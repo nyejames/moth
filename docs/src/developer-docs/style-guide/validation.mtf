@@ -614,8 +614,8 @@ Audit that:
 
 - stage ownership remains narrow
 - AST and HIR type representation still respect `TypeEnvironment` and `TypeId`
-- user-facing failures use `CompilerDiagnostic`
-- internal and infrastructure failures use `CompilerError`
+- diagnosed failures remain plain `CompilerDiagnostic` values
+- internal and infrastructure failures remain in the typed `CompilerError` lane
 - no obsolete API or duplicated path remains
 - no backend reparses source syntax
 - no analysis mutates HIR when its contract is side-table based

@@ -1,16 +1,16 @@
 //! Shared top-level statement-start classification tests.
 
 use super::*;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 
 fn classify_after(tokens: Vec<TokenKind>) -> SymbolStatementStart {
-    let location = SourceLocation::default();
+    let span = LocalSpan::source_start();
     let tokens = tokens
         .into_iter()
-        .map(|kind| Token::new(kind, location.clone()))
+        .map(|kind| Token::new(kind, span))
         .collect::<Vec<_>>();
     classify_symbol_statement_start_at(&tokens, 0)
 }
@@ -32,12 +32,12 @@ fn function_and_compile_time_bindings_are_header_declarations() {
 fn qualified_match_arm_is_not_a_choice_declaration() {
     let mut string_table = StringTable::new();
     let ready = string_table.intern("Ready");
-    let location = SourceLocation::default();
+    let span = LocalSpan::source_start();
     let tokens = vec![
-        Token::new(TokenKind::DoubleColon, location.clone()),
-        Token::new(TokenKind::Symbol(ready), location.clone()),
-        Token::new(TokenKind::FatArrow, location.clone()),
-        Token::new(TokenKind::Eof, location),
+        Token::new(TokenKind::DoubleColon, span),
+        Token::new(TokenKind::Symbol(ready), span),
+        Token::new(TokenKind::FatArrow, span),
+        Token::new(TokenKind::Eof, span),
     ];
     let classification = classify_symbol_statement_start_at(&tokens, 0);
     assert_eq!(classification, SymbolStatementStart::Other);

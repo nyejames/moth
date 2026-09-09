@@ -16,7 +16,7 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
@@ -70,10 +70,10 @@ pub fn load_project_config(
         config.extra_project_fields.clear();
         if config.entry_dir.is_dir() {
             return Err(CompilerMessages::from_diagnostic(
-                config.config_diagnostic(
-                    "config.moth",
+                CompilerDiagnostic::invalid_config_reason(
+                    Some(string_table.intern("config.moth")),
                     InvalidConfigReason::MissingConfigFile,
-                    string_table,
+                    None,
                 ),
                 string_table.clone(),
             ));
@@ -115,12 +115,9 @@ pub(crate) fn compile_project_config_file(
     project_source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
-    // A failed reload must not leave prior project-global/config provenance visible to the next
-    // frontend invocation.
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
     config.extra_project_fields.clear();
-    config.setting_locations.clear();
     config.setting_spans.clear();
     config.html_section = crate::projects::settings::HtmlSectionConfig::default();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
@@ -128,7 +125,6 @@ pub(crate) fn compile_project_config_file(
             CompilerError::file_error(
                 config_path,
                 format!("Failed to canonicalize config path: {error}"),
-                string_table,
             ),
             string_table.clone(),
         )

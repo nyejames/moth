@@ -36,7 +36,6 @@ use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashMap;
 
 pub(crate) enum GenericNominalTemplate<'a> {
@@ -50,7 +49,6 @@ pub(crate) struct GenericNominalConstructorInput<'a> {
     pub template: GenericNominalTemplate<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
     pub raw_args: Option<&'a [CallArgument]>,
-    pub location: SourceLocation,
     pub span: Option<SourceSpan>,
 }
 
@@ -115,15 +113,13 @@ pub(crate) fn infer_generic_nominal_constructor(
     }
 
     if !missing_parameters.is_empty() {
-        let mut diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
+        let diagnostic = CompilerDiagnostic::invalid_generic_instantiation(
             Some(string_table.intern(input.display_name)),
             InvalidGenericInstantiationReason::CannotInferArguments { missing_parameters },
-            input.location,
+            input.span,
         );
-        diagnostic.primary_span = input.span;
         return Err(diagnostic.into());
     }
-
     // ------------------------
     //  Build instance key
     // ------------------------
@@ -181,38 +177,32 @@ pub(crate) fn infer_generic_nominal_constructor(
             .map(|visibility| &visibility.visible_namespace_records),
         resolved_type_aliases: context.shared.resolved_type_aliases.as_deref(),
     };
-    if let Err(mut diagnostic) = validate_nominal_generic_bound_evidence(
-        instance_type_id,
-        input.location.clone(),
-        &evidence_context,
-    ) {
+    if let Err(mut diagnostic) =
+        validate_nominal_generic_bound_evidence(instance_type_id, input.span, &evidence_context)
+    {
         diagnostic.primary_span = input.span;
         return Err(CallValidationError::Diagnostic(diagnostic));
     }
-
     Ok(GenericNominalInference {
         instance_type_id,
         instance_key,
     })
 }
 
-/// Records the first source location at which each generic parameter received a binding.
+/// Records the first source span at which each generic parameter received a binding.
 ///
+/// WHAT: uses entry-or-insert so only the first span is retained for each parameter.
+/// WHY: later evidence for the same parameter must not overwrite the first evidence span,
+/// which is the one needed for the secondary conflict label.
 struct NominalBindingEvidenceLocations {
-    locations_by_parameter: FxHashMap<GenericParameterId, SourceLocation>,
     spans_by_parameter: FxHashMap<GenericParameterId, Option<SourceSpan>>,
 }
 
 impl NominalBindingEvidenceLocations {
     fn new() -> Self {
         Self {
-            locations_by_parameter: FxHashMap::default(),
             spans_by_parameter: FxHashMap::default(),
         }
-    }
-
-    fn previous_location(&self, parameter_id: GenericParameterId) -> Option<SourceLocation> {
-        self.locations_by_parameter.get(&parameter_id).cloned()
     }
 
     fn previous_span(&self, parameter_id: GenericParameterId) -> Option<SourceSpan> {
@@ -222,23 +212,14 @@ impl NominalBindingEvidenceLocations {
             .flatten()
     }
 
-    /// Records the evidence location for every parameter that is currently bound.
-    ///
-    /// WHAT: uses entry-or-insert so only the first location is retained for each parameter.
-    /// WHY: later evidence for the same parameter must not overwrite the first evidence
-    /// location, which is the one needed for the secondary conflict label.
     fn record_first_bindings(
         &mut self,
         canonical_parameters: &[EnvironmentGenericParameter],
         bindings: &GenericTypeBindings,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     ) {
         for parameter in canonical_parameters {
             if bindings.get(parameter.id).is_some() {
-                self.locations_by_parameter
-                    .entry(parameter.id)
-                    .or_insert_with(|| location.clone());
                 self.spans_by_parameter.entry(parameter.id).or_insert(span);
             }
         }
@@ -311,7 +292,6 @@ fn collect_expected_type_bindings(
                         &mut evidence_context,
                         parameter_type_id,
                         argument,
-                        input.location.clone(),
                         input.span,
                     )?;
                 }
@@ -333,7 +313,6 @@ fn collect_expected_type_bindings(
                             .zip(expected_fields)
                             .map(|(template, expected)| (template.type_id, expected.type_id)),
                         &mut evidence_context,
-                        input.location.clone(),
                         input.span,
                     )?;
                 }
@@ -350,7 +329,6 @@ fn collect_expected_type_bindings(
                         template_variants,
                         expected_variants,
                         &mut evidence_context,
-                        input.location.clone(),
                         input.span,
                     )?;
                 }
@@ -409,8 +387,7 @@ fn collect_constructor_argument_bindings(
             &mut evidence_context,
             field.type_id,
             argument.value.type_id,
-            argument.location.clone(),
-            argument.value.span,
+            argument.span,
         )?;
     }
 
@@ -429,7 +406,6 @@ fn collect_nominal_binding_evidence(
     context: &mut NominalBindingEvidenceContext<'_>,
     template_type_id: TypeId,
     concrete_type_id: TypeId,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 ) -> Result<(), CallValidationError> {
     let canonical_parameters = context
@@ -453,7 +429,6 @@ fn collect_nominal_binding_evidence(
             context.evidence_locations.record_first_bindings(
                 canonical_parameters,
                 &*context.bindings,
-                location.clone(),
                 span,
             );
             Ok(())
@@ -465,9 +440,6 @@ fn collect_nominal_binding_evidence(
             Ok(())
         }
         Err(conflict) => {
-            let previous_evidence_location = context
-                .evidence_locations
-                .previous_location(conflict.parameter_id);
             let previous_evidence_span = context
                 .evidence_locations
                 .previous_span(conflict.parameter_id);
@@ -476,8 +448,6 @@ fn collect_nominal_binding_evidence(
                 conflict,
                 canonical_parameters,
                 context.string_table,
-                location,
-                previous_evidence_location,
                 span,
                 previous_evidence_span,
             )
@@ -494,17 +464,10 @@ fn collect_nominal_binding_evidence(
 fn collect_pairwise_type_bindings(
     type_pairs: impl IntoIterator<Item = (TypeId, TypeId)>,
     context: &mut NominalBindingEvidenceContext<'_>,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 ) -> Result<(), CallValidationError> {
     for (template_type_id, concrete_type_id) in type_pairs {
-        collect_nominal_binding_evidence(
-            context,
-            template_type_id,
-            concrete_type_id,
-            location.clone(),
-            span,
-        )?;
+        collect_nominal_binding_evidence(context, template_type_id, concrete_type_id, span)?;
     }
 
     Ok(())
@@ -518,7 +481,6 @@ fn collect_choice_variant_bindings(
     template_variants: &[ChoiceVariantDefinition],
     expected_variants: &[ChoiceVariantDefinition],
     context: &mut NominalBindingEvidenceContext<'_>,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 ) -> Result<(), CallValidationError> {
     if template_variants.len() != expected_variants.len() {
@@ -547,7 +509,6 @@ fn collect_choice_variant_bindings(
                 .zip(expected_fields)
                 .map(|(template, expected)| (template.type_id, expected.type_id)),
             context,
-            location.clone(),
             span,
         )?;
     }
@@ -559,7 +520,7 @@ fn collect_choice_variant_bindings(
 ///
 /// WHAT: resolves the parameter name from the canonical parameter list, carries the
 /// conflicting `TypeId`s without rendering them, and attaches a secondary label at the
-/// first evidence location when one was recorded.
+/// first evidence span when one was recorded.
 /// WHY: type names are rendered later through `DiagnosticRenderContext`; the diagnostic
 /// payload carries only semantic `TypeId`s and structured facts.
 fn nominal_binding_conflict_diagnostic(
@@ -567,8 +528,6 @@ fn nominal_binding_conflict_diagnostic(
     conflict: BindingConflict,
     canonical_parameters: &[EnvironmentGenericParameter],
     string_table: &mut StringTable,
-    current_evidence_location: SourceLocation,
-    previous_evidence_location: Option<SourceLocation>,
     current_evidence_span: Option<SourceSpan>,
     previous_evidence_span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
@@ -583,8 +542,6 @@ fn nominal_binding_conflict_diagnostic(
         GenericInferenceSubject::NominalType,
         conflict,
         parameter_name,
-        current_evidence_location,
-        previous_evidence_location,
         current_evidence_span,
         previous_evidence_span,
     )

@@ -21,41 +21,28 @@ use super::synthetic_build_results::{
 };
 use crate::build_system::build::{BuildResult, FileKind};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidAssignmentTargetReason,
     InvalidOutputFolderReason,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-fn test_location(path: InternedPath) -> SourceLocation {
-    test_location_at(path, 0, 0)
-}
-
-fn test_location_at(
-    path: InternedPath,
-    raw_line_number: i32,
-    raw_char_column: i32,
-) -> SourceLocation {
-    SourceLocation::new(
-        path,
-        CharPosition {
-            line_number: raw_line_number,
-            char_column: raw_char_column,
-        },
-        CharPosition {
-            line_number: raw_line_number,
-            char_column: raw_char_column + 1,
-        },
+fn test_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
+    let mut builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        source,
+        LocalSpan::exact(start, length, &mut builder).expect("test span should encode"),
     )
 }
 
 fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
-    let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
+    let string_table = StringTable::new();
     let diagnostics = codes
         .iter()
         .map(|code| match *code {
@@ -66,11 +53,9 @@ fn diagnostic_messages(codes: &[&str]) -> CompilerMessages {
                 None,
                 None,
                 None,
-                test_location(source_path.clone()),
+                None,
             ),
-            "MOTH-SYNTAX-0003" => {
-                CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path.clone()))
-            }
+            "MOTH-SYNTAX-0003" => CompilerDiagnostic::unexpected_trailing_comma(None),
             other => panic!("test diagnostic code is not constructed: {other}"),
         })
         .collect();
@@ -99,7 +84,6 @@ fn diagnostic_expectation(
 #[test]
 fn failure_message_contains_uses_structured_render_output() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let variable_name = string_table.intern("value");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
@@ -108,7 +92,7 @@ fn failure_message_contains_uses_structured_render_output() {
         None,
         None,
         None,
-        test_location(source_path),
+        None,
     );
     let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     let expectation = FailureExpectation {
@@ -128,7 +112,6 @@ fn failure_message_contains_uses_structured_render_output() {
 #[test]
 fn failure_message_contains_includes_rendered_label_text() {
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
     let label_text = string_table.intern("secondary context lives here");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
@@ -137,10 +120,10 @@ fn failure_message_contains_includes_rendered_label_text() {
         None,
         None,
         None,
-        test_location(source_path.clone()),
+        None,
     )
     .with_labels(vec![DiagnosticLabel::secondary(
-        test_location(source_path),
+        None,
         Some(DiagnosticLabelMessage::RenderedText(label_text)),
     )]);
     let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
@@ -269,39 +252,50 @@ fn contains_matching_requires_every_expected_occurrence() {
     assert!(!reason.contains("Unexpected codes"), "{reason}");
 }
 
-/// Renders one fixture-relative path as the UTF-8 text a diagnostic location carries.
-///
-/// A lossy conversion here would build a location for a path the fixture does not own, so an
-/// unrepresentable fixture root fails the test instead.
-#[track_caller]
-fn fixture_path_text(fixture_root: &Path, relative_path: &str) -> String {
-    let path = fixture_root.join(relative_path);
-    path.to_str()
-        .unwrap_or_else(|| panic!("fixture path {path:?} should be valid UTF-8"))
-        .to_owned()
-}
-
 fn structured_diagnostic_messages(fixture_root: &Path) -> CompilerMessages {
+    let primary_path = fixture_root.join("input/main.moth");
+    let secondary_path = fixture_root.join("input/helper.moth");
+    let entry_path = fixture_root.join("config.moth");
+    let source_text = "aa\nbb\ncc\ndddd\n";
+
     let mut string_table = StringTable::new();
-    let primary_path = InternedPath::from_single_str(
-        &fixture_path_text(fixture_root, "input/main.moth"),
+    let mut source_database = SourceDatabase::build(
+        [primary_path.as_path(), secondary_path.as_path()],
+        &entry_path,
+        None,
         &mut string_table,
-    );
-    let secondary_path = InternedPath::from_single_str(
-        &fixture_path_text(fixture_root, "input/helper.moth"),
-        &mut string_table,
-    );
+    )
+    .expect("structured diagnostic source identities should build");
+    let primary_source = source_database
+        .get_by_canonical_path(&primary_path)
+        .expect("primary source should be registered")
+        .id;
+    let secondary_source = source_database
+        .get_by_canonical_path(&secondary_path)
+        .expect("secondary source should be registered")
+        .id;
+    source_database
+        .retain_text(primary_source, source_text.to_owned())
+        .expect("primary source text should be retained");
+    source_database
+        .retain_text(secondary_source, source_text.to_owned())
+        .expect("secondary source text should be retained");
+
+    let primary_span = test_span(primary_source, 7, 1);
+    let secondary_span = test_span(secondary_source, 13, 1);
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
         None,
         None,
         None,
         None,
-        Some(test_location_at(secondary_path, 3, 4)),
-        test_location_at(primary_path, 2, 1),
+        Some(secondary_span),
+        Some(primary_span),
     );
 
-    CompilerMessages::from_diagnostic(diagnostic, string_table)
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    messages.set_source_database(Arc::new(source_database));
+    messages
 }
 
 fn structured_diagnostic_expectation(assertion: DiagnosticAssertion) -> FailureExpectation {
@@ -350,9 +344,30 @@ fn structured_diagnostic_assertions_consume_compiler_identity_and_locations() {
     assert!(result.passed, "{:?}", result.failure_reason);
 }
 
-fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
+fn relative_structured_diagnostic_messages(scope: &str, fixture_root: &Path) -> CompilerMessages {
+    let source_scope = scope
+        .strip_suffix("/declaration.header")
+        .unwrap_or(scope)
+        .strip_prefix("input/")
+        .unwrap_or_else(|| scope.strip_suffix("/declaration.header").unwrap_or(scope));
+    let source_path = fixture_root.join("input").join(source_scope);
+    let entry_path = fixture_root.join("config.moth");
     let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str(scope, &mut string_table);
+    let mut source_database = SourceDatabase::build(
+        [source_path.as_path()],
+        &entry_path,
+        None,
+        &mut string_table,
+    )
+    .expect("relative structured source identity should build");
+    let source_id = source_database
+        .get_by_canonical_path(&source_path)
+        .expect("relative structured source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, "aa\nbb\ncc\ndddd\n".to_owned())
+        .expect("relative structured source text should be retained");
+
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
         None,
@@ -360,10 +375,11 @@ fn relative_structured_diagnostic_messages(scope: &str) -> CompilerMessages {
         None,
         None,
         None,
-        test_location_at(source_path, 2, 1),
+        Some(test_span(source_id, 7, 1)),
     );
-
-    CompilerMessages::from_diagnostic(diagnostic, string_table)
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    messages.set_source_database(Arc::new(source_database));
+    messages
 }
 
 #[test]
@@ -403,7 +419,7 @@ fn structured_diagnostic_assertions_resolve_relative_scopes_under_input_root() {
         });
 
         let result = validate_failure_result(
-            relative_structured_diagnostic_messages(scope),
+            relative_structured_diagnostic_messages(scope, &fixture_root),
             &expectation,
             &fixture_root,
         );
@@ -543,14 +559,10 @@ fn warning_build_result(codes: &[&str]) -> BuildResult {
     let warnings = codes
         .iter()
         .map(|code| match *code {
-            "MOTH-RULE-0022" => {
-                CompilerDiagnostic::unreachable_match_arm(SourceLocation::default())
+            "MOTH-RULE-0022" => CompilerDiagnostic::unreachable_match_arm(None),
+            "MOTH-IMPORT-0003" => {
+                CompilerDiagnostic::dependency_alias_case_mismatch(alias, symbol, None)
             }
-            "MOTH-IMPORT-0003" => CompilerDiagnostic::dependency_alias_case_mismatch(
-                alias,
-                symbol,
-                SourceLocation::default(),
-            ),
             other => panic!("test warning code is not constructed: {other}"),
         })
         .collect();
@@ -674,10 +686,9 @@ fn ignore_and_forbid_keep_their_structured_warning_behaviour() {
 
 #[test]
 fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() {
-    let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
-    let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
-    let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
+    let string_table = StringTable::new();
+    let warning = CompilerDiagnostic::unreachable_match_arm(None);
+    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     // diagnostic_codes owns the error contract only; warning_codes independently owns the
     // warning. A warning code must never appear in diagnostic_codes for a failed compilation.
@@ -697,10 +708,9 @@ fn exact_warning_codes_match_warnings_retained_in_failed_compilation_messages() 
 
 #[test]
 fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
-    let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
-    let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
-    let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
+    let string_table = StringTable::new();
+    let warning = CompilerDiagnostic::unreachable_match_arm(None);
+    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
@@ -718,10 +728,9 @@ fn warnings_ignore_truly_ignores_warnings_on_a_failed_compilation() {
 
 #[test]
 fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
-    let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
-    let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
-    let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
+    let string_table = StringTable::new();
+    let warning = CompilerDiagnostic::unreachable_match_arm(None);
+    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     // Authoring the warning code as a diagnostic code must fail: the warning is not in the
     // error-severity stream, so the multiset reports it as missing.
@@ -752,10 +761,9 @@ fn warning_code_cannot_satisfy_failure_diagnostic_codes() {
 
 #[test]
 fn warning_prose_cannot_satisfy_error_message_contains() {
-    let mut string_table = StringTable::new();
-    let source_path = InternedPath::from_single_str("main.moth", &mut string_table);
-    let warning = CompilerDiagnostic::unreachable_match_arm(test_location(source_path.clone()));
-    let error = CompilerDiagnostic::unexpected_trailing_comma(test_location(source_path));
+    let string_table = StringTable::new();
+    let warning = CompilerDiagnostic::unreachable_match_arm(None);
+    let error = CompilerDiagnostic::unexpected_trailing_comma(None);
     let messages = CompilerMessages::from_diagnostics(vec![error, warning], string_table);
     // The unreachable-match-arm warning prose must not satisfy message_contains because the
     // fragment check only inspects error-severity diagnostics.

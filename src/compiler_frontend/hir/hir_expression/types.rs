@@ -19,7 +19,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::{HirChoice, HirChoiceField, HirChoiceVariant};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -30,7 +30,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_type_id(
         &mut self,
         type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
         match self.type_environment.get(type_id) {
             Some(TypeDefinition::GenericParameter(parameter)) => {
@@ -39,14 +39,14 @@ impl<'a> HirBuilder<'a> {
                         "Unresolved generic parameter TypeId {:?} ({:?}) reached HIR lowering",
                         type_id, parameter.id
                     ),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
             Some(_) => Ok(type_id),
             None => {
                 return_hir_transformation_error!(
                     format!("TypeId {:?} is not registered in TypeEnvironment", type_id),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
         }
@@ -57,7 +57,7 @@ impl<'a> HirBuilder<'a> {
         key: &crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
         nominal_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::StructId, CompilerError> {
         if let Some(&struct_id) = self.generic_structs_by_key.get(key) {
             return Ok(struct_id);
@@ -111,7 +111,7 @@ impl<'a> HirBuilder<'a> {
             .unwrap_or_default();
 
         for (field_name, field_type_id) in field_definitions {
-            let field_type = self.lower_type_id(field_type_id, location)?;
+            let field_type = self.lower_type_id(field_type_id, span)?;
             let field_id = self.allocate_field_id();
             self.fields_by_struct_and_name
                 .insert((struct_id, field_name.clone()), field_id);
@@ -144,7 +144,7 @@ impl<'a> HirBuilder<'a> {
         key: &crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
         nominal_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-        _location: &SourceLocation,
+        _span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
         if let Some(&choice_id) = self.generic_choices_by_key.get(key) {
             return Ok(choice_id);
@@ -181,7 +181,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         let choice_id = self.allocate_choice_id();
-        let hir_variants = self.lower_choice_variants_for_type_id(instance_type_id, _location)?;
+        let hir_variants = self.lower_choice_variants_for_type_id(instance_type_id, _span)?;
 
         self.generic_choices_by_key
             .insert(key.to_owned(), choice_id);
@@ -203,7 +203,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_choice_variants_for_type_id(
         &mut self,
         type_id: TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Vec<crate::compiler_frontend::hir::module::HirChoiceVariant>, CompilerError> {
         // Copy compact variant facts before allocating/lowering fields. This keeps
         // the TypeEnvironment as the single metadata owner while avoiding a long
@@ -212,7 +212,7 @@ impl<'a> HirBuilder<'a> {
             let Some(variants) = self.type_environment.variants_for(type_id) else {
                 return_hir_transformation_error!(
                     format!("Choice TypeId {:?} has no variant metadata", type_id),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             };
 
@@ -227,7 +227,7 @@ impl<'a> HirBuilder<'a> {
                         let Some(field_name) = field.name.name() else {
                             return_hir_transformation_error!(
                                 "Choice variant field is missing a name",
-                                self.hir_error_location(location)
+                                self.hir_error_location(span)
                             );
                         };
                         lowered_fields.push((field_name, field.type_id));
@@ -245,7 +245,7 @@ impl<'a> HirBuilder<'a> {
             let mut hir_variant_fields = Vec::with_capacity(variant_fields.len());
 
             for (field_name, field_type_id) in variant_fields {
-                let field_type = self.lower_type_id(field_type_id, location)?;
+                let field_type = self.lower_type_id(field_type_id, span)?;
                 hir_variant_fields.push(HirChoiceField {
                     name: field_name,
                     ty: field_type,

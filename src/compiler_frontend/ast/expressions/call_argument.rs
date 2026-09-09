@@ -5,7 +5,8 @@
 //! mutable access markers, and mutable-place vs fresh-rvalue passing semantics.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Stable declaration-order slot retained from call-argument parsing.
@@ -59,19 +60,19 @@ pub struct CallArgument {
     /// needed, without rediscovering policy from expression shape.
     pub passing_mode: CallPassingMode,
 
-    /// Source location of the argument expression.
-    pub location: SourceLocation,
+    /// Exact source span of the argument expression.
+    pub span: Option<SourceSpan>,
 
-    /// For named arguments, the source location of the parameter name token.
-    pub target_location: Option<SourceLocation>,
+    /// For named arguments, the exact source span of the parameter name token.
+    pub target_span: Option<SourceSpan>,
 
-    /// Optional source location of the authored `~` mutable-access marker.
+    /// Optional exact source span of the authored `~` mutable-access marker.
     ///
-    /// WHAT: preserves the location of the `~` token when the author wrote it.
+    /// WHAT: preserves the span of the `~` token when the author wrote it.
     /// WHY: mutable-access diagnostics point at the marker when it is the real mistake, and at
     /// the value expression when the marker is absent, so the primary label stays on the
     /// authored source that the author must change.
-    pub marker_location: Option<SourceLocation>,
+    pub marker_span: Option<SourceSpan>,
 
     /// Parameter slot selected by the shared parser before this value was parsed.
     ///
@@ -97,36 +98,35 @@ impl CallArgument {
     pub fn positional(
         value: Expression,
         access_mode: CallAccessMode,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self {
             value,
             target_param: None,
             access_mode,
             passing_mode: Self::passing_mode_from_access_mode(access_mode),
-            location,
-            target_location: None,
-            marker_location: None,
+            span,
+            target_span: None,
+            marker_span: None,
             parameter_slot: None,
         }
     }
-
     /// Build a named call argument with the default passing mode derived from `access_mode`.
     pub fn named(
         value: Expression,
         name: StringId,
         access_mode: CallAccessMode,
-        location: SourceLocation,
-        target_location: SourceLocation,
+        span: Option<SourceSpan>,
+        target_span: Option<SourceSpan>,
     ) -> Self {
         Self {
             value,
             target_param: Some(name),
             access_mode,
             passing_mode: Self::passing_mode_from_access_mode(access_mode),
-            location,
-            target_location: Some(target_location),
-            marker_location: None,
+            span,
+            target_span,
+            marker_span: None,
             parameter_slot: None,
         }
     }
@@ -137,12 +137,12 @@ impl CallArgument {
         self
     }
 
-    /// Attach the source location of the authored `~` mutable-access marker.
+    /// Attach the exact span of the authored `~` mutable-access marker.
     ///
     /// WHAT: only the parse owner populates this, because only it sees the `~` token.
     /// WHY: synthetic/test constructors that do not parse authored tokens leave it `None`.
-    pub fn with_marker_location(mut self, marker_location: SourceLocation) -> Self {
-        self.marker_location = Some(marker_location);
+    pub fn with_marker_span(mut self, marker_span: Option<SourceSpan>) -> Self {
+        self.marker_span = marker_span;
         self
     }
 
@@ -157,7 +157,6 @@ impl CallArgument {
 ///
 /// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
 /// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after
-/// the shared parser has accepted the call syntax.
 pub(crate) fn order_call_arguments_by_retained_slot(
     arguments: &[CallArgument],
     expected_slot_count: usize,
@@ -165,7 +164,7 @@ pub(crate) fn order_call_arguments_by_retained_slot(
     let mut ordered = vec![None; expected_slot_count];
 
     for argument in arguments {
-        if argument.target_param.is_some() != argument.target_location.is_some() {
+        if argument.target_param.is_some() != argument.target_span.is_some() {
             return Err(CompilerError::compiler_error(
                 "Parsed named call argument has incomplete target metadata",
             ));

@@ -27,7 +27,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Resolve one `TokenKind::Path` through the value-position Stage 0 view.
@@ -43,14 +43,11 @@ pub(crate) fn resolve_file_value(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
-    let location = token_stream.current_location();
-    let span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
-    let row = token_stream
+    let token_span = SourceSpan::new(token_stream.file_id, token_stream.current_token().span);
+    let span = Some(token_span);
+    token_stream
         .path_syntax
-        .try_path_for_token(path_syntax, &location)?;
+        .try_path_for_token(path_syntax, token_span)?;
     let services = context
         .shared
         .file_value_resolution
@@ -76,23 +73,20 @@ pub(crate) fn resolve_file_value(
     match resolved.class {
         PreparedFileReferenceClass::Extensionless => Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::ExtensionlessFileValue,
-            row.location.clone(),
+            span,
         )
         .into()),
         PreparedFileReferenceClass::SourceKindNoFileValue => {
             Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::MothFileHasNoValue,
-                row.location.clone(),
+                span,
             )
             .into())
         }
         PreparedFileReferenceClass::SiteRoot => match resolved.outcome {
-            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => structural_string(
-                vec![ConstStringPiece::SiteRoot],
-                row.location.clone(),
-                span,
-                value_mode,
-            ),
+            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {
+                structural_string(vec![ConstStringPiece::SiteRoot], span, value_mode)
+            }
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
                 Err(diagnostic.clone().into())
             }
@@ -114,11 +108,10 @@ pub(crate) fn resolve_file_value(
                         Ok(services
                             .module_resources
                             .borrow_mut()
-                            .intern_origin(origin.clone(), row.location.clone()))
+                            .intern_origin(origin.clone(), span))
                     })?;
                     return Ok(Expression::new(
                         kind,
-                        row.location.clone(),
                         span,
                         builtin_type_ids::STRING,
                         DataType::StringSlice,
@@ -146,7 +139,6 @@ pub(crate) fn resolve_file_value(
                     declaration,
                     context,
                     type_interner,
-                    row.location.clone(),
                     span,
                 ))
             }
@@ -174,17 +166,10 @@ pub(crate) fn resolve_file_value(
                 );
                 let mut resources = services.module_resources.borrow_mut();
                 let resource = match source {
-                    Some(source) => {
-                        resources.intern_origin_with_source(origin, *source, row.location.clone())
-                    }
-                    None => resources.intern_origin(origin, row.location.clone()),
+                    Some(source) => resources.intern_origin_with_source(origin, *source, span),
+                    None => resources.intern_origin(origin, span),
                 };
-                structural_string(
-                    vec![ConstStringPiece::Resource(resource)],
-                    row.location.clone(),
-                    span,
-                    value_mode,
-                )
+                structural_string(vec![ConstStringPiece::Resource(resource)], span, value_mode)
             }
             _ => Err(CompilerError::compiler_error(
                 "resource file reference did not resolve to a resource target",
@@ -196,13 +181,11 @@ pub(crate) fn resolve_file_value(
 
 fn structural_string(
     pieces: Vec<ConstStringPiece>,
-    location: SourceLocation,
     span: Option<SourceSpan>,
     value_mode: &ValueMode,
 ) -> Result<Expression, ExpressionParseError> {
     Ok(Expression::new(
         ExpressionKind::StructuralString { pieces },
-        location,
         span,
         builtin_type_ids::STRING,
         DataType::StringSlice,

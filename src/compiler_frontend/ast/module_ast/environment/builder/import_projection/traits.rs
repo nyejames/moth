@@ -75,7 +75,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 source_file: InternedPath::new(),
                 this_type,
                 requirements,
-                declaration_location: Default::default(),
+                declaration_span: None,
                 visibility: TraitVisibility::Source { exported: true },
             };
             if trait_environment.insert(definition).is_some() {
@@ -171,7 +171,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 name: requirement_path.append(name),
                 value_mode: parameter.value_mode.clone(),
                 type_id,
-                location: Default::default(),
                 span: None,
             });
         }
@@ -183,18 +182,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             returns.push(ResolvedTraitReturn {
                 type_id,
                 channel: returned.channel,
-                location: Default::default(),
+                span: None,
             });
         }
 
         Ok(ResolvedTraitRequirement {
             id: requirement_id,
             name: requirement_name,
-            name_location: Default::default(),
             receiver,
             parameters,
             returns,
-            location: Default::default(),
             span: None,
         })
     }
@@ -332,7 +329,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 target_type_id,
                 trait_id,
                 source_file: InternedPath::new(),
-                declaration_location: Default::default(),
+                declaration_span: None,
                 requirements,
             });
         }

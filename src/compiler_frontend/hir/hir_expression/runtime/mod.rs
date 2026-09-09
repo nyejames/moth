@@ -7,7 +7,6 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[derive(Debug, Clone)]
 pub(super) enum RuntimeRpnTree {
@@ -15,14 +14,12 @@ pub(super) enum RuntimeRpnTree {
     Unary {
         op: Operator,
         operand: Box<RuntimeRpnTree>,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     },
     Binary {
         left: Box<RuntimeRpnTree>,
         op: Operator,
         right: Box<RuntimeRpnTree>,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     },
 }

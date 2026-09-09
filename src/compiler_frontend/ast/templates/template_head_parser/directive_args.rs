@@ -63,7 +63,7 @@ pub(crate) fn reject_unexpected_directive_arguments(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::UnexpectedArguments,
-                token_stream.current_location(),
+                token_stream.current_span().into(),
             ),
         )
         .into());
@@ -83,7 +83,7 @@ pub(crate) fn reject_empty_directive_parens(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
-                token_stream.current_location(),
+                token_stream.current_span().into(),
             ),
         )
         .into());
@@ -118,7 +118,7 @@ pub(crate) fn expect_directive_close_paren(token_stream: &FileTokens) -> Directi
         CompilerDiagnostic::expected_token(
             TokenKind::CloseParenthesis,
             Some(found),
-            token_stream.current_location(),
+            token_stream.current_span().into(),
         ),
     )
     .into())
@@ -156,7 +156,7 @@ fn parse_single_expression_in_directive_parens(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::EmptyArguments,
-                token_stream.current_location(),
+                token_stream.current_span().into(),
             ),
         )
         .into());
@@ -177,7 +177,10 @@ fn parse_single_expression_in_directive_parens(
     if token_stream.current_token_kind() == &TokenKind::Comma {
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::unexpected_token(TokenKind::Comma, token_stream.current_location()),
+            CompilerDiagnostic::unexpected_token(
+                TokenKind::Comma,
+                token_stream.current_span().into(),
+            ),
         )
         .into());
     }
@@ -229,7 +232,7 @@ pub(crate) fn parse_required_parenthesized_expression(
             CompilerDiagnostic::expected_token(
                 TokenKind::OpenParenthesis,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_location(),
+                token_stream.current_span().into(),
             ),
         )
         .into());
@@ -271,7 +274,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_template_directive(
                         Some(directive_name),
                         InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                        token_stream.current_location(),
+                        token_stream.current_span().into(),
                     ),
                 )
                 .into());
@@ -283,7 +286,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_number_literal(
                         token.source_text,
                         reason,
-                        token_stream.current_location(),
+                        token_stream.current_span().into(),
                     ),
                 )
             })?;
@@ -294,7 +297,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                     CompilerDiagnostic::invalid_template_directive(
                         Some(directive_name),
                         InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                        token_stream.current_location(),
+                        token_stream.current_span().into(),
                     ),
                 )
                 .into());
@@ -308,7 +311,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::EmptyArguments,
-                    token_stream.current_location(),
+                    token_stream.current_span().into(),
                 ),
             )
             .into());
@@ -319,7 +322,7 @@ pub(crate) fn parse_optional_slot_target_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                    token_stream.current_location(),
+                    token_stream.current_span().into(),
                 ),
             )
             .into());
@@ -342,7 +345,7 @@ pub(crate) fn parse_required_slot_name_argument(
             CompilerDiagnostic::expected_token(
                 TokenKind::OpenParenthesis,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_location(),
+                token_stream.current_span().into(),
             ),
         )
         .into());
@@ -358,7 +361,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                    token_stream.current_location(),
+                    token_stream.current_span().into(),
                 ),
             )
             .into());
@@ -369,7 +372,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::EmptyArguments,
-                    token_stream.current_location(),
+                    token_stream.current_span().into(),
                 ),
             )
             .into());
@@ -380,7 +383,7 @@ pub(crate) fn parse_required_slot_name_argument(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                    token_stream.current_location(),
+                    token_stream.current_span().into(),
                 ),
             )
             .into());
@@ -394,9 +397,8 @@ pub(crate) fn parse_required_slot_name_argument(
 
 /// Attach the authored span of the token that owns a directive syntax diagnostic.
 ///
-/// Directive argument validation runs while the original token stream still carries both the
-/// source identity and each token's exact local span. Keep the legacy location and label values
-/// untouched; the retained span is an additional source-context fact for later rendering.
+/// Directive argument validation keeps the exact global span of the token
+/// owning a syntax diagnostic.
 fn with_current_token_span(
     token_stream: &FileTokens,
     mut diagnostic: CompilerDiagnostic,

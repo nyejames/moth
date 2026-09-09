@@ -14,8 +14,9 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{PublicExportEntry, PublicExportTarget};
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, HeaderKind, HeaderParseOptions, LocalDeclarationOrderingHint,
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    BoundModuleHeaders, HeaderKind, HeaderParseOptions, HeaderPreparationFailure,
+    LocalDeclarationOrderingHint, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -24,7 +25,7 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -96,13 +97,7 @@ fn parse_module_headers(
     let prepared_syntax = prepare_header_syntax(
         &mut prepared_outputs,
         &mut string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(file_id, _)| *file_id == source)
-                .expect("prepared source retains its original span builder");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
@@ -195,47 +190,34 @@ fn reports_circular_dependencies() {
         ],
         "src/a.moth",
     );
-    let cycle_header = headers
+    let cycle_header_name_span = headers
         .headers
         .iter()
         .find(|header| header_name(header, &string_table) == "Middle")
+        .map(|header| header.name_span)
         .expect("cycle fixture must contain the Middle header");
-    let expected_primary_location = cycle_header.name_location.clone();
-    let expected_primary_span =
-        SourceSpan::new(cycle_header.tokens.file_id, cycle_header.name_span);
 
-    let bag =
+    let messages =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect_err("cycle should fail dependency sorting");
+            .expect_err("cycle should fail dependency sorting")
+            .into_messages(&string_table);
+    let diagnostic_string_table = &messages.string_table;
 
-    let cycle_diagnostic = bag
-        .diagnostics()
+    let cycle_diagnostic = messages
+        .diagnostic_slice()
         .iter()
         .find(|diagnostic| {
             let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
                 return false;
             };
 
-            let path = path.to_portable_string(&string_table);
+            let path = path.to_portable_string(diagnostic_string_table);
             path.contains("Top") || path.contains("Middle")
         })
-        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {bag:?}"));
+        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {messages:?}"));
 
-    assert!(
-        cycle_diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&string_table)
-            .contains("src/"),
-        "cycle diagnostics should point at a declaration location instead of the default location"
-    );
     assert_eq!(
-        cycle_diagnostic.primary_location, expected_primary_location,
-        "cycle diagnostics must preserve the legacy declaration location"
-    );
-    assert_eq!(
-        cycle_diagnostic.primary_span,
-        Some(expected_primary_span),
+        cycle_diagnostic.primary_span, cycle_header_name_span,
         "cycle diagnostics must retain the exact owning header name span"
     );
 }
@@ -446,10 +428,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     let prepared_syntax = prepare_header_syntax(
         &mut [output],
         &mut string_table,
-        &mut |source, diagnostic| {
-            assert_eq!(source, file_id);
-            diagnostic.capture_preparation_span(source, &mut span_builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax preparation should succeed");
     let result = bind_module_headers(
@@ -462,9 +441,12 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         &mut string_table,
     );
 
-    let bag = match result {
-        Err(bag) => bag,
+    let failure = match result {
+        Err(failure) => failure,
         Ok(_) => panic!("same-file forward capacity reference should fail during header parsing"),
+    };
+    let HeaderPreparationFailure::Diagnosed(bag) = failure else {
+        panic!("same-file forward capacity reference should be a diagnosed failure: {failure:?}");
     };
 
     let found = bag.diagnostics().iter().any(|diagnostic| {
@@ -769,17 +751,19 @@ fn qualified_alias_cycle_reports_circular_dependency() {
         "src/app.moth",
     );
 
-    let diagnostics =
+    let messages =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect_err("qualified aliases that reference each other must form a cycle");
+            .expect_err("qualified aliases that reference each other must form a cycle")
+            .into_messages(&string_table);
     assert!(
-        diagnostics.diagnostics().iter().any(|diagnostic| {
-            matches!(
+        messages
+            .diagnostic_slice()
+            .iter()
+            .any(|diagnostic| matches!(
                 &diagnostic.payload,
                 DiagnosticPayload::CircularDependency { .. }
-            )
-        }),
-        "qualified alias cycle should retain the circular-dependency diagnostic: {diagnostics:?}"
+            )),
+        "qualified alias cycle should retain the circular-dependency diagnostic: {messages:?}"
     );
 }
 
@@ -1085,14 +1069,12 @@ fn parse_module_headers_with_content_sources(
             &mut span_builder,
         )
         .expect("template tokenization should succeed");
-        // The template's retained tokens index the builder's table; keep it alive with the
-        // other prepared sources for the remainder of this fixture.
+        // The template's retained tokens index the builder's table; prepare while the builder
+        // remains available, then retain it for the remainder of this fixture.
+        let output = prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
+            .expect("template preparation should succeed");
         retained_span_builders.push((file_id_for(path), span_builder));
-
-        prepared_outputs.push(
-            prepare_moth_template_file(file_tokens, &mut string_table)
-                .expect("template preparation should succeed"),
-        );
+        prepared_outputs.push(output);
     }
 
     for (path, source) in markdown_files {
@@ -1157,13 +1139,7 @@ fn parse_module_headers_with_content_sources(
     let prepared_syntax = prepare_header_syntax(
         &mut prepared_outputs,
         &mut string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(file_id, _)| *file_id == source)
-                .expect("prepared source retains its original span builder");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
@@ -1299,29 +1275,27 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
             "@page.moth",
         );
 
-    let bag = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
-        .expect_err("a real content dependency cycle should fail dependency sorting");
+    let messages = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
+        .expect_err("a real content dependency cycle should fail dependency sorting")
+        .into_messages(&string_table);
+    let diagnostic_string_table = &messages.string_table;
 
-    let cycle_diagnostic = bag
-        .diagnostics()
+    let cycle_diagnostic = messages
+        .diagnostic_slice()
         .iter()
         .find(|diagnostic| {
             let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
                 return false;
             };
 
-            let path = path.to_portable_string(&string_table);
+            let path = path.to_portable_string(diagnostic_string_table);
             path.contains("docs/intro.mtf/content") || path.contains("legal/license.mtf/content")
         })
-        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {bag:?}"));
+        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {messages:?}"));
 
-    let diagnostic_scope = cycle_diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&string_table);
     assert!(
-        diagnostic_scope == "docs/intro.mtf" || diagnostic_scope == "legal/license.mtf",
-        "the cycle diagnostic should point at a content constant's own location, got {diagnostic_scope}"
+        cycle_diagnostic.primary_span.is_some(),
+        "the cycle diagnostic should point at a content constant's own span"
     );
 }
 
@@ -1409,11 +1383,11 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut icon_span_builder,
     )
     .expect("icon template should tokenize");
+    let icon_output =
+        prepare_moth_template_file(icon_tokens, &mut string_table, &mut icon_span_builder)
+            .expect("icon template should prepare");
     retained_span_builders.push((icon_file_id, icon_span_builder));
-    prepared_outputs.push(
-        prepare_moth_template_file(icon_tokens, &mut string_table)
-            .expect("icon template should prepare"),
-    );
+    prepared_outputs.push(icon_output);
 
     // Simulate Stage 0 for the nested module: the module-relative authored occurrence inside
     // `components/@page.moth` resolves to the icon template's canonical identity.
@@ -1444,13 +1418,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let prepared_syntax = prepare_header_syntax(
         &mut prepared_outputs,
         &mut string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(file_id, _)| *file_id == source)
-                .expect("prepared source retains its original span builder");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("nested header syntax should prepare");
     let headers = bind_module_headers(

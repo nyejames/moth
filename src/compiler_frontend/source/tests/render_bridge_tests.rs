@@ -1,10 +1,9 @@
-use super::SourceDatabase;
+use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan};
 
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -12,7 +11,7 @@ use std::fs;
 use std::sync::Arc;
 
 #[test]
-fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing() {
+fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root =
         fs::canonicalize(temporary_directory.path()).expect("project root should canonicalize");
@@ -64,8 +63,8 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
         .retain_text(root_id, "root config snapshot\n".to_owned())
         .expect("root config snapshot should be retained");
 
-    // Ambiguity is a property of the identities, not of how many happen to be loaded: one loaded
-    // candidate among colliding records must not become the answer by default.
+    // Logical-path lookup remains ambiguous even after both snapshots load, so it must not choose
+    // another source's text. The exact source span below carries the intended source identity.
     assert!(
         database
             .unique_record_for_logical_path(&root_logical_path)
@@ -75,28 +74,21 @@ fn ambiguous_project_config_logical_path_omits_source_frame_instead_of_guessing(
         .retain_text(entry_id, "entry source snapshot\n".to_owned())
         .expect("entry source snapshot should be retained");
     let name = string_table.intern("undefined_thing");
-    let location = SourceLocation::new(
-        entry_logical_path,
-        CharPosition {
-            line_number: 0,
-            char_column: 0,
-        },
-        CharPosition {
-            line_number: 0,
-            char_column: 6,
-        },
-    );
-    let diagnostic = CompilerDiagnostic::unknown_value_name(name, location);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span =
+        LocalSpan::exact(0, 6, &mut span_builder).expect("primary span should fit inline");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(SourceSpan::new(entry_id, local_span)));
     let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
     messages.set_source_database(Arc::new(database));
 
     let rendered = render_compiler_messages_html(&messages, temporary_directory.path());
     assert!(
         !rendered.contains("root config snapshot"),
-        "an ambiguous logical path must never render the root config text: {rendered}"
+        "the exact source span must not render the colliding root source: {rendered}"
     );
     assert!(
-        !rendered.contains("entry source snapshot"),
-        "an ambiguous logical path must omit the frame rather than guess: {rendered}"
+        rendered.contains("entry source snapshot"),
+        "the exact source span must render its retained source: {rendered}"
     );
 }

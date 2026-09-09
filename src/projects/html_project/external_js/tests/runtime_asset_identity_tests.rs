@@ -14,7 +14,6 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProvider, ExternalImportProviderContext, ExternalImportRequest,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -51,7 +50,6 @@ fn resolve_widget_via_provider(
         import_path: format!("@{}", logical_source_path.as_str()),
         logical_source_path,
         canonical_source_path,
-        source_location: SourceLocation::default(),
         source_span: None,
     };
 
@@ -173,7 +171,6 @@ fn same_logical_path_from_different_canonical_paths_yields_equal_origins() {
         package.clone(),
         &logical,
         checkout_one.path().join("widget.js"),
-        SourceLocation::default(),
         None,
     )
     .expect("identity should build from the fixture logical path");
@@ -182,7 +179,6 @@ fn same_logical_path_from_different_canonical_paths_yields_equal_origins() {
         package,
         &logical,
         checkout_two.path().join("widget.js"),
-        SourceLocation::default(),
         None,
     )
     .expect("identity should build from the fixture logical path");

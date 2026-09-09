@@ -6,18 +6,21 @@
 //!      callers can share syntax without rebuilding type-environment policy here.
 
 use super::*;
+use crate::compiler_frontend::compiler_messages::InvalidTypeAnnotationReason;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::numeric_text::parse::materialize_i32;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::Token;
 
-/// Boxed diagnostic result for type-annotation parsing.
+/// Two-lane result for type-annotation parsing.
 ///
-/// WHAT: keeps the connected parser family on one small error boundary.
+/// WHAT: carries authored-source diagnostics separately from internal compiler-state failures.
 /// WHY: type parsing otherwise carries the large diagnostic value through every
-///      successful declaration and signature parse.
-type TypeParseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+///      successful declaration and signature parse, and infrastructure failures must abort
+///      through the typed lane instead of becoming source diagnostics.
+type TypeParseResult<T> = Result<T, HeaderParseFailure>;
 
 // -------------------------
 //  Type annotation parsing
@@ -76,82 +79,92 @@ fn parse_type_atom(
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let location = token_stream.current_location();
-    let span = token_stream.tokens[token_stream.index].span;
+    let span = current_source_span(token_stream);
 
     match token_stream.current_token_kind() {
         TokenKind::DatatypeInt => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinInt { location, span })
+            Ok(ParsedTypeRef::BuiltinInt { span })
         }
 
         TokenKind::DatatypeFloat => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinFloat { location, span })
+            Ok(ParsedTypeRef::BuiltinFloat { span })
         }
 
         TokenKind::DatatypeBool => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinBool { location, span })
+            Ok(ParsedTypeRef::BuiltinBool { span })
         }
 
         TokenKind::DatatypeString => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinString { location, span })
+            Ok(ParsedTypeRef::BuiltinString { span })
         }
 
         TokenKind::DatatypeChar => {
             token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinChar { location, span })
+            Ok(ParsedTypeRef::BuiltinChar { span })
         }
 
-        TokenKind::DatatypeNone => Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::NoneNotAllowed,
-            token_stream.current_location(),
-        ))),
+        TokenKind::DatatypeNone => Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::NoneNotAllowed,
+                current_source_span(token_stream),
+            ),
+        )),
 
         TokenKind::Must | TokenKind::TraitThis => {
             if matches!(context, TypeAnnotationContext::TraitRequirement)
                 && token_stream.current_token_kind() == &TokenKind::TraitThis
             {
                 token_stream.advance();
-                return Ok(ParsedTypeRef::This { location, span });
+                return Ok(ParsedTypeRef::This { span });
             }
-
             let _keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                current_source_span(token_stream),
                 compilation_stage(context),
                 "type annotation parsing",
-            )
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            )?;
 
-            Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-                context,
-                InvalidTypeAnnotationReason::ReservedTraitKeyword,
-                token_stream.current_location(),
-            )))
+            Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_type_annotation(
+                    context,
+                    InvalidTypeAnnotationReason::ReservedTraitKeyword,
+                    current_source_span(token_stream),
+                ),
+            ))
         }
 
         TokenKind::OpenCurly => parse_collection_type(token_stream, context, string_table),
 
-        TokenKind::Reactive => Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
-            token_stream.current_location(),
-        ))),
+        TokenKind::Reactive => Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
+                current_source_span(token_stream),
+            ),
+        )),
 
-        TokenKind::As => Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
+        TokenKind::As => Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::AsNotValidHere,
+                current_source_span(token_stream),
+            ),
+        )),
+        TokenKind::Type => Err(HeaderParseFailure::Diagnostic(type_keyword_deferred_error(
+            token_stream,
             context,
-            InvalidTypeAnnotationReason::AsNotValidHere,
-            token_stream.current_location(),
         ))),
-        TokenKind::Type => Err(Box::new(type_keyword_deferred_error(token_stream, context))),
-        TokenKind::Of => Err(Box::new(CompilerDiagnostic::unexpected_token(
-            token_stream.current_token_kind().to_owned(),
-            token_stream.current_location(),
-        ))),
+        TokenKind::Of => Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::unexpected_token(
+                token_stream.current_token_kind().to_owned(),
+                current_source_span(token_stream),
+            ),
+        )),
         TokenKind::Symbol(type_name) => {
             let type_name = *type_name;
             token_stream.advance();
@@ -161,7 +174,6 @@ fn parse_type_atom(
             // single qualified path while preserving bare single-symbol types.
             if token_stream.current_token_kind() == &TokenKind::Dot {
                 let mut path = vec![type_name];
-                let path_location = location.clone();
 
                 while token_stream.current_token_kind() == &TokenKind::Dot {
                     token_stream.advance(); // consume '.'
@@ -172,37 +184,34 @@ fn parse_type_atom(
                             token_stream.advance();
                         }
                         other => {
-                            return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-                                context,
-                                InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                                    found: other,
-                                },
-                                token_stream.current_location(),
-                            )));
+                            return Err(HeaderParseFailure::Diagnostic(
+                                CompilerDiagnostic::invalid_type_annotation(
+                                    context,
+                                    InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
+                                        found: other.into(),
+                                    },
+                                    current_source_span(token_stream),
+                                ),
+                            ));
                         }
                     }
                 }
 
-                return Ok(ParsedTypeRef::Qualified {
-                    path,
-                    location: path_location,
-                    span,
-                });
+                return Ok(ParsedTypeRef::Qualified { path, span });
             }
 
             Ok(ParsedTypeRef::Named {
                 name: type_name,
-                location,
                 span,
             })
         }
-        TokenKind::Colon if matches!(context, TypeAnnotationContext::DeclarationTarget) => {
-            Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
+        TokenKind::Colon if matches!(context, TypeAnnotationContext::DeclarationTarget) => Err(
+            HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_type_annotation(
                 context,
                 InvalidTypeAnnotationReason::UnexpectedColon,
-                token_stream.current_location(),
-            )))
-        }
+                current_source_span(token_stream),
+            )),
+        ),
         other
             if matches!(context, TypeAnnotationContext::DeclarationTarget)
                 && matches!(
@@ -215,21 +224,25 @@ fn parse_type_atom(
                         | TokenKind::MultiplyAssign
                 ) =>
         {
-            Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-                context,
-                InvalidTypeAnnotationReason::InvalidTokenAfterName {
-                    token: other.to_owned(),
-                },
-                token_stream.current_location(),
-            )))
+            Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_type_annotation(
+                    context,
+                    InvalidTypeAnnotationReason::InvalidTokenAfterName {
+                        token: other.to_owned().into(),
+                    },
+                    current_source_span(token_stream),
+                ),
+            ))
         }
-        _ => Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: token_stream.current_token_kind().to_owned(),
-            },
-            token_stream.current_location(),
-        ))),
+        _ => Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
+                    found: token_stream.current_token_kind().to_owned().into(),
+                },
+                current_source_span(token_stream),
+            ),
+        )),
     }
 }
 
@@ -266,8 +279,7 @@ fn parse_collection_type(
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
     let opening_token_index = token_stream.index;
-    let location = token_stream.current_location();
-    let span = token_stream.tokens[opening_token_index].span;
+    let span = current_source_span(token_stream);
     token_stream.advance(); // consume '{'
 
     let inner_tokens = collect_collection_inner_tokens(token_stream)?;
@@ -276,7 +288,6 @@ fn parse_collection_type(
     if inner_tokens.is_empty() {
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
-            location,
             span,
             fixed_capacity: None,
         });
@@ -286,11 +297,13 @@ fn parse_collection_type(
         .iter()
         .find(|token| token.kind == TokenKind::Reactive)
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
-            reactive_token.location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
+                Some(SourceSpan::new(token_stream.file_id, reactive_token.span)),
+            ),
+        ));
     }
 
     // Map type syntax `{K = V}` takes precedence over collection capacity splitting.
@@ -307,44 +320,36 @@ fn parse_collection_type(
             );
         }
         TopLevelAssignScan::Multiple => {
-            return Err(Box::new(CompilerDiagnostic::invalid_map_type(
-                InvalidMapTypeReason::MultipleMapSeparators,
-                location,
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_map_type(
+                    InvalidMapTypeReason::MultipleMapSeparators,
+                    span,
+                ),
+            ));
         }
     }
 
-    // Collection type parsing keeps capacity syntax narrow and unambiguous:
-    //   - If the entire inner content parses as a valid element type, this is `{T}` (growable).
-    //   - Otherwise, the first valid element-type suffix separates capacity from element type.
-    //   - If no element type suffix is found, capacity-only shorthand is allowed only in
-    //     declaration target context (with `Inferred` element type).
-
-    // Try 1: if the contents start as an element type, that type must consume the whole
-    // collection body. This keeps old post-element capacity syntax like `{Int 64}` from
-    // silently becoming capacity-only shorthand.
     if collection_type_slice_can_start_type(&inner_tokens, context, string_table) {
         let parsed_slice = parse_type_slice(&inner_tokens, token_stream, context, string_table)?;
         if let Some(extra_token) = parsed_slice.next_token {
-            return Err(Box::new(CompilerDiagnostic::expected_token(
-                TokenKind::CloseCurly,
-                Some(extra_token.kind),
-                extra_token.location,
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::expected_token(
+                    TokenKind::CloseCurly,
+                    Some(extra_token.kind),
+                    Some(SourceSpan::new(token_stream.file_id, extra_token.span)),
+                ),
+            ));
         }
 
         let element = parsed_slice.parsed_type;
-        reject_trait_this_composition(&element, context, location.clone())?;
+        reject_trait_this_composition(&element, context, span)?;
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(element),
-            location,
             span,
             fixed_capacity: None,
         });
     }
 
-    // Try 2: find the first valid element type suffix by scanning left-to-right.
-    // Tokens before the suffix become the fixed-capacity syntax.
     for split_idx in 1..inner_tokens.len() {
         let type_tokens = &inner_tokens[split_idx..];
         if !collection_type_slice_can_start_type(type_tokens, context, string_table) {
@@ -354,31 +359,33 @@ fn parse_collection_type(
         if let Some(element) =
             parse_type_slice_exact(type_tokens, token_stream, context, string_table)
         {
-            reject_trait_this_composition(&element, context, location.clone())?;
+            reject_trait_this_composition(&element, context, span)?;
             return Ok(ParsedTypeRef::Collection {
                 element: Box::new(element),
-                location,
                 span,
-                fixed_capacity: parsed_capacity(&inner_tokens[..split_idx], string_table)?,
+                fixed_capacity: parsed_capacity(
+                    &inner_tokens[..split_idx],
+                    string_table,
+                    token_stream.file_id,
+                )?,
             });
         }
     }
 
-    // Try 3: capacity-only shorthand (declaration target only).
     if matches!(context, TypeAnnotationContext::DeclarationTarget) {
         return Ok(ParsedTypeRef::Collection {
             element: Box::new(ParsedTypeRef::Inferred),
-            location,
             span,
-            fixed_capacity: parsed_capacity(&inner_tokens, string_table)?,
+            fixed_capacity: parsed_capacity(&inner_tokens, string_table, token_stream.file_id)?,
         });
     }
 
-    // No valid element type found in a non-declaration context.
-    Err(Box::new(CompilerDiagnostic::invalid_collection_type(
-        InvalidCollectionTypeReason::ShorthandCapacityNotAllowed,
-        location,
-    )))
+    Err(HeaderParseFailure::Diagnostic(
+        CompilerDiagnostic::invalid_collection_type(
+            InvalidCollectionTypeReason::ShorthandCapacityNotAllowed,
+            span,
+        ),
+    ))
 }
 
 /// Collect all tokens inside a braced type body, tracking nested braces.
@@ -405,11 +412,13 @@ fn collect_collection_inner_tokens(token_stream: &mut FileTokens) -> TypeParseRe
                 token_stream.advance();
             }
             TokenKind::Eof => {
-                return Err(Box::new(CompilerDiagnostic::expected_token(
-                    TokenKind::CloseCurly,
-                    Some(TokenKind::Eof),
-                    token_stream.current_location(),
-                )));
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::expected_token(
+                        TokenKind::CloseCurly,
+                        Some(TokenKind::Eof),
+                        current_source_span(token_stream),
+                    ),
+                ));
             }
             _ => {
                 inner_tokens.push(token_stream.current_token());
@@ -430,58 +439,63 @@ fn collect_collection_inner_tokens(token_stream: &mut FileTokens) -> TypeParseRe
 fn parsed_capacity(
     tokens: &[Token],
     string_table: &StringTable,
+    source_id: SourceId,
 ) -> TypeParseResult<Option<ParsedCollectionCapacity>> {
     if tokens.is_empty() {
         return Ok(None);
     }
 
     if tokens.len() == 1 {
+        let token_span = Some(SourceSpan::new(source_id, tokens[0].span));
         match &tokens[0].kind {
             TokenKind::NumericLiteral(token) => {
                 if token.kind != NumericLiteralKind::WholeNumber {
-                    return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
-                        InvalidCollectionTypeReason::CapacityNotInt,
-                        tokens[0].location.clone(),
-                    )));
+                    return Err(HeaderParseFailure::Diagnostic(
+                        CompilerDiagnostic::invalid_collection_type(
+                            InvalidCollectionTypeReason::CapacityNotInt,
+                            token_span,
+                        ),
+                    ));
                 }
 
                 let value = materialize_i32(token, string_table).map_err(|reason| {
                     CompilerDiagnostic::invalid_number_literal(
                         token.source_text,
                         reason,
-                        tokens[0].location.clone(),
+                        token_span,
                     )
                 })?;
 
                 if token.sign == NumericLiteralSign::Negative {
-                    return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
-                        InvalidCollectionTypeReason::NegativeCapacity,
-                        tokens[0].location.clone(),
-                    )));
+                    return Err(HeaderParseFailure::Diagnostic(
+                        CompilerDiagnostic::invalid_collection_type(
+                            InvalidCollectionTypeReason::NegativeCapacity,
+                            token_span,
+                        ),
+                    ));
                 }
 
                 return Ok(Some(ParsedCollectionCapacity::Literal {
                     value,
-                    location: tokens[0].location.clone(),
-                    span: tokens[0].span,
+                    span: token_span,
                 }));
             }
             TokenKind::Symbol(name) => {
                 return Ok(Some(ParsedCollectionCapacity::BareConstant {
                     name: *name,
-                    location: tokens[0].location.clone(),
-                    span: tokens[0].span,
+                    span: token_span,
                 }));
             }
             _ => {}
         }
     }
 
-    let location = tokens[0].location.clone();
-    Err(Box::new(CompilerDiagnostic::invalid_collection_type(
-        InvalidCollectionTypeReason::CapacityNotConstant,
-        location,
-    )))
+    Err(HeaderParseFailure::Diagnostic(
+        CompilerDiagnostic::invalid_collection_type(
+            InvalidCollectionTypeReason::CapacityNotConstant,
+            Some(SourceSpan::new(source_id, tokens[0].span)),
+        ),
+    ))
 }
 
 // -------------------------
@@ -535,35 +549,32 @@ fn parse_map_type_from_inner_tokens(
     string_table: &StringTable,
     opening_token: &Token,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let location = &opening_token.location;
+    let span = Some(SourceSpan::new(token_stream.file_id, opening_token.span));
     let key_tokens = &inner_tokens[..assign_idx];
     let value_tokens = &inner_tokens[assign_idx + 1..];
 
     if key_tokens.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_type(
-            InvalidMapTypeReason::EmptyMapKeyType,
-            location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_map_type(InvalidMapTypeReason::EmptyMapKeyType, span),
+        ));
     }
 
     if value_tokens.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_type(
-            InvalidMapTypeReason::EmptyMapValueType,
-            location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_map_type(InvalidMapTypeReason::EmptyMapValueType, span),
+        ));
     }
 
-    let key = try_parse_map_side(key_tokens, token_stream, context, string_table, location)?;
-    let value = try_parse_map_side(value_tokens, token_stream, context, string_table, location)?;
+    let key = try_parse_map_side(key_tokens, token_stream, context, string_table, span)?;
+    let value = try_parse_map_side(value_tokens, token_stream, context, string_table, span)?;
 
-    reject_trait_this_composition(&key, context, location.clone())?;
-    reject_trait_this_composition(&value, context, location.clone())?;
+    reject_trait_this_composition(&key, context, span)?;
+    reject_trait_this_composition(&value, context, span)?;
 
     Ok(ParsedTypeRef::Map {
         key: Box::new(key),
         value: Box::new(value),
-        location: location.clone(),
-        span: opening_token.span,
+        span,
     })
 }
 
@@ -579,34 +590,39 @@ fn try_parse_map_side(
     token_stream: &FileTokens,
     context: TypeAnnotationContext,
     string_table: &StringTable,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> TypeParseResult<ParsedTypeRef> {
     if let Some(parsed) = parse_type_slice_exact(tokens, token_stream, context, string_table) {
         return Ok(parsed);
     }
 
     if map_side_looks_like_fixed_capacity(tokens, token_stream, context, string_table) {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_type(
-            InvalidMapTypeReason::FixedCapacityNotAllowed,
-            location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_map_type(
+                InvalidMapTypeReason::FixedCapacityNotAllowed,
+                span,
+            ),
+        ));
     }
 
     if map_side_looks_like_postfix_capacity(tokens, token_stream, context, string_table) {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_type(
-            InvalidMapTypeReason::FixedCapacityNotAllowed,
-            location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_map_type(
+                InvalidMapTypeReason::FixedCapacityNotAllowed,
+                span,
+            ),
+        ));
     }
 
-    // Fall back to the normal type-slice parser so the user gets the best available error.
     let parsed_slice = parse_type_slice(tokens, token_stream, context, string_table)?;
     if let Some(extra_token) = parsed_slice.next_token {
-        return Err(Box::new(CompilerDiagnostic::expected_token(
-            TokenKind::CloseCurly,
-            Some(extra_token.kind),
-            extra_token.location,
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::expected_token(
+                TokenKind::CloseCurly,
+                Some(extra_token.kind),
+                Some(SourceSpan::new(token_stream.file_id, extra_token.span)),
+            ),
+        ));
     }
 
     Ok(parsed_slice.parsed_type)
@@ -629,7 +645,7 @@ fn map_side_looks_like_fixed_capacity(
         if collection_type_slice_can_start_type(type_tokens, context, string_table)
             && parse_type_slice_exact(type_tokens, token_stream, context, string_table).is_some()
             && matches!(
-                parsed_capacity(&tokens[..split_idx], string_table),
+                parsed_capacity(&tokens[..split_idx], string_table, token_stream.file_id,),
                 Ok(Some(_))
             )
         {
@@ -690,16 +706,7 @@ fn parse_type_slice(
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeSlice> {
     let mut slice_tokens = tokens.to_vec();
-    let eof_anchor = tokens
-        .last()
-        .cloned()
-        .unwrap_or_else(|| outer_stream.current_token());
-    slice_tokens.push(Token::with_span(
-        TokenKind::Eof,
-        eof_anchor.location,
-        eof_anchor.span,
-    ));
-
+    slice_tokens.push(Token::with_span(TokenKind::Eof, LocalSpan::source_start()));
     let mut stream = FileTokens::new_path_free_substream(
         outer_stream.src_path.clone(),
         outer_stream.file_id,
@@ -787,25 +794,22 @@ fn parse_generic_arguments(
     string_table: &StringTable,
     allow_generic_application: bool,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let location = token_stream.current_location();
-    let span = token_stream.tokens[token_stream.index].span;
+    let span = current_source_span(token_stream);
+
     if token_stream.current_token_kind() != &TokenKind::Of {
         return Ok(parsed_type);
     }
 
     if !allow_generic_application {
-        return Err(Box::new(nested_generic_application_error(
-            token_stream.current_location(),
-            context,
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            nested_generic_application_error(span, context),
+        ));
     }
-
     match parsed_type {
         ParsedTypeRef::This { .. } => {
-            return Err(Box::new(trait_this_composition_error(
-                context,
-                token_stream.current_location(),
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                trait_this_composition_error(context, current_source_span(token_stream)),
+            ));
         }
         ParsedTypeRef::Named { .. } => {}
         // Qualified paths such as `io.input.Input` are concrete type references,
@@ -813,10 +817,12 @@ fn parse_generic_arguments(
         // deliberately deferred until there is a clear need and a resolved generic
         // base policy; for now they fall through to the OnNonNamedType error.
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_generic_application(
-                GenericApplicationErrorReason::OnNonNamedType,
-                token_stream.current_location(),
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_generic_application(
+                    GenericApplicationErrorReason::OnNonNamedType,
+                    current_source_span(token_stream),
+                ),
+            ));
         }
     };
 
@@ -826,10 +832,12 @@ fn parse_generic_arguments(
     loop {
         if generic_argument_list_is_finished(token_stream.current_token_kind()) {
             if arguments.is_empty() {
-                return Err(Box::new(CompilerDiagnostic::invalid_generic_application(
-                    GenericApplicationErrorReason::EmptyArgumentList,
-                    token_stream.current_location(),
-                )));
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_generic_application(
+                        GenericApplicationErrorReason::EmptyArgumentList,
+                        current_source_span(token_stream),
+                    ),
+                ));
             }
             break;
         }
@@ -841,24 +849,27 @@ fn parse_generic_arguments(
             TokenKind::Comma => {
                 token_stream.advance();
                 if generic_argument_list_is_finished(token_stream.current_token_kind()) {
-                    return Err(Box::new(CompilerDiagnostic::invalid_generic_application(
-                        GenericApplicationErrorReason::MissingArgumentAfterComma,
-                        token_stream.current_location(),
-                    )));
+                    return Err(HeaderParseFailure::Diagnostic(
+                        CompilerDiagnostic::invalid_generic_application(
+                            GenericApplicationErrorReason::MissingArgumentAfterComma,
+                            current_source_span(token_stream),
+                        ),
+                    ));
                 }
             }
             token if generic_argument_list_is_finished(token) => break,
             TokenKind::Of => {
-                return Err(Box::new(nested_generic_application_error(
-                    token_stream.current_location(),
-                    context,
-                )));
+                return Err(HeaderParseFailure::Diagnostic(
+                    nested_generic_application_error(current_source_span(token_stream), context),
+                ));
             }
             other => {
-                return Err(Box::new(CompilerDiagnostic::unexpected_token(
-                    other.to_owned(),
-                    token_stream.current_location(),
-                )));
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::unexpected_token(
+                        other.to_owned(),
+                        current_source_span(token_stream),
+                    ),
+                ));
             }
         }
     }
@@ -866,7 +877,6 @@ fn parse_generic_arguments(
     Ok(ParsedTypeRef::Applied {
         base: Box::new(parsed_type),
         arguments,
-        location,
         span,
     })
 }
@@ -876,21 +886,19 @@ fn parse_generic_type_argument(
     context: TypeAnnotationContext,
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let argument_location = token_stream.current_location();
+    let argument_span = current_source_span(token_stream);
     let parsed_argument = parse_type_atom(token_stream, context, string_table)?;
 
-    reject_trait_this_composition(&parsed_argument, context, argument_location)?;
+    reject_trait_this_composition(&parsed_argument, context, argument_span)?;
 
     if token_stream.current_token_kind() == &TokenKind::Of {
-        return Err(Box::new(nested_generic_application_error(
-            token_stream.current_location(),
-            context,
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            nested_generic_application_error(current_source_span(token_stream), context),
+        ));
     }
 
     Ok(parsed_argument)
 }
-
 /// Decide whether a token terminates the generic argument list.
 ///
 /// WHAT: lists the token kinds that cannot start a generic argument and therefore signal
@@ -914,12 +922,12 @@ fn generic_argument_list_is_finished(token: &TokenKind) -> bool {
 }
 
 fn nested_generic_application_error(
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     _context: TypeAnnotationContext,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_generic_application(
         GenericApplicationErrorReason::NestedApplication,
-        location,
+        span,
     )
 }
 
@@ -928,88 +936,80 @@ fn parse_optional_type_suffix(
     parsed_type: ParsedTypeRef,
     context: TypeAnnotationContext,
 ) -> TypeParseResult<ParsedTypeRef> {
-    let location = token_stream.current_location();
-    let span = token_stream.tokens[token_stream.index].span;
+    let span = current_source_span(token_stream);
+
     if token_stream.current_token_kind() != &TokenKind::QuestionMark {
         return Ok(parsed_type);
     }
 
-    reject_trait_this_composition(&parsed_type, context, location.clone())?;
+    reject_trait_this_composition(&parsed_type, context, span)?;
 
     if matches!(parsed_type, ParsedTypeRef::Optional { .. }) {
-        return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::DuplicateOptional,
-            token_stream.current_location(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::DuplicateOptional,
+                current_source_span(token_stream),
+            ),
+        ));
     }
 
     token_stream.advance();
     if token_stream.current_token_kind() == &TokenKind::QuestionMark {
-        return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
-            context,
-            InvalidTypeAnnotationReason::DuplicateOptional,
-            token_stream.current_location(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_type_annotation(
+                context,
+                InvalidTypeAnnotationReason::DuplicateOptional,
+                current_source_span(token_stream),
+            ),
+        ));
     }
 
     Ok(ParsedTypeRef::Optional {
         inner: Box::new(parsed_type),
-        location,
         span,
     })
 }
 
 /// Recursively check whether a parsed type contains `This` anywhere in its structure.
-///
-/// WHAT: walks through applied generics, collections and optionals to find
-///      a `ParsedTypeRef::This` node.
-/// WHY: `This` is only valid as a bare trait requirement; it must not appear nested.
 fn parsed_type_contains_trait_this(parsed_type: &ParsedTypeRef) -> bool {
     match parsed_type {
         ParsedTypeRef::This { .. } => true,
-
         ParsedTypeRef::Applied {
             base, arguments, ..
         } => {
             parsed_type_contains_trait_this(base)
                 || arguments.iter().any(parsed_type_contains_trait_this)
         }
-
         ParsedTypeRef::Collection { element, .. }
         | ParsedTypeRef::Optional { inner: element, .. } => {
             parsed_type_contains_trait_this(element)
         }
-
         _ => false,
     }
 }
 
-/// Fail if a parsed type contains nested `This`, emitting the appropriate diagnostic.
-///
-/// WHAT: delegates to `parsed_type_contains_trait_this` and turns a positive result into
-///      `InvalidTypeAnnotationReason::TraitThisMustBeDirect`.
-/// WHY: centralizes the composition check so callers in map, collection, optional, and
-///      generic paths share the same error message.
 fn reject_trait_this_composition(
     parsed_type: &ParsedTypeRef,
     context: TypeAnnotationContext,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> TypeParseResult<()> {
     if parsed_type_contains_trait_this(parsed_type) {
-        return Err(Box::new(trait_this_composition_error(context, location)));
+        return Err(HeaderParseFailure::Diagnostic(
+            trait_this_composition_error(context, span),
+        ));
     }
     Ok(())
 }
 
 fn trait_this_composition_error(
     context: TypeAnnotationContext,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_type_annotation(
         context,
         InvalidTypeAnnotationReason::TraitThisMustBeDirect,
-        location,
+        span,
     )
 }
 
@@ -1020,9 +1020,9 @@ fn type_keyword_deferred_error(
     CompilerDiagnostic::invalid_type_annotation(
         context,
         InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-            found: TokenKind::Type,
+            found: TokenKind::Type.into(),
         },
-        token_stream.current_location(),
+        current_source_span(token_stream),
     )
 }
 
@@ -1035,4 +1035,10 @@ fn compilation_stage(context: TypeAnnotationContext) -> &'static str {
         TypeAnnotationContext::TypeAliasTarget => "Type Alias Parsing",
         TypeAnnotationContext::TraitRequirement => "Trait Requirement Parsing",
     }
+}
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }

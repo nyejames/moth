@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input for the inline single-predicate body parser after `if` has been consumed.
 pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
@@ -36,7 +36,7 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
-    pub(super) location: SourceLocation,
+    pub(super) header_index: usize,
     pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
 }
@@ -55,7 +55,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         type_interner,
         target,
         string_table,
-        location,
+        header_index,
         span,
         classification,
     } = input;
@@ -77,15 +77,15 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
     {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()));
     }
 
-    if !same_logical_line(&location, &token_stream.current_location()) {
+    if !same_logical_line(token_stream, header_index, token_stream.index) {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()));
     }
@@ -99,7 +99,6 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         string_table,
         scrutinee: header.scrutinee,
         pattern: header.pattern,
-        location,
         span,
     }))
 }
@@ -113,7 +112,6 @@ struct InlineValueMatchParseInput<'a, 'b> {
     string_table: &'a mut StringTable,
     scrutinee: Expression,
     pattern: MatchPattern,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 }
 
@@ -133,7 +131,6 @@ fn parse_inline_value_match(
         string_table,
         scrutinee,
         pattern,
-        location,
         span,
     } = input;
 
@@ -148,13 +145,11 @@ fn parse_inline_value_match(
 
     let then_body = vec![then_value_node(
         output.then_values,
-        location.clone(),
         output.then_span,
         then_context.scope.clone(),
     )];
     let else_body = vec![then_value_node(
         output.else_values,
-        location.clone(),
         output.else_span,
         context.scope.clone(),
     )];
@@ -168,7 +163,7 @@ fn parse_inline_value_match(
         }],
         default: Some(else_body),
         exhaustiveness: MatchExhaustiveness::HasDefault,
-        location: location.clone(),
+        span,
         result_type_ids: output.result_type_ids,
     };
 

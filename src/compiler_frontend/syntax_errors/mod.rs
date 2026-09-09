@@ -14,7 +14,7 @@ pub(crate) mod signature_position;
 pub(crate) mod statement_position;
 
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerDiagnostic};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 #[cfg(test)]
 mod tests;
@@ -26,7 +26,7 @@ mod tests;
 /// WHY: renderer text belongs at the render boundary, not inside syntax scanning helpers.
 pub(crate) fn common_syntax_mistake(
     reason: CommonSyntaxMistakeReason,
-    location: SourceLocation,
+    span: SourceSpan,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::common_syntax_mistake(reason, location)
+    CompilerDiagnostic::common_syntax_mistake(reason, Some(span))
 }

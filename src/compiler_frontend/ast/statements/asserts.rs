@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -38,11 +37,7 @@ pub(crate) fn parse_assert_statement(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
-    let assert_location = token_stream.current_location();
-    let assert_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let assert_span = Some(token_stream.current_span());
     let assert_name = string_table.intern("assert");
     let condition_name = string_table.intern("condition");
     let message_name = string_table.intern("message");
@@ -56,7 +51,6 @@ pub(crate) fn parse_assert_statement(
         string_type_id,
         DataType::StringSlice,
         type_interner.environment_mut_for_derived_types(),
-        assert_location.clone(),
         None,
     );
     let message_type_id = default_message.type_id;
@@ -95,7 +89,7 @@ pub(crate) fn parse_assert_statement(
             CallDiagnosticContext::assertion("assert"),
             &raw_arguments,
             &expectations,
-            assert_location.clone(),
+            assert_span,
             CallArgumentResolutionContext {
                 string_table,
                 type_environment: type_check_context.type_environment,
@@ -139,7 +133,7 @@ pub(crate) fn parse_assert_statement(
     if token_stream.current_token_kind() == &TokenKind::Bang {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::BangOnNonFallible,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -148,14 +142,13 @@ pub(crate) fn parse_assert_statement(
     if token_stream.current_token_kind() == &TokenKind::Catch {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOnNonFallible,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
     ast.push(AstNode {
         kind: NodeKind::Assert { condition, message },
-        location: assert_location,
         span: assert_span,
         scope: context.scope.clone(),
     });

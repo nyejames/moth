@@ -68,9 +68,6 @@ pub struct JsLoweringConfig {
     /// Emit human-readable formatting.
     pub pretty: bool,
 
-    /// Emit source location comments.
-    pub emit_locations: bool,
-
     /// Automatically invoke the module start function.
     pub auto_invoke_start: bool,
 
@@ -103,7 +100,6 @@ impl JsLoweringConfig {
     pub fn direct_js(release_build: bool) -> Self {
         JsLoweringConfig {
             pretty: !release_build,
-            emit_locations: false,
             auto_invoke_start: false,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),

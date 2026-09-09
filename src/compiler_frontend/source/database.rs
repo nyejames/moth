@@ -68,7 +68,9 @@ pub struct SourceDatabase {
 pub struct FrozenSourceDatabase {
     slots: Vec<SourceSlot>,
     loaded: Vec<SourceRecord>,
+    #[allow(dead_code)] // Retained for deferred frozen-source failure lookups.
     load_failures: Vec<CompilerError>,
+    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookups.
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
     paths: PathTable,
 }
@@ -166,7 +168,6 @@ impl SourceDatabase {
             registration_index,
             entry_file_path,
             project_path_resolver,
-            string_table,
         )?;
         rows.sort_by(|(_, _, left), (_, _, right)| {
             left.portable_sort_key.cmp(&right.portable_sort_key)
@@ -214,7 +215,6 @@ impl SourceDatabase {
             registration_index,
             entry_file_path,
             project_path_resolver,
-            string_table,
         )?;
         self.append_ordered_logical_rows(rows, string_table)
     }
@@ -231,7 +231,7 @@ impl SourceDatabase {
                 let path_id = self
                     .path_interner
                     .try_intern_filesystem_path(&logical.path, string_table)
-                    .map_err(|error| map_path_intern_error(error, string_table))?;
+                    .map_err(|error| map_path_intern_error(error))?;
                 Ok((canonical, kind, path_id))
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -330,17 +330,15 @@ impl SourceDatabase {
             slot.provenance
         };
 
-        // Construct the legacy path only on the rare oversized-snapshot error path. Normal loads
-        // carry the compact PathId without allocating a component vector.
+        // Oversized snapshots are checked only on the failure path; normal loads carry the compact
+        // logical `PathId` without reconstructing a component vector.
         if text.len() >= u32::MAX as usize {
             let slot = self
                 .get(id)
                 .expect("source slot validated before retaining text");
-            let logical_path = self.legacy_logical_path(id);
             let fit_result = ensure_source_snapshot_fits(
                 text.len(),
                 provenance,
-                &logical_path,
                 slot.canonical_os_path.as_deref(),
             );
             if let Err(error) = fit_result {
@@ -535,16 +533,11 @@ impl SourceDatabase {
         project_path_resolver: Option<&ProjectPathResolver>,
         string_table: &mut StringTable,
     ) -> Result<SourceId, CompilerError> {
-        let logical = logical_source_path(
-            &canonical_path,
-            entry_file_path,
-            project_path_resolver,
-            string_table,
-        )?;
+        let logical = logical_source_path(&canonical_path, entry_file_path, project_path_resolver)?;
         let path_id = self
             .path_interner
             .try_intern_filesystem_path(&logical.path, string_table)
-            .map_err(|error| map_path_intern_error(error, string_table))?;
+            .map_err(|error| map_path_intern_error(error))?;
 
         if let Some(slot) = self.get_by_canonical_path(&canonical_path) {
             if slot.logical_path != path_id {
@@ -625,6 +618,7 @@ impl SourceDatabase {
     /// A logical path is safe to render only when it identifies exactly one slot in this
     /// database. Collisions can arise when independently rooted sources share a portable spelling;
     /// returning no slot on ambiguity is safer than guessing and displaying another file's text.
+    #[allow(dead_code)] // Retained for deferred mutable logical-path lookup consumers.
     pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: &InternedPath,
@@ -642,6 +636,7 @@ impl SourceDatabase {
 }
 impl FrozenSourceDatabase {
     /// Iterate over physical source slots in deterministic source-identity order.
+    #[allow(dead_code)] // Retained for deferred frozen-source iteration consumers.
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
         debug_assert_eq!(
             self.slots.first().map(|slot| slot.provenance),
@@ -664,6 +659,7 @@ impl FrozenSourceDatabase {
     /// A path ID identifies a spelling in this owner's path table, but multiple source slots may
     /// intentionally share that spelling. Returning no slot on ambiguity prevents a renderer
     /// from choosing another source's snapshot.
+    #[allow(dead_code)] // Retained for deferred frozen-source logical-path lookup consumers.
     pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: PathId,
@@ -677,6 +673,7 @@ impl FrozenSourceDatabase {
     }
 
     /// Resolve a physical source slot by its canonical filesystem path.
+    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookup consumers.
     pub(crate) fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
         let id = self.canonical_to_id.get(canonical_path)?;
         self.get(*id)
@@ -695,6 +692,7 @@ impl FrozenSourceDatabase {
     /// [`PathTable`] parent links and is never retained by the database. Component IDs are
     /// reused verbatim, so ambiguity semantics match the mutable bridge: the view is
     /// returned even when several slots share the same spelling.
+    #[allow(dead_code)] // Retained for deferred frozen-source path compatibility consumers.
     pub(crate) fn legacy_logical_path(&self, source: SourceId) -> InternedPath {
         let path_id = self
             .slots
@@ -718,6 +716,7 @@ impl FrozenSourceDatabase {
     }
 
     /// Borrow the exact retained snapshot for one loaded physical source.
+    #[allow(dead_code)] // Retained for deferred frozen-source snapshot consumers.
     pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
         self.loaded_record(id).map(|record| record.text.as_ref())
     }
@@ -729,6 +728,7 @@ impl FrozenSourceDatabase {
     }
 
     /// Return the structured load failure retained for one source, when its load failed.
+    #[allow(dead_code)] // Retained for deferred frozen-source failure consumers.
     pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
         match &self.get(id)?.load {
             SourceLoadStatus::Failed(index) => self.load_failures.get(index.index()),
@@ -786,6 +786,7 @@ impl FrozenSourceDatabase {
     }
 }
 
+#[allow(dead_code)] // Supports the deferred mutable logical-path lookup contract.
 fn path_id_matches_components(
     table: &PathTable,
     path_id: PathId,
@@ -1015,18 +1016,12 @@ fn logical_rows_for_registration_index(
     registration_index: &SourceRegistrationIndex<'_>,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
-    string_table: &mut StringTable,
 ) -> Result<Vec<(PathBuf, SourceKind, LogicalSourcePath)>, CompilerError> {
     let rows_iter = registration_index.rows();
     let mut rows = Vec::with_capacity(rows_iter.len());
 
     for (canonical, kind) in rows_iter {
-        let logical = logical_source_path(
-            canonical,
-            entry_file_path,
-            project_path_resolver,
-            string_table,
-        )?;
+        let logical = logical_source_path(canonical, entry_file_path, project_path_resolver)?;
         rows.push((canonical.to_path_buf(), kind, logical));
     }
 
@@ -1038,10 +1033,9 @@ fn logical_source_path(
     canonical_file: &Path,
     entry_file_path: &Path,
     project_path_resolver: Option<&ProjectPathResolver>,
-    string_table: &mut StringTable,
 ) -> Result<LogicalSourcePath, CompilerError> {
     let logical = match project_path_resolver {
-        Some(resolver) => resolver.logical_path_for_canonical_file(canonical_file, string_table)?,
+        Some(resolver) => resolver.logical_path_for_canonical_file(canonical_file)?,
         None => {
             let fallback_root = entry_file_path
                 .parent()
@@ -1053,7 +1047,7 @@ fn logical_source_path(
 
     let portable_sort_key = logical
         .to_str()
-        .ok_or_else(|| non_utf8_logical_path_error(&logical, string_table))?
+        .ok_or_else(|| non_utf8_logical_path_error(&logical))?
         .replace('\\', "/");
 
     Ok(LogicalSourcePath {
@@ -1062,16 +1056,12 @@ fn logical_source_path(
     })
 }
 
-fn non_utf8_logical_path_error(
-    logical_path: &Path,
-    string_table: &mut StringTable,
-) -> CompilerError {
+fn non_utf8_logical_path_error(logical_path: &Path) -> CompilerError {
     CompilerError::file_error(
         logical_path,
         format!(
             "Source file logical path {logical_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
         ),
-        string_table,
     )
 }
 
@@ -1089,10 +1079,10 @@ fn identity_table_capacity_error(table: &'static str) -> CompilerError {
 /// Translate one path-interning outcome into the owning database's failure lane: strict
 /// UTF-8 violations keep their existing file error, while compact-domain exhaustion
 /// becomes the typed source-capacity failure.
-fn map_path_intern_error(error: PathInternError, string_table: &mut StringTable) -> CompilerError {
+fn map_path_intern_error(error: PathInternError) -> CompilerError {
     match error {
         PathInternError::NonUtf8(NonUtf8PathComponent { path }) => {
-            non_utf8_logical_path_error(&path, string_table)
+            non_utf8_logical_path_error(&path)
         }
         PathInternError::TableFull => identity_table_capacity_error("logical path nodes"),
     }

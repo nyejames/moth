@@ -18,10 +18,10 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::{
     NumericExponentSign, NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -137,9 +137,9 @@ fn parse_whole_number_token(
                 0,
                 NumericExponentSign::None,
             )),
-            SourceLocation::default(),
+            LocalSpan::source_start(),
         ),
-        Token::new(TokenKind::Eof, SourceLocation::default()),
+        Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
     let mut token_stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut expression = Vec::new();

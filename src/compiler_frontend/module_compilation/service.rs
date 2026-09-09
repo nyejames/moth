@@ -21,14 +21,15 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::owned_folded_string_from_const_string;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, HeaderKind, PreparedHeaderSyntax, bind_module_headers,
+    BoundModuleHeaders, HeaderKind, HeaderPreparationFailure, PreparedHeaderSyntax,
+    bind_module_headers,
 };
 use crate::compiler_frontend::hir::functions::{
     HirFunctionOriginLookup, PrivateFunctionOriginSeed,
 };
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts_with_string_table;
+use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
@@ -199,6 +200,9 @@ pub(crate) fn compile_module(
             Err(error) => Err(error),
         },
         Err(PremergeFailure::Infrastructure(error)) => Err(error),
+        // Mixed double-failures only arise at source-finalization tails and never reach
+        // module compilation; abort through the typed lane if one ever does.
+        Err(PremergeFailure::Mixed { error, .. }) => Err(error),
     }
 }
 
@@ -596,8 +600,7 @@ fn run_semantic_stages(
                     .function_name
                     .map(|name| compiler.string_table.resolve(name).to_owned())
                     .unwrap_or_else(|| "<generated>".to_owned()),
-                diagnostic_location: request.call_location.clone(),
-                diagnostic_span: request.call_span,
+                call_span: request.call_span,
             }
         }));
     // 4b. Extract validated generic-template body artefacts before HIR consumes AST
@@ -621,7 +624,6 @@ fn run_semantic_stages(
         private_function_origin_seeds,
     )?;
 
-    // 5. Convert const fragment structural strings to owned values before AST is consumed by HIR.
     let const_top_level_fragments = {
         let module_resources = module_resources.borrow();
         module_ast
@@ -635,7 +637,7 @@ fn run_semantic_stages(
                 )
                 .map(|value| ResolvedConstFragment {
                     runtime_insertion_index: fragment.runtime_insertion_index,
-                    location: fragment._location.clone(),
+                    span: None,
                     value,
                 })
             })
@@ -660,17 +662,10 @@ fn run_semantic_stages(
         metadata: lowering_metadata,
     } = hir_lowering;
 
-    // 7. Validate extracted non-HIR compiler metadata before a successful module is
-    // returned. Invalid compiler metadata is an internal CompilerError.
-    if let Err(error) = lowering_metadata.validate() {
-        return Err(error.into());
-    }
-
     // Link facts are the validated-HIR owner for direct call targets. The convergence
     // observation model consumes these facts after HIR validation rather than scanning
     // source or introducing a second HIR call graph.
-    let function_link_facts =
-        collect_module_function_link_facts_with_string_table(&hir_module, &compiler.string_table)?;
+    let function_link_facts = collect_module_function_link_facts(&hir_module)?;
 
     #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {
@@ -840,13 +835,22 @@ fn bind_retained_headers(
         compiler.source_files.as_ref(),
         &mut compiler.string_table,
     )
-    .map_err(|bag| {
+    .map_err(|failure| {
         // Move the compiler table into the batch; binding failed, so the compiler owner
         // hands its table to the diagnosed lane instead of cloning it for a vessel.
-        let table = std::mem::take(&mut compiler.string_table);
-        let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
-        batch.prepend_diagnostics(std::mem::take(warnings));
-        PremergeFailure::Diagnosed(batch)
+        // Infrastructure failures stay typed and discard warning companions, matching the
+        // module classifier contract.
+        match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => {
+                let table = std::mem::take(&mut compiler.string_table);
+                let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+                batch.prepend_diagnostics(std::mem::take(warnings));
+                PremergeFailure::Diagnosed(batch)
+            }
+            HeaderPreparationFailure::Infrastructure(error) => {
+                PremergeFailure::Infrastructure(error)
+            }
+        }
     })?;
 
     record_header_counters(&headers);
@@ -861,13 +865,16 @@ fn sort_headers(
 ) -> Result<SortedHeaders, PremergeFailure> {
     compiler
         .sort_headers(module_headers, resolved_file_references)
-        .map_err(|bag| {
-            // Move the compiler table into the batch; ordering failed, so no clone is
-            // needed to carry the diagnostics.
-            let table = std::mem::take(&mut compiler.string_table);
-            let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
-            batch.prepend_diagnostics(std::mem::take(warnings));
-            PremergeFailure::Diagnosed(batch)
+        .map_err(|failure| match failure {
+            PremergeFailure::Diagnosed(mut batch) => {
+                batch.prepend_diagnostics(std::mem::take(warnings));
+                PremergeFailure::Diagnosed(batch)
+            }
+            PremergeFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+            PremergeFailure::Mixed { mut batch, error } => {
+                batch.prepend_diagnostics(std::mem::take(warnings));
+                PremergeFailure::Mixed { batch, error }
+            }
         })
 }
 

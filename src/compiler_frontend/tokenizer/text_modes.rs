@@ -12,9 +12,7 @@ use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
 use crate::compiler_frontend::tokenizer::newline_handling::{
     consume_pending_carriage_return_newline, normalize_consumed_carriage_return_newline,
 };
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, SourceLocation, Token, TokenKind, TokenStream,
-};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
 use crate::return_token;
 
 pub(super) fn tokenize_raw_string(
@@ -38,10 +36,7 @@ pub(super) fn tokenize_raw_string(
         token_value.push(ch);
     }
 
-    Err(Box::new(CompilerDiagnostic::unterminated_string_literal(
-        stream.new_location(),
-    ))
-    .into())
+    Err(CompilerDiagnostic::unterminated_string_literal(Some(stream.current_source_span()?)).into())
 }
 
 /// WHAT: lexes a double-quoted string slice, decoding only the supported escapes.
@@ -54,51 +49,37 @@ pub(super) fn tokenize_string(
 ) -> TokenizeResult<Token> {
     let mut token_value = String::new();
     loop {
-        // Capture the position and byte offset of the next source character before consuming
-        // it so escape diagnostics can span the backslash and its escape body precisely.
-        let span_start = stream.position;
+        // Capture the byte offset of the next source character before consuming it so escape
+        // diagnostics can span the backslash and its escape body precisely.
         let span_start_byte = stream.byte_offset;
 
         let Some(ch) = stream.next() else {
-            return Err(Box::new(CompilerDiagnostic::unterminated_string_literal(
-                stream.new_location(),
+            return Err(CompilerDiagnostic::unterminated_string_literal(Some(
+                stream.current_source_span()?,
             ))
             .into());
         };
 
         if ch == '\\' {
             // The backslash has been consumed, so the stream now points at the escaped character.
-            let after_backslash = stream.position;
             let after_backslash_byte = stream.byte_offset;
 
             let Some(&escaped_char) = stream.peek() else {
                 // A backslash at end of source never received an escaped character.
-                return Err(Box::new(CompilerDiagnostic::invalid_string_escape(
+                return Err(CompilerDiagnostic::invalid_string_escape(
                     InvalidStringEscapeReason::TrailingBackslash,
-                    escape_span(
-                        stream,
-                        span_start_byte,
-                        span_start,
-                        after_backslash,
-                        after_backslash_byte,
-                    ),
-                ))
+                    Some(escape_span(stream, span_start_byte, after_backslash_byte)?),
+                )
                 .into());
             };
 
             // A physical newline after a backslash is a line-continuation attempt, not a
             // supported escape. LF and CRLF continuation are the same source mistake.
             if escaped_char == '\n' || escaped_char == '\r' {
-                return Err(Box::new(CompilerDiagnostic::invalid_string_escape(
+                return Err(CompilerDiagnostic::invalid_string_escape(
                     InvalidStringEscapeReason::PhysicalNewline,
-                    escape_span(
-                        stream,
-                        span_start_byte,
-                        span_start,
-                        after_backslash,
-                        after_backslash_byte,
-                    ),
-                ))
+                    Some(escape_span(stream, span_start_byte, after_backslash_byte)?),
+                )
                 .into());
             }
 
@@ -114,18 +95,12 @@ pub(super) fn tokenize_string(
                 'r' => token_value.push('\r'),
                 't' => token_value.push('\t'),
                 _ => {
-                    return Err(Box::new(CompilerDiagnostic::invalid_string_escape(
+                    return Err(CompilerDiagnostic::invalid_string_escape(
                         InvalidStringEscapeReason::UnsupportedEscape {
                             escaped: escaped_char,
                         },
-                        escape_span(
-                            stream,
-                            span_start_byte,
-                            span_start,
-                            stream.position,
-                            stream.byte_offset,
-                        ),
-                    ))
+                        Some(escape_span(stream, span_start_byte, stream.byte_offset)?),
+                    )
                     .into());
                 }
             }
@@ -148,27 +123,16 @@ pub(super) fn tokenize_string(
     }
 }
 
-/// Preserve half-open byte bounds while converting the exclusive cursor's character column
-/// to the inclusive end column required by the legacy diagnostic renderer.
+/// Build an exact source span for a string escape range.
 fn escape_span(
-    stream: &TokenStream<'_>,
+    stream: &mut TokenStream<'_>,
     start_byte: u32,
-    start: CharPosition,
-    end: CharPosition,
     end_byte: u32,
-) -> SourceLocation {
-    let inclusive_end = CharPosition {
-        char_column: end.char_column.saturating_sub(1),
-        ..end
-    };
-
-    SourceLocation::with_byte_range(
-        stream.file_path.to_owned(),
-        start,
-        inclusive_end,
-        start_byte,
-        end_byte,
-    )
+) -> Result<
+    crate::compiler_frontend::source::SourceSpan,
+    crate::compiler_frontend::source::SpanCapacityError,
+> {
+    stream.source_span_for_bytes(start_byte, end_byte)
 }
 
 pub(super) fn tokenize_template_body(

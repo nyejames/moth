@@ -12,19 +12,20 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameter, GenericParameterList, GenericParameterScope, GenericTraitBound,
     TypeParameterId,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use rustc_hash::FxHashSet;
 
-/// Boxed diagnostic result for generic-parameter parsing.
+/// Typed failure result for generic-parameter parsing.
 ///
 /// WHAT: keeps list parsing, trait-bound parsing and trait-name validation on
-///       one small error boundary while preserving structured diagnostics.
+///       one error boundary that preserves source diagnostics and infrastructure failures.
 /// WHY: these connected helpers otherwise carry the large diagnostic value
-///      through every successful header parse. The header owner unboxes once.
-type GenericParameterParseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+///      through every successful header parse while losing the outer failure lane.
+type GenericParameterParseResult<T> = Result<T, HeaderParseFailure>;
 
 /// Parse a generic parameter list after the current `type` keyword.
 ///
@@ -36,18 +37,15 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     string_table: &StringTable,
 ) -> GenericParameterParseResult<GenericParameterList> {
     if token_stream.current_token_kind() != &TokenKind::Type {
-        return Err(Box::new(
-            CompilerError::new(
-                "Generic parameter parser was called when the current token was not `type`.",
-                token_stream.current_location(),
-                ErrorType::Compiler,
-            )
-            .into(),
-        ));
+        return Err(CompilerError::new(
+            "Generic parameter parser was called when the current token was not `type`.",
+            None,
+            ErrorType::Compiler,
+        )
+        .into());
     }
 
-    let type_keyword_location = token_stream.current_location();
-    let type_keyword_span = token_stream.current_token().span;
+    let type_keyword_span = current_source_span(token_stream);
     token_stream.advance();
 
     let mut parameters = Vec::new();
@@ -56,11 +54,10 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
     loop {
         match token_stream.current_token_kind().to_owned() {
             TokenKind::Symbol(name) if expecting_parameter => {
-                let span = token_stream.tokens[token_stream.index].span;
+                let span = current_source_span(token_stream);
                 parameters.push(GenericParameter {
                     id: TypeParameterId(parameters.len() as u32),
                     name,
-                    location: token_stream.current_location(),
                     span,
                     trait_bounds: Vec::new(),
                 });
@@ -73,7 +70,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     token_stream,
                     CompilerDiagnostic::unexpected_token(
                         token_stream.current_token_kind().to_owned(),
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -85,7 +82,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                         token_stream,
                         CompilerDiagnostic::unexpected_token(
                             token_stream.current_token_kind().to_owned(),
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         ),
                     )
                     .into());
@@ -109,13 +106,9 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
             | TokenKind::DoubleColon
             | TokenKind::As => {
                 if parameters.is_empty() {
-                    return Err(with_token_span(
-                        token_stream,
+                    return Err(CompilerDiagnostic::invalid_generic_parameter(
+                        InvalidGenericParameterReason::EmptyParameterList,
                         type_keyword_span,
-                        CompilerDiagnostic::invalid_generic_parameter(
-                            InvalidGenericParameterReason::EmptyParameterList,
-                            type_keyword_location,
-                        ),
                     )
                     .into());
                 }
@@ -125,7 +118,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                         token_stream,
                         CompilerDiagnostic::unexpected_token(
                             token_stream.current_token_kind().to_owned(),
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         ),
                     )
                     .into());
@@ -150,7 +143,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::BoundsMustUseIs,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -161,7 +154,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::BoundsMustUseIs,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -172,7 +165,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::ListMustStayWithHeader,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -183,7 +176,7 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
                         None,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -193,8 +186,10 @@ pub(crate) fn parse_generic_parameter_list_after_type_keyword(
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken { found: other },
-                        token_stream.current_location(),
+                        InvalidGenericParameterReason::InvalidToken {
+                            found: other.into(),
+                        },
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -213,7 +208,7 @@ fn parse_trait_bounds_for_current_parameter(
             token_stream,
             CompilerDiagnostic::unexpected_token(
                 token_stream.current_token_kind().to_owned(),
-                token_stream.current_location(),
+                current_source_span(token_stream),
             ),
         )
         .into());
@@ -224,20 +219,16 @@ fn parse_trait_bounds_for_current_parameter(
     loop {
         match token_stream.current_token_kind().to_owned() {
             TokenKind::Symbol(trait_name) if expecting_trait_name => {
-                let span = token_stream.tokens[token_stream.index].span;
-                if let Err(diagnostic) = ensure_trait_bound_name_is_all_caps(
-                    trait_name,
-                    token_stream.current_location(),
-                    string_table,
-                ) {
-                    return Err(with_token_span(token_stream, span, *diagnostic).into());
+                let span = current_source_span(token_stream);
+                if let Err(diagnostic) =
+                    ensure_trait_bound_name_is_all_caps(trait_name, span, string_table)
+                {
+                    return Err(with_token_span(span, diagnostic).into());
                 }
 
-                parameter.trait_bounds.push(GenericTraitBound {
-                    trait_name,
-                    location: token_stream.current_location(),
-                    span,
-                });
+                parameter
+                    .trait_bounds
+                    .push(GenericTraitBound { trait_name, span });
                 token_stream.advance();
                 expecting_trait_name = false;
             }
@@ -262,7 +253,7 @@ fn parse_trait_bounds_for_current_parameter(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
                         InvalidGenericParameterReason::BoundsMustUseIs,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -273,18 +264,19 @@ fn parse_trait_bounds_for_current_parameter(
                     token_stream,
                     CompilerDiagnostic::unexpected_end_of_file(
                         None,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
             }
-
             other => {
                 return Err(with_current_token_span(
                     token_stream,
                     CompilerDiagnostic::invalid_generic_parameter(
-                        InvalidGenericParameterReason::InvalidToken { found: other },
-                        token_stream.current_location(),
+                        InvalidGenericParameterReason::InvalidToken {
+                            found: other.into(),
+                        },
+                        current_source_span(token_stream),
                     ),
                 )
                 .into());
@@ -292,12 +284,11 @@ fn parse_trait_bounds_for_current_parameter(
         }
     }
 }
-
 fn ensure_trait_bound_name_is_all_caps(
     trait_name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
-) -> GenericParameterParseResult<()> {
+) -> Result<(), CompilerDiagnostic> {
     if is_uppercase_constant_name(string_table.resolve(trait_name)) {
         return Ok(());
     }
@@ -305,42 +296,38 @@ fn ensure_trait_bound_name_is_all_caps(
     Err(CompilerDiagnostic::invalid_declaration(
         InvalidDeclarationReason::InvalidTraitName,
         Some(trait_name),
-        location,
-    )
-    .into())
+        span,
+    ))
 }
 
-/// Attach the authored token range while retaining the legacy location bridge.
 fn with_current_token_span(
     token_stream: &FileTokens,
     diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
-    with_token_span(token_stream, token_stream.current_token().span, diagnostic)
+    with_token_span(current_source_span(token_stream), diagnostic)
 }
 
 fn with_token_span(
-    token_stream: &FileTokens,
-    span: LocalSpan,
+    span: Option<SourceSpan>,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
+        diagnostic.primary_span = span;
     }
     diagnostic
 }
 
 fn with_parameter_span(
-    token_stream: &FileTokens,
-    parameter_list: &GenericParameterList,
-    diagnostic: Box<CompilerDiagnostic>,
-) -> Box<CompilerDiagnostic> {
-    let Some(parameter) = parameter_list
-        .parameters
-        .iter()
-        .find(|parameter| parameter.location == diagnostic.primary_location)
-    else {
-        return diagnostic;
-    };
+    _token_stream: &FileTokens,
+    _parameter_list: &GenericParameterList,
+    diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    diagnostic
+}
 
-    Box::new(with_token_span(token_stream, parameter.span, *diagnostic))
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }

@@ -15,103 +15,71 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
+    DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_body_by_name, node, test_if_branch_metadata, test_source_location,
+    function_body_by_name, node, test_if_branch_metadata,
 };
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn then_value(line: i32) -> AstNode {
+fn then_value(_line: i32) -> AstNode {
     node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![Expression::int(
-                line,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            )],
-            location: test_source_location(line),
+            expressions: vec![Expression::int(1, None, ValueMode::ImmutableOwned)],
+            span: None,
         }),
-        test_source_location(line),
+        None,
     )
 }
 
 fn return_value(line: i32) -> AstNode {
     node(
-        NodeKind::Return(vec![Expression::int(
-            line,
-            test_source_location(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )]),
-        test_source_location(line),
+        NodeKind::Return(vec![Expression::int(line, None, ValueMode::ImmutableOwned)]),
+        None,
     )
 }
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(
-            line,
-            test_source_location(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
-        test_source_location(line),
+        NodeKind::ExpressionStatement(Expression::int(line, None, ValueMode::ImmutableOwned)),
+        None,
     )
 }
 
-fn assert_statement(condition: Expression, line: i32) -> AstNode {
+fn assert_statement(condition: Expression, _line: i32) -> AstNode {
     node(
         NodeKind::Assert {
             condition,
-            // Branch-exit tests inspect only the condition's terminality effect.
-            message: Expression::bool(
-                true,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            message: Expression::bool(true, None, ValueMode::ImmutableOwned),
         },
-        test_source_location(line),
+        None,
     )
 }
 
-fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, line: i32) -> AstNode {
+fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, _line: i32) -> AstNode {
     let branch_metadata = test_if_branch_metadata(else_body.is_some());
     node(
         NodeKind::If(
-            Expression::bool(
-                true,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             then_body,
             else_body,
             branch_metadata,
         ),
-        test_source_location(line),
+        None,
     )
 }
 
 fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i32) -> AstNode {
     node(
         NodeKind::Match {
-            scrutinee: Expression::int(
-                line,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            scrutinee: Expression::int(line, None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     line,
-                    test_source_location(line + 1),
                     None,
                     ValueMode::ImmutableOwned,
                 )),
@@ -121,7 +89,7 @@ fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i3
             default,
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_source_location(line),
+        None,
     )
 }
 
@@ -258,7 +226,7 @@ fn branch_exits_recurse_into_lexical_scopes() {
         NodeKind::LexicalScope {
             body: vec![then_value(2)],
         },
-        test_source_location(1),
+        None,
     );
 
     assert_eq!(analyze_branch_exits(&[scoped]), BranchExitSummary::PRODUCES);
@@ -307,15 +275,7 @@ fn branch_exits_combine_match_arms_and_default() {
 fn branch_exits_report_assert_false_as_terminal() {
     let summary = analyze_branch_exits(&[
         expression_statement(1),
-        assert_statement(
-            Expression::bool(
-                false,
-                test_source_location(2),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
-            2,
-        ),
+        assert_statement(Expression::bool(false, None, ValueMode::ImmutableOwned), 2),
         then_value(3),
     ]);
 
@@ -325,12 +285,7 @@ fn branch_exits_report_assert_false_as_terminal() {
 #[test]
 fn branch_exits_do_not_treat_passing_assert_as_terminal() {
     let summary = analyze_branch_exits(&[assert_statement(
-        Expression::bool(
-            true,
-            test_source_location(1),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        Expression::bool(true, None, ValueMode::ImmutableOwned),
         1,
     )]);
 
@@ -341,21 +296,11 @@ fn branch_exits_do_not_treat_passing_assert_as_terminal() {
 fn branch_exits_combine_assert_false_branches_as_terminal() {
     let terminating_if = bool_if(
         vec![assert_statement(
-            Expression::bool(
-                false,
-                test_source_location(2),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(false, None, ValueMode::ImmutableOwned),
             2,
         )],
         Some(vec![assert_statement(
-            Expression::bool(
-                false,
-                test_source_location(3),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(false, None, ValueMode::ImmutableOwned),
             3,
         )]),
         1,
@@ -363,12 +308,7 @@ fn branch_exits_combine_assert_false_branches_as_terminal() {
 
     let partial_if = bool_if(
         vec![assert_statement(
-            Expression::bool(
-                false,
-                test_source_location(5),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(false, None, ValueMode::ImmutableOwned),
             5,
         )],
         None,
@@ -418,10 +358,15 @@ fn shared_validator_rejects_all_terminating_value_if() {
     let error = validate_closed_branch_pair(
         analyze_branch_exits(&[return_value(1)]),
         analyze_branch_exits(&[return_value(2)]),
-        &test_source_location(1),
+        None,
     )
     .expect_err("a value-if whose every path terminates has no value to provide");
-    let diagnostic = CompilerDiagnostic::from(error);
+    let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(
+        diagnostic,
+    ) = error
+    else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
 
     assert!(matches!(
         diagnostic.payload,
@@ -444,7 +389,6 @@ fn inferred_block_value_if_rejects_later_nested_produced_type_conflict() {
         );
     };
     assert_eq!(*context, TypeMismatchContext::Declaration);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 5);
 }
 
 #[test]
@@ -460,5 +404,4 @@ fn inferred_multi_bind_rejects_later_nested_produced_type_conflict() {
         );
     };
     assert_eq!(*context, TypeMismatchContext::Assignment);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 5);
 }

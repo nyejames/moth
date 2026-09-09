@@ -1021,6 +1021,7 @@ impl ProjectFrontendCompilation {
     /// WHY: tests keep using the transitional source fallback while production
     ///      build/check/benchmark use
     ///      [`Self::into_render_messages_with_frozen_identity`].
+    #[cfg(test)]
     pub(crate) fn into_render_messages(self, string_table: &mut StringTable) -> CompilerMessages {
         let Self {
             project,

@@ -9,7 +9,6 @@
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
@@ -34,8 +33,7 @@ pub(crate) fn js_runtime_asset_identity(
     package: StablePackageIdentity,
     logical_source_path: &PortableResourcePath,
     canonical_source_path: PathBuf,
-    authored_import_location: SourceLocation,
-    authored_import_span: Option<SourceSpan>,
+    source_span: Option<SourceSpan>,
 ) -> Result<RuntimeAssetIdentity, CompilerError> {
     let declared_output_path = js_runtime_asset_output_path(logical_source_path);
     let logical_path = PortableResourcePath::from_relative_logical_path(&declared_output_path)?;
@@ -49,11 +47,9 @@ pub(crate) fn js_runtime_asset_identity(
         origin: StableResourceOriginId::new(owner, logical_path),
         canonical_source_path,
         asset_kind: String::from("js"),
-        authored_import_location,
-        authored_import_span,
+        source_span,
     })
 }
-
 /// Register every planned JS runtime asset as a byte source of the shared registry.
 ///
 /// WHAT: deduplicates the canonical sources, then attaches each provider-owned origin to its

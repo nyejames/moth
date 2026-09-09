@@ -19,7 +19,7 @@ use crate::compiler_frontend::ast::templates::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
@@ -40,24 +40,24 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_runtime_template_expression_from_owned_handoff(
         &mut self,
         handoff: &OwnedRuntimeTemplateHandoff,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        self.validate_runtime_template_handoff_lowering_input(handoff, location)?;
+        self.validate_runtime_template_handoff_lowering_input(handoff, span_ref)?;
 
         match &handoff.body {
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
-                self.lower_runtime_slot_application_template_expression(handoff, location)
+                self.lower_runtime_slot_application_template_expression(handoff, span_ref)
             }
 
             OwnedRuntimeTemplateBody::Render(node) => {
                 if is_owned_runtime_template_node_control_flow(node) {
-                    self.lower_runtime_control_flow_template_expression(node, location)
+                    self.lower_runtime_control_flow_template_expression(node, span_ref)
                 } else if self.owned_runtime_template_node_has_runtime_dependency(node) {
                     self.lower_runtime_reactive_linear_template_expression_from_owned_node(
-                        node, location,
+                        node, span_ref,
                     )
                 } else {
-                    self.lower_runtime_linear_template_expression(node, location)
+                    self.lower_runtime_linear_template_expression(node, span_ref)
                 }
             }
         }
@@ -71,20 +71,20 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_runtime_slot_application_expression_from_owned_handoff(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        self.lower_runtime_slot_application_template_expression(handoff, location)
+        self.lower_runtime_slot_application_template_expression(handoff, span_ref)
     }
 
     fn validate_runtime_template_handoff_lowering_input(
         &mut self,
         handoff: &OwnedRuntimeTemplateHandoff,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if runtime_template_handoff_has_top_level_loop_control(handoff) {
             return_hir_transformation_error!(
                 "Template loop-control signal reached HIR outside an owned template loop body.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         }
 

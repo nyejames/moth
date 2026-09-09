@@ -5,9 +5,7 @@
 //!      HIR lowering and borrow-checker ownership.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, IfBranchMetadata, NodeKind, SourceLocation,
-};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, IfBranchMetadata, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
@@ -17,37 +15,24 @@ use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::datatypes::{DataType, TypeId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::CharPosition;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
-/// Creates a single-line `SourceLocation` at the given line number for use in test fixtures.
+/// Creates a span-less synthetic source position for use in test fixtures.
 ///
-/// WHAT: produces a deterministic source location with an arbitrary column span.
-/// WHY: many test suites construct locations for the same reason; one canonical helper prevents
-///      each suite from defining its own with slightly different shapes.
-pub(crate) fn test_source_location(line: i32) -> SourceLocation {
-    SourceLocation {
-        scope: InternedPath::new(),
-        start_pos: CharPosition {
-            line_number: line,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: line,
-            char_column: 120,
-        },
-        ..Default::default()
-    }
+/// Test ASTs model generated values rather than authored source, so their provenance is absent.
+/// Keep the line argument for call-site readability while avoiding fabricated line/column data.
+pub(crate) fn test_source_location(_line: i32) -> Option<SourceSpan> {
+    None
 }
 
-pub(crate) fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
+pub(crate) fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
     AstNode {
         kind,
-        location,
-        span: None,
+        span,
         scope: InternedPath::new(),
     }
 }
@@ -75,7 +60,7 @@ pub(crate) fn param(
     data_type: DataType,
     id: TypeId,
     mutable: bool,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Declaration {
     let value_mode = if mutable {
         ValueMode::MutableOwned
@@ -85,14 +70,7 @@ pub(crate) fn param(
 
     Declaration {
         id: name,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            location,
-            None,
-            id,
-            data_type,
-            value_mode,
-        ),
+        value: Expression::new(ExpressionKind::NoValue, span, id, data_type, value_mode),
         binding_span: None,
         config_qualifier: None,
     }
@@ -102,9 +80,9 @@ pub(crate) fn function_node(
     name: InternedPath,
     signature: FunctionSignature,
     body: Vec<AstNode>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> AstNode {
-    node(NodeKind::Function(name, signature, body), location)
+    node(NodeKind::Function(name, signature, body), span)
 }
 
 pub(crate) fn fresh_success_returns(result_type_ids: Vec<TypeId>) -> Vec<ReturnSlot> {
@@ -132,24 +110,30 @@ pub(crate) fn immutable_reference_expr(
     name: InternedPath,
     data_type: DataType,
     id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Expression {
-    Expression::reference_with_type_id(name, data_type, id, location, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue)
+    Expression::reference_with_type_id(
+        name,
+        data_type,
+        id,
+        span,
+        ValueMode::ImmutableReference,
+        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
+    )
 }
 
 pub(crate) fn assignment_target(
     name: InternedPath,
     data_type: DataType,
     id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> PlaceExpression {
     PlaceExpression {
         kind: PlaceExpressionKind::Local(name),
         type_id: id,
         diagnostic_type: data_type,
         value_mode: ValueMode::MutableReference,
-        location,
-        span: None,
+        span,
     }
 }
 

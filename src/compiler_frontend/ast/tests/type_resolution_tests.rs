@@ -21,10 +21,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     resolve_struct_field_types, validate_map_key_type,
 };
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidDeclarationReason, InvalidMapTypeReason, InvalidTypeAnnotationReason,
-    NameNamespace, TypeAnnotationContext,
+    DiagnosticPayload, DiagnosticToken, InvalidDeclarationReason, InvalidMapTypeReason,
+    InvalidTypeAnnotationReason, NameNamespace, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -138,12 +137,11 @@ Box type Existing = |\n\
 fn checked_conversion_rejects_inferred_type() {
     let mut type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-    let location = SourceLocation::default();
 
     let error = resolve_diagnostic_type_to_type_id_checked(
         &DataType::Inferred,
         &mut type_environment,
-        &location,
+        None,
     )
     .expect_err("checked conversion should reject Inferred placeholder");
 
@@ -152,10 +150,8 @@ fn checked_conversion_rejects_inferred_type() {
             &error.payload,
             DiagnosticPayload::InvalidTypeAnnotation {
                 context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                    found: TokenKind::Eof
-                },
-            }
+                reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
+            } if *found == DiagnosticToken::from(TokenKind::Eof)
         ),
         "expected InvalidTypeAnnotation for Inferred, got {:?}",
         error.payload
@@ -167,7 +163,7 @@ fn checked_conversion_rejects_unresolved_namespaced_type() {
     let mut string_table = StringTable::new();
     let mut type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-    let location = SourceLocation::default();
+
     let namespace = string_table.intern("missing");
     let name = string_table.intern("Type");
 
@@ -176,7 +172,7 @@ fn checked_conversion_rejects_unresolved_namespaced_type() {
             path: vec![namespace, name],
         },
         &mut type_environment,
-        &location,
+        None,
     )
     .expect_err("checked conversion should reject unresolved namespaced type");
 
@@ -250,24 +246,18 @@ fn literal_capacity_resolves_to_fixed_collection() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let parsed = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 64,
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
     };
 
     let resolved = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -292,7 +282,6 @@ fn constant_capacity_resolves_to_fixed_collection() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let capacity_name = string_table.intern("capacity");
 
     // Build a scope context with a local constant declaration.
@@ -308,7 +297,6 @@ fn constant_capacity_resolves_to_fixed_collection() {
         id: InternedPath::from_components(vec![capacity_name]),
         value: Expression::new(
             ExpressionKind::Int(42),
-            location.clone(),
             None,
             builtin_type_ids::INT,
             DataType::Int,
@@ -317,25 +305,20 @@ fn constant_capacity_resolves_to_fixed_collection() {
         binding_span: None,
         config_qualifier: None,
     };
-    scope_context.add_compile_time_var(constant_declaration, SourceLocation::default());
+    scope_context.add_compile_time_var(constant_declaration, None);
 
     let parsed = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::BareConstant {
             name: capacity_name,
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
     };
 
     let resolved = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         Some(&scope_context),
@@ -360,34 +343,26 @@ fn nested_fixed_collections_fold_both_capacities() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let inner = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 4,
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
     };
     let outer = ParsedTypeRef::Collection {
         element: Box::new(inner),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 8,
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
     };
 
     let resolved = resolve_parsed_type_annotation(
         outer,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -456,15 +431,14 @@ Buffer = |
 /// WHAT: the Composed TIR root contains only a slot.
 /// WHY: struct-field const inlining must resolve the root through the supplied module store.
 fn slot_field_default_template(template_ir_store: &mut TemplateIrStore) -> Template {
-    let location = SourceLocation::default();
     let mut builder = TemplateIrBuilder::new(template_ir_store);
-    let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
+    let slot_node = builder.push_slot_node(SlotKey::Default, None);
     let template_id = builder.finish_template(
         slot_node,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        location.clone(),
+        None,
     );
 
     Template {
@@ -473,7 +447,6 @@ fn slot_field_default_template(template_ir_store: &mut TemplateIrStore) -> Templ
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location,
         span: None,
     }
 }
@@ -483,7 +456,6 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let mut string_table = StringTable::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut type_environment = TypeEnvironment::new();
-    let location = SourceLocation::default();
     let wrapper_path = InternedPath::from_single_str("wrapper", &mut string_table);
     let wrapper_template = slot_field_default_template(&mut template_ir_store.borrow_mut());
     let wrapper_declaration = Declaration {
@@ -499,11 +471,13 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let field_path = struct_path.clone().append(string_table.intern("content"));
     let field = Declaration {
         id: field_path,
-        value: Expression::reference(
+        value: Expression::reference_with_type_id(
             wrapper_path,
             DataType::Template,
-            location,
+            builtin_type_ids::STRING,
+            None,
             ValueMode::ImmutableReference,
+            crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
         ),
         binding_span: None,
         config_qualifier: None,
@@ -525,13 +499,11 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
         ExpressionKind::Template(_)
     ));
 }
-
 #[test]
 fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let mut string_table = StringTable::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut type_environment = TypeEnvironment::new();
-    let location = SourceLocation::default();
     let constant_path = InternedPath::from_single_str("value", &mut string_table);
     let project_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
@@ -542,7 +514,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         SyntheticInterfaceMemberIdentity::new(SyntheticInterfaceClass::Builder, "assets", "bundle");
     let constant = Declaration {
         id: constant_path.clone(),
-        value: Expression::int(7, location.clone(), None, ValueMode::ImmutableOwned)
+        value: Expression::int(7, None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                 project_member.clone(),
             )),
@@ -551,23 +523,30 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![constant]));
     let collection_type_id = type_environment.intern_collection(builtin_type_ids::INT, None);
-    let collection = Expression::collection_with_type_id(vec![Expression::reference_with_type_id(
-        constant_path,
-        DataType::Int,
-        builtin_type_ids::INT,
-        location.clone(),
+    let collection = Expression::collection_with_type_id(
+        vec![
+            Expression::reference_with_type_id(
+                constant_path,
+                DataType::Int,
+                builtin_type_ids::INT,
+                None,
+                ValueMode::ImmutableReference,
+                crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
+            )
+            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                project_member.clone(),
+            )),
+        ],
+        CollectionExpressionType {
+            element_type_id: builtin_type_ids::INT,
+            element_diagnostic_type: DataType::Int,
+            fixed_capacity: None,
+            collection_type_id: Some(collection_type_id),
+        },
+        &mut type_environment,
         None,
-        ValueMode::ImmutableReference,
-        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
+        ValueMode::ImmutableOwned,
     )
-    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-        project_member.clone(),
-    ))], CollectionExpressionType {
-        element_type_id: builtin_type_ids::INT,
-        element_diagnostic_type: DataType::Int,
-        fixed_capacity: None,
-        collection_type_id: Some(collection_type_id),
-    }, &mut type_environment, location.clone(), None, ValueMode::ImmutableOwned)
     .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
         builder_member.clone(),
     ));
@@ -687,7 +666,7 @@ fn assert_source_invalid_map_type(
 ) {
     let diagnostic = match parse_single_file_ast_result(source) {
         Ok(_) => panic!("{expected_description}: source parsed successfully"),
-        Err(diagnostic) => diagnostic.as_ref().to_owned(),
+        Err(diagnostic) => diagnostic.to_owned(),
     };
     assert!(
         matches!(
@@ -839,23 +818,15 @@ fn map_type_resolves_for_supported_key() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let parsed = ParsedTypeRef::Map {
-        key: Box::new(ParsedTypeRef::BuiltinString {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        value: Box::new(ParsedTypeRef::BuiltinInt {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
+        value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
     };
 
     let resolved = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -882,23 +853,15 @@ fn map_type_rejects_unsupported_key() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let parsed = ParsedTypeRef::Map {
-        key: Box::new(ParsedTypeRef::BuiltinFloat {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        value: Box::new(ParsedTypeRef::BuiltinInt {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        key: Box::new(ParsedTypeRef::BuiltinFloat { span: None }),
+        value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        span: None,
     };
 
     let error = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -925,7 +888,7 @@ fn map_key_capability_rejects_generic_key_as_unsupported() {
     let parameter_name = string_table.intern("Key");
     let key_type_id = type_environment.register_synthetic_generic_parameter(parameter_name);
 
-    let error = validate_map_key_type(key_type_id, &type_environment, &SourceLocation::default())
+    let error = validate_map_key_type(key_type_id, &type_environment, None)
         .expect_err("generic map keys should be rejected by the scalar-key policy");
 
     assert!(
@@ -949,40 +912,24 @@ fn map_type_rejects_excessive_inline_nesting() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     // {String = {String = {String = Int}}} is depth 3 and should be rejected
     let parsed = ParsedTypeRef::Map {
-        key: Box::new(ParsedTypeRef::BuiltinString {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
+        key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
         value: Box::new(ParsedTypeRef::Map {
-            key: Box::new(ParsedTypeRef::BuiltinString {
-                location: location.clone(),
-                span: LocalSpan::source_start(),
-            }),
+            key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
             value: Box::new(ParsedTypeRef::Map {
-                key: Box::new(ParsedTypeRef::BuiltinString {
-                    location: location.clone(),
-                    span: LocalSpan::source_start(),
-                }),
-                value: Box::new(ParsedTypeRef::BuiltinInt {
-                    location: location.clone(),
-                    span: LocalSpan::source_start(),
-                }),
-                location: location.clone(),
-                span: LocalSpan::source_start(),
+                key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
+                value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+                span: None,
             }),
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        span: None,
     };
 
     let error = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -1010,32 +957,20 @@ fn map_type_allows_two_level_nesting() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     // {String = {String = Int}} is depth 2 and should be allowed
     let parsed = ParsedTypeRef::Map {
-        key: Box::new(ParsedTypeRef::BuiltinString {
-            location: location.clone(),
-            span: LocalSpan::source_start(),
-        }),
+        key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
         value: Box::new(ParsedTypeRef::Map {
-            key: Box::new(ParsedTypeRef::BuiltinString {
-                location: location.clone(),
-                span: LocalSpan::source_start(),
-            }),
-            value: Box::new(ParsedTypeRef::BuiltinInt {
-                location: location.clone(),
-                span: LocalSpan::source_start(),
-            }),
-            location: location.clone(),
-            span: LocalSpan::source_start(),
+            key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
+            value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+            span: None,
         }),
-        location: location.clone(),
-        span: LocalSpan::source_start(),
+        span: None,
     };
 
     let resolved = resolve_parsed_type_annotation(
         parsed,
-        &location,
+        None,
         &mut resolution_context,
         &mut string_table,
         None,

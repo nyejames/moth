@@ -8,7 +8,7 @@ use crate::build_system::resource_unions::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::{ErrorType, SourceLocation};
+use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
@@ -76,8 +76,8 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
     let live = origin("assets/live.svg");
     let unreachable = origin("assets/unreachable.svg");
     let mut resources = ModuleResourceTable::new();
-    let live_id = resources.intern_origin(live.clone(), SourceLocation::default());
-    let _unreachable_id = resources.intern_origin(unreachable.clone(), SourceLocation::default());
+    let live_id = resources.intern_origin(live.clone(), None);
+    let _unreachable_id = resources.intern_origin(unreachable.clone(), None);
     let module = module_with_resource_table(resources);
     let mut reachability = HirReachability::default();
     reachability
@@ -85,7 +85,6 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
         .push(ReachableResourceUse {
             resource_id: live_id,
             owner: crate::compiler_frontend::hir::ids::FunctionId(0),
-            location: SourceLocation::default(),
             span: None,
         });
 
@@ -106,7 +105,7 @@ fn entry_union_includes_const_fragment_resource_without_executable_use() {
         .const_top_level_fragments
         .push(ResolvedConstFragment {
             runtime_insertion_index: 0,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                 fragment_resource.clone(),
             )]),

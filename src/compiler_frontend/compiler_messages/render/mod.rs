@@ -45,6 +45,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidPageMetadataReason, InvalidTemplateDirectiveReason, NameNamespace,
     NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, UnsupportedOperatorCategory,
 };
+use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -54,7 +55,6 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 pub(crate) fn invalid_generic_application_message(
     reason: GenericApplicationErrorReason,

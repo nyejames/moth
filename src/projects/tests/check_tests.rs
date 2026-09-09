@@ -8,13 +8,12 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::render::{
-    display_line_number, relative_display_path_from_root, resolve_source_file_path,
-};
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[cfg(unix)]
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -409,21 +408,31 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
 fn diagnostic_identity_sequence<'a>(
     diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
     string_table: &StringTable,
+    source_database: &SourceDatabase,
     project_root: &std::path::Path,
 ) -> Vec<DiagnosticIdentityRow> {
     let canonical_project_root = project_root
         .canonicalize()
         .expect("diagnostic fixture root should canonicalize");
+    let render_context = DiagnosticRenderContext::new(string_table)
+        .with_optional_source_database(Some(source_database));
 
     diagnostics
         .into_iter()
         .map(|diagnostic| {
             let identity = diagnostic.identity();
-            let source_file =
-                resolve_source_file_path(&diagnostic.primary_location.scope, string_table);
-            let normalized_path =
-                relative_display_path_from_root(&source_file, &canonical_project_root);
-            let line = display_line_number(diagnostic.primary_location.start_pos.line_number);
+            let position = render_context
+                .primary_position(diagnostic)
+                .expect("frontend diagnostics should retain a resolvable primary source span");
+            let relative_path = position
+                .path
+                .strip_prefix(&canonical_project_root)
+                .unwrap_or(position.path.as_path());
+            let normalized_path = relative_path
+                .to_str()
+                .expect("diagnostic logical path should be valid UTF-8")
+                .replace('\\', "/");
+            let line = position.start.line.saturating_add(1) as i32;
             (identity.code, identity.reason_key, normalized_path, line)
         })
         .collect()
@@ -466,6 +475,15 @@ if value is:
         !check_warning_outcome.messages.has_errors(),
         "warning fixture should not produce frontend errors"
     );
+    let build_warning_result = build_project(
+        &builder,
+        warning_root
+            .to_str()
+            .expect("temp project path should be valid UTF-8 for this test"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("warning fixture should build successfully");
 
     assert_path_missing(&warning_root.join("dev"));
     assert_path_missing(&warning_root.join("release"));
@@ -479,25 +497,24 @@ if value is:
             && remaining.iter().any(|name| name == "src"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
-
-    let build_warning_result = build_project(
-        &builder,
-        warning_root
-            .to_str()
-            .expect("temp project path should be valid UTF-8 for this test"),
-        &[],
-        &BuildConfigInputSet::new(),
-    )
-    .expect("warning fixture should build successfully");
-
+    let check_warning_source_database = check_warning_outcome
+        .messages
+        .source_database_for_diagnostic(0)
+        .expect("check warnings should retain their source database");
+    let build_warning_source_database = build_warning_result
+        .source_database
+        .as_deref()
+        .expect("build warnings should retain their source database");
     let check_warning_identity = diagnostic_identity_sequence(
         check_warning_outcome.messages.diagnostic_slice().iter(),
         &check_warning_outcome.messages.string_table,
+        check_warning_source_database,
         &warning_root,
     );
     let build_warning_identity = diagnostic_identity_sequence(
-        &build_warning_result.warnings,
+        build_warning_result.warnings.iter(),
         &build_warning_result.string_table,
+        build_warning_source_database,
         &warning_root,
     );
 
@@ -554,14 +571,23 @@ increment(count)
         panic!("error fixture should fail the build frontend");
     };
 
+    let check_error_source_database = check_error_outcome
+        .messages
+        .source_database_for_diagnostic(0)
+        .expect("check errors should retain their source database");
+    let build_error_source_database = build_error_messages
+        .source_database_for_diagnostic(0)
+        .expect("build errors should retain their source database");
     let check_error_identity = diagnostic_identity_sequence(
         check_error_outcome.messages.diagnostic_slice().iter(),
         &check_error_outcome.messages.string_table,
+        check_error_source_database,
         &error_root,
     );
     let build_error_identity = diagnostic_identity_sequence(
         build_error_messages.diagnostic_slice().iter(),
         &build_error_messages.string_table,
+        build_error_source_database,
         &error_root,
     );
 

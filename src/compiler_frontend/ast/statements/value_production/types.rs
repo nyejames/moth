@@ -13,7 +13,6 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Values produced by a `then` statement inside a value-producing block.
 ///
@@ -25,7 +24,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 #[derive(Clone, Debug)]
 pub struct ProducedValues {
     pub expressions: Vec<Expression>,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Target that `then` statements inside a value-producing block should produce values for.
@@ -136,7 +135,7 @@ pub struct ValueIfBlock {
     pub else_body: Vec<AstNode>,
     pub then_scope: InternedPath,
     pub else_scope: InternedPath,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
     pub generic_request_ranges: IfGenericRequestRanges,
     /// Expected result types for each produced value slot.
     ///
@@ -171,7 +170,7 @@ pub struct ValueMatchBlock {
     pub arms: Vec<MatchArm>,
     pub default: Option<Vec<AstNode>>,
     pub exhaustiveness: MatchExhaustiveness,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
     pub result_type_ids: Vec<TypeId>,
 }
 

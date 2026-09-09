@@ -7,7 +7,6 @@
 
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::BuilderRuntimePackageMetadata;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
@@ -56,7 +55,6 @@ pub fn register_web_canvas_package(
         StablePackageIdentity::binding(PackageOrigin::Builder, "@web/canvas"),
         &canvas_logical_source_path(),
         canvas_js_path(),
-        SourceLocation::default(),
         None,
     )
     .expect("built-in canvas asset identity is a proven internal invariant");

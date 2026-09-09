@@ -1,6 +1,5 @@
 //! Stable nominal blueprints and generated-local nominal reconstruction.
 
-use super::frozen_syntax::StableSourceLocation;
 use super::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     MaterialisationNominalOriginResolver, MaterialisationNominalSource,
@@ -80,11 +79,8 @@ pub(super) struct NominalFieldBlueprint {
     pub(super) name: String,
     pub(super) field_type: MaterialisationTypeBlueprint,
     pub(super) folded_default: Option<PublicFoldedValue>,
-    /// Stable authored range used when materialising diagnostics and resource origins.
-    ///
-    /// WHY: provenance is diagnostic data, not nominal semantic identity, so `PartialEq` excludes
-    /// this field when checking blueprint agreement.
-    pub(super) location: StableSourceLocation,
+    /// Exact authored range used when materialising diagnostics and resource origins.
+    pub(super) span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 impl PartialEq for NominalFieldBlueprint {
@@ -101,7 +97,9 @@ impl Eq for NominalFieldBlueprint {}
 
 impl NominalFieldBlueprint {
     fn merge_provenance_from(&mut self, other: &Self) {
-        self.location = self.location.preferred_with(&other.location);
+        if self.span.is_none() {
+            self.span = other.span;
+        }
     }
 }
 
@@ -243,7 +241,6 @@ pub(super) fn materialised_nominal_declaration(
         id: local_path,
         value: Expression::new(
             ExpressionKind::NoValue,
-            Default::default(),
             None,
             type_id,
             diagnostic_type,
@@ -292,7 +289,7 @@ pub(super) fn materialised_struct_fields(
                 "Materialised struct field name disagrees with its stable blueprint",
             ));
         }
-        let field_location = blueprint_field.location.materialise(string_table);
+        let field_span = blueprint_field.span;
         let mut value = if let Some(default) = blueprint_field.folded_default.as_ref() {
             let mut materialiser = GeneratedFoldedValueMaterialiser {
                 type_environment,
@@ -306,19 +303,17 @@ pub(super) fn materialised_struct_fields(
                 default,
                 field.type_id,
                 string_table,
-                &field_location,
+                field_span,
             )?
         } else {
             Expression::new(
                 ExpressionKind::NoValue,
-                field.location.clone(),
-                None,
+                field_span,
                 field.type_id,
                 diagnostic_type_spelling(field.type_id, type_environment),
                 ValueMode::ImmutableReference,
             )
         };
-        value.location = field.location.clone();
         value.value_mode = ValueMode::ImmutableReference;
         declarations.push(Declaration {
             id: field.name.clone(),
@@ -566,15 +561,15 @@ impl ModuleMaterialisationPreparation {
                     }
                     _ => None,
                 };
-                let authored_location = field_declaration
-                    .map(|declaration| &declaration.value.location)
-                    .unwrap_or(&field.location);
+                let authored_span = field_declaration
+                    .map(|declaration| declaration.value.span)
+                    .unwrap_or(field.span);
                 Ok(NominalFieldBlueprint {
                     name: self.string_table.resolve(name).to_owned(),
                     field_type: self
                         .materialisation_type_blueprint(field.type_id, parameter_slots)?,
                     folded_default,
-                    location: StableSourceLocation::capture(authored_location, &self.string_table),
+                    span: authored_span,
                 })
             })
             .collect::<Result<Box<[_]>, CompilerError>>()
@@ -1308,7 +1303,6 @@ fn intern_materialisation_nominal(
                             external_registry,
                             string_table,
                         )?,
-                        location: Default::default(),
                         span: None,
                     })
                 })
@@ -1345,7 +1339,6 @@ fn intern_materialisation_nominal(
                                         external_registry,
                                         string_table,
                                     )?,
-                                    location: Default::default(),
                                     span: None,
                                 })
                             })
@@ -1356,7 +1349,6 @@ fn intern_materialisation_nominal(
                         name: string_table.intern(&variant.name),
                         tag: variant.tag,
                         payload,
-                        location: Default::default(),
                         span: None,
                     })
                 })

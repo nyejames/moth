@@ -12,10 +12,10 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::types::{FileRole, Header, HeaderExportMode, HeaderKind};
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -30,8 +30,6 @@ pub(crate) struct SyntheticContentHeaderInput {
     pub(crate) source_file: InternedPath,
     pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
-    pub(crate) location: SourceLocation,
-    pub(crate) span: LocalSpan,
     pub(crate) initializer_tokens: Vec<Token>,
     pub(crate) initializer_references: Vec<InitializerReference>,
 }
@@ -70,15 +68,11 @@ pub(crate) fn synthetic_content_header(
 
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,
-        type_annotation: ParsedTypeRef::BuiltinString {
-            location: input.location.clone(),
-            span: input.span,
-        },
+        type_annotation: ParsedTypeRef::BuiltinString { span: None },
         config_qualifier: None,
         initializer_tokens: input.initializer_tokens,
         initializer_references: input.initializer_references,
-        location: input.location.clone(),
-        span: input.span,
+        span: None,
     };
 
     Header {
@@ -86,8 +80,7 @@ pub(crate) fn synthetic_content_header(
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: HashSet::new(),
-        name_location: input.location.clone(),
-        name_span: input.span,
+        name_span: None,
         tokens: header_tokens,
         source_file: input.source_file,
         capacity_references: Vec::new(),

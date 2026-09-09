@@ -5,8 +5,7 @@
 //!      language surface area or hidden dependencies.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::compiler_messages::compiler_errors::compiler_error_to_diagnostic;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidPageMetadataReason};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
@@ -38,14 +37,12 @@ pub(crate) struct HtmlPageMetadata {
 
 /// One resource selected by a reserved page-metadata constant.
 ///
-/// Metadata is a builder-owned, non-executable use. Its authored declaration location must remain
+/// Metadata is a builder-owned, non-executable use. Its authored declaration span must remain
 /// attached so output conflicts identify the metadata use rather than the resource-table intern.
-/// The span stays `None` until an upstream authored span exists for metadata declarations;
-/// const-fact locations are span-free today.
+/// Hand-built fixtures may omit advisory facts, in which case the span is `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MetadataResourceUse {
     pub(crate) origin: StableResourceOriginId,
-    pub(crate) authored_location: SourceLocation,
     pub(crate) authored_span: Option<SourceSpan>,
 }
 
@@ -62,12 +59,36 @@ pub(crate) struct HtmlPageMetadataPlan {
     pub(crate) uses_site_root: bool,
 }
 
+/// Page-metadata extraction failure preserving the diagnostic/infrastructure lanes.
+///
+/// WHAT: carries an authored-source rejection separately from an internal folded-string
+///       failure while the HTML builder still owns its string table.
+/// WHY: the builder boundary maps each lane into `CompilerMessages` without converting
+///      the infrastructure failure into a user diagnostic.
+#[derive(Debug)]
+pub(crate) enum PageMetadataError {
+    Diagnostic(CompilerDiagnostic),
+    Infrastructure(CompilerError),
+}
+
+impl From<CompilerDiagnostic> for PageMetadataError {
+    fn from(diagnostic: CompilerDiagnostic) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+
+impl From<CompilerError> for PageMetadataError {
+    fn from(error: CompilerError) -> Self {
+        Self::Infrastructure(error)
+    }
+}
+
 pub(crate) fn extract_html_page_metadata(
     hir_module: &HirModule,
     start_function: FunctionId,
     resources: &ModuleResourceTable,
     string_table: &mut StringTable,
-) -> Result<HtmlPageMetadataPlan, Box<CompilerDiagnostic>> {
+) -> Result<HtmlPageMetadataPlan, PageMetadataError> {
     let entry_scope = hir_module
         .side_table
         .function_name_path(start_function)
@@ -76,11 +97,6 @@ pub(crate) fn extract_html_page_metadata(
     let entry_scope_prefix = entry_scope
         .as_ref()
         .map(|path| path.to_portable_string(string_table));
-
-    let error_location = entry_scope
-        .as_ref()
-        .map(|path| SourceLocation::new(path.to_owned(), Default::default(), Default::default()))
-        .unwrap_or_default();
 
     let mut metadata = HtmlPageMetadata::default();
     let mut resource_uses = Vec::new();
@@ -94,13 +110,20 @@ pub(crate) fn extract_html_page_metadata(
         };
 
         let key_id = string_table.intern(reserved_name);
+        let authored_span = hir_module
+            .const_facts
+            .declarations
+            .values()
+            .find(|fact| {
+                fact.declaration_path.to_portable_string(string_table) == module_constant.name
+            })
+            .and_then(|fact| fact.span);
 
         let value = match &module_constant.value {
             HirConstValue::String(value) => OwnedFoldedString::Text(value.to_owned()),
             HirConstValue::StructuralString { pieces } => {
                 let structural_value = ConstStringValue::Pieces(pieces.clone());
-                owned_folded_string_from_const_string(&structural_value, resources, string_table)
-                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?
+                owned_folded_string_from_const_string(&structural_value, resources, string_table)?
             }
 
             // Every remaining constant shape genuinely holds a non-string value.
@@ -117,25 +140,14 @@ pub(crate) fn extract_html_page_metadata(
                 return Err(invalid_page_metadata_rejection(
                     key_id,
                     InvalidPageMetadataReason::NotAString,
-                    &error_location,
+                    authored_span,
                 ));
             }
         };
 
-        let authored_location = hir_module
-            .const_facts
-            .declarations
-            .values()
-            .find(|fact| {
-                fact.declaration_path.to_portable_string(string_table) == module_constant.name
-            })
-            .map(|fact| fact.location.clone())
-            // Hand-built unit fixtures may omit advisory facts. Production HIR always carries
-            // the matching fact, and the entry scope keeps those fixtures diagnosable.
-            .unwrap_or_else(|| error_location.clone());
         record_metadata_structural_uses(
             &value,
-            &authored_location,
+            authored_span,
             &mut resource_uses,
             &mut uses_site_root,
         );
@@ -154,7 +166,7 @@ pub(crate) fn extract_html_page_metadata(
             return Err(invalid_page_metadata_rejection(
                 key_id,
                 InvalidPageMetadataReason::DuplicateDeclaration,
-                &error_location,
+                authored_span,
             ));
         }
 
@@ -170,7 +182,7 @@ pub(crate) fn extract_html_page_metadata(
 
 fn record_metadata_structural_uses(
     value: &OwnedFoldedString,
-    authored_location: &SourceLocation,
+    authored_span: Option<SourceSpan>,
     resource_uses: &mut Vec<MetadataResourceUse>,
     uses_site_root: &mut bool,
 ) {
@@ -182,8 +194,7 @@ fn record_metadata_structural_uses(
         match piece {
             OwnedFoldedStringPiece::Resource(origin) => resource_uses.push(MetadataResourceUse {
                 origin: origin.clone(),
-                authored_location: authored_location.clone(),
-                authored_span: None,
+                authored_span,
             }),
             OwnedFoldedStringPiece::SiteRoot => *uses_site_root = true,
             OwnedFoldedStringPiece::Text(_) => {}
@@ -213,16 +224,14 @@ fn is_reserved_page_key(name: &str) -> bool {
     )
 }
 
-/// Builds the boxed diagnostic shared by every invalid page-metadata arm.
+/// Builds the page-metadata rejection shared by every invalid page-metadata arm.
 fn invalid_page_metadata_rejection(
     key_id: StringId,
     reason: InvalidPageMetadataReason,
-    location: &SourceLocation,
-) -> Box<CompilerDiagnostic> {
-    Box::new(CompilerDiagnostic::invalid_page_metadata(
-        key_id,
-        reason,
-        location.clone(),
+    span: Option<SourceSpan>,
+) -> PageMetadataError {
+    PageMetadataError::Diagnostic(CompilerDiagnostic::invalid_page_metadata(
+        key_id, reason, span,
     ))
 }
 

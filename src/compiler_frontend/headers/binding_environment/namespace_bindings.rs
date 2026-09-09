@@ -29,14 +29,12 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Boxed diagnostic result for namespace binding registration and record construction.
+/// Result for namespace binding registration and record construction.
 ///
-/// WHAT: gives namespace registration and recursive record construction one small error boundary.
-/// WHY: record insertion and privacy checks propagate structured diagnostics through the
-///      same connected family without carrying the large value inline at every return.
+/// The connected helper family preserves plain diagnosed values and typed
+/// infrastructure failures in `BindingEnvironmentError`.
 type NamespaceBindingResult<T> = Result<T, BindingEnvironmentError>;
 
 /// Inputs for one provider-backed public namespace member.
@@ -53,7 +51,7 @@ struct ProviderNamespaceMemberInput<'a> {
     diagnostic_path: &'a InternedPath,
     value_members: &'a mut FxHashMap<StringId, NamespaceValueMember>,
     type_members: &'a mut FxHashMap<StringId, NamespaceTypeMember>,
-    location: &'a SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +69,7 @@ enum SymbolKind {
 /// detection in one place.
 struct ExternalNamespaceRecordInserter<'a> {
     string_table: &'a mut StringTable,
-    location: &'a SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 impl<'a> ExternalNamespaceRecordInserter<'a> {
@@ -105,14 +103,12 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
                 || record.value_members.contains_key(&name_id)
                 || record.type_members.contains_key(&name_id)
             {
-                return Err(
-                    Box::new(CompilerDiagnostic::duplicate_import_surface_member(
-                        child_surface_path,
-                        name_id,
-                        self.location.clone(),
-                    ))
-                    .into(),
-                );
+                return Err(CompilerDiagnostic::duplicate_import_surface_member(
+                    child_surface_path,
+                    name_id,
+                    self.span,
+                )
+                .into());
             }
 
             match symbol_id {
@@ -146,14 +142,12 @@ impl<'a> ExternalNamespaceRecordInserter<'a> {
         // a value or type member at the same level.
         if record.value_members.contains_key(&name_id) || record.type_members.contains_key(&name_id)
         {
-            return Err(
-                Box::new(CompilerDiagnostic::duplicate_import_surface_member(
-                    child_surface_path.clone(),
-                    name_id,
-                    self.location.clone(),
-                ))
-                .into(),
-            );
+            return Err(CompilerDiagnostic::duplicate_import_surface_member(
+                child_surface_path.clone(),
+                name_id,
+                self.span,
+            )
+            .into());
         }
 
         let child_source = record.record_source.clone();
@@ -183,6 +177,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         namespace_target: ResolvedNamespaceTarget,
     ) -> NamespaceBindingResult<()> {
         let local_name = self.derive_namespace_name(clause)?;
+        let namespace_span = match &clause.binding {
+            DependencyBindingSyntax::Namespace { alias: Some(alias) } => Some(alias.span),
+            DependencyBindingSyntax::Namespace { alias: None } => Some(clause.dependency.span),
+            DependencyBindingSyntax::DirectSelections { .. } => None,
+        };
         let source_namespace_access =
             if let ResolvedNamespaceTarget::SourceFile(file_path) = &namespace_target {
                 Some(
@@ -202,17 +201,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             file_visibility,
                             file_path,
                             exported_entries,
-                            clause
-                                .namespace_binding_location()
-                                .unwrap_or(&clause.dependency.location),
+                            namespace_span,
                         )?,
-                    _ => {
-                        self.build_source_namespace_record(file_path, &clause.dependency.location)?
-                    }
+                    _ => self.build_source_namespace_record(file_path, namespace_span)?,
                 }
             }
             ResolvedNamespaceTarget::ExternalPackage { package_path } => {
-                self.build_external_namespace_record(package_path, &clause.dependency.location)?
+                self.build_external_namespace_record(package_path, namespace_span)?
             }
         };
 
@@ -225,27 +220,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         };
 
-        let local_name_span = match &clause.binding {
-            DependencyBindingSyntax::Namespace { alias: Some(alias) } => Some(SourceSpan::new(
-                clause.dependency.dependency_shell_id.source,
-                alias.span,
-            )),
-            DependencyBindingSyntax::Namespace { alias: None }
-            | DependencyBindingSyntax::DirectSelections { .. } => None,
-        };
-
         registry.register(
             local_name,
             VisibleNameBinding::NamespaceRecord {
                 record_source: record_source.clone(),
             },
-            Some(
-                clause
-                    .namespace_binding_location()
-                    .cloned()
-                    .unwrap_or_else(|| clause.dependency.location.clone()),
-            ),
-            local_name_span,
+            namespace_span,
         )?;
 
         file_visibility
@@ -262,7 +242,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         file_visibility,
                         file_path,
                         access,
-                        clause.dependency.location.clone(),
+                        namespace_span,
                     );
                 }
             }
@@ -277,7 +257,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         namespace_file: &InternedPath,
         access: &SourceDependencyAccess,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         match access {
             SourceDependencyAccess::PublicExport { exported_entries } => {
@@ -317,12 +297,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         if self.module_symbols.receiver_method_paths.contains(path)
                             && let Some(name) = path.name()
                         {
-                            Self::add_visible_receiver_method(
-                                file_visibility,
-                                name,
-                                path,
-                                location.clone(),
-                            );
+                            Self::add_visible_receiver_method(file_visibility, name, path, span);
                         }
                     }
                 }
@@ -491,12 +466,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 }
 
                 let public_surface_name_id = self.string_table.intern(&target_package);
-                return Err(Box::new(diagnostics::not_exported_by_public_surface(
+                return Err(diagnostics::not_exported_by_public_surface(
                     &clause.dependency.path,
                     public_surface_name_id,
                     ImportPublicSurfaceType::SourcePackage,
-                    clause.dependency.location.clone(),
-                ))
+                    Some(clause.dependency.span),
+                )
                 .into());
             }
         }
@@ -524,17 +499,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .module_root_public_exports
             .contains_key(target_root)
         {
-            return Err(Box::new(diagnostics::cross_module_dependency_not_exported(
+            return Err(diagnostics::cross_module_dependency_not_exported(
                 &clause.dependency.path,
-                clause.dependency.location.clone(),
-            ))
+                Some(clause.dependency.span),
+            )
             .into());
         }
 
-        Err(Box::new(diagnostics::missing_module_root_public_surface(
+        Err(diagnostics::missing_module_root_public_surface(
             &clause.dependency.path,
-            clause.dependency.location.clone(),
-        ))
+            Some(clause.dependency.span),
+        )
         .into())
     }
 
@@ -551,27 +526,28 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &mut self,
         clause: &RetainedDependencyClause,
     ) -> NamespaceBindingResult<StringId> {
+        let namespace_span = match &clause.binding {
+            DependencyBindingSyntax::Namespace { alias: Some(alias) } => Some(alias.span),
+            DependencyBindingSyntax::Namespace { alias: None } => Some(clause.dependency.span),
+            DependencyBindingSyntax::DirectSelections { .. } => None,
+        };
         let Some(local_name) = clause.effective_namespace_local_name(self.string_table) else {
-            return Err(Box::new(CompilerDiagnostic::invalid_namespace_default_name(
+            return Err(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path.clone(),
-                clause.dependency.location.clone(),
-            ))
+                namespace_span,
+            )
             .into());
         };
 
         if !is_valid_identifier(self.string_table.resolve(local_name)) {
-            return Err(Box::new(CompilerDiagnostic::invalid_namespace_default_name(
+            return Err(CompilerDiagnostic::invalid_namespace_default_name(
                 clause.dependency.path.clone(),
-                clause.dependency.location.clone(),
-            ))
+                namespace_span,
+            )
             .into());
         }
 
-        let local_name_location = clause
-            .namespace_binding_location()
-            .cloned()
-            .unwrap_or_else(|| clause.dependency.location.clone());
-        ensure_not_keyword_shadow_identifier(local_name, local_name_location, self.string_table)?;
+        ensure_not_keyword_shadow_identifier(local_name, namespace_span, self.string_table)?;
 
         Ok(local_name)
     }
@@ -580,7 +556,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn build_source_namespace_record(
         &self,
         file_path: &InternedPath,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<NamespaceRecord> {
         let mut value_members = FxHashMap::default();
         let mut type_members = FxHashMap::default();
@@ -638,7 +614,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         }
 
-        self.check_duplicate_namespace_members(file_path, &value_members, &type_members, location)?;
+        self.check_duplicate_namespace_members(file_path, &value_members, &type_members, span)?;
 
         Ok(NamespaceRecord {
             value_members,
@@ -658,7 +634,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         file_visibility: &mut FileVisibility,
         root_file: &InternedPath,
         exported_entries: &FxHashSet<PublicExportEntry>,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<NamespaceRecord> {
         let mut value_members = FxHashMap::default();
         let mut type_members = FxHashMap::default();
@@ -710,7 +686,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             diagnostic_path,
                             value_members: &mut value_members,
                             type_members: &mut type_members,
-                            location,
+                            span,
                         },
                     )?;
                 }
@@ -732,7 +708,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         }
 
-        self.check_duplicate_namespace_members(root_file, &value_members, &type_members, location)?;
+        self.check_duplicate_namespace_members(root_file, &value_members, &type_members, span)?;
 
         Ok(NamespaceRecord {
             value_members,
@@ -761,7 +737,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             diagnostic_path,
             value_members,
             type_members,
-            location,
+            span,
         } = input;
         let provider_id = self
             .source_provider_dependencies
@@ -818,7 +794,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &structure.receiver_methods,
                         provider_id,
-                        location,
+                        span,
                     )?;
                 }
                 PublicDeclarationSemantics::Choice(choice) => {
@@ -829,7 +805,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &choice.receiver_methods,
                         provider_id,
-                        location,
+                        span,
                     )?;
                 }
                 PublicDeclarationSemantics::TransparentAlias(_) => {
@@ -915,7 +891,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn build_external_namespace_record(
         &mut self,
         package_path: StringId,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<NamespaceRecord> {
         let mut record =
             NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package_path));
@@ -931,7 +907,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let surface_path = InternedPath::from_components(vec![package_path]);
         let mut inserter = ExternalNamespaceRecordInserter {
             string_table: self.string_table,
-            location,
+            span,
         };
 
         for (path, function_id) in package.function_symbol_ids() {
@@ -999,18 +975,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         surface_path: &InternedPath,
         value_members: &FxHashMap<StringId, NamespaceValueMember>,
         type_members: &FxHashMap<StringId, NamespaceTypeMember>,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> NamespaceBindingResult<()> {
         for name in value_members.keys() {
             if type_members.contains_key(name) {
-                return Err(
-                    Box::new(CompilerDiagnostic::duplicate_import_surface_member(
-                        surface_path.clone(),
-                        *name,
-                        location.clone(),
-                    ))
-                    .into(),
-                );
+                return Err(CompilerDiagnostic::duplicate_import_surface_member(
+                    surface_path.clone(),
+                    *name,
+                    span,
+                )
+                .into());
             }
         }
         Ok(())

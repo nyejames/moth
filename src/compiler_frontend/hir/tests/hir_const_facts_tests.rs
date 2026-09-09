@@ -10,12 +10,12 @@ use crate::compiler_frontend::ast::const_values::facts::{
 };
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
+
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{function_node, test_source_location};
+use crate::compiler_frontend::tests::ast_fixture_support::function_node;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -31,7 +31,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path.clone());
@@ -48,11 +48,9 @@ fn projects_ast_const_facts_into_hir_metadata() {
             value_kind: ConstFactValueKind::Literal,
             value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
                 string_table.intern("Moth"),
-                test_source_location(2),
                 None,
                 ValueMode::ImmutableOwned,
             ))),
-            location: test_source_location(2),
         },
     );
 
@@ -65,11 +63,9 @@ fn projects_ast_const_facts_into_hir_metadata() {
             value_kind: ConstFactValueKind::Literal,
             value: AstConstFactValue::Expression(Box::new(Expression::int(
                 42,
-                test_source_location(3),
                 None,
                 ValueMode::ImmutableOwned,
             ))),
-            location: test_source_location(3),
         },
     );
 
@@ -87,7 +83,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(explicit.scope, ConstBindingScope::ExplicitTopLevel);
     assert_eq!(explicit.source, ConstBindingSource::ExplicitHash);
     assert_eq!(explicit.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(explicit.location, test_source_location(2));
+    assert_eq!(explicit.span, None);
 
     let private = module
         .const_facts
@@ -98,7 +94,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(private.source, ConstBindingSource::InferredImmutable);
     assert_eq!(private.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(private.location, test_source_location(3));
+    assert_eq!(private.span, None);
 }
 
 #[test]
@@ -113,7 +109,7 @@ fn empty_ast_const_facts_produces_empty_hir_const_facts() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -128,17 +124,6 @@ fn empty_ast_const_facts_produces_empty_hir_const_facts() {
 fn remaps_const_fact_keys_and_payload_paths() {
     let mut source_table = StringTable::new();
     let original_path = InternedPath::from_single_str("site_name", &mut source_table);
-    let location = SourceLocation::new(
-        original_path.clone(),
-        CharPosition {
-            line_number: 4,
-            char_column: 0,
-        },
-        CharPosition {
-            line_number: 4,
-            char_column: 9,
-        },
-    );
 
     let mut ast_facts = AstConstFacts::default();
     ast_facts.declarations.insert(
@@ -150,11 +135,9 @@ fn remaps_const_fact_keys_and_payload_paths() {
             value_kind: ConstFactValueKind::Literal,
             value: AstConstFactValue::Expression(Box::new(Expression::int(
                 1,
-                location.clone(),
                 None,
                 ValueMode::ImmutableOwned,
             ))),
-            location,
         },
     );
 
@@ -173,5 +156,4 @@ fn remaps_const_fact_keys_and_payload_paths() {
         .get(&remapped_path)
         .expect("remapped fact should be keyed by remapped path");
     assert_eq!(fact.declaration_path, remapped_path);
-    assert_eq!(fact.location.scope, remapped_path);
 }

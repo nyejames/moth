@@ -2847,11 +2847,13 @@ comparable before/after evidence: its endpoints fell from `41.20ms` / `1403.99ms
 scaling gate fits `n^1.59`; its budget is tightened from `n^1.80` to `n^1.70` as a deliberately
 close ratchet, not headroom.
 
-## Data Layout Migration - Phase 0 Activation Baseline - 2026-09-04
+## Data Layout Migration - Phase 0 Activation Baseline (historical, as of 2026-09-04)
 
-Baseline freeze for `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`.
-Evidence-only phase: no compiler or language semantics changed. Every subsequent phase of that plan
-compares against this section.
+This is the historical activation baseline for
+`docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`, recorded as of
+2026-09-04. Evidence-only phase: no compiler or language semantics changed. The values and status
+claims below are historical and must not be read as current workspace status; subsequent phase
+sections compare against this recorded baseline.
 
 ### Environment
 
@@ -2865,12 +2867,13 @@ compares against this section.
 | OS | macOS 14.6.1 (`aarch64-apple-darwin`) |
 | Toolchain | `rustc 1.97.1 (8bab26f4f 2026-07-14)`, `clippy 0.1.97` |
 
-The plan text and the architecture document both referred to a Rust 1.95 CI gate. The repository's
-actual toolchain is 1.97.1 and `.github/workflows/release.yml` runs `dtolnay/rust-toolchain@stable`,
-so the recorded lanes below are the current truth. The three Clippy lanes were reproduced locally by
-cross-checking; `x86_64-unknown-linux-gnu` was installed for this purpose.
+At activation, the plan text and the architecture document both referred to a Rust 1.95 CI gate.
+The repository's recorded toolchain was 1.97.1 and `.github/workflows/release.yml` ran
+`dtolnay/rust-toolchain@stable`, so the lanes below are activation-era evidence. The three Clippy
+lanes were reproduced locally by cross-checking; `x86_64-unknown-linux-gnu` was installed for this
+historical run.
 
-### Correctness and lint baseline: green
+### Correctness and lint baseline: green (as of activation)
 
 | Command | Result |
 | --- | --- |
@@ -2889,19 +2892,21 @@ cross-checking; `x86_64-unknown-linux-gnu` was installed for this purpose.
 
 No unrelated failures. The baseline is fully green, so no component had to be reported separately.
 
-### Temporary lint bridge, recorded with its removal owner
+### Historical activation lint bridge (as of 2026-09-04)
 
-Two `#[allow(clippy::result_large_err)]` allowances exist and are the only reason the three Clippy
-lanes pass:
+At activation, two `#[allow(clippy::result_large_err)]` allowances existed and were recorded as
+the only reason the three Clippy lanes passed:
 
 | Site | Reason | Removal owner |
 | --- | --- | --- |
 | `src/lib.rs` | 192-byte `CompilerError` across internal `Result` boundaries | Slice 1G5 |
 | `xtask/src/benchmark_execution.rs` | 224-byte `BenchmarkCaseFailure` | Slice 1G5, by shrinking the record rather than relocating the allowance |
 
-No other lint suppression, boxing workaround or compatibility path was added during activation.
+These activation-only allowances are historical evidence, not current guidance; the active plan
+and fresh validation establish the current workspace status. No other lint suppression, boxing
+workaround or compatibility path was added during activation.
 
-### Layout baseline: current predecessor types
+### Historical layout baseline: predecessor types (as of activation)
 
 Measured on `aarch64-apple-darwin` with `std::mem::size_of` / `align_of` through a throwaway probe
 test, which was deleted after recording. The durable layout assertions arrive with the replacement
@@ -2960,7 +2965,10 @@ compiler, and it exists only because durable diagnostics keep a full `TypeEnviro
 `CompilerDiagnostic` at 184 bytes and `CompilerError` at 192 bytes are the direct causes of
 `clippy::result_large_err`. Slice 1G5's gate is `size_of::<CompilerDiagnostic>() <= 128`.
 
-### Migration inventory
+### Historical migration inventory (as of activation)
+
+The searchable inventories and counts below describe the activation-era predecessor representation;
+they are not a current-workspace inventory.
 
 Full searchable inventories are generated under `target/data-layout-audit/` and are deliberately not
 committed. Concise summary:
@@ -3044,7 +3052,7 @@ predecessor runs: activation commit `b6f81fe58` predates the data-layout harness
 withdrawn; the recovered five-run predecessor evidence below is the only data-layout repeatability
 record for this checkpoint.
 
-### Recovered predecessor data-layout evidence - 2026-09-07
+### Recovered predecessor data-layout evidence (historical, as of 2026-09-07)
 
 The activation base `b6f81fe58` is not the measured data-layout predecessor: it lacks the data-layout
 benchmark harness. I extracted the immediately preceding instrumentation checkpoint
@@ -3111,6 +3119,8 @@ The predecessor has no dedicated path-only remap counter. `file_prepare_output_r
 the three probes, but that does not recover a path-specific count; path remap counts/bytes remain
 unavailable and are not marked complete.
 
+The owner-ledger and memory measurements below are archived predecessor evidence, recorded as of
+2026-09-07; they describe the activation-era representation rather than the current workspace.
 The aggregate allocator proxy does not by itself partition common/cold ownership. To recover bounded
 owner evidence without changing the timing run, a feature-gated throwaway owner ledger was enabled
 only in the archived probe binary. It samples actual owner capacities at each successful
@@ -3199,7 +3209,10 @@ exclusions above are not tagged by the predecessor.
 This deferral does not block Phase 1; it is recorded on its owning slice in the plan, and the plan's
 Phase 1 slice order was changed in this phase so it is actually executable.
 
-## Data Layout Migration - Span Census and Encoding Selection - 2026-09-06
+## Data Layout Migration - Span Census and Encoding Selection (historical record, 2026-09-06)
+
+> This section preserves evidence as of its recorded date; its measurements and selection record are
+> historical and do not describe current workspace validation.
 
 Slice 1C2. Anchored at commit `14ab178d1`, which made token byte offsets exact. Command:
 `just span-census`; machine-readable report at `target/span-census.json`.
@@ -3312,7 +3325,10 @@ discharged by this section. Its recorded owner was written as slice 1C3 consumed
 pre-activation numbering; the work landed as 1C1 (byte cursor and line index) followed by 1C2
 (this census), which is the same order under the corrected names.
 
-## Data Layout Migration - Source Ownership Checkpoint - 2026-09-08
+## Data Layout Migration - Source Ownership Checkpoint (historical record, 2026-09-08)
+
+> The checkpoint sections below preserve evidence as of their recorded dates. Their bridge wording,
+> validation results and acceptance claims are historical records, not current workspace status.
 
 Phase 1D4b replaces tokenizer-owned builder results with a borrowed original source builder.
 File/chunk aggregation returns every builder before fallible merging. Directory, package,
@@ -3338,12 +3354,15 @@ identifier span through the finalized database and checks the return-site offset
 Source-unit coverage separately proves repeated preparation preserves distinct original overflow
 rows. Neither test claims semantic stages already append compact spans; that migration follows.
 
-## Data Layout Migration - Preparation Diagnostic Spans - 2026-09-08
+## Data Layout Migration - Preparation Diagnostic Spans (historical record, 2026-09-08)
+
+> This section preserves evidence as of its recorded date; its bridge wording, validation results and
+> acceptance claims are historical records, not current workspace status.
 
 Phase 1D3 retains exact primary and related preparation spans in the original source tables.
 This checkpoint preserves lexical infrastructure failures separately from source diagnoses and
-checks real extended-table exhaustion through the preparation boundary. The legacy location
-bridge remains until 1H, so this slice claims no aggregate retained-memory reduction.
+checks real extended-table exhaustion through the preparation boundary. The legacy location bridge
+remains until 1H, so this slice claims no aggregate retained-memory reduction.
 
 Machine: Apple M1 Pro, aarch64 macOS; Rust/Clippy 1.97.1. The final
 `cargo fmt --all && just validate` passed native featured all-target Clippy, 5,069 compiler tests,

@@ -13,9 +13,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -57,8 +57,6 @@ pub(crate) fn builtin_error_type_path(string_table: &mut StringTable) -> Interne
 }
 
 pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> BuiltinErrorManifest {
-    let location = SourceLocation::default();
-
     let error_path = builtin_error_type_path(string_table);
 
     let mut visible_symbol_paths = FxHashSet::default();
@@ -68,19 +66,15 @@ pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> Bu
         required_field(
             error_path.join_str(ERROR_FIELD_MESSAGE, string_table),
             DataType::StringSlice,
-            location.clone(),
+            None,
         ),
-        defaulted_int_field(
-            error_path.join_str(ERROR_FIELD_CODE, string_table),
-            0,
-            location.clone(),
-        ),
+        defaulted_int_field(error_path.join_str(ERROR_FIELD_CODE, string_table), 0, None),
     ];
 
     let declarations = vec![type_declaration(
         error_path.to_owned(),
         DataType::runtime_struct(error_path.to_owned(), builtin_type_ids::NONE),
-        location.clone(),
+        None,
     )];
 
     let mut resolved_struct_fields_by_path = FxHashMap::default();
@@ -97,7 +91,6 @@ pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> Bu
                 .cloned()
                 .unwrap_or_default(),
         ),
-        location,
         span: None,
         scope: error_path.to_owned(),
     }];
@@ -113,16 +106,16 @@ pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> Bu
 
 pub(crate) fn resolve_builtin_error_type_typed(
     context: &ScopeContext,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<ResolvedBuiltinType, CompilerError> {
-    resolve_builtin_named_type(context, ERROR_TYPE_NAME, location, string_table)
+    resolve_builtin_named_type(context, ERROR_TYPE_NAME, span, string_table)
 }
 
 fn resolve_builtin_named_type(
     context: &ScopeContext,
     type_name: &str,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<ResolvedBuiltinType, CompilerError> {
     let symbol = string_table.intern(type_name);
@@ -134,7 +127,7 @@ fn resolve_builtin_named_type(
 
     if declaration.value.diagnostic_type == DataType::Inferred {
         return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to an inferred placeholder at {location:?}.",
+            "Builtin type '{type_name}' resolved to an inferred placeholder at {span:?}.",
         )));
     }
 
@@ -146,14 +139,13 @@ fn resolve_builtin_named_type(
 fn type_declaration(
     id: InternedPath,
     data_type: DataType,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Declaration {
     Declaration {
         id,
         value: Expression::new(
             ExpressionKind::NoValue,
-            location,
-            None,
+            span,
             type_id_hint_for_diagnostic_type(&data_type),
             data_type,
             ValueMode::ImmutableReference,
@@ -162,19 +154,19 @@ fn type_declaration(
         config_qualifier: None,
     }
 }
-fn required_field(id: InternedPath, data_type: DataType, location: SourceLocation) -> Declaration {
+fn required_field(id: InternedPath, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
-        value: Expression::no_value(location, None, data_type, ValueMode::ImmutableOwned),
+        value: Expression::no_value(span, data_type, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }
 }
 
-fn defaulted_int_field(id: InternedPath, value: i32, location: SourceLocation) -> Declaration {
+fn defaulted_int_field(id: InternedPath, value: i32, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
-        value: Expression::int(value, location, None, ValueMode::ImmutableOwned),
+        value: Expression::int(value, span, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }

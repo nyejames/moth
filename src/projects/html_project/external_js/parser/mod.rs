@@ -176,12 +176,10 @@ impl<'a> ParseOrchestrator<'a> {
                     self.seen_moth_names.push(moth_name.clone());
                 }
 
-                // Parse the signature body
+                // Parse the signature body.
                 let sig_result = parse_signature(SignatureParseInput {
                     text: signature_text.clone(),
                     base_byte: annotation_span.byte_start,
-                    base_line: annotation_span.line,
-                    base_column: annotation_span.column,
                 });
                 self.diagnostics.extend(sig_result.diagnostics);
 

@@ -15,16 +15,16 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::{HirBuilder, fixture_resource, setup_builder};
 use crate::compiler_frontend::hir::ids::RegionId;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 fn structural_expression(
     builder: &mut HirBuilder<'_>,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     pieces: Vec<ConstStringPiece>,
 ) -> HirExpression {
     builder.make_expression(
-        location,
+        span,
         HirExpressionKind::StructuralString { pieces },
         builtin_type_ids::STRING,
         ValueKind::Const,
@@ -34,11 +34,11 @@ fn structural_expression(
 
 fn text_expression(
     builder: &mut HirBuilder<'_>,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     text: &str,
 ) -> HirExpression {
     builder.make_expression(
-        location,
+        span,
         HirExpressionKind::StringLiteral(text.to_owned()),
         builtin_type_ids::STRING,
         ValueKind::Const,
@@ -50,13 +50,13 @@ fn append_constant_chunk(
     builder: &mut HirBuilder<'_>,
     rendered: &mut HirExpression,
     chunk: HirExpression,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
 ) {
     builder
         .append_chunk_to_rendered_expression(
             rendered,
             chunk,
-            location,
+            span,
             builtin_type_ids::STRING,
             RegionId(0),
         )
@@ -71,7 +71,7 @@ fn appending_text_to_a_piece_bearing_string_keeps_the_resource_anchor_boundary()
 
     let authored = string_table.intern("assets/");
     let appended = string_table.intern("-thumbnail.svg");
-    let location = SourceLocation::default();
+    let location = None;
 
     let mut builder = setup_builder(&mut string_table);
     let mut rendered = structural_expression(
@@ -121,7 +121,7 @@ fn appending_two_piece_bearing_strings_fuses_the_join_but_never_across_an_anchor
     let fused_join = string_table.intern("docs/guide-v2.html");
     assert_eq!(string_table.resolve(fused_join), "docs/guide-v2.html");
 
-    let location = SourceLocation::default();
+    let location = None;
 
     let mut builder = setup_builder(&mut string_table);
     let mut rendered = structural_expression(
@@ -174,7 +174,7 @@ fn anchor_free_append_demotes_to_a_plain_string_literal() {
     let head = string_table.intern("docs");
     let separator = string_table.intern("/");
     let tail = string_table.intern("index.html");
-    let location = SourceLocation::default();
+    let location = None;
 
     let mut builder = setup_builder(&mut string_table);
     let mut rendered = structural_expression(

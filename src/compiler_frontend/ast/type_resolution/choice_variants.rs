@@ -33,14 +33,14 @@ pub(crate) fn resolve_choice_variant_payload_types(
 
                     resolved_field.value.diagnostic_type = resolve_named_signature_type(
                         &field.value.diagnostic_type,
-                        &field.value.location,
+                        field.value.span,
                         type_resolution_context,
                         string_table,
                     )?;
                     resolved_field.value.type_id = resolve_diagnostic_type_to_type_id_checked(
                         &resolved_field.value.diagnostic_type,
                         type_resolution_context.type_environment,
-                        &resolved_field.value.location,
+                        resolved_field.value.span,
                     )?;
 
                     resolved_fields.push(resolved_field);
@@ -55,7 +55,6 @@ pub(crate) fn resolve_choice_variant_payload_types(
         resolved_variants.push(ChoiceVariant {
             id: variant.id,
             payload,
-            location: variant.location.clone(),
             span: variant.span,
         });
     }

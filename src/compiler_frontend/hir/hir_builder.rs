@@ -15,7 +15,7 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -40,6 +40,7 @@ use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
@@ -240,7 +241,7 @@ impl<'a> HirBuilder<'a> {
         HirBuilder {
             module: HirModule::new(),
 
-            extracted_metadata: HirLoweringMetadata::new(),
+            extracted_metadata: HirLoweringMetadata::default(),
             ast_warnings: Vec::new(),
 
             string_table,
@@ -321,7 +322,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn intern_handoff_resource_origin(
         &mut self,
         origin: &StableResourceOriginId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<ResourceId, CompilerError> {
         let module_resources = self.module_resources.as_ref().ok_or_else(|| {
             CompilerError::compiler_error(
@@ -331,7 +332,7 @@ impl<'a> HirBuilder<'a> {
 
         Ok(module_resources
             .borrow_mut()
-            .intern_origin(origin.clone(), location.clone()))
+            .intern_origin(origin.clone(), *location))
     }
 
     /// Runs a lowering closure with `active_value_block_target` set to `target`.
@@ -557,7 +558,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         block_id: BlockId,
         local: crate::compiler_frontend::hir::blocks::HirLocal,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let block_index = self.block_index_or_error(block_id, location)?;
         let local_index = self.module.blocks[block_index].locals.len();
@@ -574,7 +575,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn local_type_id_or_error(
         &self,
         local_id: LocalId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
         let Some((block_index, local_index)) = self.local_index_by_id.get(&local_id).copied()
         else {
@@ -590,7 +591,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn field_type_id_or_error(
         &self,
         field_id: FieldId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
         let Some((struct_index, field_index)) = self.field_index_by_id.get(&field_id).copied()
         else {
@@ -606,7 +607,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn block_index_or_error(
         &self,
         block_id: BlockId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<usize, CompilerError> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
             return_hir_transformation_error!(
@@ -621,7 +622,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn function_index_or_error(
         &self,
         function_id: FunctionId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<usize, CompilerError> {
         let Some(index) = self.function_index_by_id.get(&function_id).copied() else {
             return_hir_transformation_error!(
@@ -636,7 +637,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn block_by_id_or_error(
         &self,
         block_id: BlockId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<&HirBlock, CompilerError> {
         let index = self.block_index_or_error(block_id, location)?;
         Ok(&self.module.blocks[index])
@@ -645,7 +646,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn block_mut_by_id_or_error(
         &mut self,
         block_id: BlockId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<&mut HirBlock, CompilerError> {
         let index = self.block_index_or_error(block_id, location)?;
         Ok(&mut self.module.blocks[index])
@@ -654,7 +655,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn function_by_id_or_error(
         &self,
         function_id: FunctionId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<&HirFunction, CompilerError> {
         let index = self.function_index_or_error(function_id, location)?;
         Ok(&self.module.functions[index])
@@ -663,7 +664,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn function_mut_by_id_or_error(
         &mut self,
         function_id: FunctionId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<&mut HirFunction, CompilerError> {
         let index = self.function_index_or_error(function_id, location)?;
         Ok(&mut self.module.functions[index])
@@ -676,7 +677,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn enter_function(
         &mut self,
         function_id: FunctionId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let entry_block = self.function_by_id_or_error(function_id, location)?.entry;
 
@@ -721,7 +722,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn set_current_block(
         &mut self,
         block_id: BlockId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let region = self.block_by_id_or_error(block_id, location)?.region;
         self.current_block = Some(block_id);
@@ -731,7 +732,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn current_block_id_or_error(
         &self,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<BlockId, CompilerError> {
         let Some(block_id) = self.current_block else {
             return_hir_transformation_error!("No current HIR block is active", location.clone());
@@ -742,7 +743,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn current_function_id_or_error(
         &self,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<FunctionId, CompilerError> {
         let Some(function_id) = self.current_function else {
             return_hir_transformation_error!(
@@ -756,7 +757,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn current_region_or_error(
         &self,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<RegionId, CompilerError> {
         let Some(region) = self.current_region else {
             return_hir_transformation_error!(
@@ -776,7 +777,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         block_id: BlockId,
         terminator: HirTerminator,
-        source_location: &SourceLocation,
+        source_location: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         {
             let block = self.block_mut_by_id_or_error(block_id, source_location)?;
@@ -790,14 +791,14 @@ impl<'a> HirBuilder<'a> {
             block.terminator = terminator;
         }
 
-        self.side_table.map_terminator(source_location, block_id);
+        self.side_table.map_terminator(*source_location, block_id);
         Ok(())
     }
 
     pub(crate) fn block_has_explicit_terminator(
         &self,
         block_id: BlockId,
-        location: &SourceLocation,
+        location: &Option<SourceSpan>,
     ) -> Result<bool, CompilerError> {
         let block = self.block_by_id_or_error(block_id, location)?;
         Ok(!Self::is_placeholder_terminator(&block.terminator))

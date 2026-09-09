@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::HashSet;
 
 /// Rejects slot composition artifacts that would otherwise reach runtime
@@ -120,15 +119,15 @@ fn validate_runtime_tir_view_node(
         } => {
             let branches = branches.clone();
             let fallback = *fallback;
-            let node_location = node.location.clone();
+            let node_span = node.span;
 
             for branch in branches {
-                validate_runtime_tir_view_control_flow_body(view, branch.body, &branch.location)?;
+                validate_runtime_tir_view_control_flow_body(view, branch.body, branch.span)?;
                 validate_runtime_tir_view_node(view, branch.body, visiting)?;
             }
 
             if let Some(fallback_id) = fallback {
-                validate_runtime_tir_view_control_flow_body(view, fallback_id, &node_location)?;
+                validate_runtime_tir_view_control_flow_body(view, fallback_id, node_span)?;
                 validate_runtime_tir_view_node(view, fallback_id, visiting)?;
             }
         }
@@ -140,9 +139,9 @@ fn validate_runtime_tir_view_node(
         } => {
             let body = *body;
             let aggregate_wrapper = *aggregate_wrapper;
-            let node_location = node.location.clone();
+            let node_span = node.span;
 
-            validate_runtime_tir_view_control_flow_body(view, body, &node_location)?;
+            validate_runtime_tir_view_control_flow_body(view, body, node_span)?;
             validate_runtime_tir_view_node(view, body, visiting)?;
 
             if let Some(wrapper_id) = aggregate_wrapper {
@@ -209,7 +208,7 @@ fn validate_runtime_qualified_child_view(
 fn validate_runtime_tir_view_control_flow_body(
     view: &TirView<'_>,
     body_root: TemplateIrNodeId,
-    location: &SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Result<(), TemplateError> {
     let mut escaped_insert_visiting = HashSet::from([view.identity()]);
 
@@ -221,7 +220,7 @@ fn validate_runtime_tir_view_control_flow_body(
     )? {
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
-            location.clone(),
+            span,
         )
         .into());
     }

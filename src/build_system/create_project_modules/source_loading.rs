@@ -30,8 +30,8 @@ static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: std::sync::LazyLock<
 ///
 /// WHAT: exposes the filesystem operation separately from diagnostic construction.
 /// WHY: the single-file synthetic Stage 0 path can load cache-miss source files in Rayon workers,
-///      then convert any `std::io::Error` on the serial boundary where the shared `StringTable`
-///      is available.
+///      then convert any `std::io::Error` into a path-preserving infrastructure error on the
+///      serial boundary.
 pub(crate) fn read_source_code(file_path: &Path) -> Result<String, std::io::Error> {
     #[cfg(test)]
     if should_count_source_read_for_test(file_path) {
@@ -86,12 +86,12 @@ pub(crate) fn source_read_count_for_path_for_test(path: &Path) -> usize {
 ///      so I/O failures are reported uniformly instead of leaking `std::io::Error`.
 pub fn extract_source_code(
     file_path: &Path,
-    string_table: &mut StringTable,
+    _string_table: &mut StringTable,
 ) -> Result<String, CompilerError> {
     match read_source_code(file_path) {
         Ok(content) => Ok(content),
 
-        Err(error) => Err(source_read_error(file_path, error, string_table)),
+        Err(error) => Err(source_read_error(file_path, error)),
     }
 }
 
@@ -103,7 +103,7 @@ pub fn extract_source_code(
 pub(crate) fn load_registered_source_texts(
     source_files: &mut SourceDatabase,
     registration_index: &SourceRegistrationIndex<'_>,
-    string_table: &mut StringTable,
+    _string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
     for canonical_path in registration_index.canonical_paths() {
         let source_id = source_files
@@ -121,7 +121,7 @@ pub(crate) fn load_registered_source_texts(
             Err(error) => {
                 source_files.record_source_load_error(
                     source_id,
-                    source_read_error(canonical_path, error, string_table),
+                    source_read_error(canonical_path, error),
                 )?;
             }
         }
@@ -130,11 +130,7 @@ pub(crate) fn load_registered_source_texts(
 }
 
 /// Converts raw source-read failures into the existing structured compiler error shape.
-pub(crate) fn source_read_error(
-    file_path: &Path,
-    error: std::io::Error,
-    string_table: &mut StringTable,
-) -> CompilerError {
+pub(crate) fn source_read_error(file_path: &Path, error: std::io::Error) -> CompilerError {
     let suggestion: &'static str = if error.kind() == std::io::ErrorKind::NotFound {
         "Check that the file exists at the specified path"
     } else if error.kind() == std::io::ErrorKind::PermissionDenied {
@@ -161,6 +157,5 @@ pub(crate) fn source_read_error(
             );
             metadata
         },
-        string_table,
     )
 }

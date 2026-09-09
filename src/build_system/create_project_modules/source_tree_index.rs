@@ -560,7 +560,7 @@ impl SourceTreeIndex {
             // cannot duplicate source identities, and do not traverse aliases outside this
             // boundary.
             let directory = fs::canonicalize(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error, string_table))?;
+                .map_err(|error| Self::directory_read_error(&directory, error))?;
             if !directory.starts_with(&entry_root) || !visited_directories.insert(directory.clone())
             {
                 continue;
@@ -568,7 +568,7 @@ impl SourceTreeIndex {
             stats.dirs_visited += 1;
 
             let mut entries = fs::read_dir(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error, string_table))?
+                .map_err(|error| Self::directory_read_error(&directory, error))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| {
                     CompilerError::file_error(
@@ -576,7 +576,6 @@ impl SourceTreeIndex {
                         format!(
                             "Failed to read directory entry while indexing source tree: {error}"
                         ),
-                        string_table,
                     )
                 })?;
             entries.sort_by_key(|entry| entry.path());
@@ -597,11 +596,7 @@ impl SourceTreeIndex {
                             .file_name()
                             .and_then(|name| name.to_str())
                             .ok_or_else(|| {
-                                non_utf8_filesystem_name_error(
-                                    &path,
-                                    "source tree folder name",
-                                    string_table,
-                                )
+                                non_utf8_filesystem_name_error(&path, "source tree folder name")
                             })?;
                         dependency_folder_names.insert(folder_name.to_owned());
                         subdirectories.push(path);
@@ -618,11 +613,7 @@ impl SourceTreeIndex {
                     path.file_name()
                         .and_then(|name| name.to_str())
                         .ok_or_else(|| {
-                            non_utf8_filesystem_name_error(
-                                &path,
-                                "source tree file name",
-                                string_table,
-                            )
+                            non_utf8_filesystem_name_error(&path, "source tree file name")
                         })?;
 
                 if let SourceTreeBoundaryKind::Project { .. } = kind
@@ -632,9 +623,7 @@ impl SourceTreeIndex {
                         || file_name_claims_project_globals_root(file_name))
                 {
                     let diagnostic = project_structure_diagnostic(
-                        &path,
                         InvalidConfigReason::ProjectGlobalsNameReserved,
-                        string_table,
                     );
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
@@ -654,7 +643,7 @@ impl SourceTreeIndex {
                         file_name: string_table.intern(file_name),
                         directory: path_id(&directory, string_table),
                     };
-                    let diagnostic = project_structure_diagnostic(&path, reason, string_table);
+                    let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
                         PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -684,7 +673,6 @@ impl SourceTreeIndex {
                     CompilerError::file_error(
                         &path,
                         format!("Failed to canonicalize source path: {error}"),
-                        string_table,
                     )
                 })?;
 
@@ -764,7 +752,7 @@ impl SourceTreeIndex {
                         folder_name: string_table.intern(folder_name),
                         directory: path_id(&directory, string_table),
                     };
-                    let diagnostic = project_structure_diagnostic(&directory, reason, string_table);
+                    let diagnostic = project_structure_diagnostic(reason);
                     let table = std::mem::take(string_table);
                     return Err(PremergeFailure::Diagnosed(
                         PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -775,12 +763,8 @@ impl SourceTreeIndex {
                 && directory == entry_root
                 && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
             {
-                let colliding_folder = directory.join(PROJECT_GLOBALS_DEPENDENCY_NAME);
-                let diagnostic = project_structure_diagnostic(
-                    &colliding_folder,
-                    InvalidConfigReason::ProjectGlobalsNameReserved,
-                    string_table,
-                );
+                let diagnostic =
+                    project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
                 let table = std::mem::take(string_table);
                 return Err(PremergeFailure::Diagnosed(
                     PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -802,8 +786,7 @@ impl SourceTreeIndex {
                             prefix: string_table.intern(folder_name),
                             entry_folder: path_id(&colliding_folder, string_table),
                         };
-                        let diagnostic =
-                            project_structure_diagnostic(&colliding_folder, reason, string_table);
+                        let diagnostic = project_structure_diagnostic(reason);
                         let table = std::mem::take(string_table);
                         return Err(PremergeFailure::Diagnosed(
                             PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -834,7 +817,6 @@ impl SourceTreeIndex {
                     CompilerError::file_error(
                         &directory,
                         format!("Failed to canonicalize module root directory: {error}"),
-                        string_table,
                     )
                 })?;
 
@@ -863,7 +845,6 @@ impl SourceTreeIndex {
                 CompilerError::file_error(
                     project_root,
                     format!("Failed to canonicalize project root directory: {error}"),
-                    string_table,
                 )
             })?;
 
@@ -924,9 +905,7 @@ impl SourceTreeIndex {
         let file_name = entry_file
             .file_name()
             .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                non_utf8_filesystem_name_error(entry_file, "single-file entry name", string_table)
-            })?;
+            .ok_or_else(|| non_utf8_filesystem_name_error(entry_file, "single-file entry name"))?;
         if !file_name_is_normal_module_root_file(file_name) {
             return Ok(ModuleRootTable::empty());
         }
@@ -938,7 +917,6 @@ impl SourceTreeIndex {
             CompilerError::file_error(
                 root_directory,
                 format!("Failed to canonicalize single-file source root: {error}"),
-                string_table,
             )
         })?;
 
@@ -1055,15 +1033,10 @@ impl SourceTreeIndex {
         &self.stats
     }
 
-    fn directory_read_error(
-        directory: &Path,
-        error: std::io::Error,
-        string_table: &mut StringTable,
-    ) -> CompilerError {
+    fn directory_read_error(directory: &Path, error: std::io::Error) -> CompilerError {
         CompilerError::file_error(
             directory,
             format!("Failed to read directory while indexing source tree: {error}"),
-            string_table,
         )
     }
 }
@@ -1086,7 +1059,6 @@ fn discover_project_package_facade(
         CompilerError::file_error(
             project_root,
             format!("Failed to read project root while discovering package facade: {error}"),
-            string_table,
         )
     })?;
 
@@ -1099,7 +1071,6 @@ fn discover_project_package_facade(
                     format!(
                         "Failed to read project root entry while discovering package facade: {error}"
                     ),
-                    string_table,
                 )
             })?
             .path();
@@ -1112,19 +1083,12 @@ fn discover_project_package_facade(
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| {
-                non_utf8_filesystem_name_error(
-                    &path,
-                    "project package facade candidate name",
-                    string_table,
-                )
+                non_utf8_filesystem_name_error(&path, "project package facade candidate name")
             })?;
 
         if file_name_claims_project_globals_facade(file_name) {
-            let diagnostic = project_structure_diagnostic(
-                &path,
-                InvalidConfigReason::ProjectGlobalsNameReserved,
-                string_table,
-            );
+            let diagnostic =
+                project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
             let table = std::mem::take(string_table);
             return Err(PremergeFailure::Diagnosed(
                 PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -1136,7 +1100,6 @@ fn discover_project_package_facade(
                 CompilerError::file_error(
                     &path,
                     format!("Failed to canonicalize project package facade path: {error}"),
-                    string_table,
                 )
             })?;
             support_roots.push(canonical);
@@ -1150,14 +1113,11 @@ fn discover_project_package_facade(
             .iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        let diagnostic = project_structure_diagnostic(
-            project_root,
-            InvalidConfigReason::MultipleModuleRootFiles {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(project_root, string_table),
                 candidates,
-            },
-            string_table,
-        );
+            });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -1188,14 +1148,11 @@ fn classify_directory_root(
             .iter()
             .map(|root| path_id(&root.root_file, string_table))
             .collect();
-        let diagnostic = project_structure_diagnostic(
-            directory,
-            InvalidConfigReason::MultipleModuleRootFiles {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(directory, string_table),
                 candidates,
-            },
-            string_table,
-        );
+            });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -1229,14 +1186,11 @@ fn classify_package_root_directory(
         .collect::<Vec<_>>();
 
     if normal_roots.is_empty() {
-        let diagnostic = project_structure_diagnostic(
-            directory,
-            InvalidConfigReason::SourcePackageMissingRoot {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
                 prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
-            },
-            string_table,
-        );
+            });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -1253,15 +1207,12 @@ fn classify_package_root_directory(
             .into_iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        let diagnostic = project_structure_diagnostic(
-            directory,
-            InvalidConfigReason::SourcePackageMultipleRoots {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::SourcePackageMultipleRoots {
                 prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
                 candidates,
-            },
-            string_table,
-        );
+            });
         let table = std::mem::take(string_table);
         return Err(PremergeFailure::Diagnosed(
             PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),

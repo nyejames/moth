@@ -24,7 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input bundle for source callable member parsing.
 ///
@@ -38,7 +38,6 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
     pub(super) signature: &'a FunctionSignature,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
     pub(super) visible_name: StringId,
-    pub(super) call_location: SourceLocation,
     pub(super) call_span: Option<SourceSpan>,
     pub(super) context: &'a ScopeContext,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
@@ -65,7 +64,6 @@ pub(super) fn parse_source_callable_member(
         signature,
         generic_template,
         visible_name,
-        call_location,
         call_span,
         context,
         expression,
@@ -89,21 +87,14 @@ pub(super) fn parse_source_callable_member(
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
             Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
-                let explicit_syntax_location = token_stream
-                    .tokens
-                    .get(token_stream.index + 1)
-                    .map(|token| token.location.clone())
-                    .unwrap_or_else(|| call_location.clone());
-
                 let explicit_syntax_span = token_stream
                     .tokens
                     .get(token_stream.index + 1)
-                    .map(|token| SourceSpan::new(token_stream.file_id, token.span));
+                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+                    .or(call_span);
+
                 return Err(with_generic_primary_span(
-                    explicit_generic_call_type_arguments_error(
-                        visible_name,
-                        explicit_syntax_location,
-                    ),
+                    explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),
                     explicit_syntax_span,
                 )
                 .into());
@@ -118,7 +109,7 @@ pub(super) fn parse_source_callable_member(
                     CompilerDiagnostic::invalid_generic_instantiation(
                         Some(visible_name),
                         InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
-                        call_location,
+                        call_span,
                     ),
                     call_span,
                 )
@@ -145,7 +136,6 @@ pub(super) fn parse_source_callable_member(
             expected_context,
             value_required: true,
             allow_boundary_catch: allow_call_boundary_catch,
-            call_location,
             call_span,
             warnings: None,
             type_interner,
@@ -179,7 +169,6 @@ pub(super) fn parse_source_callable_member(
     let function_call_expression = parse_function_call_expression(FunctionCallParseInput {
         token_stream,
         id: function_path,
-        call_location,
         call_span,
         context,
         signature,
@@ -205,11 +194,11 @@ pub(super) fn parse_source_callable_member(
 
 fn explicit_generic_call_type_arguments_error(
     function_name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_generic_instantiation(
         Some(function_name),
         InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        location,
+        span,
     )
 }

@@ -19,7 +19,7 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
     BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
@@ -512,10 +512,6 @@ fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan
         output_root,
         project_root: Some(project_root),
         owner: build_result.output_owner,
-        setting_location: SourceLocation::from_path(
-            &build_result.config.entry_dir,
-            &mut build_result.string_table,
-        ),
         setting_span: None,
     }))
 }

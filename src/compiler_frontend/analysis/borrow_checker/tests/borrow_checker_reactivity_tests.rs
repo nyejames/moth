@@ -34,7 +34,6 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
-    test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::assert_invalid_mutable_access_reason;
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
@@ -63,10 +62,9 @@ fn reactive_assignment_records_invalidation_after_initialization() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
-                        .with_reactive_source(source),
+                    Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
                 )),
-                test_source_location(1),
+                None,
             ),
             node(
                 NodeKind::Assignment {
@@ -74,19 +72,14 @@ fn reactive_assignment_records_invalidation_after_initialization() {
                         count_path.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_source_location(2),
-                    ),
-                    value: Expression::int(
-                        2,
-                        test_source_location(2),
                         None,
-                        ValueMode::ImmutableOwned,
                     ),
+                    value: Expression::int(2, None, ValueMode::ImmutableOwned),
                 },
-                test_source_location(2),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -119,12 +112,8 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
     let render_name_for_lookup = render_name.clone();
     let parameter_path = symbol("source", &mut string_table);
     let view_path = symbol("view", &mut string_table);
-    let mut parameter = param_with_type_id(
-        parameter_path.clone(),
-        builtin_type_ids::INT,
-        false,
-        test_source_location(1),
-    );
+    let mut parameter =
+        param_with_type_id(parameter_path.clone(), builtin_type_ids::INT, false, None);
     parameter.value.reactive_source = Some(reactive_source(
         parameter_path.clone(),
         ReactiveSourceKind::Parameter,
@@ -147,12 +136,11 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("reactive"),
-                        test_source_location(2),
                         None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::Return(vec![
@@ -160,19 +148,19 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
-                        test_source_location(2),
+                        None,
                     )
                     .with_reactive_template_metadata(
                         metadata_with_subscription(
                             reactive_source(parameter_path, ReactiveSourceKind::Parameter),
-                            test_source_location(2),
+                            None,
                         ),
                     ),
                 ]),
-                test_source_location(2),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let start = function_node(
@@ -182,7 +170,7 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
             returns: vec![],
         },
         vec![],
-        test_source_location(3),
+        None,
     );
 
     let hir = lower_hir(
@@ -235,7 +223,7 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
     let count_path = symbol("count", &mut string_table);
     let view_path = symbol("view", &mut string_table);
     let source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata = metadata_with_subscription(source.clone(), test_source_location(3));
+    let template_metadata = metadata_with_subscription(source.clone(), None);
 
     let start = function_node(
         start_name,
@@ -247,22 +235,20 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
-                        .with_reactive_source(source),
+                    Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
                 )),
-                test_source_location(1),
+                None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_source_location(2),
                         None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
@@ -270,11 +256,11 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
-                        test_source_location(3),
+                        None,
                     )
                     .with_reactive_template_metadata(template_metadata),
                 ),
-                test_source_location(3),
+                None,
             ),
             node(
                 NodeKind::Assignment {
@@ -282,19 +268,14 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
                         count_path.clone(),
                         DataType::Int,
                         builtin_type_ids::INT,
-                        test_source_location(4),
-                    ),
-                    value: Expression::int(
-                        2,
-                        test_source_location(4),
                         None,
-                        ValueMode::ImmutableOwned,
                     ),
+                    value: Expression::int(2, None, ValueMode::ImmutableOwned),
                 },
-                test_source_location(4),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -331,12 +312,12 @@ fn mutable_call_argument_records_reactive_invalidation() {
                 value_path,
                 builtin_type_ids::INT,
                 true,
-                test_source_location(1),
+                None,
             )],
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let start = function_node(
@@ -349,10 +330,9 @@ fn mutable_call_argument_records_reactive_invalidation() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
-                        .with_reactive_source(source),
+                    Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
@@ -362,18 +342,18 @@ fn mutable_call_argument_records_reactive_invalidation() {
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_source_location(3),
+                            None,
                         ),
                         CallAccessMode::Shared,
-                        test_source_location(3),
+                        None,
                     )],
                     vec![],
-                    test_source_location(3),
+                    None,
                 )),
-                test_source_location(3),
+                None,
             ),
         ],
-        test_source_location(2),
+        None,
     );
 
     let hir = lower_hir(
@@ -445,12 +425,12 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
                 parameter_path,
                 builtin_type_ids::INT,
                 false,
-                test_source_location(1),
+                None,
             )],
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let start = function_node(
@@ -463,10 +443,9 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
-                        .with_reactive_source(source),
+                    Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
@@ -476,18 +455,18 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
-                            test_source_location(3),
+                            None,
                         ),
                         CallAccessMode::Shared,
-                        test_source_location(3),
+                        None,
                     )],
                     vec![],
-                    test_source_location(3),
+                    None,
                 )),
-                test_source_location(3),
+                None,
             ),
         ],
-        test_source_location(2),
+        None,
     );
 
     let hir = lower_hir(
@@ -555,12 +534,11 @@ fn field_write_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 source_path.clone(),
-                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
-                    .with_reactive_source(source),
+                Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
-            test_source_location(1),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let mut hir = lower_hir(
@@ -568,7 +546,7 @@ fn field_write_records_reactive_invalidation() {
         &mut string_table,
     );
     let source_id = reactive_source_id_for_path(&hir, &source_path);
-    let statement_id = append_synthetic_field_write(&mut hir, source_id, test_source_location(2));
+    let statement_id = append_synthetic_field_write(&mut hir, source_id, None);
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("field write fact collection should preserve ordinary borrow rules");
@@ -591,12 +569,7 @@ fn reactive_parameter_does_not_grant_mutation_permission() {
     let (entry_path, start_name) = entry_and_start(&mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let param_path = symbol("source", &mut string_table);
-    let mut parameter = param_with_type_id(
-        param_path.clone(),
-        builtin_type_ids::INT,
-        false,
-        test_source_location(1),
-    );
+    let mut parameter = param_with_type_id(param_path.clone(), builtin_type_ids::INT, false, None);
     parameter.value.reactive_source = Some(reactive_source(
         param_path.clone(),
         ReactiveSourceKind::Parameter,
@@ -610,17 +583,12 @@ fn reactive_parameter_does_not_grant_mutation_permission() {
         },
         vec![node(
             NodeKind::Assignment {
-                target: assignment_target(
-                    param_path,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(2),
-                ),
-                value: Expression::int(2, test_source_location(2), None, ValueMode::ImmutableOwned),
+                target: assignment_target(param_path, DataType::Int, builtin_type_ids::INT, None),
+                value: Expression::int(2, None, ValueMode::ImmutableOwned),
             },
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -650,12 +618,11 @@ fn map_mutation_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 map_path.clone(),
-                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
-                    .with_reactive_source(source),
+                Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
-            test_source_location(1),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let mut hir = lower_hir(
@@ -663,8 +630,7 @@ fn map_mutation_records_reactive_invalidation() {
         &mut string_table,
     );
     let source_id = reactive_source_id_for_path(&hir, &map_path);
-    let (statement_id, value_id) =
-        append_synthetic_map_clear(&mut hir, source_id, test_source_location(2));
+    let (statement_id, value_id) = append_synthetic_map_clear(&mut hir, source_id, None);
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("map mutation fact collection should preserve ordinary borrow rules");
@@ -691,14 +657,13 @@ fn reactive_source(path: InternedPath, kind: ReactiveSourceKind) -> ReactiveSour
 
 fn metadata_with_subscription(
     source: ReactiveSource,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> ReactiveTemplateMetadata {
     let mut metadata = ReactiveTemplateMetadata::template_backed();
     metadata.push_subscription(ReactiveSubscription {
         source,
         type_id: builtin_type_ids::INT,
-        location,
-        span: None,
+        span,
     });
     metadata
 }
@@ -728,7 +693,7 @@ fn all_reactive_invalidations(
 fn append_synthetic_map_clear(
     hir: &mut crate::compiler_frontend::hir::module::HirModule,
     source_id: ReactiveSourceId,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> (HirNodeId, HirValueId) {
     let source = hir
         .side_table
@@ -760,8 +725,7 @@ fn append_synthetic_map_clear(
             args: vec![],
             result: None,
         },
-        location,
-        span: None,
+        span,
     };
 
     let start_function = hir
@@ -786,7 +750,7 @@ fn append_synthetic_map_clear(
 fn append_synthetic_field_write(
     hir: &mut crate::compiler_frontend::hir::module::HirModule,
     source_id: ReactiveSourceId,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> HirNodeId {
     let source = hir
         .side_table
@@ -818,8 +782,7 @@ fn append_synthetic_field_write(
             },
             value,
         },
-        location,
-        span: None,
+        span,
     };
 
     let start_function = hir

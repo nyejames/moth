@@ -11,7 +11,7 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
 use std::sync::Arc;
 
 /// Owned frozen token buffer retained by one generic declaration artefact.
@@ -99,10 +99,10 @@ impl StableBodySyntax {
         }
 
         let source_path_syntax = tokens.path_syntax_table()?;
-        source_path_syntax.validate_file_owned_locations(source_file)?;
+        source_path_syntax.validate_file_owned_locations(tokens.file_id)?;
         source_path_syntax.validate_file_tokens(
             &tokens.tokens,
-            source_file,
+            tokens.file_id,
             "generic body capture",
         )?;
 
@@ -189,8 +189,8 @@ impl StableBodySyntax {
         }
         let mut path_syntax = self.path_syntax.clone();
         path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
-        path_syntax.validate_file_owned_locations(source_file)?;
-        path_syntax.validate_file_tokens(&tokens, source_file, "frozen generic body")?;
+        path_syntax.validate_file_owned_locations(self.donor_file_id)?;
+        path_syntax.validate_file_tokens(&tokens, self.donor_file_id, "frozen generic body")?;
 
         let resolved_file_references = self
             .resolved_file_references
@@ -217,61 +217,6 @@ impl StableBodySyntax {
             resolution_facts,
             frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(super) struct StableSourceLocation {
-    pub(super) scope: Box<[String]>,
-    pub(super) start: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-    pub(super) end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-}
-
-impl StableSourceLocation {
-    pub(super) fn capture(location: &SourceLocation, string_table: &StringTable) -> Self {
-        Self {
-            scope: stable_path(&location.scope, string_table),
-            start: location.start_pos,
-            end: location.end_pos,
-        }
-    }
-
-    pub(super) fn materialise(&self, string_table: &mut StringTable) -> SourceLocation {
-        SourceLocation::new(
-            materialise_path(&self.scope, string_table),
-            self.start,
-            self.end,
-        )
-    }
-
-    fn is_default(&self) -> bool {
-        self.scope.is_empty() && self.start == Default::default() && self.end == Default::default()
-    }
-
-    /// Select a stable diagnostic location while combining semantically equal blueprints.
-    ///
-    /// WHY: imported public projections have no authored range, so their default must not erase
-    /// source provenance; when both ranges exist, lexical ordering makes lane order invariant.
-    pub(super) fn preferred_with(&self, other: &Self) -> Self {
-        match (self.is_default(), other.is_default()) {
-            (true, false) => other.clone(),
-            (false, true) => self.clone(),
-            _ => {
-                let ordering = self
-                    .scope
-                    .as_ref()
-                    .cmp(other.scope.as_ref())
-                    .then_with(|| self.start.line_number.cmp(&other.start.line_number))
-                    .then_with(|| self.start.char_column.cmp(&other.start.char_column))
-                    .then_with(|| self.end.line_number.cmp(&other.end.line_number))
-                    .then_with(|| self.end.char_column.cmp(&other.end.char_column));
-                if ordering == std::cmp::Ordering::Greater {
-                    other.clone()
-                } else {
-                    self.clone()
-                }
-            }
-        }
     }
 }
 

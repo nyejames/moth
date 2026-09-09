@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TirSlotPlaceholderRef, collect_tir_slot_layout, collect_tir_slot_layout_from_root,
     copy_tir_subtree_with_active_slot_plan, push_runtime_slot_contribution_source,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 
 pub(super) fn build_runtime_wrapper_site_plan(
@@ -63,12 +63,11 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         let mut slot_sites = Vec::with_capacity(drafts.len());
         for draft in drafts {
             let render_root =
-                self.build_site_render_root(&draft.placeholder, &draft.placeholder.location)?;
+                self.build_site_render_root(&draft.placeholder, draft.placeholder.span)?;
             slot_sites.push(TemplateSlotSitePlan {
                 site: draft.site,
                 key: draft.placeholder.key.clone(),
                 render_root,
-                location: draft.placeholder.location.clone(),
                 span: draft.placeholder.span,
             });
         }
@@ -100,7 +99,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
     fn build_site_render_root(
         &mut self,
         placeholder: &TirSlotPlaceholderRef,
-        location: &SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<TemplateIrNodeId, TemplateError> {
         let mut fill_roots = Vec::new();
 
@@ -114,18 +113,13 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 self.store,
                 self.slot_plan_id,
                 source.source.source,
-                source.source.location.clone(),
                 source.source.span,
             );
             let wrapped_root = self.apply_site_wrappers(placeholder, &source, source_root)?;
             fill_roots.push(wrapped_root);
         }
 
-        Ok(collapse_render_roots(
-            fill_roots,
-            location.clone(),
-            self.store,
-        ))
+        Ok(collapse_render_roots(fill_roots, span, self.store))
     }
 
     fn apply_site_wrappers(
@@ -205,24 +199,23 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         wrapper_ref: TemplateWrapperReference,
         fill_root: TemplateIrNodeId,
     ) -> Result<TemplateIrNodeId, TemplateError> {
-        let (wrapper_root, wrapper_location) = {
+        let (wrapper_root, wrapper_span) = {
             let wrapper_template = self.store.get_template(wrapper_ref.root).ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "Runtime slot site planning found a slot wrapper template ref {} that was not present in the TIR store.",
                     wrapper_ref
                 ))
             })?;
-            (wrapper_template.root, wrapper_template.location.clone())
+            (wrapper_template.root, wrapper_template.span)
         };
         let layout = collect_tir_slot_layout(self.store, wrapper_ref.root)?;
 
         if !layout.schema.has_any_slots() {
             let wrapper_reference = wrapper_ref.into_structural_child_reference();
-            let unchanged_wrapper =
-                self.push_wrapper_child(wrapper_reference, wrapper_location.clone());
+            let unchanged_wrapper = self.push_wrapper_child(wrapper_reference, wrapper_span);
             return Ok(collapse_render_roots(
                 vec![unchanged_wrapper, fill_root],
-                wrapper_location,
+                wrapper_span,
                 self.store,
             ));
         }
@@ -242,18 +235,18 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             self.copy_state,
         )?;
 
-        self.push_composed_wrapper_child(wrapper_ref, injected.root, wrapper_location)
+        self.push_composed_wrapper_child(wrapper_ref, injected.root, wrapper_span)
     }
 
     fn push_composed_wrapper_child(
         &mut self,
         wrapper_ref: TemplateWrapperReference,
         new_root: TemplateIrNodeId,
-        location: SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<TemplateIrNodeId, TemplateError> {
         let derived_id = self.derive_wrapper_template(wrapper_ref.root, new_root)?;
         let reference = wrapper_ref.into_composed_child_reference(derived_id);
-        Ok(self.push_wrapper_child(reference, location))
+        Ok(self.push_wrapper_child(reference, span))
     }
 
     fn derive_wrapper_template(
@@ -271,7 +264,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
     fn push_wrapper_child(
         &mut self,
         reference: TemplateTirChildReference,
-        location: SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> TemplateIrNodeId {
         let occurrence_id = self.store.next_child_template_occurrence_id();
         self.store.push_node(TemplateIrNode::new(
@@ -279,8 +272,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 reference,
                 occurrence_id,
             },
-            location,
-            None,
+            span,
         ))
     }
 }
@@ -308,7 +300,6 @@ fn inject_runtime_slot_fill(
         )
     })?;
     let span = node.span;
-    let location = node.location.clone();
 
     match node.kind {
         TemplateIrNodeKind::Slot { placeholder } if placeholder.key == *target_key => {
@@ -319,7 +310,7 @@ fn inject_runtime_slot_fill(
         }
 
         TemplateIrNodeKind::Slot { .. } => Ok(RuntimeSlotInjection {
-            root: empty_render_root(store, &location),
+            root: empty_render_root(store, span),
             changed: true,
         }),
 
@@ -345,8 +336,7 @@ fn inject_runtime_slot_fill(
                     TemplateIrNodeKind::Sequence {
                         children: injected_children,
                     },
-                    location,
-                    None,
+                    span,
                 )),
                 changed: true,
             })
@@ -386,7 +376,6 @@ fn inject_runtime_slot_fill(
                         reference: reference.with_root(derived_id),
                         occurrence_id,
                     },
-                    location,
                     span,
                 )),
                 changed: true,
@@ -412,7 +401,6 @@ fn inject_runtime_slot_fill(
                 branch_results.push((
                     branch.selector,
                     injected_body.root,
-                    branch.location,
                     branch.span,
                     branch.selector_site_id,
                 ));
@@ -442,11 +430,10 @@ fn inject_runtime_slot_fill(
 
             let injected_branches = branch_results
                 .into_iter()
-                .map(|(selector, body, location, span, selector_site_id)| {
+                .map(|(selector, body, span, selector_site_id)| {
                     crate::compiler_frontend::ast::templates::tir::TemplateIrBranch::new(
                         selector,
                         body,
-                        location,
                         span,
                         selector_site_id,
                     )
@@ -460,7 +447,6 @@ fn inject_runtime_slot_fill(
                         fallback: injected_fallback,
                         else_marker,
                     },
-                    location,
                     span,
                 )),
                 changed: true,
@@ -503,7 +489,6 @@ fn inject_runtime_slot_fill(
                         body: injected_body.root,
                         aggregate_wrapper: injected_aggregate,
                     },
-                    location,
                     span,
                 )),
                 changed: true,
@@ -517,26 +502,27 @@ fn inject_runtime_slot_fill(
     }
 }
 
-fn empty_render_root(store: &mut TemplateIrStore, location: &SourceLocation) -> TemplateIrNodeId {
+fn empty_render_root(
+    store: &mut TemplateIrStore,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> TemplateIrNodeId {
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        location.clone(),
-        None,
+        span,
     ))
 }
 
 fn collapse_render_roots(
     roots: Vec<TemplateIrNodeId>,
-    location: SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
     store: &mut TemplateIrStore,
 ) -> TemplateIrNodeId {
     match roots.len() {
-        0 => empty_render_root(store, &location),
+        0 => empty_render_root(store, span),
         1 => roots[0],
         _ => store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: roots },
-            location,
-            None,
+            span,
         )),
     }
 }

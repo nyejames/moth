@@ -47,29 +47,29 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// One control-flow effect that can escape an assertion message's value computation.
 ///
-/// WHAT: retains the exact authored source location for the effect rather than collapsing every
+/// WHAT: retains the exact authored source span for the effect rather than collapsing every
 ///       operation onto the surrounding call/value expression.
 /// WHY: diagnostics and internal tests need to distinguish `!`, `?`, return, and error-return
-///      sites while ordinary call mapping continues to use the call's own location.
+///      sites while ordinary call mapping continues to use the call's own span.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnclosingExitEffect {
-    ErrorPropagation(SourceLocation),
-    OptionPropagation(SourceLocation),
-    FunctionReturn(SourceLocation),
-    ErrorReturn(SourceLocation),
+    ErrorPropagation(Option<SourceSpan>),
+    OptionPropagation(Option<SourceSpan>),
+    FunctionReturn(Option<SourceSpan>),
+    ErrorReturn(Option<SourceSpan>),
 }
 
 impl EnclosingExitEffect {
-    pub(crate) fn location(&self) -> &SourceLocation {
+    pub(crate) fn span(&self) -> Option<SourceSpan> {
         match self {
-            Self::ErrorPropagation(location)
-            | Self::OptionPropagation(location)
-            | Self::FunctionReturn(location)
-            | Self::ErrorReturn(location) => location,
+            Self::ErrorPropagation(span)
+            | Self::OptionPropagation(span)
+            | Self::FunctionReturn(span)
+            | Self::ErrorReturn(span) => *span,
         }
     }
 }
@@ -102,7 +102,7 @@ pub(crate) fn assert_message_escape_diagnostic(
         classify_assertion_message_effect(message, template_ir_store)?.map(|effect| {
             CompilerDiagnostic::invalid_fallible_handling(
                 InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
-                effect.location().clone(),
+                effect.span(),
             )
         }),
     )
@@ -124,7 +124,7 @@ fn classify_expression(
         | ExpressionKind::HandledFallibleHostFunctionCall { args, handling, .. } => {
             if matches!(handling, FallibleExpressionHandling::Propagate) {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
-                    expression_propagation_location(expression),
+                    expression_propagation_span(expression),
                 )));
             }
             classify_call_arguments(args, template_ir_store, state)
@@ -134,19 +134,17 @@ fn classify_expression(
         } => {
             if matches!(handling, FallibleExpressionHandling::Propagate) {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
-                    expression_propagation_location(expression),
+                    expression_propagation_span(expression),
                 )));
             }
             classify_expression(value, template_ir_store, state)
         }
         ExpressionKind::OptionPropagation { .. } => Ok(Some(
-            EnclosingExitEffect::OptionPropagation(expression.location.clone()),
+            EnclosingExitEffect::OptionPropagation(expression.span),
         )),
         ExpressionKind::Cast(cast) => {
             if matches!(cast.handling, CastHandling::Propagate) {
-                return Ok(Some(EnclosingExitEffect::ErrorPropagation(
-                    cast.location.clone(),
-                )));
+                return Ok(Some(EnclosingExitEffect::ErrorPropagation(cast.span)));
             }
             classify_expression(&cast.source, template_ir_store, state)
         }
@@ -252,11 +250,8 @@ fn classify_expression(
     }
 }
 
-fn expression_propagation_location(expression: &Expression) -> SourceLocation {
-    expression
-        .propagation_location()
-        .unwrap_or(&expression.location)
-        .clone()
+fn expression_propagation_span(expression: &Expression) -> Option<SourceSpan> {
+    expression.propagation_span().or(expression.span)
 }
 
 fn classify_call_arguments(
@@ -331,7 +326,7 @@ fn classify_value_block(
         ValueBlock::Catch(value_catch) => {
             if matches!(value_catch.handler, FallibleHandling::Propagate) {
                 return Ok(Some(EnclosingExitEffect::ErrorPropagation(
-                    expression_propagation_location(&value_catch.handled_value),
+                    expression_propagation_span(&value_catch.handled_value),
                 )));
             }
             if let Some(effect) =
@@ -380,10 +375,8 @@ fn classify_nodes(
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for node in nodes {
         let effect = match &node.kind {
-            NodeKind::Return(_) => Some(EnclosingExitEffect::FunctionReturn(node.location.clone())),
-            NodeKind::ReturnError(_) => {
-                Some(EnclosingExitEffect::ErrorReturn(node.location.clone()))
-            }
+            NodeKind::Return(_) => Some(EnclosingExitEffect::FunctionReturn(node.span)),
+            NodeKind::ReturnError(_) => Some(EnclosingExitEffect::ErrorReturn(node.span)),
             // A loop-local control transfer cannot escape the assertion message's enclosing
             // function. Valid ASTs only contain these nodes under an owning loop.
             NodeKind::Break if state.loop_depth > 0 => None,

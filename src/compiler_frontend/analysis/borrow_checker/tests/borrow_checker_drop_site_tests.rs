@@ -38,11 +38,11 @@ fn emits_advisory_return_drop_sites() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         )],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -90,7 +90,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -100,7 +100,6 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                         vec![runtime_operand_item(Expression::bool(
                             true,
                             test_source_location(2),
-                            None,
                             ValueMode::ImmutableOwned,
                         ))],
                         builtin_type_ids::BOOL,
@@ -118,7 +117,6 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                             value: Expression::int(
                                 2,
                                 test_source_location(3),
-                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -135,7 +133,6 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                             value: Expression::int(
                                 3,
                                 test_source_location(4),
-                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -147,18 +144,13 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             ),
             node(
                 NodeKind::WhileLoop(
-                    Expression::bool(
-                        true,
-                        test_source_location(5),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    ),
+                    Expression::bool(true, test_source_location(5), ValueMode::ImmutableOwned),
                     vec![node(NodeKind::Break, test_source_location(6))],
                 ),
                 test_source_location(5),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(

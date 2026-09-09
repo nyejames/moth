@@ -59,6 +59,7 @@ impl FrozenIdentityHandle {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self) -> Option<&FrozenIdentityContext> {
         self.0.get().map(Arc::as_ref)
     }
@@ -111,6 +112,7 @@ impl FrozenIdentityContext {
 
     /// Borrow the lookup-only source owner.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source lookup consumers.
     pub(crate) fn sources(&self) -> &FrozenSourceDatabase {
         &self.sources
     }
@@ -138,12 +140,14 @@ impl FrozenIdentityContext {
 
     /// Resolve a string ID in this identity context.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-identity string lookup consumers.
     pub(crate) fn resolve_string(&self, id: StringId) -> &str {
         self.strings.resolve(id)
     }
 
     /// Fallibly resolve a string ID in this identity context.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-identity string lookup consumers.
     pub(crate) fn try_resolve_string(&self, id: StringId) -> Option<&str> {
         self.strings.try_resolve(id)
     }
@@ -159,6 +163,7 @@ impl FrozenIdentityContext {
 
     /// Iterate over physical source slots in deterministic source-identity order.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source iteration consumers.
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
         self.sources.iter()
     }
@@ -171,12 +176,14 @@ impl FrozenIdentityContext {
 
     /// Resolve one physical source slot by canonical filesystem path.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookup consumers.
     pub(crate) fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
         self.sources.get_by_canonical_path(canonical_path)
     }
 
     /// Resolve the unique physical source for an exact frozen logical-path identity.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source logical-path lookup consumers.
     pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: PathId,
@@ -196,12 +203,14 @@ impl FrozenIdentityContext {
     /// component vector is rebuilt from the frozen path table on each call and is never
     /// retained.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source path compatibility consumers.
     pub(crate) fn legacy_logical_path(&self, id: SourceId) -> InternedPath {
         self.sources.legacy_logical_path(id)
     }
 
     /// Borrow the exact retained source snapshot for one physical source.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source snapshot consumers.
     pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
         self.sources.retained_text(id)
     }
@@ -214,6 +223,7 @@ impl FrozenIdentityContext {
 
     /// Return a source's structured load failure, when loading failed.
     #[inline]
+    #[allow(dead_code)] // Retained for deferred frozen-source failure consumers.
     pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
         self.sources.source_load_error(id)
     }
@@ -256,6 +266,5 @@ mod tests {
             .install(other_identity)
             .expect_err("a handle must reject a different frozen identity");
         assert!(error.msg.contains("two different contexts"));
-
     }
 }

@@ -390,13 +390,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let headers = prepare_header_syntax(
         &mut [output_a, output_b],
         &mut frontend.string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(id, _)| *id == source)
-                .expect("prepared source owns original spans");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax preparation should succeed");
 
@@ -1461,7 +1455,6 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut fixture.frontend.string_table,
         chunks,
-        &mut fixture.span_builders.split().1,
         input_file_count,
         base_len,
     )
@@ -1785,16 +1778,15 @@ fn assert_malformed_chunks_rejected(
     use crate::compiler_frontend::compiler_messages::PremergeFailure;
 
     let mut string_table = StringTable::new();
-    let mut source_owner = SourceDatabaseBuilder::new(SourceDatabase::empty());
 
     let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         chunks,
-        &mut source_owner.split().1,
         module_file_count,
         0,
     ) {
         Err(PremergeFailure::Infrastructure(error)) => error,
+        Err(PremergeFailure::Mixed { error, .. }) => error,
         Err(PremergeFailure::Diagnosed(_)) => {
             panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
         }
@@ -1962,7 +1954,6 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         vec![first_chunk, second_chunk],
-        &mut source_owner.split().1,
         3,
         base_len,
     )

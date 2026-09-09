@@ -21,7 +21,6 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::terse;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidGenericInstantiationReason,
@@ -131,12 +130,20 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
         "the provider and independent branch should each diagnose once; blocked consumers should emit no cascades"
     );
     let diagnosed_paths = messages
-        .error_diagnostics()
-        .map(|diagnostic| {
-            diagnostic
-                .primary_location
-                .scope
-                .to_path_buf(&messages.string_table)
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| {
+            diagnostic.severity
+                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+        })
+        .filter_map(|(diagnostic_index, diagnostic)| {
+            let span = diagnostic.primary_span?;
+            let source_files = messages.source_database_for_diagnostic(diagnostic_index)?;
+            Some(
+                source_files
+                    .legacy_logical_path(span.source())
+                    .to_path_buf(&messages.string_table),
+            )
         })
         .collect::<Vec<_>>();
     assert!(
@@ -241,19 +248,22 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
         Ok(_) => panic!("selected unreadable source should fail its existing preparation lane"),
         Err(error) => error,
     };
-    let (error_type, message, location) = error
-        .first_infrastructure_error_for_tests()
+    let error_value = error
+        .infrastructure_error()
         .expect("selected preload failure should remain an infrastructure file error");
-    assert_eq!(error_type, &ErrorType::File);
+    assert_eq!(&error_value.error_type, &ErrorType::File);
     assert!(
-        message.contains("Error reading file when adding new moth files to parse"),
-        "selected source should preserve the existing read failure message: {message}"
+        error_value
+            .msg
+            .contains("Error reading file when adding new moth files to parse"),
+        "selected source should preserve the existing read failure message: {}",
+        error_value.msg,
     );
     let canonical_selected_path =
         fs::canonicalize(selected_path).expect("selected source path should canonicalize");
     assert_eq!(
-        location.scope.to_path_buf(&error.string_table),
-        canonical_selected_path
+        error_value.host_path.as_deref(),
+        Some(canonical_selected_path.as_path()),
     );
 }
 
@@ -352,9 +362,9 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     let messages = frontend.into_render_messages(&mut string_table);
 
     let matching = messages
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| {
             matches!(
                 &diagnostic.payload,
                 DiagnosticPayload::InvalidDependencyClause {
@@ -369,11 +379,17 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
         1,
         "the facade's own @project declaration should produce one structured diagnostic"
     );
-    assert_eq!(matching[0].kind.code(), "MOTH-SYNTAX-0019");
+    let (diagnostic_index, diagnostic) = matching[0];
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0019");
+    let span = diagnostic
+        .primary_span
+        .expect("self-dependency diagnostic should retain its authored span");
+    let source_files = messages
+        .source_database_for_diagnostic(diagnostic_index)
+        .expect("facade diagnostic should retain its source database");
     assert!(
-        matching[0]
-            .primary_location
-            .scope
+        source_files
+            .legacy_logical_path(span.source())
             .to_path_buf(&messages.string_table)
             .ends_with("+package.moth"),
         "self-dependency diagnostic should point to the facade source"
@@ -945,15 +961,18 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         .collect::<Vec<_>>();
 
     let matching = messages
-        .error_diagnostics()
-        .filter(|diagnostic| {
-            matches!(
-                &diagnostic.payload,
-                DiagnosticPayload::InvalidConfig {
-                    reason: InvalidConfigReason::MissingConfigInput,
-                    ..
-                }
-            )
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| {
+            diagnostic.severity
+                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+                && matches!(
+                    &diagnostic.payload,
+                    DiagnosticPayload::InvalidConfig {
+                        reason: InvalidConfigReason::MissingConfigInput,
+                        ..
+                    }
+                )
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -961,7 +980,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         1,
         "the isolated source package should report exactly one missing-input diagnostic; observed {observed_identities:?}"
     );
-    let diagnostic = matching[0];
+    let (diagnostic_index, diagnostic) = matching[0];
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
         reason: InvalidConfigReason::MissingConfigInput,
@@ -970,14 +989,19 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         unreachable!("the diagnostic was filtered to the missing-input payload");
     };
     assert_eq!(messages.string_table.resolve(*key), "enabled");
-    let location = diagnostic
-        .primary_location
-        .scope
-        .to_path_buf(&messages.string_table);
-    assert_eq!(
-        location,
-        PathBuf::from("@mod.moth"),
-        "missing-input diagnostic should point to the dependency contract"
+    let span = diagnostic
+        .primary_span
+        .expect("source-package config diagnostic should retain its authored span");
+    assert_ne!(
+        span.source(),
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        "source-package diagnostics must not use the synthetic compilation-root span",
+    );
+    assert!(
+        messages
+            .source_database_for_diagnostic(diagnostic_index)
+            .is_some(),
+        "source-package diagnostics should retain source context",
     );
     let rendered = render_compiler_messages_html(&messages, &dir);
     assert!(
@@ -1047,12 +1071,20 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
         "both diagnosed source packages should retain their errors"
     );
     let diagnosed_paths = messages
-        .error_diagnostics()
-        .map(|diagnostic| {
-            diagnostic
-                .primary_location
-                .scope
-                .to_path_buf(&messages.string_table)
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| {
+            diagnostic.severity
+                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+        })
+        .filter_map(|(diagnostic_index, diagnostic)| {
+            let span = diagnostic.primary_span?;
+            let source_files = messages.source_database_for_diagnostic(diagnostic_index)?;
+            Some(
+                source_files
+                    .legacy_logical_path(span.source())
+                    .to_path_buf(&messages.string_table),
+            )
         })
         .collect::<Vec<_>>();
     assert!(
@@ -1907,8 +1939,7 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
         ),
         canonical_source_path,
         asset_kind: "js".to_owned(),
-        authored_import_location: SourceLocation::default(),
-        authored_import_span: None,
+        source_span: None,
     }
 }
 
@@ -3836,12 +3867,20 @@ fn diagnosed_provider_retains_independent_successful_module() {
         "provider diagnostic should be rendered once"
     );
     let diagnosed_paths = messages
-        .error_diagnostics()
-        .map(|diagnostic| {
-            diagnostic
-                .primary_location
-                .scope
-                .to_path_buf(&messages.string_table)
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| {
+            diagnostic.severity
+                == crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+        })
+        .filter_map(|(diagnostic_index, diagnostic)| {
+            let span = diagnostic.primary_span?;
+            let source_files = messages.source_database_for_diagnostic(diagnostic_index)?;
+            Some(
+                source_files
+                    .legacy_logical_path(span.source())
+                    .to_path_buf(&messages.string_table),
+            )
         })
         .collect::<Vec<_>>();
     assert!(

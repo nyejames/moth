@@ -21,17 +21,18 @@ mod non_utf8_filesystem_identity {
     use std::path::PathBuf;
 
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 filesystem name should be a File infrastructure error"
         );
         assert!(
-            message.contains("Non-UTF-8"),
-            "error message should mention non-UTF-8: {message}"
+            error.msg.contains("Non-UTF-8"),
+            "error message should mention non-UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -216,19 +217,19 @@ mod non_utf8_single_file_identity {
     use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 single-file input should be a File infrastructure error"
         );
         assert!(
-            message.contains("UTF-8"),
-            "error message should mention UTF-8: {message}"
+            error.msg.contains("UTF-8"),
+            "error message should mention UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -301,19 +302,19 @@ mod non_utf8_windows_single_file_identity {
     use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "unpaired-wide single-file input should be a File infrastructure error"
         );
         assert!(
-            message.contains("UTF-8"),
-            "error message should mention UTF-8: {message}"
+            error.msg.contains("UTF-8"),
+            "error message should mention UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -487,14 +488,14 @@ mod source_package_boundary_indexes_tests {
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("nonexistent root should fail canonicalization");
         let messages = failure.into_messages(&string_table);
-
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
-        assert_eq!(*error_type, ErrorType::File);
+        assert_eq!(error.error_type, ErrorType::File);
         assert!(
-            message.contains("canonicalize"),
-            "error message should mention canonicalization: {message}"
+            error.msg.contains("canonicalize"),
+            "error message should mention canonicalization: {}",
+            error.msg,
         );
     }
 
@@ -612,11 +613,10 @@ mod source_package_boundary_indexes_tests {
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("unreadable package root should fail boundary indexing");
         let messages = failure.into_messages(&string_table);
-
-        let (error_type, _message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
-        assert_eq!(*error_type, ErrorType::File);
+        assert_eq!(error.error_type, ErrorType::File);
 
         // Restore permissions so cleanup can remove the directory.
         fs::set_permissions(&package_root, fs::Permissions::from_mode(0o755))
@@ -746,17 +746,18 @@ mod non_utf8_package_boundary_candidate_tests {
     use std::path::PathBuf;
 
     fn assert_non_utf8_file_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 package boundary candidate should be a File infrastructure error"
         );
         assert!(
-            message.contains("Non-UTF-8"),
-            "error message should mention non-UTF-8: {message}"
+            error.msg.contains("Non-UTF-8"),
+            "error message should mention non-UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -1267,21 +1268,21 @@ mod module_identity_tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755))
             .expect("should restore permissions");
     }
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
         use crate::compiler_frontend::compiler_errors::ErrorType;
 
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "project root read failure should be a File infrastructure error"
         );
         assert!(
-            message.contains(expected_text),
-            "error message should mention {expected_text:?}: {message}"
+            error.msg.contains(expected_text),
+            "error message should mention {expected_text:?}: {}",
+            error.msg,
         );
     }
 

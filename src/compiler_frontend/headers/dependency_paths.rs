@@ -6,23 +6,23 @@
 //! normalisation transform exists, the retained path is the validated authored path.
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 pub(super) fn validate_dependency_path(
     dependency_path: &InternedPath,
-    path_location: &SourceLocation,
+    path_span: &SourceSpan,
     string_table: &StringTable,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), CompilerDiagnostic> {
     // Exact `@/` is represented by an empty canonical path row. A dependency must name a provider
     // beneath the owning module root, so the site root is rejected under its own reason.
     if dependency_path.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_import_path(
+        return Err(CompilerDiagnostic::invalid_import_path(
             dependency_path.to_owned(),
             InvalidImportPathReason::PublicRoot,
-            path_location.clone(),
-        )));
+            Some(*path_span),
+        ));
     }
 
     if dependency_path
@@ -30,10 +30,10 @@ pub(super) fn validate_dependency_path(
         .iter()
         .any(|component| string_table.resolve(*component).ends_with(".moth"))
     {
-        return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
+        return Err(CompilerDiagnostic::explicit_moth_extension(
             dependency_path.to_owned(),
-            path_location.clone(),
-        )));
+            Some(*path_span),
+        ));
     }
 
     if dependency_path
@@ -41,11 +41,11 @@ pub(super) fn validate_dependency_path(
         .iter()
         .any(|component| string_table.resolve(*component) == "..")
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_import_path(
+        return Err(CompilerDiagnostic::invalid_import_path(
             dependency_path.to_owned(),
             InvalidImportPathReason::ParentDirectorySegment,
-            path_location.clone(),
-        )));
+            Some(*path_span),
+        ));
     }
 
     let mut dependency_components = dependency_path.as_components().iter().copied();
@@ -55,11 +55,11 @@ pub(super) fn validate_dependency_path(
 
     let first_segment = string_table.resolve(first);
     if first_segment == "." {
-        return Err(Box::new(CompilerDiagnostic::invalid_import_path(
+        return Err(CompilerDiagnostic::invalid_import_path(
             dependency_path.to_owned(),
             InvalidImportPathReason::CurrentDirectorySegment,
-            path_location.clone(),
-        )));
+            Some(*path_span),
+        ));
     }
 
     Ok(())

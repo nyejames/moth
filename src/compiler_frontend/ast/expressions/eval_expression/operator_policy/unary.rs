@@ -6,10 +6,10 @@
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticOperator};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Resolve the result type of a unary operator application.
 ///
@@ -19,7 +19,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 pub(super) fn resolve_unary_operator_type(
     op: &Operator,
     operand: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
     match op {
@@ -33,7 +33,7 @@ pub(super) fn resolve_unary_operator_type(
                     DiagnosticOperator::Not,
                     operand,
                     None,
-                    location.clone(),
+                    span,
                 )
                 .into())
             }

@@ -28,7 +28,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
 };
@@ -1084,7 +1083,7 @@ fn successful_build_with_warnings_exposes_warning_messages() {
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
         DiagnosticSeverity::Warning,
-        SourceLocation::default(),
+        None,
         DiagnosticPayload::UnusedName { name },
     );
 

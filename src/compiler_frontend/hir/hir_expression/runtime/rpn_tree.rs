@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::RuntimeRpnTree;
@@ -19,7 +19,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn build_runtime_rpn_tree(
         &self,
         rpn: &ExpressionRpn,
-        location: &SourceLocation,
+        source_span: &Option<SourceSpan>,
     ) -> Result<RuntimeRpnTree, CompilerError> {
         let mut stack: Vec<RuntimeRpnTree> = Vec::with_capacity(rpn.items.len());
 
@@ -27,21 +27,19 @@ impl<'a> HirBuilder<'a> {
             match item {
                 ExpressionRpnItem::Operator {
                     operator,
-                    location: operator_location,
                     span: operator_span,
                 } => match operator.required_values() {
                     1 => {
                         let Some(operand) = stack.pop() else {
                             return_hir_transformation_error!(
                                 format!("RPN stack underflow for unary operator {:?}", operator),
-                                self.hir_error_location(operator_location)
+                                self.hir_error_location(operator_span)
                             );
                         };
 
                         stack.push(RuntimeRpnTree::Unary {
                             op: operator.to_owned(),
                             operand: Box::new(operand),
-                            location: operator_location.clone(),
                             span: *operator_span,
                         });
                     }
@@ -52,7 +50,7 @@ impl<'a> HirBuilder<'a> {
                                     "RPN stack underflow for operator {:?} (missing rhs)",
                                     operator
                                 ),
-                                self.hir_error_location(operator_location)
+                                self.hir_error_location(operator_span)
                             );
                         };
                         let Some(left) = stack.pop() else {
@@ -61,7 +59,7 @@ impl<'a> HirBuilder<'a> {
                                     "RPN stack underflow for operator {:?} (missing lhs)",
                                     operator
                                 ),
-                                self.hir_error_location(operator_location)
+                                self.hir_error_location(operator_span)
                             );
                         };
 
@@ -69,14 +67,13 @@ impl<'a> HirBuilder<'a> {
                             left: Box::new(left),
                             op: operator.to_owned(),
                             right: Box::new(right),
-                            location: operator_location.clone(),
                             span: *operator_span,
                         });
                     }
                     _ => {
                         return_hir_transformation_error!(
                             format!("Unsupported operator arity for {:?}", operator),
-                            self.hir_error_location(operator_location)
+                            self.hir_error_location(operator_span)
                         );
                     }
                 },
@@ -92,14 +89,14 @@ impl<'a> HirBuilder<'a> {
                     "Malformed runtime RPN expression: expected one value on stack, got {}",
                     stack.len()
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(source_span)
             );
         }
 
         let Some(tree) = stack.pop() else {
             return_hir_transformation_error!(
                 "Malformed runtime RPN expression: validated stack unexpectedly empty",
-                self.hir_error_location(location)
+                self.hir_error_location(source_span)
             );
         };
 

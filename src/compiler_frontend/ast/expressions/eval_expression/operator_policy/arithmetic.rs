@@ -8,15 +8,15 @@ use super::diagnostics::invalid_operator_types;
 use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 pub(super) fn resolve_arithmetic_operator_type(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
     let builtins = type_environment.builtins();
@@ -39,7 +39,7 @@ pub(super) fn resolve_arithmetic_operator_type(
                 // Range construction is only valid between two Int operands.
                 Operator::Range => Ok(builtins.range),
 
-                _ => invalid_operator_types(lhs, rhs, op, location),
+                _ => invalid_operator_types(lhs, rhs, op, span),
             };
         }
 
@@ -52,7 +52,7 @@ pub(super) fn resolve_arithmetic_operator_type(
                 | Operator::Modulus
                 | Operator::Exponent => Ok(builtins.float),
 
-                _ => invalid_operator_types(lhs, rhs, op, location),
+                _ => invalid_operator_types(lhs, rhs, op, span),
             };
         }
     }
@@ -68,9 +68,9 @@ pub(super) fn resolve_arithmetic_operator_type(
             | Operator::Modulus
             | Operator::Exponent => Ok(builtins.float),
 
-            _ => invalid_operator_types(lhs, rhs, op, location),
+            _ => invalid_operator_types(lhs, rhs, op, span),
         };
     }
 
-    invalid_operator_types(lhs, rhs, op, location)
+    invalid_operator_types(lhs, rhs, op, span)
 }

@@ -3,7 +3,9 @@
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::TypeResolutionResult;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticPayload, InvalidDeclarationReason,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
@@ -16,7 +18,6 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 // ----------------------------
@@ -41,7 +42,7 @@ pub(crate) fn build_generic_parameter_scope(
     let GenericParameterScopeBuildInput {
         generic_parameters,
         canonical_by_local,
-        source_id,
+        source_id: _source_id,
         visible_source_bindings,
         visible_type_aliases,
         visible_external_symbols,
@@ -76,19 +77,31 @@ pub(crate) fn build_generic_parameter_scope(
         string_table,
         "AST Construction",
     )
-    .map(Some)
     .map_err(|mut diagnostic| {
+        let parameter_name = match &diagnostic.payload {
+            DiagnosticPayload::InvalidDeclaration {
+                reason:
+                    InvalidDeclarationReason::InvalidGenericParameterName { parameter_name }
+                    | InvalidDeclarationReason::DuplicateGenericParameter { parameter_name }
+                    | InvalidDeclarationReason::GenericParameterNameCollision { parameter_name }
+                    | InvalidDeclarationReason::ReservedGenericParameterName { parameter_name },
+                ..
+            } => Some(*parameter_name),
+            _ => None,
+        };
+
         if diagnostic.primary_span.is_none()
-            && let Some(source) = source_id
+            && let Some(parameter_name) = parameter_name
             && let Some(parameter) = generic_parameters
                 .parameters
                 .iter()
-                .find(|parameter| parameter.location == diagnostic.primary_location)
+                .find(|parameter| parameter.name == parameter_name)
         {
-            diagnostic.primary_span = Some(SourceSpan::new(source, parameter.span));
+            diagnostic.primary_span = parameter.span;
         }
         diagnostic
     })
+    .map(Some)
 }
 
 fn path_is_visible_type(
@@ -117,17 +130,17 @@ pub(crate) fn validate_generic_parameters_used(
     generic_parameters: &GenericParameterList,
     used_parameters: &FxHashSet<TypeParameterId>,
     declaration_path: &InternedPath,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> TypeResolutionResult<()> {
     for parameter in &generic_parameters.parameters {
         if !used_parameters.contains(&parameter.id) {
-            return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+            return Err(CompilerDiagnostic::invalid_declaration(
                 InvalidDeclarationReason::UnusedGenericParameter {
                     parameter_name: parameter.name,
                 },
                 declaration_path.name(),
-                location.to_owned(),
-            )));
+                span,
+            ));
         }
     }
 

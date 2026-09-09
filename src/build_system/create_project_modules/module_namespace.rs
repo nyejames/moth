@@ -27,7 +27,6 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -35,7 +34,7 @@ use crate::compiler_frontend::paths::path_normalization::{
     dependency_contains_dotdot, is_relative_dependency_path,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
@@ -251,16 +250,12 @@ impl<'a> DirectoryDependencyResolution<'a> {
         self,
         provider_path: &InternedPath,
         declaring_canonical_path: &Path,
-        dependency_location: &SourceLocation,
-        dependency_source: SourceId,
-        dependency_span: LocalSpan,
+        dependency_span: Option<SourceSpan>,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
         self.namespace_set.resolve_provider_target(
             provider_path,
             declaring_canonical_path,
-            dependency_location,
-            dependency_source,
             dependency_span,
             self.source_tree_index,
             string_table,
@@ -336,13 +331,6 @@ impl ModuleNamespaceSet {
             package_prefix,
             string_table,
         )
-        .map_err(|diagnostic| {
-            with_dependency_span(
-                diagnostic,
-                provider.dependency_shell_id.source,
-                provider.span,
-            )
-        })
     }
 
     fn resolve_dependency_unspanned(
@@ -355,26 +343,23 @@ impl ModuleNamespaceSet {
         string_table: &mut StringTable,
     ) -> Result<ResolvedDependency, CompilerDiagnostic> {
         let dependency_path = &provider.path;
-        let dependency_location = &provider.location;
-        reject_invalid_path_components(dependency_path, dependency_location, string_table)?;
+        let dependency_span = Some(provider.span);
+        reject_invalid_path_components(dependency_path, dependency_span, string_table)?;
         reject_direct_special_file_dependency(provider, string_table)?;
-        reject_explicit_source_extension(dependency_path, dependency_location, string_table)?;
+        reject_explicit_source_extension(dependency_path, dependency_span, string_table)?;
 
         let prefix_components = provider.path.as_components();
         let source_index = source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
             .ok_or_else(|| {
-                CompilerDiagnostic::missing_import_target(
-                    dependency_path.clone(),
-                    dependency_location.clone(),
-                )
+                CompilerDiagnostic::missing_import_target(dependency_path.clone(), dependency_span)
             })?;
         let SourceOwnership::Owned(consumer_module_id) =
             source_tree_index.source(source_index).ownership()
         else {
             return Err(CompilerDiagnostic::missing_import_target(
                 dependency_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         };
         let namespace = match boundary {
@@ -394,7 +379,7 @@ impl ModuleNamespaceSet {
         if namespace.is_ambiguous(&key) {
             return Err(CompilerDiagnostic::ambiguous_import_target(
                 dependency_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
 
@@ -404,7 +389,7 @@ impl ModuleNamespaceSet {
         if source_package_surface.is_some() && binding_package_prefix.is_some() {
             return Err(CompilerDiagnostic::ambiguous_import_target(
                 dependency_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
 
@@ -412,7 +397,7 @@ impl ModuleNamespaceSet {
             if namespace_conflicts_with_package_prefix(namespace, binding_prefix) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
                     dependency_path.clone(),
-                    dependency_location.clone(),
+                    dependency_span,
                 ));
             }
 
@@ -423,7 +408,7 @@ impl ModuleNamespaceSet {
             if namespace_conflicts_with_package_prefix(namespace, &key) {
                 return Err(CompilerDiagnostic::ambiguous_import_target(
                     dependency_path.clone(),
-                    dependency_location.clone(),
+                    dependency_span,
                 ));
             }
 
@@ -438,7 +423,7 @@ impl ModuleNamespaceSet {
         if self.is_source_package_private_path(&key) {
             return Err(CompilerDiagnostic::cross_module_import_not_exported(
                 dependency_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
 
@@ -448,7 +433,7 @@ impl ModuleNamespaceSet {
                 index,
                 consumer_module_id,
                 dependency_path,
-                dependency_location,
+                dependency_span,
                 string_table,
             );
         }
@@ -456,13 +441,13 @@ impl ModuleNamespaceSet {
         if find_module_bypass_prefix(&namespace.entries, &key).is_some() {
             return Err(CompilerDiagnostic::cross_module_import_not_exported(
                 dependency_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
 
         Err(CompilerDiagnostic::missing_import_target(
             dependency_path.clone(),
-            dependency_location.clone(),
+            dependency_span,
         ))
     }
 
@@ -492,27 +477,24 @@ impl ModuleNamespaceSet {
         &self,
         provider_path: &InternedPath,
         declaring_canonical_path: &Path,
-        dependency_location: &SourceLocation,
-        dependency_source: SourceId,
-        dependency_span: LocalSpan,
+        dependency_span: Option<SourceSpan>,
         project_source_tree_index: &SourceTreeIndex,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
         self.resolve_provider_target_unspanned(
             provider_path,
             declaring_canonical_path,
-            dependency_location,
+            dependency_span,
             project_source_tree_index,
             string_table,
         )
-        .map_err(|diagnostic| with_dependency_span(diagnostic, dependency_source, dependency_span))
     }
 
     fn resolve_provider_target_unspanned(
         &self,
         provider_path: &InternedPath,
         declaring_canonical_path: &Path,
-        dependency_location: &SourceLocation,
+        dependency_span: Option<SourceSpan>,
         project_source_tree_index: &SourceTreeIndex,
         string_table: &mut StringTable,
     ) -> Result<PathBuf, CompilerDiagnostic> {
@@ -520,7 +502,7 @@ impl ModuleNamespaceSet {
             return Err(CompilerDiagnostic::invalid_import_path(
                 provider_path.clone(),
                 InvalidImportPathReason::ParentDirectorySegment,
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
         let (namespace, index) = match project_source_tree_index
@@ -531,7 +513,7 @@ impl ModuleNamespaceSet {
                 let SourceOwnership::Owned(module_id) = consumer_record.ownership() else {
                     return Err(CompilerDiagnostic::missing_import_target(
                         provider_path.clone(),
-                        dependency_location.clone(),
+                        dependency_span,
                     ));
                 };
                 (
@@ -545,7 +527,7 @@ impl ModuleNamespaceSet {
                     .ok_or_else(|| {
                         CompilerDiagnostic::missing_import_target(
                             provider_path.clone(),
-                            dependency_location.clone(),
+                            dependency_span,
                         )
                     })?;
                 let namespaces = self
@@ -563,7 +545,7 @@ impl ModuleNamespaceSet {
         if namespace.is_ambiguous(&key) {
             return Err(CompilerDiagnostic::ambiguous_import_target(
                 provider_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             ));
         }
 
@@ -575,18 +557,18 @@ impl ModuleNamespaceSet {
             | Some(NamespaceEntry::SameModuleSource { .. }) => {
                 Err(CompilerDiagnostic::cross_module_import_not_exported(
                     provider_path.clone(),
-                    dependency_location.clone(),
+                    dependency_span,
                 ))
             }
             None if find_module_bypass_prefix(&namespace.entries, &key).is_some() => {
                 Err(CompilerDiagnostic::cross_module_import_not_exported(
                     provider_path.clone(),
-                    dependency_location.clone(),
+                    dependency_span,
                 ))
             }
             None => Err(CompilerDiagnostic::missing_import_target(
                 provider_path.clone(),
-                dependency_location.clone(),
+                dependency_span,
             )),
         }
     }
@@ -867,20 +849,6 @@ fn support_package_key(identities: &ModuleIdentityTable, support_id: ModuleId) -
 // Dependency resolution helpers
 // ---------------------------------------------------------------------------
 
-/// Attach the retained dependency path's exact source-owned span to one direct user diagnostic.
-///
-/// The legacy `SourceLocation` remains the diagnostic's display and compatibility range during
-/// the interval bridge. The retained path's shell source ID and local span are the authoritative
-/// byte range for namespace and provider-target failures.
-fn with_dependency_span(
-    mut diagnostic: CompilerDiagnostic,
-    source: SourceId,
-    span: LocalSpan,
-) -> CompilerDiagnostic {
-    diagnostic.primary_span = Some(SourceSpan::new(source, span));
-    diagnostic
-}
-
 /// Resolve a namespace entry to a `ResolvedDependency`, looking up the canonical path and root file
 /// from the owning boundary's `SourceTreeIndex`.
 ///
@@ -893,7 +861,7 @@ fn resolve_entry(
     index: &SourceTreeIndex,
     consumer_module_id: ModuleId,
     dependency_path: &InternedPath,
-    dependency_location: &SourceLocation,
+    dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<ResolvedDependency, CompilerDiagnostic> {
     match entry {
@@ -907,7 +875,7 @@ fn resolve_entry(
                 return Err(CompilerDiagnostic::unsupported_source_file_kind(
                     dependency_path.clone(),
                     extension_id,
-                    dependency_location.clone(),
+                    dependency_span,
                 ));
             }
             Ok(ResolvedDependency::SameModuleSource {
@@ -929,12 +897,9 @@ fn resolve_entry(
                 root_file,
             })
         }
-        NamespaceEntry::SameModuleProvider { .. } => {
-            Err(CompilerDiagnostic::missing_import_target(
-                dependency_path.clone(),
-                dependency_location.clone(),
-            ))
-        }
+        NamespaceEntry::SameModuleProvider { .. } => Err(
+            CompilerDiagnostic::missing_import_target(dependency_path.clone(), dependency_span),
+        ),
     }
 }
 
@@ -948,7 +913,7 @@ fn reject_direct_special_file_dependency(
     {
         return Err(CompilerDiagnostic::direct_special_file_import(
             provider.path.clone(),
-            provider.location.clone(),
+            Some(provider.span),
         ));
     }
 
@@ -958,21 +923,21 @@ fn reject_direct_special_file_dependency(
 /// Reject path components that cannot participate in a module-root-relative dependency.
 fn reject_invalid_path_components(
     dependency_path: &InternedPath,
-    dependency_location: &SourceLocation,
+    dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
     if dependency_contains_dotdot(dependency_path, string_table) {
         return Err(CompilerDiagnostic::invalid_import_path(
             dependency_path.clone(),
             InvalidImportPathReason::ParentDirectorySegment,
-            dependency_location.clone(),
+            dependency_span,
         ));
     }
 
     if is_relative_dependency_path(dependency_path, string_table) {
         return Err(CompilerDiagnostic::bare_file_import(
             dependency_path.clone(),
-            dependency_location.clone(),
+            dependency_span,
         ));
     }
 
@@ -982,21 +947,18 @@ fn reject_invalid_path_components(
 /// Reject explicit compiler-semantic source extensions after direct special files are classified.
 fn reject_explicit_source_extension(
     dependency_path: &InternedPath,
-    dependency_location: &SourceLocation,
+    dependency_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
     if let Some(extension) = explicit_source_extension(dependency_path, string_table) {
         let diagnostic = if extension == SourceFileKind::Moth.extension() {
-            CompilerDiagnostic::explicit_moth_extension(
-                dependency_path.clone(),
-                dependency_location.clone(),
-            )
+            CompilerDiagnostic::explicit_moth_extension(dependency_path.clone(), dependency_span)
         } else {
             let extension_id = string_table.intern(&extension);
             CompilerDiagnostic::explicit_source_extension(
                 dependency_path.clone(),
                 extension_id,
-                dependency_location.clone(),
+                dependency_span,
             )
         };
         return Err(diagnostic);

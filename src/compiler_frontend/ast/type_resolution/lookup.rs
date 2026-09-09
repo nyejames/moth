@@ -47,9 +47,10 @@ use crate::compiler_frontend::headers::binding_environment::{
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ use std::sync::Arc;
 ///      priority order between parameters, aliases, declarations, and builtins explicit.
 pub(super) fn resolve_named_type_from_context(
     type_name: StringId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<DataType> {
@@ -91,10 +92,6 @@ pub(super) fn resolve_named_type_from_context(
     }
 
     // 2) Visible type aliases.
-    //
-    // Reuse the alias module's lookup helper so the same visibility rules apply here and in
-    // parsed-ref alias expansion. Aliases are resolved before they are stored, so the cached
-    // diagnostic spelling is already the expanded target.
     if let Some(annotation) = aliases::visible_type_alias_annotation(type_name, context) {
         return Ok(annotation.diagnostic_type.clone());
     }
@@ -109,7 +106,7 @@ pub(super) fn resolve_named_type_from_context(
             canonical_path,
         )
     {
-        reject_bare_generic_type_name(type_name, canonical_path, location, context)?;
+        reject_bare_generic_type_name(type_name, canonical_path, span, context)?;
         return Ok(declaration.value.diagnostic_type.to_owned());
     }
 
@@ -118,7 +115,7 @@ pub(super) fn resolve_named_type_from_context(
         context.visible_declaration_ids,
         type_name,
     ) {
-        reject_bare_generic_type_name(type_name, &declaration.id, location, context)?;
+        reject_bare_generic_type_name(type_name, &declaration.id, span, context)?;
         return Ok(declaration.value.diagnostic_type.to_owned());
     }
 
@@ -132,10 +129,9 @@ pub(super) fn resolve_named_type_from_context(
     // 5) Traits are static contracts. They are valid in trait declarations,
     // conformances, and generic bounds, but never as ordinary value types.
     if let Some(trait_name) = visible_static_trait_name(type_name, context, string_table) {
-        return Err(Box::new(CompilerDiagnostic::trait_name_used_as_type(
-            trait_name,
-            location.clone(),
-        )));
+        return Err(CompilerDiagnostic::trait_name_used_as_type(
+            trait_name, span,
+        ));
     }
 
     // 6) Builtin type names that may still appear as named placeholders.
@@ -143,10 +139,7 @@ pub(super) fn resolve_named_type_from_context(
         return Ok(builtin_type);
     }
 
-    Err(Box::new(CompilerDiagnostic::unknown_type_name(
-        type_name,
-        location.to_owned(),
-    )))
+    Err(CompilerDiagnostic::unknown_type_name(type_name, span))
 }
 
 /// Find a visible trait name matching the supplied identifier.
@@ -186,44 +179,37 @@ fn visible_static_trait_name(
 ///      need explicit handling for the "value used as type" error shape.
 pub(super) fn resolve_namespaced_type_from_context(
     path: &[StringId],
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<DataType> {
     increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     let Some(root_name) = path.first().copied() else {
-        return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
+        return Err(CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: TokenKind::Eof,
+                found: TokenKind::Eof.into(),
             },
-            location.to_owned(),
-        )));
+            span,
+        ));
     };
     let final_name = path.last().copied().unwrap_or(root_name);
 
     let Some(visible_namespace_records) = context.visible_namespace_records else {
-        return Err(Box::new(CompilerDiagnostic::unknown_type_name(
-            final_name,
-            location.to_owned(),
-        )));
+        return Err(CompilerDiagnostic::unknown_type_name(final_name, span));
     };
 
     let Some(record) = visible_namespace_records.get(&root_name) else {
-        return Err(Box::new(CompilerDiagnostic::unknown_type_name(
-            final_name,
-            location.to_owned(),
-        )));
+        return Err(CompilerDiagnostic::unknown_type_name(final_name, span));
     };
 
     // Source and module public-surface namespace records remain shallow. Any attempt to traverse
     // deeper than one member in such a record must keep reporting the existing nested
     // traversal diagnostic, which integration fixtures already assert.
     if path.len() > 2 && matches!(record.record_source, NamespaceRecordSource::SourceFile(_)) {
-        return Err(Box::new(CompilerDiagnostic::nested_dependency_traversal(
-            root_name,
-            location.to_owned(),
-        )));
+        return Err(CompilerDiagnostic::nested_dependency_traversal(
+            root_name, span,
+        ));
     }
 
     let mut current_record = record;
@@ -236,26 +222,23 @@ pub(super) fn resolve_namespaced_type_from_context(
                 current_record = child_record;
             }
             NamespaceMemberLookup::Value(_) => {
-                return Err(Box::new(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(CompilerDiagnostic::namespace_type_value_misuse(
                     *segment,
                     NamespaceTypeValueMisuseKind::Namespace,
                     NamespaceTypeValueMisuseKind::Value,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
             NamespaceMemberLookup::Type => {
-                return Err(Box::new(CompilerDiagnostic::namespace_type_value_misuse(
+                return Err(CompilerDiagnostic::namespace_type_value_misuse(
                     *segment,
                     NamespaceTypeValueMisuseKind::Namespace,
                     NamespaceTypeValueMisuseKind::Type,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
             NamespaceMemberLookup::Missing => {
-                return Err(Box::new(CompilerDiagnostic::unknown_type_name(
-                    *segment,
-                    location.to_owned(),
-                )));
+                return Err(CompilerDiagnostic::unknown_type_name(*segment, span));
             }
         }
     }
@@ -267,38 +250,32 @@ pub(super) fn resolve_namespaced_type_from_context(
             if let Some(declaration) =
                 resolve_declaration_by_path(context.declaration_table, None, canonical_path)
             {
-                reject_bare_generic_type_name(final_name, &declaration.id, location, context)?;
+                reject_bare_generic_type_name(final_name, &declaration.id, span, context)?;
                 return Ok(declaration.value.diagnostic_type.to_owned());
             }
-            Err(Box::new(CompilerDiagnostic::unknown_type_name(
-                final_name,
-                location.to_owned(),
-            )))
+            Err(CompilerDiagnostic::unknown_type_name(final_name, span))
         }
         Some(NamespaceTypeMember::ExternalSymbol(ExternalSymbolId::Type(type_id))) => {
             Ok(DataType::External { type_id: *type_id })
         }
         _ => match lookup_namespace_member(current_record, final_name) {
             NamespaceMemberLookup::Value(_) => {
-                Err(Box::new(CompilerDiagnostic::namespace_type_value_misuse(
+                Err(CompilerDiagnostic::namespace_type_value_misuse(
                     final_name,
                     NamespaceTypeValueMisuseKind::Type,
                     NamespaceTypeValueMisuseKind::Value,
-                    location.to_owned(),
-                )))
+                    span,
+                ))
             }
             NamespaceMemberLookup::ChildNamespace(_) => {
-                Err(Box::new(CompilerDiagnostic::namespace_type_value_misuse(
+                Err(CompilerDiagnostic::namespace_type_value_misuse(
                     final_name,
                     NamespaceTypeValueMisuseKind::Type,
                     NamespaceTypeValueMisuseKind::Namespace,
-                    location.to_owned(),
-                )))
+                    span,
+                ))
             }
-            _ => Err(Box::new(CompilerDiagnostic::unknown_type_name(
-                final_name,
-                location.to_owned(),
-            ))),
+            _ => Err(CompilerDiagnostic::unknown_type_name(final_name, span)),
         },
     }
 }
@@ -313,29 +290,29 @@ pub(super) fn resolve_namespaced_type_from_context(
 pub(super) fn resolve_generic_base_type(
     base: &GenericBaseType,
     arguments: &[DataType],
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<GenericBaseType> {
     match base {
         GenericBaseType::Named(type_name) => {
             if let Some(reason) = invalid_carrier_type_syntax(*type_name, string_table) {
-                return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+                return Err(CompilerDiagnostic::invalid_generic_instantiation(
                     Some(*type_name),
                     reason,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
 
             if let Some(generic_scope) = context.generic_parameters
                 && generic_scope.contains_name(*type_name)
             {
-                return Err(Box::new(CompilerDiagnostic::namespace_misuse(
+                return Err(CompilerDiagnostic::namespace_misuse(
                     *type_name,
                     NameNamespace::Type,
                     NameNamespace::Value,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
 
             if let Some(visible_source_bindings) = context.visible_source_bindings
@@ -345,7 +322,7 @@ pub(super) fn resolve_generic_base_type(
                     Some(*type_name),
                     canonical_path,
                     arguments,
-                    location,
+                    span,
                     context,
                 );
             }
@@ -359,26 +336,25 @@ pub(super) fn resolve_generic_base_type(
                     Some(*type_name),
                     &declaration.id,
                     arguments,
-                    location,
+                    span,
                     context,
                 );
             }
 
             if let Some(trait_name) = visible_static_trait_name(*type_name, context, string_table) {
-                return Err(Box::new(CompilerDiagnostic::trait_name_used_as_type(
-                    trait_name,
-                    location.clone(),
-                )));
+                return Err(CompilerDiagnostic::trait_name_used_as_type(
+                    trait_name, span,
+                ));
             }
 
             if let Some(visible_aliases) = context.visible_type_aliases
                 && visible_aliases.contains_key(type_name)
             {
-                return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+                return Err(CompilerDiagnostic::invalid_generic_instantiation(
                     Some(*type_name),
                     InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
 
             if let Some(external_symbols) = context.visible_external_symbols
@@ -387,37 +363,32 @@ pub(super) fn resolve_generic_base_type(
                     Some(ExternalSymbolId::Type(_))
                 )
             {
-                return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+                return Err(CompilerDiagnostic::invalid_generic_instantiation(
                     Some(*type_name),
                     InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
 
             if builtin_named_type(*type_name, string_table).is_some() {
-                return Err(Box::new(CompilerDiagnostic::namespace_misuse(
+                return Err(CompilerDiagnostic::namespace_misuse(
                     *type_name,
                     NameNamespace::Type,
                     NameNamespace::Value,
-                    location.to_owned(),
-                )));
+                    span,
+                ));
             }
 
-            Err(Box::new(CompilerDiagnostic::unknown_type_name(
-                *type_name,
-                location.to_owned(),
-            )))
+            Err(CompilerDiagnostic::unknown_type_name(*type_name, span))
         }
         GenericBaseType::ResolvedNominal(path) => {
-            resolve_generic_base_path(path.name(), path, arguments, location, context)
+            resolve_generic_base_path(path.name(), path, arguments, span, context)
         }
-        GenericBaseType::External(_) => {
-            Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
-                None,
-                InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported,
-                location.to_owned(),
-            )))
-        }
+        GenericBaseType::External(_) => Err(CompilerDiagnostic::invalid_generic_instantiation(
+            None,
+            InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported,
+            span,
+        )),
         GenericBaseType::Builtin(BuiltinGenericType::Collection { fixed_capacity }) => {
             // Collection is the only builtin generic type allowed in source.
             // Its arguments are resolved separately by resolve_type.
@@ -457,7 +428,7 @@ fn invalid_carrier_type_syntax(
 fn reject_bare_generic_type_name(
     visible_name: StringId,
     canonical_path: &InternedPath,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<()> {
     let Some(kind) = context
@@ -471,17 +442,15 @@ fn reject_bare_generic_type_name(
         kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
-        return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(CompilerDiagnostic::invalid_generic_instantiation(
             Some(visible_name),
             InvalidGenericInstantiationReason::MissingTypeArguments,
-            location.to_owned(),
-        )));
+            span,
+        ));
     }
 
     Ok(())
 }
-
-/// Resolve a generic base path to a declared generic struct or choice.
 ///
 /// WHAT: checks that the canonical path names a generic struct/choice and that the argument count
 ///       matches the declaration-site parameter count, then returns `ResolvedNominal`.
@@ -491,29 +460,29 @@ fn resolve_generic_base_path(
     visible_name: Option<StringId>,
     canonical_path: &InternedPath,
     arguments: &[DataType],
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<GenericBaseType> {
     let Some(kind) = context
         .generic_declarations_by_path
         .and_then(|generic_declarations| generic_declarations.get(canonical_path))
     else {
-        return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(CompilerDiagnostic::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
-            location.to_owned(),
-        )));
+            span,
+        ));
     };
 
     if !matches!(
         kind,
         GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
     ) {
-        return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(CompilerDiagnostic::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments,
-            location.to_owned(),
-        )));
+            span,
+        ));
     }
 
     let expected = context
@@ -523,14 +492,14 @@ fn resolve_generic_base_path(
         .len();
     let actual = arguments.len();
     if actual != expected {
-        return Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+        return Err(CompilerDiagnostic::invalid_generic_instantiation(
             visible_name,
             InvalidGenericInstantiationReason::WrongArgumentCount {
                 expected,
                 found: actual,
             },
-            location.to_owned(),
-        )));
+            span,
+        ));
     }
 
     Ok(GenericBaseType::ResolvedNominal(canonical_path.to_owned()))

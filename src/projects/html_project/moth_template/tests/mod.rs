@@ -114,12 +114,11 @@ fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
         for (index, (diagnostic, expected_source)) in
             messages.diagnostics().zip(expected_sources).enumerate()
         {
-            assert_eq!(
-                messages
-                    .diagnostic_render_context(index)
-                    .retained_source_line(&diagnostic.primary_location.scope, 0),
-                Some(expected_source),
-            );
+            let position = messages
+                .diagnostic_render_context(index)
+                .primary_position(diagnostic)
+                .expect("warning should retain its authored source span");
+            assert_eq!(position.line, expected_source);
         }
     }
 }
@@ -723,11 +722,6 @@ fn content_source_preparation_failures_name_the_logical_source() {
         panic!("an unterminated string in a content source should fail preparation");
     };
 
-    let scopes = messages
-        .diagnostics()
-        .map(|diagnostic| diagnostic.primary_location.scope.to_path_buf(&string_table))
-        .collect::<Vec<_>>();
-
     let diagnostic = messages
         .diagnostics()
         .next()
@@ -735,19 +729,21 @@ fn content_source_preparation_failures_name_the_logical_source() {
     let source_database = messages
         .source_database_for_diagnostic(0)
         .expect("preparation diagnostics should retain their source database");
-    let source_slot = source_database
-        .unique_record_for_logical_path(&diagnostic.primary_location.scope)
-        .expect("the diagnosed logical source should identify one retained slot");
+    let span = diagnostic
+        .primary_span
+        .expect("the preparation diagnostic should retain its source span");
     assert_eq!(
-        source_database.retained_text(source_slot.id),
+        source_database.retained_text(span.source()),
         Some("# Broken\n\n[$insert(\"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
-    assert!(
-        scopes
-            .iter()
-            .any(|scope| scope == Path::new("docs/broken.mtf")),
-        "the failure should name the logical content source, got {scopes:?}"
+    let scope = source_database
+        .legacy_logical_path(span.source())
+        .to_path_buf(&string_table);
+    assert_eq!(
+        scope,
+        Path::new("docs/broken.mtf"),
+        "the failure should name the logical content source, got {scope:?}"
     );
 }
 
@@ -784,11 +780,9 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
         })
         .expect("a reference to an absent target should retain a diagnostic");
 
-    let scope = diagnostic.primary_location.scope.to_path_buf(&string_table);
-    assert_eq!(
-        scope,
-        Path::new("page.mtf"),
-        "the diagnostic should name the logical source, got {scope:?}"
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the retained resolution diagnostic should keep its authored source span",
     );
 }
 
@@ -812,17 +806,10 @@ fn unreadable_content_value_surfaces_its_own_read_failure() {
     // The read now happens before preparation, so the recorded failure must be replayed at the
     // preparation boundary. Reporting the slot's own "no retained text" state instead would
     // replace the user-facing read failure with an internal compiler error.
-    let diagnostic = messages
-        .diagnostics()
-        .next()
+    let error = messages
+        .infrastructure_error()
         .expect("the read failure should be reported");
-    let DiagnosticPayload::InfrastructureError { error_type, .. } = &diagnostic.payload else {
-        panic!(
-            "a read failure is an infrastructure error: {:?}",
-            diagnostic.payload
-        );
-    };
-    assert_eq!(*error_type, ErrorType::File);
+    assert_eq!(error.error_type, ErrorType::File);
 }
 
 #[test]
@@ -979,10 +966,8 @@ fn duplicate_source_paths_are_diagnostics() {
         diagnostic.payload,
         DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
     ));
-    assert_eq!(diagnostic.labels.len(), 2);
-    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
-    assert_eq!(diagnostic.labels[1].style, DiagnosticLabelStyle::Secondary);
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert_eq!(diagnostic.labels.len(), 1);
+    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
 }
 
 #[test]

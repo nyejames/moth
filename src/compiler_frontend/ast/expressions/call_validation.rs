@@ -16,12 +16,13 @@ use crate::compiler_frontend::ast::expressions::constructor_views::{
 };
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
@@ -33,13 +34,13 @@ use crate::compiler_frontend::type_coercion::compatibility::{
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 
 pub(crate) enum CallValidationError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for CallValidationError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        CallValidationError::Diagnostic(Box::new(diagnostic))
+        CallValidationError::Diagnostic(diagnostic)
     }
 }
 
@@ -263,19 +264,18 @@ pub(crate) fn expectations_from_receiver_method_signature(
 /// WHAT: this is the normalization boundary for defaults, type compatibility and access policy
 ///      after `call_arguments` has selected each argument's declaration-order slot.
 /// WHY: once one caller changes final argument policy, every other call-shaped consumer inherits
-///      it from here without a second syntax-routing implementation.
 pub(crate) fn resolve_call_arguments(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
     expectations: &[ParameterExpectation],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     context: CallArgumentResolutionContext<'_>,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
         args,
         expectations,
-        location,
+        span,
         CallArgumentPolicyContext {
             string_table: context.string_table,
             type_environment: context.type_environment,
@@ -283,7 +283,6 @@ pub(crate) fn resolve_call_arguments(
         },
     )
 }
-
 /// Resolves call arguments through shared shape/default/access rules without
 /// running the ordinary final type-compatibility check.
 ///
@@ -292,13 +291,13 @@ pub(crate) fn resolve_call_arguments(
 /// exact `TypeId` equality is intentionally too strict for the pre-substitution
 /// template parameters.
 /// WHY: the parser owns named/positional routing; this owner consumes those retained slots for
-/// arity, defaults and mutable-access rules while allowing generic-aware validation to supply its
-/// own type evidence.
+/// arity, defaults and mutable-access rules while allowing generic-aware validation to supply
+/// its own type evidence.
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
     expectations: &[ParameterExpectation],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
@@ -306,7 +305,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
         diagnostics,
         args,
         expectations,
-        location,
+        span,
         CallArgumentPolicyContext {
             string_table,
             type_environment,
@@ -319,7 +318,7 @@ fn resolve_call_arguments_with_type_policy(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
     expectations: &[ParameterExpectation],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     context: CallArgumentPolicyContext<'_>,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
     let CallArgumentPolicyContext {
@@ -349,7 +348,7 @@ fn resolve_call_arguments_with_type_policy(
                     defaulted.type_id.0,
                 );
                 resolved[slot] = Some(
-                    CallArgument::positional(defaulted, CallAccessMode::Shared, location.clone())
+                    CallArgument::positional(defaulted, CallAccessMode::Shared, span)
                         .with_parameter_slot(ParameterSlot::new(slot)),
                 );
             } else {
@@ -359,7 +358,7 @@ fn resolve_call_arguments_with_type_policy(
                         parameter_index: slot,
                     },
                     Some(string_table.intern(diagnostics.callee_name)),
-                    location.clone(),
+                    span,
                 )
                 .into());
             }
@@ -381,14 +380,8 @@ fn resolve_call_arguments_with_type_policy(
             return Err(CompilerError::compiler_error(message).into());
         };
 
-        let passing_mode = classify_call_passing_mode(
-            &diagnostics,
-            &argument,
-            expectation,
-            slot,
-            location.clone(),
-            string_table,
-        )?;
+        let passing_mode =
+            classify_call_passing_mode(&diagnostics, &argument, expectation, slot, string_table)?;
 
         if expectation.requires_reactive_source && !argument.value.is_reactive_source() {
             return Err(CompilerDiagnostic::invalid_call_shape(
@@ -397,7 +390,7 @@ fn resolve_call_arguments_with_type_policy(
                     parameter_index: slot,
                 },
                 Some(string_table.intern(diagnostics.callee_name)),
-                argument.location.clone(),
+                argument.span,
             )
             .into());
         }
@@ -440,7 +433,7 @@ fn resolve_call_arguments_with_type_policy(
                 expected_type_id,
                 actual_type_id,
                 mismatch_context,
-                normalized_argument.location.clone(),
+                normalized_argument.span,
             )
             .into());
         }
@@ -462,7 +455,6 @@ fn classify_call_passing_mode(
     argument: &CallArgument,
     expectation: &ParameterExpectation,
     slot_index: usize,
-    _location: SourceLocation,
     string_table: &mut StringTable,
 ) -> Result<CallPassingMode, CallValidationError> {
     let callee_name = Some(string_table.intern(diagnostics.callee_name));
@@ -487,7 +479,7 @@ fn classify_call_passing_mode(
                         binding_name,
                     },
                     callee_name,
-                    argument.location.clone(),
+                    argument.span,
                 )
                 .into())
             }
@@ -498,7 +490,7 @@ fn classify_call_passing_mode(
                     parameter_index: slot_index,
                 },
                 callee_name,
-                argument.location.clone(),
+                argument.span,
             )
             .into()),
         },
@@ -511,7 +503,7 @@ fn classify_call_passing_mode(
                     parameter_index: slot_index,
                 },
                 callee_name,
-                authored_marker_location(argument),
+                authored_marker_span(argument),
             )
             .into())
         }
@@ -527,7 +519,7 @@ fn classify_call_passing_mode(
                     parameter_index: slot_index,
                 },
                 callee_name,
-                authored_marker_location(argument),
+                authored_marker_span(argument),
             )
             .into()),
             // The authored `~` is the call-site source the author wrote, so the primary label
@@ -540,7 +532,7 @@ fn classify_call_passing_mode(
                         binding_name,
                     },
                     callee_name,
-                    authored_marker_location(argument),
+                    authored_marker_span(argument),
                 )
                 .into())
             }
@@ -549,15 +541,12 @@ fn classify_call_passing_mode(
     }
 }
 
-/// Resolve the primary diagnostic location for an argument that authored a `~` marker.
+/// Resolve the primary diagnostic span for an argument that authored a `~` marker.
 ///
-/// WHAT: prefers the authored marker location, falling back to the value expression location.
+/// WHAT: prefers the authored marker span, falling back to the value expression span.
 /// WHY: when `~` was authored, the marker is the call-site source the author must change.
-fn authored_marker_location(argument: &CallArgument) -> SourceLocation {
-    argument
-        .marker_location
-        .clone()
-        .unwrap_or_else(|| argument.location.clone())
+fn authored_marker_span(argument: &CallArgument) -> Option<SourceSpan> {
+    argument.marker_span.or(argument.span)
 }
 
 fn is_call_argument_type_compatible(

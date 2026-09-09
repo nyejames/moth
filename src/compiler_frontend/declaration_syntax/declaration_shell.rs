@@ -20,25 +20,26 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::{
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
-use crate::compiler_frontend::source::LocalSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
-    collect_declaration_initializer_tokens, collect_symbol_references,
+    TokenScanFailure, collect_declaration_initializer_tokens, collect_symbol_references,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
 pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 
-/// Boxed diagnostic result for declaration-shell parsing.
+/// Two-lane result for declaration-shell parsing.
 ///
 /// WHAT: keeps declaration parsing and binding-marker validation on one small
-///       error boundary while preserving the original structured diagnostic.
+///       error boundary while preserving the original structured diagnostic, with
+///       infrastructure failures aborting through the typed lane.
 /// WHY: these connected helpers otherwise carry the large diagnostic value
 ///      through every successful parse. Plain-diagnostic callers unbox once at
 ///      their existing boundary.
-type DeclarationShellResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type DeclarationShellResult<T> = Result<T, HeaderParseFailure>;
 #[derive(Clone, Debug)]
 pub struct DeclarationSyntax {
     pub binding_mode: BindingMode,
@@ -47,8 +48,8 @@ pub struct DeclarationSyntax {
     pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
     pub initializer_tokens: Vec<Token>,
     pub initializer_references: Vec<InitializerReference>,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    /// Exact source-qualified span of the declaration binding anchor.
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -56,10 +57,9 @@ pub struct BindingTargetSyntax {
     pub name: StringId,
     pub binding_mode: BindingMode,
     pub type_annotation: ParsedTypeRef,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    /// Exact source-qualified span of the binding target anchor.
+    pub span: Option<SourceSpan>,
 }
-
 impl DeclarationSyntax {
     pub fn value_mode(&self) -> ValueMode {
         self.binding_mode.value_mode()
@@ -69,10 +69,8 @@ impl DeclarationSyntax {
         self.type_annotation.clone()
     }
 
-    /// Remap type annotation, config qualifier, initializer tokens, initializer references,
-    /// and source location into a merged string table.
-    ///
-    // Called by per-file frontend output remapping before module-wide dependency sorting.
+    /// Remap type names, initializer token payloads, and initializer references into a merged
+    /// string table. Source-qualified spans are identity independent and are left unchanged.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
         if let Some(qualifier) = &mut self.config_qualifier {
@@ -84,21 +82,6 @@ impl DeclarationSyntax {
         for reference in &mut self.initializer_references {
             reference.remap_string_ids(remap);
         }
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.type_annotation.rebind_source_identity(logical_path);
-        if let Some(qualifier) = &mut self.config_qualifier {
-            qualifier.rebind_source_identity(logical_path);
-        }
-        for token in &mut self.initializer_tokens {
-            token.location.rebind_source_identity(logical_path);
-        }
-        for reference in &mut self.initializer_references {
-            reference.rebind_source_identity(logical_path);
-        }
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -106,13 +89,18 @@ pub fn parse_declaration_syntax(
     token_stream: &mut FileTokens,
     name: StringId,
     string_table: &mut StringTable,
+    span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<DeclarationSyntax> {
     // `#Config of T` is declaration-owned syntax, not an ordinary `#` binding followed by a
     // type named `Config`. Detect it before the generic target parser so all declaration stages
     // retain one qualifier representation.
-    let target_span = token_stream.tokens[token_stream.index].span;
+    let target_span = current_source_span(token_stream);
     let config_qualifier = if starts_build_config_qualifier(token_stream, string_table) {
-        Some(parse_build_config_qualifier(token_stream, string_table)?)
+        Some(parse_build_config_qualifier(
+            token_stream,
+            string_table,
+            Some(span_builder),
+        )?)
     } else {
         None
     };
@@ -122,13 +110,12 @@ pub fn parse_declaration_syntax(
             name,
             binding_mode: BindingMode::CompileTimeConstant,
             type_annotation: qualifier.type_annotation.clone(),
-            location: qualifier.qualifier_location.clone(),
-            span: target_span,
+            span: qualifier.qualifier_span.or(target_span),
         }
     } else {
         // This checks for mutability marker first (in the case of mutable methods), or whether
         // the declaration has an explicit type.
-        parse_binding_target_syntax(name, token_stream, string_table)?
+        parse_binding_target_syntax(name, token_stream, string_table, span_builder)?
     };
 
     // A source `#Config` declaration may intentionally omit its initializer so a later
@@ -146,7 +133,6 @@ pub fn parse_declaration_syntax(
             config_qualifier,
             initializer_tokens: Vec::new(),
             initializer_references: Vec::new(),
-            location: target.location,
             span: target.span,
         });
     }
@@ -157,35 +143,42 @@ pub fn parse_declaration_syntax(
             token_stream.advance();
         }
         TokenKind::Comma | TokenKind::Eof | TokenKind::Newline => {
-            return Err(Box::new(
+            return Err(HeaderParseFailure::Diagnostic(
                 CompilerDiagnostic::missing_declaration_initializer(
                     name,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 ),
             ));
         }
         _ => {
-            return Err(Box::new(CompilerDiagnostic::expected_token(
-                TokenKind::Assign,
-                Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_location(),
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::expected_token(
+                    TokenKind::Assign,
+                    Some(token_stream.current_token_kind().to_owned()),
+                    current_source_span(token_stream),
+                ),
+            ));
         }
     }
 
     // Transitive mutation: the token scanner may intern EOF delimiters for diagnostics
     // when the initializer is unclosed at end-of-file.
-    let mut initializer_tokens =
-        collect_declaration_initializer_tokens(token_stream, string_table)?;
+    let mut initializer_tokens = collect_declaration_initializer_tokens(token_stream, string_table)
+        .map_err(|failure| match failure {
+            TokenScanFailure::Diagnostic(diagnostic) => HeaderParseFailure::Diagnostic(diagnostic),
+            TokenScanFailure::Infrastructure(error) => HeaderParseFailure::Infrastructure(error),
+        })?;
     if initializer_tokens.is_empty() {
         // The author wrote `=` but supplied no initializer expression. Point at the real
         // boundary after `=` (newline, end, EOF or comma) rather than the declaration name
         // or target type, so the diagnostic anchors where the initializer is missing.
-        return Err(Box::new(CompilerDiagnostic::invalid_declaration(
-            InvalidDeclarationReason::MissingInitializerExpression,
-            Some(name),
-            token_stream.current_location(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_declaration(
+                InvalidDeclarationReason::MissingInitializerExpression,
+                Some(name),
+                current_source_span(token_stream),
+            ),
+        ));
     }
 
     // Retain the real boundary after an incomplete inline value-`if` tail. AST otherwise
@@ -205,9 +198,11 @@ pub fn parse_declaration_syntax(
         binding_mode: target.binding_mode,
         type_annotation: target.type_annotation,
         config_qualifier,
-        initializer_references: collect_symbol_references(&initializer_tokens),
+        initializer_references: collect_symbol_references(
+            &initializer_tokens,
+            token_stream.file_id,
+        ),
         initializer_tokens,
-        location: target.location,
         span: target.span,
     })
 }
@@ -216,21 +211,24 @@ pub fn parse_binding_target_syntax(
     name: StringId,
     token_stream: &mut FileTokens,
     string_table: &StringTable,
+    span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<BindingTargetSyntax> {
-    let target_token = &token_stream.tokens[token_stream.index];
-    let target_location = target_token.location.clone();
-    let target_span = target_token.span;
+    let target_span = current_source_span(token_stream);
 
     let binding_mode = if token_stream.current_token_kind() == &TokenKind::Mutable {
-        require_binding_marker_adjacent(token_stream, BindingMode::MutableRuntime)?;
+        require_binding_marker_adjacent(token_stream, BindingMode::MutableRuntime, span_builder)?;
         token_stream.advance();
         BindingMode::MutableRuntime
     } else if token_stream.current_token_kind() == &TokenKind::Hash {
-        require_binding_marker_adjacent(token_stream, BindingMode::CompileTimeConstant)?;
+        require_binding_marker_adjacent(
+            token_stream,
+            BindingMode::CompileTimeConstant,
+            span_builder,
+        )?;
         token_stream.advance();
         BindingMode::CompileTimeConstant
     } else if token_stream.current_token_kind() == &TokenKind::Reactive {
-        require_binding_marker_adjacent(token_stream, BindingMode::ReactiveRuntime)?;
+        require_binding_marker_adjacent(token_stream, BindingMode::ReactiveRuntime, span_builder)?;
         token_stream.advance();
         BindingMode::ReactiveRuntime
     } else {
@@ -247,7 +245,6 @@ pub fn parse_binding_target_syntax(
         name,
         binding_mode,
         type_annotation,
-        location: target_location,
         span: target_span,
     })
 }
@@ -256,14 +253,15 @@ pub fn parse_binding_target_syntax(
 // that follows it (`=` for inferred, or the first token of the explicit type annotation).
 //
 // WHY: the language requires `name #= value` and `name ~= value`, rejecting `name # = value`
-// and `name ~ = value`. Tokens carry start/end positions, so adjacency is a precise structural
-// check without guessing about whitespace.
+// and `name ~ = value`. Exact local byte ranges make the check independent of line/column
+// bookkeeping and UTF-8 character width.
 //
-// Returns an error when the marker is not adjacent to the next token, using the marker token's
-// location as the diagnostic primary location.
+// Returns an error when the marker is not adjacent to the next token, using the marker span as
+// the diagnostic primary span.
 pub(crate) fn require_binding_marker_adjacent(
     token_stream: &FileTokens,
     mode: BindingMode,
+    span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
 ) -> DeclarationShellResult<()> {
     let Some(current_token) = token_stream.tokens.get(token_stream.index) else {
         return Ok(());
@@ -272,11 +270,10 @@ pub(crate) fn require_binding_marker_adjacent(
         return Ok(());
     };
 
-    let on_same_line =
-        current_token.location.end_pos.line_number == next_token.location.start_pos.line_number;
-    let adjacent = on_same_line
-        && current_token.location.end_pos.char_column + 1
-            == next_token.location.start_pos.char_column;
+    let resolver = span_builder.resolver();
+    let current_range = current_token.span.resolve_with(resolver);
+    let next_range = next_token.span.resolve_with(resolver);
+    let adjacent = current_range.end() == next_range.start();
 
     if !adjacent {
         let reason = match mode {
@@ -289,13 +286,22 @@ pub(crate) fn require_binding_marker_adjacent(
             }
             BindingMode::ImmutableRuntime => return Ok(()),
         };
-        return Err(Box::new(CompilerDiagnostic::common_syntax_mistake(
-            reason,
-            current_token.location.clone(),
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::common_syntax_mistake(
+                reason,
+                Some(SourceSpan::new(token_stream.file_id, current_token.span)),
+            ),
+        ));
     }
 
     Ok(())
+}
+
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }
 
 #[cfg(test)]

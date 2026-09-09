@@ -11,11 +11,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use rustc_hash::FxHashSet;
 
 /// Scanner-local error boundary for dependency-clause parsing.
@@ -25,19 +25,13 @@ use rustc_hash::FxHashSet;
 ///      header parser converts either lane into `HeaderParseFailure` at the owning boundary.
 #[derive(Debug)]
 pub(crate) enum DependencyClauseParseError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(CompilerError),
-}
-
-impl From<Box<CompilerDiagnostic>> for DependencyClauseParseError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
-        Self::Diagnostic(diagnostic)
-    }
 }
 
 impl From<CompilerDiagnostic> for DependencyClauseParseError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        Self::Diagnostic(Box::new(diagnostic))
+        Self::Diagnostic(diagnostic)
     }
 }
 
@@ -55,26 +49,16 @@ impl From<CompilerError> for DependencyClauseParseError {
 ///      conversion needs both lanes without treating infrastructure as a diagnostic.
 type DependencyClauseResult<T> = Result<T, DependencyClauseParseError>;
 
-/// One optional local alias with the source location that introduced its name.
-///
-/// WHAT: keeps an alias name and its diagnostic span inseparable while dependency syntax is
-///       transferred from path scanning into retained header facts.
-/// WHY: collision diagnostics must point at the alias itself, not at the whole dependency clause.
+/// One optional local alias with the exact source span that introduced its name.
 #[derive(Clone, Debug)]
 pub struct DependencyAlias {
     pub name: StringId,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: SourceSpan,
 }
 
 impl DependencyAlias {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -84,35 +68,29 @@ impl DependencyAlias {
 pub struct ScannedDependencyProvider {
     pub path: InternedPath,
     pub path_syntax: PathSyntaxId,
-    pub path_location: SourceLocation,
-    pub path_span: LocalSpan,
+    pub path_span: SourceSpan,
 }
 
 /// The consolidated path authority for one retained dependency clause.
-///
-/// WHAT: stores one shell, one structural path, one target classification and one path location.
-/// WHY: later stages must not rediscover the provider boundary from path spelling.
 #[derive(Clone, Debug)]
 pub struct RetainedDependencyPath {
     pub dependency_shell_id: DependencyShellId,
     pub path: InternedPath,
     pub path_syntax: PathSyntaxId,
     pub target: DependencyTargetKind,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: SourceSpan,
 }
 
 impl RetainedDependencyPath {
-    /// Remap the path components, target extension and location into a merged string table.
+    /// Remap the path components and target extension into a merged string table.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.path.remap_string_ids(remap);
         self.target.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     /// Commit the final source identity while preserving module-root-relative paths.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId, _logical_path: &InternedPath) {
+        self.span = SourceSpan::new(file_id, self.span.local());
         self.dependency_shell_id.source = file_id;
     }
 }
@@ -121,8 +99,7 @@ impl RetainedDependencyPath {
 #[derive(Clone, Debug)]
 pub struct ScannedDependencySelection {
     pub source_name: StringId,
-    pub source_location: SourceLocation,
-    pub source_span: LocalSpan,
+    pub source_span: SourceSpan,
     pub local_alias: Option<DependencyAlias>,
 }
 
@@ -145,17 +122,17 @@ pub struct ScannedDependencyClause {
     pub binding: ScannedDependencyBinding,
 }
 
-/// Parse one dependency clause into one provider root and a flat direct-selection list.
 pub(crate) fn parse_dependency_clause(
     tokens: &[Token],
     start_index: usize,
     path_syntax: &PathSyntaxTable,
+    source_id: SourceId,
 ) -> DependencyClauseResult<(ScannedDependencyClause, usize)> {
     let Some(path_token) = tokens.get(start_index) else {
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
             InvalidDependencyClauseReason::MissingPath,
-            SourceLocation::default(),
+            None,
         )
         .into());
     };
@@ -164,18 +141,20 @@ pub(crate) fn parse_dependency_clause(
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             DependencyClauseKind::Namespace,
             InvalidDependencyClauseReason::ExpectedPath,
-            path_token.location.clone(),
+            Some(SourceSpan::new(source_id, path_token.span)),
         )
         .into());
     };
-    let path_syntax_row = path_syntax.try_path_for_token(*path_id, &path_token.location)?;
+    let path_row = path_syntax.try_path(*path_id)?;
+    let path_span = SourceSpan::new(path_row.span.source(), path_token.span);
+    let path_syntax_row = path_syntax.try_path_for_token(*path_id, path_span)?;
+    let source_id = path_span.source();
     let mut index = start_index + 1;
 
     let provider = ScannedDependencyProvider {
         path: path_syntax_row.root.clone(),
         path_syntax: *path_id,
-        path_location: path_syntax_row.location.clone(),
-        path_span: path_token.span,
+        path_span,
     };
 
     if clause_ended(tokens.get(index)) {
@@ -192,33 +171,32 @@ pub(crate) fn parse_dependency_clause(
         .get(index)
         .is_some_and(|token| token.kind == TokenKind::As)
     {
-        let alias_keyword_location = tokens[index].location.clone();
+        let alias_keyword_span = SourceSpan::new(source_id, tokens[index].span);
         index += 1;
         let Some(alias_token) = tokens.get(index) else {
             return Err(dependency_clause_error(
                 DependencyClauseKind::NamespaceAlias,
                 InvalidDependencyClauseReason::MissingAlias,
-                alias_keyword_location,
+                Some(alias_keyword_span),
             ));
         };
         let TokenKind::Symbol(alias_name) = alias_token.kind else {
             return Err(dependency_clause_error(
                 DependencyClauseKind::NamespaceAlias,
                 InvalidDependencyClauseReason::ExpectedAliasName,
-                alias_token.location.clone(),
+                Some(SourceSpan::new(source_id, alias_token.span)),
             ));
         };
         let alias = DependencyAlias {
             name: alias_name,
-            location: alias_token.location.clone(),
-            span: alias_token.span,
+            span: SourceSpan::new(source_id, alias_token.span),
         };
         index += 1;
         if !clause_ended(tokens.get(index)) {
             return Err(dependency_clause_error(
                 DependencyClauseKind::NamespaceAlias,
                 InvalidDependencyClauseReason::NamespaceAliasWithSelections,
-                tokens[index].location.clone(),
+                Some(SourceSpan::new(source_id, tokens[index].span)),
             ));
         }
         return Ok((
@@ -230,7 +208,7 @@ pub(crate) fn parse_dependency_clause(
         ));
     }
 
-    reject_legacy_or_delimited_selection(tokens.get(index))?;
+    reject_legacy_or_delimited_selection(tokens.get(index), source_id)?;
 
     let mut selections = Vec::new();
     let mut selected_source_names = FxHashSet::default();
@@ -242,7 +220,7 @@ pub(crate) fn parse_dependency_clause(
             return Err(dependency_clause_error(
                 DependencyClauseKind::DirectSelection,
                 InvalidDependencyClauseReason::MissingSelectionAfterComma,
-                path_token.location.clone(),
+                Some(path_span),
             ));
         };
         let TokenKind::Symbol(source_name) = selection_token.kind else {
@@ -250,8 +228,7 @@ pub(crate) fn parse_dependency_clause(
                 DependencyClauseKind::DirectSelection,
                 InvalidDependencyClauseReason::ExpectedSelectionName,
                 selection_continuation_comma
-                    .clone()
-                    .unwrap_or_else(|| selection_token.location.clone()),
+                    .or(Some(SourceSpan::new(source_id, selection_token.span))),
             ));
         };
         if tokens
@@ -260,11 +237,11 @@ pub(crate) fn parse_dependency_clause(
         {
             return Err(CompilerDiagnostic::invalid_path(
                 crate::compiler_frontend::compiler_messages::PathKind::WhitespaceMustBeQuoted,
-                selection_token.location.clone(),
+                Some(SourceSpan::new(source_id, selection_token.span)),
             )
             .into());
         }
-        let source_location = selection_token.location.clone();
+        let source_span = SourceSpan::new(source_id, selection_token.span);
         index += 1;
 
         let local_alias = if tokens
@@ -276,21 +253,20 @@ pub(crate) fn parse_dependency_clause(
                 return Err(dependency_clause_error(
                     DependencyClauseKind::NamespaceAlias,
                     InvalidDependencyClauseReason::MissingAlias,
-                    source_location,
+                    Some(source_span),
                 ));
             };
             let TokenKind::Symbol(alias_name) = alias_token.kind else {
                 return Err(dependency_clause_error(
                     DependencyClauseKind::NamespaceAlias,
                     InvalidDependencyClauseReason::ExpectedAliasName,
-                    alias_token.location.clone(),
+                    Some(SourceSpan::new(source_id, alias_token.span)),
                 ));
             };
             index += 1;
             Some(DependencyAlias {
                 name: alias_name,
-                location: alias_token.location.clone(),
-                span: alias_token.span,
+                span: SourceSpan::new(source_id, alias_token.span),
             })
         } else {
             None
@@ -300,7 +276,7 @@ pub(crate) fn parse_dependency_clause(
             return Err(dependency_clause_error(
                 DependencyClauseKind::DirectSelection,
                 InvalidDependencyClauseReason::DuplicateSelectionName,
-                source_location,
+                Some(source_span),
             ));
         }
         let local_name = local_alias.as_ref().map_or(source_name, |alias| alias.name);
@@ -308,23 +284,20 @@ pub(crate) fn parse_dependency_clause(
             return Err(dependency_clause_error(
                 DependencyClauseKind::DirectSelection,
                 InvalidDependencyClauseReason::DuplicateSelectionLocalName,
-                local_alias
-                    .as_ref()
-                    .map_or_else(|| source_location.clone(), |alias| alias.location.clone()),
+                Some(local_alias.as_ref().map_or(source_span, |alias| alias.span)),
             ));
         }
 
         selections.push(ScannedDependencySelection {
             source_name,
-            source_location: source_location.clone(),
-            source_span: selection_token.span,
+            source_span,
             local_alias,
         });
 
         match tokens.get(index).map(|token| &token.kind) {
             Some(TokenKind::Comma) => {
-                let comma_location = tokens[index].location.clone();
-                continuation_comma = Some(comma_location.clone());
+                let comma_span = SourceSpan::new(source_id, tokens[index].span);
+                continuation_comma = Some(comma_span);
                 index += 1;
                 while tokens
                     .get(index)
@@ -336,29 +309,26 @@ pub(crate) fn parse_dependency_clause(
                     return Err(dependency_clause_error(
                         DependencyClauseKind::DirectSelection,
                         InvalidDependencyClauseReason::MissingSelectionAfterComma,
-                        comma_location,
+                        Some(comma_span),
                     ));
                 }
-                reject_legacy_or_delimited_selection(tokens.get(index))?;
+                reject_legacy_or_delimited_selection(tokens.get(index), source_id)?;
             }
             Some(TokenKind::Newline | TokenKind::End | TokenKind::Eof) | None => break,
             _ => {
-                // If a continuation comma kept the clause open and the next token starts a
-                // declaration, the comma consumed this name as a dependency selection. Report
-                // the actual parse decision instead of a generic missing-comma diagnostic.
-                if let Some(comma_location) = &selection_continuation_comma
+                if let Some(comma_span) = &selection_continuation_comma
                     && classify_symbol_statement_start_at(tokens, index)
                         .starts_statement_after_dependency_selection()
                 {
                     return Err(continuation_entered_statement_error(
-                        source_location,
-                        comma_location.clone(),
+                        source_span,
+                        *comma_span,
                     ));
                 }
                 return Err(dependency_clause_error(
                     DependencyClauseKind::DirectSelection,
                     InvalidDependencyClauseReason::MissingCommaBetweenSelections,
-                    tokens[index].location.clone(),
+                    Some(SourceSpan::new(source_id, tokens[index].span)),
                 ));
             }
         }
@@ -382,7 +352,10 @@ fn clause_ended(token: Option<&Token>) -> bool {
     })
 }
 
-fn reject_legacy_or_delimited_selection(token: Option<&Token>) -> DependencyClauseResult<()> {
+fn reject_legacy_or_delimited_selection(
+    token: Option<&Token>,
+    source_id: SourceId,
+) -> DependencyClauseResult<()> {
     let Some(token) = token else {
         return Ok(());
     };
@@ -396,34 +369,27 @@ fn reject_legacy_or_delimited_selection(token: Option<&Token>) -> DependencyClau
     Err(dependency_clause_error(
         DependencyClauseKind::DirectSelection,
         reason,
-        token.location.clone(),
+        Some(SourceSpan::new(source_id, token.span)),
     ))
 }
 
-/// Build a continuation-entered-statement diagnostic with primary and secondary labels.
-///
-/// The primary span is the consumed selected/declaration name. The secondary span is the
-/// comma that kept the clause open. The reason is payload-free because the primary span
-/// already identifies the name.
+/// Build a continuation-entered-statement diagnostic with a secondary comma label.
 fn continuation_entered_statement_error(
-    selected_name_location: SourceLocation,
-    comma_location: SourceLocation,
+    selected_name_span: SourceSpan,
+    comma_span: SourceSpan,
 ) -> DependencyClauseParseError {
     let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
         DependencyClauseKind::DirectSelection,
         InvalidDependencyClauseReason::ContinuationEnteredStatement,
-        selected_name_location.clone(),
+        Some(selected_name_span),
     )
     .with_labels(vec![
-        crate::compiler_frontend::compiler_messages::DiagnosticLabel::primary(
-            selected_name_location,
-        ),
         crate::compiler_frontend::compiler_messages::DiagnosticLabel::secondary(
-            comma_location,
+            Some(comma_span),
             None,
         ),
     ]);
-    DependencyClauseParseError::Diagnostic(Box::new(diagnostic))
+    DependencyClauseParseError::Diagnostic(diagnostic)
 }
 
 #[cfg(test)]
@@ -433,7 +399,7 @@ mod dependency_clause_syntax_tests;
 fn dependency_clause_error(
     kind: DependencyClauseKind,
     reason: InvalidDependencyClauseReason,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> DependencyClauseParseError {
-    CompilerDiagnostic::invalid_dependency_clause(kind, reason, location).into()
+    CompilerDiagnostic::invalid_dependency_clause(kind, reason, span).into()
 }

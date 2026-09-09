@@ -847,7 +847,6 @@ impl TypeEnvironment {
                     substituted_fields.push(FieldDefinition {
                         name: field.name.clone(),
                         type_id: self.substitute_type_id(field.type_id, &mapping),
-                        location: field.location.clone(),
                         span: field.span,
                     });
                 }
@@ -873,7 +872,6 @@ impl TypeEnvironment {
                             substituted_record_fields.push(FieldDefinition {
                                 name: field.name.clone(),
                                 type_id: self.substitute_type_id(field.type_id, &mapping),
-                                location: field.location.clone(),
                                 span: field.span,
                             });
                         }
@@ -886,7 +884,6 @@ impl TypeEnvironment {
                     name: variant.name,
                     tag: variant.tag,
                     payload: substituted_payload,
-                    location: variant.location.clone(),
                     span: variant.span,
                 });
             }
@@ -2164,14 +2161,12 @@ impl TypeEnvironment {
     fn remap_fields(fields: &mut [FieldDefinition], remap: &StringIdRemap) {
         for field in fields {
             field.name.remap_string_ids(remap);
-            field.location.remap_string_ids(remap);
         }
     }
 
     fn remap_variants(variants: &mut [ChoiceVariantDefinition], remap: &StringIdRemap) {
         for variant in variants {
             variant.name = remap.get(variant.name);
-            variant.location.remap_string_ids(remap);
 
             match &mut variant.payload {
                 ChoiceVariantPayloadDefinition::Unit => {}

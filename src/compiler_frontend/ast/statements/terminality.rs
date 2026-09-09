@@ -25,13 +25,11 @@
 //! all-path terminality. Earlier fall-through statements may be followed by a later terminal
 //! statement.
 
-use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, MatchExhaustiveness, NodeKind, SourceLocation,
-};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
-
+use crate::compiler_frontend::source::SourceSpan;
 /// Policy that decides whether a function body must be terminal on all paths.
 ///
 /// WHAT: distinguishes functions that may implicitly fall through from functions that must
@@ -83,7 +81,7 @@ pub(crate) fn terminality_policy_for_signature(
 pub(crate) fn validate_function_body_terminality(
     body: &[AstNode],
     policy: FunctionTerminalityPolicy,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Option<CompilerDiagnostic> {
     match policy {
         FunctionTerminalityPolicy::AllowImplicitUnit
@@ -95,7 +93,7 @@ pub(crate) fn validate_function_body_terminality(
             } else {
                 Some(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::FunctionMayFallThrough,
-                    location,
+                    span,
                 ))
             }
         }

@@ -62,7 +62,7 @@ pub(crate) fn parse_curly_literal_expression(
                     *type_id,
                     type_environment.builtins().string,
                     TypeMismatchContext::General,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }

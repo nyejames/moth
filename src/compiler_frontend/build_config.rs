@@ -23,7 +23,7 @@
 //! resolution phases that produce them.
 //!
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::keywords::is_valid_identifier;
@@ -36,7 +36,7 @@ use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_unde
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use std::cell::RefCell;
@@ -472,12 +472,7 @@ fn parse_ordinary_quoted_literal(
 
     if !matches!(module_start.kind, TokenKind::ModuleStart)
         || !matches!(eof.kind, TokenKind::Eof)
-        || literal.location.start_pos
-            != (CharPosition {
-                line_number: 0,
-                char_column: 1,
-            })
-        || literal.location.end_pos != eof.location.end_pos
+        || literal.span == eof.span
     {
         return Err(malformed_quoted_literal_error(
             value,
@@ -598,18 +593,16 @@ impl BuildInputName {
     }
 }
 
-/// Where a build-config value or contract fact came from.
-///
-/// WHAT: one location enum for diagnostics and provenance. Retained compiler source spans reuse
-///       the shared [`SourceLocation`]; command and programmatic inputs carry their argument
-///       position instead, because they have no source span.
+/// WHAT: one carrier for source-span and command-input provenance. Retained compiler source spans
+///       use the shared [`SourceSpan`]; command and programmatic inputs carry their argument
+///       position instead because they have no source span.
 /// WHY:  mismatch, duplicate and missing-input diagnostics must underline either the source
 ///       declaration or the exact command argument without a second location model.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BuildConfigValueLocation {
     /// A retained compiler source span: a contract declaration, its default literal or a
     /// direct project field initializer.
-    Source(SourceLocation),
+    Source(SourceSpan),
 
     /// An explicit command or programmatic input at one argument position.
     Command(BuildCommandLocation),
@@ -746,7 +739,6 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
-    pub(crate) qualifier_location: SourceLocation,
     pub(crate) qualifier_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
@@ -821,13 +813,7 @@ pub(crate) struct BuildConfigContractFact {
     value_type: BuildInputType,
     required: bool,
     default: Option<PrimitiveBuildValue>,
-    location: SourceLocation,
-    /// Exact source ownership when this fact came from a prepared source contract.
-    ///
-    /// Project-owned provider facts retain only their legacy location because they have no
-    /// authored source anchor. The source-contract adapter fills this field from the retained
-    /// declaration qualifier span without reconstructing a range at the build boundary.
-    source_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
     resolved_provider: Option<ResolvedBuildConfigProvider>,
 }
 
@@ -838,23 +824,16 @@ impl BuildConfigContractFact {
         value_type: BuildInputType,
         required: bool,
         default: Option<PrimitiveBuildValue>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self {
             name,
             value_type,
             required,
             default,
-            location,
-            source_span: None,
+            span,
             resolved_provider: None,
         }
-    }
-
-    /// Retain the exact source anchor carried by one prepared source contract.
-    pub(crate) fn with_source_span(mut self, source_span: SourceSpan) -> Self {
-        self.source_span = Some(source_span);
-        self
     }
 
     /// Attach the value already selected while a direct project contract folded.
@@ -893,12 +872,8 @@ impl BuildConfigContractFact {
         self.default.as_ref()
     }
 
-    pub(crate) fn location(&self) -> &SourceLocation {
-        &self.location
-    }
-
-    pub(crate) fn source_span(&self) -> Option<SourceSpan> {
-        self.source_span
+    pub(crate) fn span(&self) -> Option<SourceSpan> {
+        self.span
     }
 
     fn resolved_provider(&self) -> Option<&ResolvedBuildConfigProvider> {
@@ -1015,11 +990,12 @@ impl BuildConfigResolutionError {
         }
     }
 
-    /// Return the authored contract location when this error has one.
-    pub(crate) fn contract_location(&self) -> Option<&SourceLocation> {
+    /// Return the authored contract span when this error has one.
+    #[cfg(test)]
+    pub(crate) fn contract_span(&self) -> Option<SourceSpan> {
         match self {
             Self::SourceContractConflict { first, .. }
-            | Self::DuplicateProjectContract { first, .. } => Some(first.location()),
+            | Self::DuplicateProjectContract { first, .. } => first.span(),
             Self::ProjectSourceContractConflict { source, .. }
             | Self::FixedProjectSourceTypeMismatch { source, .. }
             | Self::DefaultTypeMismatch {
@@ -1033,23 +1009,8 @@ impl BuildConfigResolutionError {
             }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
-            } => Some(source.location()),
+            } => source.span(),
             Self::UnknownExplicitInput { .. } => None,
-        }
-    }
-
-    /// Return the typed mismatch reason, if this error came from a supplied value or default.
-    pub(crate) fn provided_type(&self) -> Option<PrimitiveBuildInputType> {
-        match self {
-            Self::DefaultTypeMismatch { provided, .. }
-            | Self::ValueTypeMismatch { provided, .. } => Some(*provided),
-            Self::SourceContractConflict { .. }
-            | Self::DuplicateProjectContract { .. }
-            | Self::ProjectSourceContractConflict { .. }
-            | Self::FixedProjectSourceTypeMismatch { .. }
-            | Self::MissingRequiredValue { .. }
-            | Self::DirectProjectProviderMissing { .. }
-            | Self::UnknownExplicitInput { .. } => None,
         }
     }
 
@@ -1128,7 +1089,7 @@ pub(crate) struct ResolvedBuildConfigValue {
     value: Option<PrimitiveBuildValue>,
     origin: BuildConfigValueOrigin,
     fingerprint: BuildConfigFingerprint,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_location: Option<BuildConfigValueLocation>,
 }
 
@@ -1603,7 +1564,7 @@ fn resolve_one_build_config_value(
                 BuildInputType::Primitive(PrimitiveBuildInputType::String),
                 true,
                 None,
-                SourceLocation::default(),
+                None,
             ),
         }
     })?;
@@ -1640,9 +1601,7 @@ fn resolve_one_build_config_value(
         (
             Some(value.clone()),
             BuildConfigValueOrigin::DeclarationDefault,
-            Some(BuildConfigValueLocation::Source(
-                contract.location().clone(),
-            )),
+            contract.span.map(BuildConfigValueLocation::Source),
         )
     } else if contract.required() {
         return Err(BuildConfigResolutionError::MissingRequiredValue {
@@ -1668,11 +1627,10 @@ fn resolved_fixed_project_value(
         source,
         fixed_project.default.clone(),
         BuildConfigValueOrigin::FixedProjectField,
-        Some(BuildConfigValueLocation::Source(
-            fixed_project.location().clone(),
-        )),
+        fixed_project.span.map(BuildConfigValueLocation::Source),
     ))
 }
+
 fn resolved_value_from_provider(
     contract: &BuildConfigContractFact,
     provider: &ResolvedBuildConfigProvider,
@@ -1685,7 +1643,7 @@ fn resolved_value_from_provider(
         value: provider.value.clone(),
         origin: provider.origin,
         fingerprint: provider.fingerprint,
-        location: contract.location().clone(),
+        span: contract.span,
         value_location: provider.value_location.clone(),
     }
 }
@@ -1710,7 +1668,7 @@ fn resolved_value_from_contract(
         value,
         origin,
         fingerprint,
-        location: contract.location().clone(),
+        span: contract.span,
         value_location,
     }
 }

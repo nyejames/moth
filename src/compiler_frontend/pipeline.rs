@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -277,7 +277,7 @@ impl CompilerFrontend<'static> {
             source_id,
             span_builder,
         )
-        .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure, source_id))?;
+        .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure))?;
         tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }
@@ -360,7 +360,7 @@ impl CompilerFrontend<'static> {
                     &mut span_builder,
                 )?;
 
-                prepare_moth_template_file(tokenization, local_string_table)
+                prepare_moth_template_file(tokenization, local_string_table, &mut span_builder)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         })();
@@ -380,7 +380,7 @@ impl<'a> CompilerFrontend<'a> {
         &mut self,
         headers: BoundModuleHeaders,
         resolved_file_references: &ResolvedFileReferenceTable,
-    ) -> Result<SortedHeaders, DiagnosticBag> {
+    ) -> Result<SortedHeaders, PremergeFailure> {
         // Content-source ordering edges resolve through Stage 0's canonical targets, which this
         // compiler instance already retains as the module source identities.
         let content_source_targets = ContentSourceTargets::from_resolved_references(

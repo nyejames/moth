@@ -272,7 +272,7 @@ fn content_source_targets(
         }
 
         let authored_path = &path_syntax
-            .try_path_for_token(reference.path_syntax, &reference.location)?
+            .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
         targets.insert(
             reference.path_syntax,

@@ -619,7 +619,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             },
             &mut trait_evidence_environment,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         // -----------------------------------------
         //  Validate bounded nominal instantiations
@@ -720,7 +720,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )
         .map_err(|error| match error {
             TemplateError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         })?;
@@ -809,7 +809,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_declarations_by_path: &self.generic_declarations_by_path,
             string_table,
         })
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
     /// The same scope, taking the canonical parameter map from the header's registered list.
@@ -850,9 +850,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn environment_header_scope(
         &self,
         header: &Header,
-        string_table: &mut StringTable,
+        _string_table: &mut StringTable,
     ) -> ScopeContext {
-        let source_file_scope = header.canonical_source_file(string_table);
+        let source_file_scope = header.source_file.clone();
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
@@ -947,12 +947,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?;
             Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(path.clone(), struct_type_id);
 
-            // Build a placeholder declaration so the builtin struct is reachable
+            // Build a synthetic placeholder declaration so the builtin struct is reachable
             // through the declaration table during body parsing.
-            let declaration_location = fields
-                .first()
-                .map(|field| field.value.location.clone())
-                .unwrap_or_default();
 
             let declaration_id = self
                 .declaration_table
@@ -971,7 +967,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     id: path.clone(),
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        declaration_location,
                         None,
                         struct_type_id,
                         DataType::runtime_struct(path.clone(), struct_type_id),
@@ -1053,7 +1048,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             for trait_bound in &parameter.trait_bounds {
                 let trait_id = self.resolve_visible_trait_name(
                     trait_bound.trait_name,
-                    &trait_bound.location,
+                    trait_bound.span,
                     visibility,
                     trait_environment,
                     string_table,
@@ -1105,7 +1100,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     CompilerDiagnostic::generic_bound_private_surface_leak(
                         owner_name,
                         trait_definition.name,
-                        trait_bound.location.clone(),
+                        trait_bound.span,
                     ),
                     string_table,
                 ));
@@ -1120,7 +1115,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
     /// then written into `TypeEnvironment` as compact semantic member definitions.
     /// WHY: keeping the conversion on the environment builder centralizes diagnostic mapping
-    /// at the AST environment boundary and avoids repeated large-error iterator closures.
+    /// at the AST environment boundary without closure-specific error conversions.
     pub(crate) fn field_definitions_from_declarations(
         &mut self,
         fields: &[Declaration],
@@ -1132,18 +1127,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let type_id = match resolve_diagnostic_type_to_type_id_checked(
                 &field.value.diagnostic_type,
                 &mut self.type_environment,
-                &field.value.location,
+                field.value.span,
             ) {
                 Ok(type_id) => type_id,
                 Err(diagnostic) => {
-                    return Err(self.diagnostic_messages(*diagnostic, string_table));
+                    return Err(self.diagnostic_messages(diagnostic, string_table));
                 }
             };
 
             definitions.push(FieldDefinition {
                 name: field.id.clone(),
                 type_id,
-                location: field.value.location.clone(),
                 span: field.value.span,
             });
         }
@@ -1181,7 +1175,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> CompilerMessages {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             ExpressionParseError::Infrastructure(error) => {
                 self.error_messages(*error, string_table)

@@ -32,18 +32,12 @@ use std::sync::Arc;
 use super::resolve_named_signature_type;
 
 pub(crate) enum StructFieldResolutionError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for StructFieldResolutionError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        StructFieldResolutionError::Diagnostic(Box::new(diagnostic))
-    }
-}
-
-impl From<Box<CompilerDiagnostic>> for StructFieldResolutionError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
         StructFieldResolutionError::Diagnostic(diagnostic)
     }
 }
@@ -101,6 +95,7 @@ pub(crate) fn resolve_struct_field_types(
     let mut resolved_fields =
         resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
     resolve_struct_field_defaults(
+        struct_path,
         &mut resolved_fields,
         type_resolution_context,
         template_ir_store,
@@ -168,13 +163,12 @@ fn resolve_struct_field_type_shells(
     // WHY: Struct fields must enter AST/HIR in fully resolved nominal form so later
     // phases do not carry unresolved `NamedType` placeholders.
     let mut resolved_fields = Vec::with_capacity(fields.len());
-
     for field in fields {
         let mut resolved_field = field.to_owned();
 
         resolved_field.value.diagnostic_type = resolve_named_signature_type(
             &field.value.diagnostic_type,
-            &field.value.location,
+            field.value.span,
             type_resolution_context,
             string_table,
         )?;
@@ -184,7 +178,7 @@ fn resolve_struct_field_type_shells(
         resolved_field.value.type_id = resolve_diagnostic_type_to_type_id_checked(
             &resolved_field.value.diagnostic_type,
             type_environment,
-            &resolved_field.value.location,
+            resolved_field.value.span,
         )?;
 
         resolved_fields.push(resolved_field);
@@ -199,6 +193,7 @@ fn resolve_struct_field_type_shells(
 /// WHY: constructor shells need only field types, so keeping default classification here avoids
 ///      lending the TIR store through an earlier type-only pass that cannot consume it.
 fn resolve_struct_field_defaults(
+    struct_path: &InternedPath,
     resolved_fields: &mut [Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
@@ -208,6 +203,7 @@ fn resolve_struct_field_defaults(
         declaration_table: type_resolution_context.declaration_table,
         visible_declaration_ids: type_resolution_context.visible_declaration_ids,
         declaring_file_id: type_resolution_context.declaring_file_id,
+        scope: struct_path.to_owned(),
     };
     for resolved_field in resolved_fields {
         let type_environment = &mut *type_resolution_context.type_environment;
@@ -232,7 +228,7 @@ fn resolve_struct_field_defaults(
             && !default_value_is_constant
         {
             return Err(CompilerDiagnostic::invalid_struct_default_value(
-                resolved_field.value.location.clone(),
+                resolved_field.value.span,
             )
             .into());
         }
@@ -248,13 +244,13 @@ fn resolve_struct_field_defaults(
 /// The declaration surface one field default resolves against.
 ///
 /// WHAT: the visible declarations a reference may name, plus the identity of the file that
-/// authored the default.
 /// WHY: inlining recurses through every nested expression shape, so these three facts travel
 ///      together to the evaluation scope at the bottom rather than through each hop by hand.
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     declaring_file_id: SourceId,
+    scope: InternedPath,
 }
 
 fn inline_visible_constant_references(
@@ -277,7 +273,6 @@ fn inline_visible_constant_references(
             Ok(inlinable_declaration
                 .map(|declaration| {
                     let mut resolved = declaration.value.to_owned();
-                    resolved.location = expression.location.clone();
                     resolved.span = expression.span;
                     resolved
                 })
@@ -299,10 +294,9 @@ fn inline_visible_constant_references(
             }
 
             let mut current_type = ExpectedType::Known(expression.type_id);
-
             let mut evaluation_context = ScopeContext::new(
                 ContextKind::ConstantHeader,
-                expression.location.scope.to_owned(),
+                scope.scope.to_owned(),
                 Rc::clone(scope.declaration_table),
                 Arc::new(ExternalPackageRegistry::new()),
                 Vec::new(),
@@ -331,7 +325,7 @@ fn inline_visible_constant_references(
                 CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable,
                     None,
-                    expression.location.clone(),
+                    expression.span,
                 )
             })
             .map_err(StructFieldResolutionError::from)
@@ -494,7 +488,6 @@ fn expression_is_compile_time_constant_from_effective_tir(
 fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -> Expression {
     let mut rewritten = Expression::new(
         kind,
-        expression.location.clone(),
         expression.span,
         expression.type_id,
         expression.diagnostic_type.to_owned(),

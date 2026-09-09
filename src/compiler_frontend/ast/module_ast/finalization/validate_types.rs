@@ -37,8 +37,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Context shared by every helper in this type-boundary validation pass.
 ///
@@ -180,7 +180,7 @@ fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), 
         NodeKind::StructDefinition(_, fields) => validate_declarations(fields, context),
 
         NodeKind::Function(_, signature, body) => {
-            validate_signature(signature, &node.location, context)?;
+            validate_signature(signature, node.span, context)?;
             validate_nodes(body, context)
         }
 
@@ -214,7 +214,7 @@ fn validate_place_expression(
     place: &PlaceExpression,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
-    validate_type_id(place.type_id, &place.location, context)?;
+    validate_type_id(place.type_id, place.span, context)?;
     match &place.kind {
         PlaceExpressionKind::Local(_) => Ok(()),
         PlaceExpressionKind::Field { base, .. } => validate_place_expression(base, context),
@@ -225,7 +225,7 @@ fn validate_expression(
     expression: &Expression,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
-    validate_type_id(expression.type_id, &expression.location, context)?;
+    validate_type_id(expression.type_id, expression.span, context)?;
 
     match &expression.kind {
         // Recursive expression containers.
@@ -254,7 +254,7 @@ fn validate_expression(
 
         // Function expressions carry signature metadata only; bodies are statement-level nodes.
         ExpressionKind::Function(signature) => {
-            validate_signature(signature, &expression.location, context)
+            validate_signature(signature, expression.span, context)
         }
 
         // Calls.
@@ -271,7 +271,7 @@ fn validate_expression(
             ..
         } => {
             validate_call_arguments(args, context)?;
-            validate_type_ids(&[*error_type_id], &expression.location, context)
+            validate_type_ids(&[*error_type_id], expression.span, context)
         }
 
         // Wrapped and coerced values.
@@ -286,8 +286,8 @@ fn validate_expression(
 
         ExpressionKind::Cast(cast) => {
             validate_expression(&cast.source, context)?;
-            validate_type_id(cast.target_type_id, &cast.location, context)?;
-            validate_type_id(cast.source_type_id, &cast.source.location, context)
+            validate_type_id(cast.target_type_id, cast.span, context)?;
+            validate_type_id(cast.source_type_id, cast.source.span, context)
         }
 
         ExpressionKind::HandledFallibleExpression { value, .. } => {
@@ -472,16 +472,16 @@ fn validate_match_pattern(
         | MatchPattern::Relational { value, .. } => validate_expression(value, context),
         MatchPattern::ChoiceVariant { captures, .. } => {
             for capture in captures {
-                validate_type_id(capture.type_id, &capture.location, context)?;
+                validate_type_id(capture.type_id, capture.span, context)?;
             }
             Ok(())
         }
         MatchPattern::OptionNone { .. } => Ok(()),
         MatchPattern::OptionPresentCapture {
             inner_type_id,
-            binding_location,
+            binding_span,
             ..
-        } => validate_type_id(*inner_type_id, binding_location, context),
+        } => validate_type_id(*inner_type_id, *binding_span, context),
     }
 }
 
@@ -552,13 +552,13 @@ fn validate_call_arguments(
 
 fn validate_signature(
     signature: &FunctionSignature,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
     validate_declarations(&signature.parameters, context)?;
-    validate_type_ids(&signature.success_return_type_ids(), location, context)?;
+    validate_type_ids(&signature.success_return_type_ids(), span, context)?;
     if let Some(error_return_type_id) = signature.error_return_type_id() {
-        validate_type_id(error_return_type_id, location, context)?;
+        validate_type_id(error_return_type_id, span, context)?;
     }
     Ok(())
 }
@@ -584,7 +584,7 @@ fn validate_multi_bind_target(
     target: &MultiBindTarget,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
-    validate_type_id(target.type_id, &target.location, context)
+    validate_type_id(target.type_id, target.span, context)
 }
 
 fn validate_nodes(nodes: &[AstNode], context: &TypeValidationContext) -> Result<(), CompilerError> {
@@ -606,11 +606,11 @@ fn validate_expressions(
 
 fn validate_type_ids(
     type_ids: &[TypeId],
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
     for type_id in type_ids {
-        validate_type_id(*type_id, location, context)?;
+        validate_type_id(*type_id, span, context)?;
     }
     Ok(())
 }
@@ -622,7 +622,7 @@ fn validate_type_ids(
 /// invariant, not a user-facing diagnostic.
 fn validate_type_id(
     type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
     if context.type_environment.get(type_id).is_some() {
@@ -634,7 +634,7 @@ fn validate_type_id(
             "Resolved TypeId({}) reached executable AST without a matching TypeEnvironment entry.",
             type_id.0
         ),
-        location.to_owned(),
+        span,
         ErrorType::Compiler,
     ))
 }

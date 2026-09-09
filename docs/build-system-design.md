@@ -358,7 +358,7 @@ pub struct SourceBuildConfigContract {
     pub value_type: BuildInputType,
     pub required: bool,
     pub default: Option<PrimitiveBuildValue>,
-    pub location: SourceLocation,
+    pub span: SourceSpan,
 }
 ```
 
@@ -1029,10 +1029,12 @@ For each module job, Stage 0 calls one compiler-owned module compilation service
 ready module + completed provider interfaces
 -> build one compiler input value
 -> call the compiler module compilation service
--> Success / Diagnosed / CompilerError
+-> Success / Diagnosed (plain CompilerDiagnostic values) / CompilerError
 -> deterministic string-identity remap and atomic publication
 ```
 
+Diagnosed outcomes carry the compact plain user-diagnostic boundary. Typed `CompilerError` values
+remain the outer infrastructure/invariant failure lane and abort the owning project or package.
 The compiler's own local semantic sequence inside that call is interface binding, local declaration ordering, AST semantics, public-interface projection, HIR lowering and validation, borrow validation, generated semantic completion and lifetime facts. That sequence is compiler-owned. Stage 0 never invokes its steps individually, constructs a public-interface draft, mutates HIR or reruns a compiler analysis. See `docs/compiler-design-overview.md` > `Compiler input and result boundary > Canonical module compilation service`.
 
 Directory modules and synthetic single-file compilation use the same service after their own Stage 0 preparation path.

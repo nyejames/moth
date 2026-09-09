@@ -581,9 +581,8 @@ fn append_runtime_bootstrap(
 pub(crate) fn html_output_path(
     entry_point: &Path,
     entry_root: Option<&Path>,
-    string_table: &mut StringTable,
 ) -> Result<PathBuf, CompilerError> {
-    derive_logical_html_path(entry_point, entry_root, string_table)
+    derive_logical_html_path(entry_point, entry_root)
 }
 
 /// Escapes JS source so it is safe to embed inside an HTML `<script>` block.

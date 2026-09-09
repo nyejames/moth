@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! Frontend/compiler stages
-//!   -> CompilerDiagnostic { kind, severity, primary_location, labels, payload }
+//!   -> CompilerDiagnostic { kind, severity, primary_span, labels, payload }
 //!   -> DiagnosticBag accumulates one or many diagnostics locally
 //!   -> CompilerMessages owns ordered diagnostics + frozen identity range rows plus
 //!      transitional table/source rows at stage/build boundaries
@@ -43,7 +43,7 @@
 //! ## Design Principles
 //!
 //! ### Frozen Identity Contexts Plus Transitional StringTable Rows
-//! Diagnostics preserve interned path scopes, so top-level renderers and file-adjacent helpers
+//! Diagnostics preserve interned payload scopes, so top-level renderers and file-adjacent helpers
 //! resolve paths through range-bound frozen identity snapshots when present, falling back to
 //! the shared transitional `StringTable` for the current build or parse lifecycle.
 //!
@@ -78,20 +78,15 @@
 //! CompilerMessages (ordered diagnostics + frozen identity rows + transitional StringTable)
 //! ```
 
-pub use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
-    InfrastructureDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{
-    FrozenIdentityContext, SourceDatabase, SpanCapacityError, SpanCapacityReason,
+    FrozenIdentityContext, SourceDatabase, SourceSpan, SpanCapacityError, SpanCapacityReason,
 };
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // -------------------------
@@ -106,6 +101,16 @@ pub struct CompilerMessages {
     /// WHY: renderers, tests, dev-server summaries, and CLI output all consume this one sequence
     /// instead of consulting parallel message stores.
     pub(crate) diagnostics: Vec<CompilerDiagnostic>,
+
+    /// Outer infrastructure failure carried beside the diagnostic stream.
+    ///
+    /// WHAT: holds the single typed `CompilerError` for internal/tooling/filesystem failures
+    ///       without converting it into a user-facing diagnostic payload.
+    /// WHY: an infrastructure failure aborts the owning compilation yet must stay observable at
+    ///      existing command/render/test boundaries. Storing it here keeps the typed message,
+    ///      source span or host path, error type and metadata intact without making this
+    ///      diagnostic stream own the failure's render context.
+    pub(crate) infrastructure_error: Option<CompilerError>,
 
     pub string_table: StringTable,
 
@@ -136,7 +141,6 @@ pub struct CompilerMessages {
     /// `TypeEnvironment`. Successful builds carry the module type table in `Module`, not here.
     pub(crate) render_type_contexts: Vec<RenderTypeContext>,
 }
-
 #[derive(Debug, Clone)]
 pub(crate) struct RenderTypeContext {
     pub(crate) diagnostic_range: Range<usize>,
@@ -157,6 +161,7 @@ impl CompilerMessages {
     pub fn empty(string_table: StringTable) -> Self {
         Self {
             diagnostics: Vec::new(),
+            infrastructure_error: None,
             string_table,
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -170,6 +175,7 @@ impl CompilerMessages {
     ) -> Self {
         Self {
             diagnostics,
+            infrastructure_error: None,
             string_table,
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -177,16 +183,57 @@ impl CompilerMessages {
         }
     }
 
-    pub fn has_errors(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error)
+    /// Whether this boundary carries the legacy outer infrastructure failure.
+    pub(crate) fn has_infrastructure_error(&self) -> bool {
+        self.infrastructure_error.is_some()
     }
 
-    pub fn has_warnings(&self) -> bool {
-        self.diagnostics
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Warning)
+    /// Borrow the legacy outer infrastructure failure, if present.
+    ///
+    /// WHAT: exposes the typed `CompilerError` without converting it into a diagnostic.
+    /// WHY: renderers, tests and status summaries inspect the outer failure's message,
+    ///      source span or host path, type and metadata directly.
+    pub(crate) fn infrastructure_error(&self) -> Option<&CompilerError> {
+        self.infrastructure_error.as_ref()
+    }
+
+    /// Store the outer infrastructure failure without converting it into a user diagnostic.
+    ///
+    /// WHAT: chains a second failure behind the first while preserving the first available source
+    ///       span and host path.
+    /// WHY: aggregation can observe a deterministic double-failure tail. `CompilerError` owns
+    ///      only its typed provenance, so no diagnostic string table or render context is merged
+    ///      here.
+    pub(crate) fn set_infrastructure_error(&mut self, error: CompilerError) {
+        match &mut self.infrastructure_error {
+            Some(existing) => {
+                existing.msg = format!(
+                    "{existing_msg}; {incoming_msg}",
+                    existing_msg = existing.msg,
+                    incoming_msg = error.msg,
+                );
+                if existing.source_span.is_none() {
+                    existing.source_span = error.source_span;
+                }
+                if existing.host_path.is_none() {
+                    existing.host_path = error.host_path;
+                }
+                for (key, value) in error.metadata {
+                    existing.metadata.entry(key).or_insert(value);
+                }
+            }
+            None => {
+                self.infrastructure_error = Some(error);
+            }
+        }
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.infrastructure_error.is_some()
+            || self
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error)
     }
 
     /// Count diagnostics with `Error` severity.
@@ -195,6 +242,7 @@ impl CompilerMessages {
             .iter()
             .filter(|d| d.severity == DiagnosticSeverity::Error)
             .count()
+            + usize::from(self.infrastructure_error.is_some())
     }
 
     /// Count diagnostics with `Warning` severity.
@@ -203,6 +251,12 @@ impl CompilerMessages {
             .iter()
             .filter(|d| d.severity == DiagnosticSeverity::Warning)
             .count()
+    }
+
+    pub fn has_warnings(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
     }
 
     /// Iterate over every diagnostic in compiler production order.
@@ -272,49 +326,6 @@ impl CompilerMessages {
         self.error_diagnostics().next()
     }
 
-    #[cfg(test)]
-    pub(crate) fn first_infrastructure_error_for_tests(
-        &self,
-    ) -> Option<(&ErrorType, &str, &SourceLocation)> {
-        self.infrastructure_errors_for_tests().next()
-    }
-
-    /// Iterate over all error-severity infrastructure diagnostics.
-    ///
-    /// WHAT: scans every error diagnostic, not just the first, so a later
-    ///   infrastructure error is not hidden by an earlier non-infrastructure error.
-    /// WHY: `first_infrastructure_error_for_tests` only checked the first error
-    ///   diagnostic and returned `None` when it was not infrastructure, making
-    ///   later infrastructure errors invisible.
-    #[cfg(test)]
-    pub(crate) fn infrastructure_errors_for_tests(
-        &self,
-    ) -> impl Iterator<Item = (&ErrorType, &str, &SourceLocation)> {
-        self.error_diagnostics().filter_map(|diagnostic| {
-            let DiagnosticPayload::InfrastructureError {
-                msg, error_type, ..
-            } = &diagnostic.payload
-            else {
-                return None;
-            };
-
-            Some((error_type, msg.as_str(), &diagnostic.primary_location))
-        })
-    }
-
-    /// Test-only: iterate over all infrastructure-error payloads, returning the
-    /// full `DiagnosticPayload::InfrastructureError` variant for metadata access.
-    #[cfg(test)]
-    pub(crate) fn infrastructure_error_payloads_for_tests(
-        &self,
-    ) -> impl Iterator<Item = &DiagnosticPayload> {
-        self.error_diagnostics()
-            .filter_map(|diagnostic| match &diagnostic.payload {
-                DiagnosticPayload::InfrastructureError { .. } => Some(&diagnostic.payload),
-                _ => None,
-            })
-    }
-
     /// Iterate over diagnostics with `Warning` severity.
     pub(crate) fn warnings(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
         self.diagnostics
@@ -329,6 +340,7 @@ impl CompilerMessages {
     pub fn from_diagnostic(diagnostic: CompilerDiagnostic, string_table: StringTable) -> Self {
         Self {
             diagnostics: vec![diagnostic],
+            infrastructure_error: None,
             string_table,
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -340,27 +352,19 @@ impl CompilerMessages {
     pub fn from_diagnostic_ref(diagnostic: CompilerDiagnostic, string_table: &StringTable) -> Self {
         Self::from_diagnostic(diagnostic, string_table.clone())
     }
-
-    /// Wrap a single `CompilerError` into a `CompilerMessages` container with no warnings.
+    /// Carry a single `CompilerError` on the outer infrastructure lane with no warnings.
     ///
-    /// WHY: Several build/backend modules need to convert a `CompilerError` into the richer
+    /// WHY: Several build/backend modules need to surface a `CompilerError` through the richer
     /// `CompilerMessages` type at a boundary. Centralising this avoids repeated inline struct
-    /// literals scattered across callers.
+    /// literals scattered across callers. The error stays typed: no diagnostic payload is
+    /// fabricated and its message, source span, host path, type and metadata are preserved as-is.
     ///
-    /// When the error carries an attached render-identity context (set at a module semantic
-    /// boundary), the context's `StringTable` is merged into the supplied target table and the
-    /// error's interned location is remapped into that target exactly once. This keeps the
-    /// location resolvable in the returned message set even when the error's path IDs were issued
-    /// by a module-local table that no longer exists. Errors without an attached context keep the
-    /// original behavior: the diagnostic borrows the location unchanged against the target table.
-    pub fn from_error(mut error: CompilerError, mut string_table: StringTable) -> Self {
-        if let Some(render_context) = error.take_render_context() {
-            let remap = string_table.merge_from(&render_context);
-            error.remap_string_ids(&remap);
-        }
-        let diagnostic = compiler_error_to_diagnostic(&error);
+    /// The table remains owned by `CompilerMessages` for diagnostic payloads and render contexts;
+    /// it is never attached to or remapped through the infrastructure error.
+    pub fn from_error(error: CompilerError, string_table: StringTable) -> Self {
         Self {
-            diagnostics: vec![diagnostic],
+            diagnostics: Vec::new(),
+            infrastructure_error: Some(error),
             string_table,
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -372,36 +376,28 @@ impl CompilerMessages {
     ///
     /// WHAT: snapshots the current table state into the returned message container.
     /// WHY: frontend/build boundaries often only borrow the shared table, but diagnostics still
-    /// need the full interned-path context accumulated so far.
+    /// need the full interned payload context accumulated so far.
     pub fn from_error_ref(error: CompilerError, string_table: &StringTable) -> Self {
         Self::from_error(error, string_table.clone())
     }
 
-    /// Wrap already-collected warnings plus one infrastructure error while preserving table context.
+    /// Carry already-collected warnings plus one infrastructure error on the outer lane.
     ///
-    /// WHAT: carries forward the caller's warning set, appends the boundary failure, and clones
-    /// the current `StringTable`.
+    /// WHAT: carries forward the caller's warning set on the diagnostic stream and clones the
+    /// current `StringTable`.
     /// WHY: these helpers receive warnings that were produced before the failure. Keeping that
-    /// order makes `CompilerMessages` a true production-order diagnostic stream.
+    /// order makes `CompilerMessages` a true production-order diagnostic stream with the typed
+    /// failure reported beside it. The error retains its own typed provenance and does not
+    /// borrow or remap the warning table.
     pub fn from_error_with_warnings(
-        mut error: CompilerError,
+        error: CompilerError,
         warning_diagnostics: Vec<CompilerDiagnostic>,
         string_table: &StringTable,
     ) -> Self {
-        // Merge an attached render-identity context into a clone of the caller's table before
-        // building the diagnostic, mirroring `from_error`. The warnings were produced against the
-        // caller's table, so merging only adds the error's local strings and leaves their IDs
-        // valid in the resulting table.
-        let mut merged_table = string_table.clone();
-        if let Some(render_context) = error.take_render_context() {
-            let remap = merged_table.merge_from(&render_context);
-            error.remap_string_ids(&remap);
-        }
-        let mut diagnostics = warning_diagnostics;
-        diagnostics.push(compiler_error_to_diagnostic(&error));
         Self {
-            diagnostics,
-            string_table: merged_table,
+            diagnostics: warning_diagnostics,
+            infrastructure_error: Some(error),
+            string_table: string_table.clone(),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -414,7 +410,6 @@ impl CompilerMessages {
     /// then stores the typed boundary diagnostic directly in `diagnostics`.
     /// WHY: frontend stages that emit `CompilerDiagnostic` need to preserve structured payloads
     /// so that boundary renderers can resolve `StringId` values through the shared `StringTable`.
-    /// The warning set was emitted before the failure, so it stays first.
     pub fn from_diagnostic_with_warnings(
         diagnostic: CompilerDiagnostic,
         warning_diagnostics: Vec<CompilerDiagnostic>,
@@ -424,6 +419,7 @@ impl CompilerMessages {
         diagnostics.push(diagnostic);
         Self {
             diagnostics,
+            infrastructure_error: None,
             string_table: string_table.clone(),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -431,16 +427,10 @@ impl CompilerMessages {
         }
     }
 
-    /// Build a single file-scoped message set while preserving the caller's existing table state.
-    ///
-    /// WHAT: clones the current table, interns the failing path into that clone, and returns a
-    /// message set that owns the resulting diagnostic context.
-    /// WHY: file-system errors often arise after the current build already interned many other
-    /// paths, so the returned diagnostics must preserve those older interned IDs as well.
+    /// Carry a filesystem failure while retaining the caller's table for any surrounding
+    /// diagnostics.
     pub fn file_error(path: &Path, msg: impl Into<String>, string_table: &StringTable) -> Self {
-        let mut error_string_table = string_table.clone();
-        let error = CompilerError::file_error(path, msg, &mut error_string_table);
-        Self::from_error(error, error_string_table)
+        Self::from_error(CompilerError::file_error(path, msg), string_table.clone())
     }
 
     /// Associate the current diagnostics with the source snapshot database that produced them.
@@ -547,13 +537,15 @@ impl CompilerMessages {
     ///
     /// WHAT: moves diagnostics and all frozen/source/type render-context ranges from `messages`
     ///       into this set, offsets the appended ranges by the current diagnostic count, and
-    ///       remaps the incoming table-owned IDs into this set's table.
+    ///       remaps diagnostic-owned IDs into this set's table.
     /// WHY: final aggregation consumes module-local message owners without cloning their
     ///       diagnostics or string tables. Each incoming table is merged exactly once before its
-    ///       diagnostics and type environments are appended.
+    ///       diagnostics and type environments are appended; the outer infrastructure error keeps
+    ///       its own typed source span and host path.
     pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
         let CompilerMessages {
             mut diagnostics,
+            infrastructure_error,
             string_table,
             mut render_frozen_contexts,
             mut render_source_contexts,
@@ -589,15 +581,9 @@ impl CompilerMessages {
             type_context.diagnostic_range.end += shift;
             self.render_type_contexts.push(type_context);
         }
-    }
 
-    /// Attach one frozen identity owner to every current diagnostic.
-    pub(crate) fn set_frozen_identity_context(&mut self, identity: Arc<FrozenIdentityContext>) {
-        if !self.diagnostics.is_empty() {
-            self.render_frozen_contexts.push(RenderFrozenContext {
-                diagnostic_range: 0..self.diagnostics.len(),
-                identity,
-            });
+        if let Some(error) = infrastructure_error {
+            self.set_infrastructure_error(error);
         }
     }
 
@@ -692,27 +678,17 @@ pub enum CompilerErrorMetadataKey {
 pub struct CompilerError {
     pub msg: String,
 
-    // Stores the interned source scope for this diagnostic. Header-local scopes may include a
-    // synthetic `.header` suffix and are resolved back to real file paths only at render time.
-    pub location: SourceLocation,
+    /// Exact source provenance when this failure has an authored source range.
+    pub source_span: Option<SourceSpan>,
+
+    /// Host filesystem path for failures that occur before a source span exists.
+    pub host_path: Option<PathBuf>,
+
     pub error_type: ErrorType,
 
     // Structured guidance for internal/tooling failures. User-facing diagnostics carry typed
     // payload facts on `CompilerDiagnostic` instead of using this string map.
     pub metadata: HashMap<CompilerErrorMetadataKey, String>,
-
-    // Optional self-contained render-identity context for this error's interned `location`.
-    //
-    // WHAT: carries the `StringTable` that issued the `SourceLocation`'s interned path IDs, so a
-    //       later ownership boundary can merge those IDs into its own table and remap the location
-    //       exactly once instead of resolving it against a mismatched or empty table.
-    // WHY: an infrastructure error recovered at a module semantic boundary can carry a location
-    //      whose interned path IDs are only valid in the module-local table that produced them.
-    //      Without this context a consumer that supplies a different table cannot resolve or
-    //      remap the location, so the path would render incorrectly or point at the wrong string.
-    //      The context is attached only at ownership boundaries that need it; every ordinary
-    //      constructor leaves it `None` so cheap construction and cloning are unchanged.
-    render_context: Option<StringTable>,
 }
 
 /// Merge warnings produced by an earlier frontend stage into a later message set.
@@ -733,34 +709,27 @@ pub(crate) fn merge_stage_messages(
 }
 
 impl CompilerError {
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        // An attached render context is only authoritative for the location's original ID space.
-        // Once an external caller remaps the location into another table, that table becomes the
-        // authority and the attached context would describe a stale identity. Drop it so no
-        // double-authority can survive the conversion. `CompilerMessages::from_error` takes the
-        // context before remapping, so this drop only affects other external remap callers.
-        self.render_context = None;
-        self.location.remap_string_ids(remap);
-    }
-
     pub fn new(
         msg: impl Into<String>,
-        location: SourceLocation,
+        source_span: Option<SourceSpan>,
         error_type: ErrorType,
     ) -> CompilerError {
         CompilerError {
             msg: msg.into(),
-            location,
+            source_span,
+            host_path: None,
             error_type,
             metadata: HashMap::new(),
-            render_context: None,
         }
     }
 
     /// Span exhaustion shares the existing source-size failure lane until Phase 5 reclassifies
-    /// it. Exhaustion is terminal for the producing stage: the error's location carries the
-    /// offending exact range, so diagnostics are never published with a silently dropped span.
-    pub(crate) fn source_span_capacity(error: SpanCapacityError, location: SourceLocation) -> Self {
+    /// it. The optional source span preserves any already-encoded provenance without requiring
+    /// callers to fabricate a span when packing failed before one could be created.
+    pub(crate) fn source_span_capacity(
+        error: SpanCapacityError,
+        source_span: Option<SourceSpan>,
+    ) -> Self {
         let (message, error_type) = match error.reason() {
             SpanCapacityReason::ExtendedTableFull => (
                 format!(
@@ -781,54 +750,17 @@ impl CompilerError {
                 ErrorType::Compiler,
             ),
         };
-        Self::new(message, location, error_type)
+        Self::new(message, source_span, error_type)
     }
 
     /// Attach structured guidance metadata to this error and return it for chaining.
     ///
     /// WHAT: replaces the metadata map wholesale.
-    /// WHY: the module semantic boundary recovers an infrastructure error's metadata from its
-    ///      structured payload alongside the message, location and error type, so a single
-    ///      builder keeps that reconstruction readable without repeated `new_metadata_entry` calls.
+    /// WHY: infrastructure boundaries recover an error's metadata alongside its message and
+    ///      typed provenance, so a single builder keeps that reconstruction readable without
+    ///      repeated `new_metadata_entry` calls.
     pub fn with_metadata(mut self, metadata: HashMap<CompilerErrorMetadataKey, String>) -> Self {
         self.metadata = metadata;
-        self
-    }
-
-    /// Attach the render-identity `StringTable` that issued this error's interned location.
-    ///
-    /// WHAT: stores the table so a later `CompilerMessages::from_error` boundary can merge the
-    ///       location's IDs into its own table and remap the location exactly once.
-    /// WHY: only ownership boundaries that move an error across a string-table scope need this.
-    ///      Ordinary constructors leave the context `None`, so this builder is the single attach
-    ///      point and keeps normal construction cheap.
-    pub fn with_render_context(mut self, string_table: StringTable) -> Self {
-        self.render_context = Some(string_table);
-        self
-    }
-
-    /// Take the attached render-identity context, leaving `None`.
-    ///
-    /// WHAT: moves the optional `StringTable` out of this error.
-    /// WHY: `CompilerMessages::from_error` consumes the context once to merge and remap the
-    ///      location, so the error never keeps a stale authority after the boundary conversion.
-    pub(crate) fn take_render_context(&mut self) -> Option<StringTable> {
-        self.render_context.take()
-    }
-
-    /// Replace only the location scope path while preserving the existing span positions.
-    ///
-    /// WHAT: rewrites the interned path for a diagnostic without touching its line/column data.
-    /// WHY: some helpers need to attach a resolved file path after building a precise span-based
-    /// error, and downgrading that span to a file-level location would lose useful diagnostics.
-    pub fn with_scope_path(mut self, file_path: &Path, string_table: &mut StringTable) -> Self {
-        self.location.scope = match InternedPath::try_from_filesystem_path(file_path, string_table)
-        {
-            Ok(interned) => interned,
-            Err(NonUtf8PathComponent { .. }) => {
-                InternedPath::from_single_str(&format!("{file_path:?}"), string_table)
-            }
-        };
         self
     }
 
@@ -841,62 +773,49 @@ impl CompilerError {
         self.metadata.insert(key, value);
     }
 
-    /// Create a thread panic error (internal compiler_frontend issue)
+    /// Create a thread panic error (internal compiler_frontend issue).
     pub fn new_thread_panic(msg: impl Into<String>) -> Self {
-        CompilerError {
-            msg: msg.into(),
-            location: SourceLocation::default(),
-            error_type: ErrorType::Compiler,
-            metadata: HashMap::new(),
-            render_context: None,
-        }
+        Self::new(msg, None, ErrorType::Compiler)
     }
 
-    /// Create a compiler_frontend error (internal bug, not user's fault)
+    /// Create a compiler_frontend error (internal bug, not user's fault).
     // Existing backend and frontend invariant checks use `CompilerError::compiler_error(...)`
     // as the direct constructor for infrastructure diagnostics.
     #[allow(clippy::self_named_constructors)]
     pub fn compiler_error(msg: impl Into<String>) -> Self {
-        CompilerError {
-            msg: msg.into(),
-            location: SourceLocation::default(),
-            error_type: ErrorType::Compiler,
-            metadata: HashMap::new(),
-            render_context: None,
-        }
+        Self::new(msg, None, ErrorType::Compiler)
     }
 
-    /// Create a file system error from a Path
-    pub fn file_error(path: &Path, msg: impl Into<String>, string_table: &mut StringTable) -> Self {
+    /// Create a filesystem error from a host path.
+    pub fn file_error(path: &Path, msg: impl Into<String>) -> Self {
         CompilerError {
             msg: msg.into(),
-            location: SourceLocation::from_path(path, string_table),
+            source_span: None,
+            host_path: Some(path.to_path_buf()),
             error_type: ErrorType::File,
             metadata: HashMap::new(),
-            render_context: None,
         }
     }
 
-    /// Create a file system error from Path with metadata
+    /// Create a filesystem error from a host path with metadata.
     pub fn new_file_error(
         path: &Path,
         msg: impl Into<String>,
         metadata: HashMap<CompilerErrorMetadataKey, String>,
-        string_table: &mut StringTable,
     ) -> CompilerError {
         CompilerError {
             msg: msg.into(),
-            location: SourceLocation::from_path(path, string_table),
+            source_span: None,
+            host_path: Some(path.to_path_buf()),
             error_type: ErrorType::File,
             metadata,
-            render_context: None,
         }
     }
 }
 
-// Adds more information to the CompilerError
-// So it knows the file path (possible specific part of the line soon)
-// And the type of error
+// Classifies the source of an infrastructure failure.
+//
+// Filesystem failures retain their host path separately from source-owned spans.
 #[derive(PartialEq, Debug, Clone)]
 pub enum ErrorType {
     File,
@@ -907,29 +826,13 @@ pub enum ErrorType {
     Backend(crate::backends::error_types::BackendErrorType),
 }
 
-/// Convert a direct `CompilerError` into the boundary diagnostic sequence.
-///
-/// This exists only for infrastructure/tooling paths that still return `CompilerError`.
-pub(crate) fn compiler_error_to_diagnostic(error: &CompilerError) -> CompilerDiagnostic {
-    CompilerDiagnostic::with_severity(
-        DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure),
-        DiagnosticSeverity::Error,
-        error.location.clone(),
-        DiagnosticPayload::InfrastructureError {
-            msg: error.msg.clone(),
-            error_type: error.error_type.clone(),
-            metadata: error.metadata.clone(),
-        },
-    )
-}
-
 /// Return a filesystem infrastructure error.
 ///
 /// Usage: `return_file_error!(path, "message", { metadata })`;
 #[macro_export]
 macro_rules! return_file_error {
     // Metadata usage for direct infrastructure rendering.
-    ($string_table:expr, $path:expr, $msg:expr, { $( $key:ident => $value:expr ),* $(,)? }) => {{
+    ($path:expr, $msg:expr, { $( $key:ident => $value:expr ),* $(,)? }) => {{
         return Err($crate::compiler_frontend::compiler_errors::CompilerError::new_file_error(
             $path,
             $msg,
@@ -938,23 +841,20 @@ macro_rules! return_file_error {
                 $( map.insert($crate::compiler_frontend::compiler_errors::CompilerErrorMetadataKey::$key, $value.into()); )*
                 map
             },
-            $string_table,
         ));
     }};
     // Usage without guidance metadata.
-    ($string_table:expr, $path:expr, $msg:expr) => {{
+    ($path:expr, $msg:expr) => {{
         return Err($crate::compiler_frontend::compiler_errors::CompilerError::file_error(
             $path,
             $msg,
-            $string_table,
         ));
     }};
 }
 
-/// Returns a new CompilerError for internal compiler_frontend bugs.
+/// Returns a new `CompilerError` for internal compiler_frontend bugs.
 ///
 /// Compiler errors indicate bugs in the compiler_frontend itself, not user code issues.
-/// These provide the location of the bug in the compiler_frontend source code
 #[macro_export]
 macro_rules! return_compiler_error {
     // Variant with format string, arguments, and metadata (with semicolon separator)
@@ -1003,14 +903,14 @@ macro_rules! return_compiler_error {
 /// These are typically compiler_frontend bugs where the HIR infrastructure is missing
 /// or incomplete for a particular language feature.
 ///
-/// Usage: `return_hir_transformation_error!("Function '{}' transformation not yet implemented", func_name, location, {})`;
+/// Usage: `return_hir_transformation_error!("Function '{}' transformation not yet implemented", func_name, source_span, {})`;
 #[macro_export]
 macro_rules! return_hir_transformation_error {
     // HIR failures may carry metadata for direct infrastructure rendering.
-    ($msg:expr, $location:expr, { $( $key:ident => $value:expr ),* $(,)? }) => {
+    ($msg:expr, $source_span:expr, { $( $key:ident => $value:expr ),* $(,)? }) => {
         let mut error = $crate::compiler_frontend::compiler_errors::CompilerError::new(
             $msg,
-            $location,
+            $source_span,
             $crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
         );
         $(
@@ -1021,10 +921,10 @@ macro_rules! return_hir_transformation_error {
         )*
         return Err(error)
     };
-    ($msg:expr, $location:expr) => {
+    ($msg:expr, $source_span:expr) => {
         return Err($crate::compiler_frontend::compiler_errors::CompilerError::new(
             $msg,
-            $location,
+            $source_span,
             $crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
         ))
     };

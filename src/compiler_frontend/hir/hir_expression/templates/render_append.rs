@@ -33,7 +33,7 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::aggregate::RuntimeTemplateAggregateAppend;
@@ -47,7 +47,7 @@ struct OwnedRuntimeBranchChainAppend<'a, 'context> {
     branch_index: usize,
     append_context: RuntimeTemplateAppendContext<'context>,
     aggregate_local: Option<LocalId>,
-    location: &'a SourceLocation,
+    span_ref: &'a Option<SourceSpan>,
 }
 
 impl<'a> HirBuilder<'a> {
@@ -63,12 +63,12 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_reactive_linear_template_expression_from_owned_node(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let string_ty = builtin_type_ids::STRING;
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let mut rendered = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::StringLiteral(String::new()),
             string_ty,
             ValueKind::Const,
@@ -77,7 +77,7 @@ impl<'a> HirBuilder<'a> {
 
         self.append_owned_runtime_template_node_to_reactive_linear_expression(
             node,
-            location,
+            span_ref,
             &mut rendered,
         )?;
 
@@ -90,7 +90,7 @@ impl<'a> HirBuilder<'a> {
     fn append_owned_runtime_template_node_to_reactive_linear_expression(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         rendered: &mut HirExpression,
     ) -> Result<(), CompilerError> {
         let string_ty = builtin_type_ids::STRING;
@@ -99,31 +99,31 @@ impl<'a> HirBuilder<'a> {
             OwnedRuntimeTemplateNode::Sequence { children, .. } => {
                 for child in children {
                     self.append_owned_runtime_template_node_to_reactive_linear_expression(
-                        child, location, rendered,
+                        child, span_ref, rendered,
                     )?;
                 }
             }
 
             OwnedRuntimeTemplateNode::Text {
                 text,
-                location: text_location,
+                span: text_span,
                 ..
             } => {
-                let chunk_region = self.current_region_or_error(text_location)?;
-                let chunk_kind = self.runtime_template_text_chunk(text, text_location)?;
+                let chunk_region = self.current_region_or_error(text_span)?;
+                let chunk_kind = self.runtime_template_text_chunk(text, text_span)?;
                 let chunk = self.make_expression(
-                    text_location,
+                    text_span,
                     chunk_kind,
                     string_ty,
                     ValueKind::Const,
                     chunk_region,
                 );
 
-                let append_region = self.current_region_or_error(location)?;
+                let append_region = self.current_region_or_error(span_ref)?;
                 self.append_chunk_to_rendered_expression(
                     rendered,
                     chunk,
-                    location,
+                    span_ref,
                     string_ty,
                     append_region,
                 )?;
@@ -139,25 +139,25 @@ impl<'a> HirBuilder<'a> {
                     reactive_subscription.is_some(),
                 )?;
 
-                let region = self.current_region_or_error(location)?;
+                let region = self.current_region_or_error(span_ref)?;
                 self.append_chunk_to_rendered_expression(
-                    rendered, chunk, location, string_ty, region,
+                    rendered, chunk, span_ref, string_ty, region,
                 )?;
             }
 
             OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
                 let chunk = self.lower_reactive_linear_child_template_chunk(template)?;
 
-                let region = self.current_region_or_error(location)?;
+                let region = self.current_region_or_error(span_ref)?;
                 self.append_chunk_to_rendered_expression(
-                    rendered, chunk, location, string_ty, region,
+                    rendered, chunk, span_ref, string_ty, region,
                 )?;
             }
 
             OwnedRuntimeTemplateNode::ConditionalWrapper { .. } => {
                 return_hir_transformation_error!(
                     "Reactive linear template lowering received an output-conditioned wrapper node.",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span_ref)
                 );
             }
 
@@ -171,7 +171,7 @@ impl<'a> HirBuilder<'a> {
             | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. } => {
                 return_hir_transformation_error!(
                     "Reactive linear template lowering received a non-linear owned node. Reactive control-flow and slot sites must use their dedicated lowering paths.",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span_ref)
                 );
             }
         }
@@ -188,7 +188,7 @@ impl<'a> HirBuilder<'a> {
                 if is_owned_runtime_template_node_control_flow(node) {
                     return_hir_transformation_error!(
                         "Reactive linear template lowering received a nested control-flow child template.",
-                        self.hir_error_location(&template.location)
+                        self.hir_error_location(&template.span)
                     );
                 }
 
@@ -196,22 +196,22 @@ impl<'a> HirBuilder<'a> {
                 if self.owned_runtime_template_node_has_runtime_dependency(node) {
                     self.lower_runtime_reactive_linear_template_expression_from_owned_node(
                         node,
-                        &template.location,
+                        &template.span,
                     )
                     .map(|lowered| lowered.value)
                 } else {
                     let chunk = self.lower_runtime_linear_template_expression_from_owned_node(
                         node,
-                        &template.location,
+                        &template.span,
                     )?;
-                    self.materialize_reactive_template_snapshot_chunk(chunk, &template.location)
+                    self.materialize_reactive_template_snapshot_chunk(chunk, &template.span)
                 }
             }
 
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(_) => {
                 return_hir_transformation_error!(
                     "Reactive linear template lowering received a nested runtime slot application.",
-                    self.hir_error_location(&template.location)
+                    self.hir_error_location(&template.span)
                 )
             }
         }
@@ -291,13 +291,13 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn initialize_runtime_template_accumulator(
         &mut self,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
         let string_ty = builtin_type_ids::STRING;
-        let accumulator = self.allocate_temp_local(string_ty, Some(location.clone()))?;
-        let region = self.current_region_or_error(location)?;
+        let accumulator = self.allocate_temp_local(string_ty, None)?;
+        let region = self.current_region_or_error(span_ref)?;
         let empty_string = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::StringLiteral(String::new()),
             string_ty,
             ValueKind::Const,
@@ -309,7 +309,7 @@ impl<'a> HirBuilder<'a> {
                 target: HirPlace::Local(accumulator),
                 value: empty_string,
             },
-            location,
+            span_ref,
         )?;
 
         Ok(accumulator)
@@ -319,36 +319,36 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         aggregate: LocalId,
         accumulator: LocalId,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let region = self.current_region_or_error(fallback_location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let aggregate_value = self.make_expression(
-            fallback_location,
+            span_ref,
             HirExpressionKind::Load(HirPlace::Local(aggregate)),
             builtin_type_ids::STRING,
             ValueKind::Place,
             region,
         );
 
-        self.append_template_chunk_to_accumulator(aggregate_value, accumulator, fallback_location)
+        self.append_template_chunk_to_accumulator(aggregate_value, accumulator, span_ref)
     }
 
     fn append_text_to_accumulator(
         &mut self,
         text: String,
         accumulator: LocalId,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let chunk = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::StringLiteral(text),
             builtin_type_ids::STRING,
             ValueKind::Const,
             region,
         );
 
-        self.append_template_chunk_to_accumulator(chunk, accumulator, location)
+        self.append_template_chunk_to_accumulator(chunk, accumulator, span_ref)
     }
 
     /// Appends one piece-bearing owned text payload to an accumulator.
@@ -363,21 +363,21 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         text: &OwnedFoldedString,
         append_context: RuntimeTemplateAppendContext<'_>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let OwnedFoldedString::Pieces(pieces) = text else {
             return_hir_transformation_error!(
                 "Piece-bearing runtime-template text node carried neither plain text nor pieces.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         };
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let chunk_kind = HirExpressionKind::StructuralString {
-            pieces: self.hir_pieces_from_owned_pieces(pieces, location)?,
+            pieces: self.hir_pieces_from_owned_pieces(pieces, span_ref)?,
         };
         let chunk = self.make_expression(
-            location,
+            span_ref,
             chunk_kind,
             builtin_type_ids::STRING,
             ValueKind::Const,
@@ -387,13 +387,13 @@ impl<'a> HirBuilder<'a> {
         self.append_template_chunk_to_accumulator(
             chunk,
             append_context.target_accumulator,
-            location,
+            span_ref,
         )?;
 
         self.mark_owned_runtime_template_output_if_needed(
             TemplateBodyEmission::Output,
             append_context,
-            location,
+            span_ref,
         )?;
 
         Ok(TemplateBodyEmission::Output)
@@ -403,7 +403,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expression: &Expression,
         append_context: RuntimeTemplateAppendContext<'_>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         if let ExpressionKind::StringSlice(text) = &expression.kind
             && self.string_table.resolve(*text).is_empty()
@@ -421,7 +421,7 @@ impl<'a> HirBuilder<'a> {
         self.append_template_chunk_to_accumulator(
             chunk,
             append_context.target_accumulator(),
-            fallback_location,
+            span_ref,
         )?;
 
         Ok(TemplateBodyEmission::Output)
@@ -430,12 +430,12 @@ impl<'a> HirBuilder<'a> {
     fn append_unresolved_slot_node_to_accumulator(
         &mut self,
         append_context: RuntimeTemplateAppendContext<'_>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         if append_context.rejects_unresolved_slots() {
             return_hir_transformation_error!(
                 "Runtime template slot application reached HIR with an unresolved slot placeholder. AST slot routing should have converted it to a runtime slot site before HIR lowering.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         }
 
@@ -450,7 +450,7 @@ impl<'a> HirBuilder<'a> {
         node: &OwnedRuntimeTemplateNode,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         match node {
             OwnedRuntimeTemplateNode::Sequence { children, .. } => {
@@ -461,7 +461,7 @@ impl<'a> HirBuilder<'a> {
                         child,
                         append_context,
                         aggregate_local,
-                        fallback_location,
+                        span_ref,
                     )?;
 
                     match emission {
@@ -476,8 +476,8 @@ impl<'a> HirBuilder<'a> {
                         }
                     }
 
-                    let current_block = self.current_block_id_or_error(fallback_location)?;
-                    if self.block_has_explicit_terminator(current_block, fallback_location)? {
+                    let current_block = self.current_block_id_or_error(span_ref)?;
+                    if self.block_has_explicit_terminator(current_block, span_ref)? {
                         break;
                     }
                 }
@@ -489,7 +489,7 @@ impl<'a> HirBuilder<'a> {
                 })
             }
 
-            OwnedRuntimeTemplateNode::Text { text, location, .. } => {
+            OwnedRuntimeTemplateNode::Text { text, .. } => {
                 // Piece-bearing payloads append as one structural constant chunk in authored
                 // order; every anchor inside the payload is a real output, so whitespace-only
                 // trimming questions only apply to plain-text payloads.
@@ -497,7 +497,7 @@ impl<'a> HirBuilder<'a> {
                     return self.append_structural_text_node_to_accumulator(
                         text,
                         append_context,
-                        location,
+                        span_ref,
                     );
                 };
 
@@ -509,7 +509,7 @@ impl<'a> HirBuilder<'a> {
                 self.append_text_to_accumulator(
                     text_value,
                     append_context.target_accumulator,
-                    location,
+                    span_ref,
                 )?;
 
                 // Whitespace-only text is appended to the accumulator for
@@ -528,22 +528,19 @@ impl<'a> HirBuilder<'a> {
                 self.mark_owned_runtime_template_output_if_needed(
                     TemplateBodyEmission::Output,
                     append_context,
-                    location,
+                    span_ref,
                 )?;
 
                 Ok(TemplateBodyEmission::Output)
             }
 
             OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-                let emission = self.append_expression_to_accumulator(
-                    expression,
-                    append_context,
-                    fallback_location,
-                )?;
+                let emission =
+                    self.append_expression_to_accumulator(expression, append_context, span_ref)?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(emission)
             }
@@ -553,46 +550,38 @@ impl<'a> HirBuilder<'a> {
                     template,
                     append_context,
                     aggregate_local,
-                    fallback_location,
+                    span_ref,
                 )?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(emission)
             }
 
-            OwnedRuntimeTemplateNode::ConditionalWrapper {
-                child,
-                wrapper,
-                location,
-                ..
-            } => self.append_output_conditioned_runtime_wrapper(
-                child,
-                wrapper,
-                append_context,
-                location,
-            ),
+            OwnedRuntimeTemplateNode::ConditionalWrapper { child, wrapper, .. } => self
+                .append_output_conditioned_runtime_wrapper(
+                    child,
+                    wrapper,
+                    append_context,
+                    span_ref,
+                ),
 
             OwnedRuntimeTemplateNode::BranchChain {
-                branches,
-                fallback,
-                location,
-                ..
+                branches, fallback, ..
             } => self.append_owned_runtime_template_branch_chain(
                 branches,
                 fallback.as_deref(),
                 append_context,
                 aggregate_local,
-                location,
+                span_ref,
             ),
 
             OwnedRuntimeTemplateNode::Loop {
                 header,
                 body,
                 aggregate_wrapper,
-                location,
                 ..
             } => self.append_owned_runtime_template_loop(
                 header,
@@ -600,40 +589,40 @@ impl<'a> HirBuilder<'a> {
                 aggregate_wrapper.as_deref(),
                 append_context,
                 aggregate_local,
-                location,
+                span_ref,
             ),
 
             OwnedRuntimeTemplateNode::AggregateOutput => {
                 let Some(aggregate) = aggregate_local else {
                     return_hir_transformation_error!(
                         "Owned runtime template aggregate output appeared outside an aggregate wrapper context.",
-                        self.hir_error_location(fallback_location)
+                        self.hir_error_location(span_ref)
                     );
                 };
 
                 self.append_aggregate_local_to_accumulator(
                     aggregate,
                     append_context.target_accumulator,
-                    fallback_location,
+                    span_ref,
                 )?;
                 self.mark_owned_runtime_template_output_if_needed(
                     TemplateBodyEmission::Output,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(TemplateBodyEmission::Output)
             }
 
-            OwnedRuntimeTemplateNode::LoopControl { kind, location, .. } => {
+            OwnedRuntimeTemplateNode::LoopControl { kind, .. } => {
                 if let Some(flush) = append_context.loop_control_flush {
-                    self.flush_runtime_slot_application_for_loop_control(flush, *kind, location)?;
+                    self.flush_runtime_slot_application_for_loop_control(flush, *kind, span_ref)?;
                     return Ok(match kind {
                         TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
                         TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
                     });
                 }
 
-                self.emit_template_loop_control(*kind, location)?;
+                self.emit_template_loop_control(*kind, span_ref)?;
                 Ok(match kind {
                     TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
                     TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
@@ -641,15 +630,12 @@ impl<'a> HirBuilder<'a> {
             }
 
             OwnedRuntimeTemplateNode::RuntimeSlotSite { site, .. } => {
-                let emission = self.append_runtime_slot_site_to_accumulator(
-                    *site,
-                    append_context,
-                    fallback_location,
-                )?;
+                let emission =
+                    self.append_runtime_slot_site_to_accumulator(*site, append_context, span_ref)?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(emission)
             }
@@ -658,17 +644,17 @@ impl<'a> HirBuilder<'a> {
                 let emission = self.append_runtime_slot_source_to_accumulator(
                     *source,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(emission)
             }
 
-            OwnedRuntimeTemplateNode::Slot { location, .. } => {
+            OwnedRuntimeTemplateNode::Slot { .. } => {
                 // Wrapper-shaped templates can reach HIR as runtime values when
                 // they are not used as helpers. Their slot placeholders are
                 // structural insertion points, not renderable chunks, so linear
@@ -676,7 +662,7 @@ impl<'a> HirBuilder<'a> {
                 // path did. Inside an active runtime slot application wrapper
                 // the placeholder should have been resolved to a site by AST
                 // routing, so the reject policy raises an internal compiler error.
-                self.append_unresolved_slot_node_to_accumulator(append_context, location)
+                self.append_unresolved_slot_node_to_accumulator(append_context, span_ref)
             }
         }
     }
@@ -685,12 +671,12 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         emission: TemplateBodyEmission,
         append_context: RuntimeTemplateAppendContext<'_>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if emission == TemplateBodyEmission::Output
             && let Some(flag) = append_context.emitted_output
         {
-            self.mark_runtime_template_output_emitted(flag, fallback_location)?;
+            self.mark_runtime_template_output_emitted(flag, span_ref)?;
         }
 
         Ok(())
@@ -701,7 +687,7 @@ impl<'a> HirBuilder<'a> {
         template: &OwnedRuntimeTemplateHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         match &template.body {
             OwnedRuntimeTemplateBody::Render(node) => self
@@ -709,15 +695,12 @@ impl<'a> HirBuilder<'a> {
                     node,
                     append_context,
                     aggregate_local,
-                    fallback_location,
+                    span_ref,
                 ),
 
-            OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => self
-                .append_runtime_slot_application_with_context(
-                    handoff,
-                    append_context,
-                    fallback_location,
-                ),
+            OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
+                self.append_runtime_slot_application_with_context(handoff, append_context, span_ref)
+            }
         }
     }
 
@@ -727,7 +710,7 @@ impl<'a> HirBuilder<'a> {
         fallback: Option<&OwnedRuntimeTemplateNode>,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         self.append_owned_runtime_template_branch_chain_from_index(
             branches,
@@ -735,7 +718,7 @@ impl<'a> HirBuilder<'a> {
             0,
             append_context,
             aggregate_local,
-            location,
+            span_ref,
         )
     }
 
@@ -746,14 +729,14 @@ impl<'a> HirBuilder<'a> {
         branch_index: usize,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let Some(branch) = branches.get(branch_index) else {
             return self.append_owned_runtime_template_fallback_branch(
                 fallback,
                 append_context,
                 aggregate_local,
-                location,
+                span_ref,
             );
         };
 
@@ -761,14 +744,14 @@ impl<'a> HirBuilder<'a> {
             crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector::Bool(condition) => {
                 self.lower_if_with_body_emitters(
                     condition,
-                    &branch.location,
+                    &branch.span,
                     None,
                     |builder: &mut HirBuilder<'_>| {
                         builder.append_owned_runtime_template_node_to_accumulator(
                             &branch.body,
                             append_context,
                             aggregate_local,
-                            &branch.location,
+                            &branch.span,
                         )?;
                         Ok(())
                     },
@@ -779,7 +762,7 @@ impl<'a> HirBuilder<'a> {
                             branch_index + 1,
                             append_context,
                             aggregate_local,
-                            location,
+                            span_ref,
                         )?;
                         Ok(())
                     },
@@ -798,7 +781,7 @@ impl<'a> HirBuilder<'a> {
                         branch_index,
                         append_context,
                         aggregate_local,
-                        location,
+                        span_ref,
                     },
                 ),
         }
@@ -814,13 +797,13 @@ impl<'a> HirBuilder<'a> {
         self.append_runtime_option_present_template_branch(
             scrutinee,
             pattern,
-            &branch.location,
+            &branch.span,
             |builder: &mut HirBuilder<'_>| {
                 builder.append_owned_runtime_template_node_to_accumulator(
                     &branch.body,
                     append.append_context,
                     append.aggregate_local,
-                    &branch.location,
+                    &branch.span,
                 )?;
                 Ok(())
             },
@@ -831,7 +814,7 @@ impl<'a> HirBuilder<'a> {
                     append.branch_index + 1,
                     append.append_context,
                     append.aggregate_local,
-                    append.location,
+                    append.span_ref,
                 )?;
                 Ok(())
             },
@@ -844,7 +827,7 @@ impl<'a> HirBuilder<'a> {
         fallback: Option<&OwnedRuntimeTemplateNode>,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let Some(fallback) = fallback else {
             return Ok(TemplateBodyEmission::NoOutput);
@@ -854,7 +837,7 @@ impl<'a> HirBuilder<'a> {
             fallback,
             append_context,
             aggregate_local,
-            location,
+            span_ref,
         )
     }
 
@@ -865,17 +848,16 @@ impl<'a> HirBuilder<'a> {
         aggregate_wrapper: Option<&OwnedRuntimeTemplateNode>,
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
-        let aggregate = self.initialize_runtime_template_accumulator(fallback_location)?;
-        let emitted_any_iteration =
-            self.initialize_runtime_template_emitted_flag(fallback_location)?;
+        let aggregate = self.initialize_runtime_template_accumulator(span_ref)?;
+        let emitted_any_iteration = self.initialize_runtime_template_emitted_flag(span_ref)?;
 
         match header {
             TemplateLoopHeader::Conditional { condition } => {
                 self.lower_while_with_body_emitter(
                     condition,
-                    fallback_location,
+                    span_ref,
                     None,
                     |builder: &mut HirBuilder<'_>| {
                         let iteration_context = append_context
@@ -886,7 +868,7 @@ impl<'a> HirBuilder<'a> {
                             body,
                             iteration_context,
                             aggregate_local,
-                            fallback_location,
+                            span_ref,
                         )?;
                         Ok(())
                     },
@@ -897,7 +879,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_range_loop_with_body_emitter(
                     bindings,
                     range,
-                    fallback_location,
+                    span_ref,
                     |builder: &mut HirBuilder<'_>| {
                         let iteration_context = append_context
                             .with_target_accumulator(aggregate)
@@ -907,7 +889,7 @@ impl<'a> HirBuilder<'a> {
                             body,
                             iteration_context,
                             aggregate_local,
-                            fallback_location,
+                            span_ref,
                         )?;
                         Ok(())
                     },
@@ -918,7 +900,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_collection_loop_with_body_emitter(
                     bindings,
                     iterable,
-                    fallback_location,
+                    span_ref,
                     |builder: &mut HirBuilder<'_>| {
                         let iteration_context = append_context
                             .with_target_accumulator(aggregate)
@@ -928,7 +910,7 @@ impl<'a> HirBuilder<'a> {
                             body,
                             iteration_context,
                             aggregate_local,
-                            fallback_location,
+                            span_ref,
                         )?;
                         Ok(())
                     },
@@ -942,7 +924,7 @@ impl<'a> HirBuilder<'a> {
             emitted_any_iteration,
             append_context,
             aggregate_local,
-            fallback_location,
+            span_ref,
         )?;
 
         // The loop's emitted flag is runtime data: zero-iteration collection
@@ -964,7 +946,7 @@ impl<'a> HirBuilder<'a> {
         emitted_output: LocalId,
         append_context: RuntimeTemplateAppendContext<'_>,
         _aggregate_local: Option<LocalId>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let Some(aggregate_wrapper) = aggregate_wrapper else {
             return Ok(());
@@ -976,13 +958,13 @@ impl<'a> HirBuilder<'a> {
                 emitted_output,
                 append_context,
             },
-            fallback_location,
-            |builder, append, fallback_location| {
+            span_ref,
+            |builder, append, span_ref| {
                 builder.append_owned_runtime_template_node_to_accumulator(
                     aggregate_wrapper,
                     append.append_context,
                     Some(append.aggregate),
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(())
             },
@@ -995,13 +977,13 @@ impl<'a> HirBuilder<'a> {
         direct_subscription: bool,
     ) -> Result<HirExpression, CompilerError> {
         let lowered = self.lower_expression_value_to_current_block(expression)?;
-        let location = &expression.location;
+        let span_ref = &expression.span;
         let string_ty = builtin_type_ids::STRING;
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let chunk_as_string = if direct_subscription {
-            self.coerce_reactive_subscription_to_string(lowered, location, string_ty, region)
+            self.coerce_reactive_subscription_to_string(lowered, span_ref, string_ty, region)
         } else {
-            self.coerce_expression_to_string(lowered, location, string_ty, region)
+            self.coerce_expression_to_string(lowered, span_ref, string_ty, region)
         }?;
 
         if direct_subscription
@@ -1015,7 +997,7 @@ impl<'a> HirBuilder<'a> {
 
         // Non-reactive chunks inside a reactive template are snapshots. Store the rendered chunk
         // once so later rerenders do not accidentally turn ordinary `[source]` reads live.
-        self.materialize_reactive_template_snapshot_chunk(chunk_as_string, location)
+        self.materialize_reactive_template_snapshot_chunk(chunk_as_string, span_ref)
     }
 
     /// Coerces a direct reactive subscription chunk without eager statement materialization.
@@ -1028,13 +1010,13 @@ impl<'a> HirBuilder<'a> {
     fn coerce_reactive_subscription_to_string(
         &mut self,
         expression: HirExpression,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         string_ty: TypeId,
         region: RegionId,
     ) -> Result<HirExpression, CompilerError> {
         if expression.ty == self.type_environment.builtins().float {
             return Ok(self.make_expression(
-                location,
+                span_ref,
                 HirExpressionKind::Cast {
                     source: Box::new(expression),
                     policy: BuiltinCastPolicyId::FloatToString,
@@ -1045,28 +1027,28 @@ impl<'a> HirBuilder<'a> {
             ));
         }
 
-        self.coerce_expression_to_string(expression, location, string_ty, region)
+        self.coerce_expression_to_string(expression, span_ref, string_ty, region)
     }
 
     fn materialize_reactive_template_snapshot_chunk(
         &mut self,
         chunk: HirExpression,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
         let string_ty = builtin_type_ids::STRING;
-        let snapshot = self.allocate_temp_local(string_ty, Some(location.clone()))?;
+        let snapshot = self.allocate_temp_local(string_ty, None)?;
 
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(snapshot),
                 value: chunk,
             },
-            location,
+            span_ref,
         )?;
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         Ok(self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Load(HirPlace::Local(snapshot)),
             string_ty,
             ValueKind::Place,
@@ -1089,7 +1071,7 @@ impl<'a> HirBuilder<'a> {
                     .append_runtime_slot_application_with_context(
                         handoff,
                         append_context,
-                        &expression.location,
+                        &expression.span,
                     )
                     .map(Some);
             }
@@ -1100,7 +1082,7 @@ impl<'a> HirBuilder<'a> {
                         .append_runtime_slot_application_with_context(
                             handoff,
                             append_context,
-                            &expression.location,
+                            &expression.span,
                         )
                         .map(Some);
                 }
@@ -1111,7 +1093,7 @@ impl<'a> HirBuilder<'a> {
                             .append_nested_runtime_template_control_flow(
                                 node,
                                 append_context,
-                                &expression.location,
+                                &expression.span,
                             )
                             .map(Some);
                     }
@@ -1133,7 +1115,7 @@ impl<'a> HirBuilder<'a> {
                             node,
                             append_context,
                             None,
-                            &expression.location,
+                            &expression.span,
                         )
                         .map(Some);
                 }
@@ -1148,7 +1130,7 @@ impl<'a> HirBuilder<'a> {
                             node,
                             append_context,
                             None,
-                            &expression.location,
+                            &expression.span,
                         )
                         .map(Some);
                 }
@@ -1166,18 +1148,18 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         flush: RuntimeSlotLoopControlFlush<'_>,
         control_kind: TemplateLoopControlKind,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let condition_block = self.current_block_id_or_error(location)?;
-        let parent_region = self.current_region_or_error(location)?;
+        let condition_block = self.current_block_id_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error(span_ref)?;
         let flush_region = self.create_child_region(parent_region);
         let skip_region = self.create_child_region(parent_region);
-        let flush_block = self.create_block(flush_region, location, "runtime-slot-flush")?;
-        let skip_block = self.create_block(skip_region, location, "runtime-slot-skip")?;
+        let flush_block = self.create_block(flush_region, span_ref, "runtime-slot-flush")?;
+        let skip_block = self.create_block(skip_region, span_ref, "runtime-slot-skip")?;
         let condition = self.make_local_load_expression(
             flush.contribution_emitted_flag,
             builtin_type_ids::BOOL,
-            location,
+            span_ref,
             parent_region,
         );
 
@@ -1188,14 +1170,14 @@ impl<'a> HirBuilder<'a> {
                 then_block: flush_block,
                 else_block: skip_block,
             },
-            location,
+            span_ref,
         )?;
 
         // If a slot contribution produced output before loop control, replay the
         // wrapper on this terminating path before jumping to the surrounding
         // template loop target. The skip path still emits the same loop control
         // without rendering an empty wrapper.
-        self.set_current_block(flush_block, location)?;
+        self.set_current_block(flush_block, span_ref)?;
         let wrapper_context = RuntimeTemplateAppendContext::new(flush.target_accumulator)
             .with_runtime_slot_sites(flush.source_accumulators, flush.slot_sites)
             .with_emitted_output(flush.parent_emitted_flag)
@@ -1204,28 +1186,28 @@ impl<'a> HirBuilder<'a> {
             flush.wrapper_plan,
             wrapper_context,
             None,
-            location,
+            span_ref,
         )?;
 
-        let flush_tail = self.current_block_id_or_error(location)?;
-        if !self.block_has_explicit_terminator(flush_tail, location)? {
-            self.emit_template_loop_control(control_kind, location)?;
+        let flush_tail = self.current_block_id_or_error(span_ref)?;
+        if !self.block_has_explicit_terminator(flush_tail, span_ref)? {
+            self.emit_template_loop_control(control_kind, span_ref)?;
         }
 
-        self.set_current_block(skip_block, location)?;
-        self.emit_template_loop_control(control_kind, location)
+        self.set_current_block(skip_block, span_ref)?;
+        self.emit_template_loop_control(control_kind, span_ref)
     }
 
     fn append_runtime_slot_site_to_accumulator(
         &mut self,
         site_id: RuntimeSlotSiteId,
         append_context: RuntimeTemplateAppendContext<'_>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let Some(slot_sites) = append_context.slot_sites else {
             return_hir_transformation_error!(
                 "Runtime slot site appeared outside an active runtime slot application.",
-                self.hir_error_location(fallback_location)
+                self.hir_error_location(span_ref)
             );
         };
         let Some(site) = slot_sites
@@ -1234,7 +1216,7 @@ impl<'a> HirBuilder<'a> {
         else {
             return_hir_transformation_error!(
                 "Runtime slot application wrapper referenced a missing slot site.",
-                self.hir_error_location(fallback_location)
+                self.hir_error_location(span_ref)
             );
         };
 
@@ -1242,7 +1224,7 @@ impl<'a> HirBuilder<'a> {
             &site.render_root,
             append_context,
             None,
-            &site.location,
+            &site.span,
         )
     }
 
@@ -1250,24 +1232,24 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source_id: RuntimeSlotContributionSourceId,
         append_context: RuntimeTemplateAppendContext<'_>,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let Some(source_accumulators) = append_context.source_accumulators else {
             return_hir_transformation_error!(
                 "Runtime slot source appeared outside an active runtime slot application.",
-                self.hir_error_location(fallback_location)
+                self.hir_error_location(span_ref)
             );
         };
         let Some(source_accumulator) = source_accumulators.local_for(source_id) else {
             return_hir_transformation_error!(
                 "Runtime slot site referenced a missing contribution source.",
-                self.hir_error_location(fallback_location)
+                self.hir_error_location(span_ref)
             );
         };
 
-        let region = self.current_region_or_error(fallback_location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let source_value = self.make_expression(
-            fallback_location,
+            span_ref,
             HirExpressionKind::Load(HirPlace::Local(source_accumulator)),
             builtin_type_ids::STRING,
             ValueKind::Place,
@@ -1276,7 +1258,7 @@ impl<'a> HirBuilder<'a> {
         self.append_template_chunk_to_accumulator(
             source_value,
             append_context.target_accumulator,
-            fallback_location,
+            span_ref,
         )?;
 
         Ok(TemplateBodyEmission::Output)
@@ -1285,11 +1267,11 @@ impl<'a> HirBuilder<'a> {
     fn emit_template_loop_control(
         &mut self,
         control_kind: TemplateLoopControlKind,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         match control_kind {
-            TemplateLoopControlKind::Break => self.emit_break_to_current_loop(location, None),
-            TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(location, None),
+            TemplateLoopControlKind::Break => self.emit_break_to_current_loop(span_ref, None),
+            TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(span_ref, None),
         }
     }
 
@@ -1297,19 +1279,19 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         node: &OwnedRuntimeTemplateNode,
         append_context: RuntimeTemplateAppendContext<'_>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         match node {
             OwnedRuntimeTemplateNode::LoopControl {
                 kind,
-                location: control_location,
+                span: control_span,
                 ..
             } => {
                 if let Some(flush) = append_context.loop_control_flush {
                     self.flush_runtime_slot_application_for_loop_control(
                         flush,
                         *kind,
-                        control_location,
+                        control_span,
                     )?;
                     return Ok(match kind {
                         TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
@@ -1317,7 +1299,7 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                self.emit_template_loop_control(*kind, control_location)?;
+                self.emit_template_loop_control(*kind, control_span)?;
                 Ok(match kind {
                     TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
                     TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
@@ -1329,7 +1311,7 @@ impl<'a> HirBuilder<'a> {
                     node,
                     append_context,
                     None,
-                    location,
+                    span_ref,
                 )?;
 
                 if append_context.emitted_output().is_some()
@@ -1348,10 +1330,10 @@ impl<'a> HirBuilder<'a> {
         node: &OwnedRuntimeTemplateNode,
         wrapper_node: &OwnedRuntimeTemplateNode,
         append_context: RuntimeTemplateAppendContext<'_>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
-        let child_accumulator = self.initialize_runtime_template_accumulator(location)?;
-        let child_emitted = self.initialize_runtime_template_emitted_flag(location)?;
+        let child_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
+        let child_emitted = self.initialize_runtime_template_emitted_flag(span_ref)?;
         let child_context = append_context
             .with_target_accumulator(child_accumulator)
             .with_emitted_output(Some(child_emitted));
@@ -1360,7 +1342,7 @@ impl<'a> HirBuilder<'a> {
             node,
             child_context,
             None,
-            location,
+            span_ref,
         )?;
 
         // Append the owned wrapper node only when the child structurally emitted
@@ -1373,13 +1355,13 @@ impl<'a> HirBuilder<'a> {
                 emitted_output: child_emitted,
                 append_context,
             },
-            location,
-            |builder, append, fallback_location| {
+            span_ref,
+            |builder, append, span_ref| {
                 builder.append_owned_runtime_template_node_to_accumulator(
                     wrapper_node,
                     append.append_context,
                     Some(append.aggregate),
-                    fallback_location,
+                    span_ref,
                 )?;
                 Ok(())
             },
@@ -1403,21 +1385,21 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         chunk: HirExpression,
         accumulator: LocalId,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let string_ty = builtin_type_ids::STRING;
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let accumulated = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Load(HirPlace::Local(accumulator)),
             string_ty,
             ValueKind::Place,
             region,
         );
         let chunk_as_string =
-            self.coerce_expression_to_string(chunk, location, string_ty, region)?;
+            self.coerce_expression_to_string(chunk, span_ref, string_ty, region)?;
         let next_value = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::BinOp {
                 left: Box::new(accumulated),
                 op: HirBinOp::StringAppend,
@@ -1433,14 +1415,14 @@ impl<'a> HirBuilder<'a> {
                 target: HirPlace::Local(accumulator),
                 value: next_value,
             },
-            location,
+            span_ref,
         )
     }
 
     pub(super) fn coerce_expression_to_string(
         &mut self,
         expression: HirExpression,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         string_ty: TypeId,
         region: RegionId,
     ) -> Result<HirExpression, CompilerError> {
@@ -1450,7 +1432,7 @@ impl<'a> HirBuilder<'a> {
 
         if expression.ty == self.type_environment.builtins().none {
             return Ok(self.make_expression(
-                location,
+                span_ref,
                 HirExpressionKind::StringLiteral(String::new()),
                 string_ty,
                 ValueKind::Const,
@@ -1462,11 +1444,11 @@ impl<'a> HirBuilder<'a> {
         // stringification so casts and templates share one formatting contract.
         // Template chunk formatting is generated scaffolding: the `FormatFloat` stays spanless.
         if expression.ty == self.type_environment.builtins().float {
-            return self.emit_formatted_float_value(expression, location, None);
+            return self.emit_formatted_float_value(expression, span_ref);
         }
 
         let empty = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::StringLiteral(String::new()),
             string_ty,
             ValueKind::Const,
@@ -1474,7 +1456,7 @@ impl<'a> HirBuilder<'a> {
         );
 
         Ok(self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::BinOp {
                 left: Box::new(empty),
                 op: crate::compiler_frontend::hir::operators::HirBinOp::StringAppend,
@@ -1503,7 +1485,7 @@ impl<'a> HirBuilder<'a> {
     fn runtime_template_text_chunk(
         &mut self,
         text: &OwnedFoldedString,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<HirExpressionKind, CompilerError> {
         if let Some(plain_text) = text.clone().into_text() {
             return Ok(HirExpressionKind::StringLiteral(plain_text));
@@ -1512,12 +1494,12 @@ impl<'a> HirBuilder<'a> {
         let OwnedFoldedString::Pieces(pieces) = text else {
             return_hir_transformation_error!(
                 "Runtime-template text payload carried neither plain text nor pieces.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         };
 
         Ok(HirExpressionKind::StructuralString {
-            pieces: self.hir_pieces_from_owned_pieces(pieces, location)?,
+            pieces: self.hir_pieces_from_owned_pieces(pieces, span_ref)?,
         })
     }
 
@@ -1525,7 +1507,7 @@ impl<'a> HirBuilder<'a> {
     fn hir_pieces_from_owned_pieces(
         &mut self,
         pieces: &[OwnedFoldedStringPiece],
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<Vec<ConstStringPiece>, CompilerError> {
         let mut hir_pieces = Vec::with_capacity(pieces.len());
 
@@ -1536,7 +1518,7 @@ impl<'a> HirBuilder<'a> {
                 }
 
                 OwnedFoldedStringPiece::Resource(origin) => ConstStringPiece::Resource(
-                    self.intern_handoff_resource_origin(origin, location)?,
+                    self.intern_handoff_resource_origin(origin, span_ref)?,
                 ),
 
                 OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
@@ -1648,7 +1630,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         rendered: &mut HirExpression,
         chunk: HirExpression,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         string_ty: TypeId,
         region: RegionId,
     ) -> Result<(), CompilerError> {
@@ -1657,12 +1639,12 @@ impl<'a> HirBuilder<'a> {
         {
             let composed = self.composed_const_string_chunk(left, &right)?;
             *rendered =
-                self.make_expression(location, composed, string_ty, ValueKind::Const, region);
+                self.make_expression(span_ref, composed, string_ty, ValueKind::Const, region);
             return Ok(());
         }
 
         *rendered = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::BinOp {
                 left: Box::new(rendered.clone()),
                 op: HirBinOp::StringAppend,

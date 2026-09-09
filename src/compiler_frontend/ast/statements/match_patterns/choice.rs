@@ -7,7 +7,8 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
@@ -16,7 +17,7 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 use rustc_hash::FxHashMap;
 
@@ -24,14 +25,11 @@ use super::diagnostics::reject_deferred_pattern_lead_token;
 use super::types::ParsedChoicePattern;
 use super::types::ParsedChoicePayloadCapture;
 
-/// Boxed diagnostic result for all choice-pattern parsing functions.
+/// Typed result for choice-pattern parsing.
 ///
-/// WHAT: every function in this module returns errors as `Box<CompilerDiagnostic>`.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err`;
-/// boxing the error variant keeps the success path cheap and matches the
-/// already-boxed `MatchHeaderResult` convention used by the surrounding
-/// match-header parser.
-type ChoicePatternResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Authored syntax failures remain `CompilerDiagnostic`; retained-table and other compiler
+/// invariant failures travel through the infrastructure lane without being reclassified.
+type ChoicePatternResult<T> = Result<T, ExpressionParseError>;
 
 /// Resolve a choice variant pattern to its deterministic variant index.
 ///
@@ -48,11 +46,11 @@ pub fn parse_choice_variant_pattern(
 ) -> ChoicePatternResult<ParsedChoicePattern> {
     // Choice patterns support exact variant names plus constructor-like payload captures.
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
-        return Err(Box::new(diagnostic));
+        return Err(diagnostic.into());
     }
 
     let choice_name_display = choice_display_name(choice_nominal_path, string_table);
-    let (variant_name, variant_location, variant_span) = parse_variant_name(
+    let (variant_name, variant_span) = parse_variant_name(
         token_stream,
         match_context,
         choice_nominal_path,
@@ -61,17 +59,18 @@ pub fn parse_choice_variant_pattern(
     )?;
 
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
-        return Err(Box::new(deferred_feature_reason_diagnostic(
+        return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
-            token_stream.current_location(),
-        )));
+            current_span(token_stream),
+        )
+        .into());
     }
 
     let variant_index = resolve_variant_to_tag(
         variants,
         variant_name,
         &choice_name_display,
-        &variant_location,
+        variant_span,
         string_table,
         choice_nominal_path,
     )?;
@@ -85,7 +84,6 @@ pub fn parse_choice_variant_pattern(
         variant: variant_name,
         tag: variant_index,
         captures,
-        location: variant_location,
         span: variant_span,
     })
 }
@@ -105,12 +103,13 @@ fn parse_choice_pattern_captures(
     match &variant.payload {
         ChoiceVariantPayload::Unit => {
             if token_stream.current_token_kind() == &TokenKind::OpenParenthesis {
-                return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::UnitVariantHasPayload,
                     Some(variant.id),
                     None,
-                    token_stream.current_location(),
-                )));
+                    current_span(token_stream),
+                )
+                .into());
             }
 
             Ok(Vec::new())
@@ -118,18 +117,19 @@ fn parse_choice_pattern_captures(
 
         ChoiceVariantPayload::Record { fields } => {
             if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
-                return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::PayloadVariantNeedsBindings,
                     Some(variant.id),
                     None,
-                    token_stream.current_location(),
-                )));
+                    current_span(token_stream),
+                )
+                .into());
             }
 
             token_stream.advance();
 
             let mut captures = Vec::new();
-            let mut seen_names: FxHashMap<StringId, SourceLocation> = FxHashMap::default();
+            let mut seen_names: FxHashMap<StringId, Option<SourceSpan>> = FxHashMap::default();
 
             loop {
                 token_stream.skip_newlines();
@@ -139,47 +139,39 @@ fn parse_choice_pattern_captures(
                     break;
                 }
 
-                let capture_location = token_stream.current_location();
-                let capture_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
-
+                let capture_span = current_span(token_stream);
                 // Wildcards are not yet supported in choice payload position.
                 if token_stream.current_token_kind() == &TokenKind::Wildcard {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::WildcardNotSupported,
                         None,
                         None,
-                        capture_location,
-                    )));
+                        capture_span,
+                    )
+                    .into());
                 }
 
                 let field_name = match token_stream.current_token_kind() {
                     TokenKind::Symbol(name) => *name,
                     _ => {
-                        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                        return Err(CompilerDiagnostic::invalid_match_pattern(
                             InvalidMatchPatternReason::CaptureBindingMustBeFieldName,
                             None,
                             None,
-                            capture_location,
-                        )));
+                            capture_span,
+                        )
+                        .into());
                     }
                 };
                 token_stream.advance();
 
                 let mut binding_name = field_name;
-                let mut binding_location = capture_location.clone();
                 let mut binding_span = capture_span;
 
                 // Parse optional `as <local_binding>` rename syntax.
                 if token_stream.current_token_kind() == &TokenKind::As {
                     token_stream.advance();
-                    binding_location = token_stream.current_location();
-                    binding_span = Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    ));
+                    binding_span = current_span(token_stream);
                     let after_as_token = token_stream.current_token_kind().to_owned();
                     binding_name = match after_as_token {
                         TokenKind::Symbol(name) => {
@@ -190,71 +182,75 @@ fn parse_choice_pattern_captures(
                         | TokenKind::Eof
                         | TokenKind::CloseParenthesis
                         | TokenKind::Comma => {
-                            return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                            return Err(CompilerDiagnostic::invalid_match_pattern(
                                 InvalidMatchPatternReason::ExpectedLocalBindingAfterAs,
                                 None,
                                 None,
-                                binding_location,
-                            )));
+                                binding_span,
+                            )
+                            .into());
                         }
                         _ => {
-                            return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                            return Err(CompilerDiagnostic::invalid_match_pattern(
                                 InvalidMatchPatternReason::AliasMustBeLocalBinding,
                                 None,
                                 None,
-                                binding_location,
-                            )));
+                                binding_span,
+                            )
+                            .into());
                         }
                     };
                 }
 
                 // Reject named assignment: `Err(message = text) =>`
                 if token_stream.current_token_kind() == &TokenKind::Assign {
-                    return Err(Box::new(deferred_feature_reason_diagnostic(
+                    return Err(deferred_feature_reason_diagnostic(
                         DeferredFeatureReason::NamedPayloadPatternAssignment,
-                        token_stream.current_location(),
-                    )));
+                        current_span(token_stream),
+                    )
+                    .into());
                 }
 
                 // Check duplicate capture binding name (uses the local alias when present).
                 if seen_names.contains_key(&binding_name) {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::DuplicateCaptureBinding,
                         Some(variant.id),
                         None,
-                        binding_location,
-                    )));
+                        binding_span,
+                    )
+                    .into());
                 }
-                seen_names.insert(binding_name, binding_location.clone());
+                seen_names.insert(binding_name, binding_span);
 
                 // Validate capture position and name against declaration metadata.
                 let field_index = captures.len();
                 let Some(field_decl) = fields.get(field_index) else {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::TooManyCaptureBindings,
                         Some(variant.id),
                         None,
-                        capture_location,
-                    )));
+                        capture_span,
+                    )
+                    .into());
                 };
 
                 let expected_field_name = choice_payload_field_name(field_decl, string_table)?;
                 if field_name != expected_field_name {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::CaptureBindingNameMismatch,
                         Some(variant.id),
                         None,
-                        capture_location,
-                    )));
+                        capture_span,
+                    )
+                    .into());
                 }
 
                 captures.push(ParsedChoicePayloadCapture {
                     binding_name,
                     field_index,
                     type_id: field_decl.value.type_id,
-                    location: capture_location,
                     span: capture_span,
-                    binding_location,
                     binding_span,
                 });
 
@@ -270,29 +266,32 @@ fn parse_choice_pattern_captures(
                         break;
                     }
                     TokenKind::OpenParenthesis => {
-                        return Err(Box::new(deferred_feature_reason_diagnostic(
+                        return Err(deferred_feature_reason_diagnostic(
                             DeferredFeatureReason::NestedPayloadPattern,
-                            token_stream.current_location(),
-                        )));
+                            current_span(token_stream),
+                        )
+                        .into());
                     }
                     _ => {
-                        return Err(Box::new(CompilerDiagnostic::expected_token(
+                        return Err(CompilerDiagnostic::expected_token(
                             TokenKind::Comma,
                             Some(token_stream.current_token_kind().clone()),
-                            token_stream.current_location(),
-                        )));
+                            current_span(token_stream),
+                        )
+                        .into());
                     }
                 }
             }
 
             // Check for too few captures.
             if captures.len() != fields.len() {
-                return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                return Err(CompilerDiagnostic::invalid_match_pattern(
                     InvalidMatchPatternReason::TooFewCaptureBindings,
                     Some(variant.id),
                     None,
-                    variant.location.clone(),
-                )));
+                    variant.span,
+                )
+                .into());
             }
 
             Ok(captures)
@@ -311,16 +310,10 @@ fn choice_payload_field_name(
     string_table: &StringTable,
 ) -> ChoicePatternResult<StringId> {
     field.id.name().ok_or_else(|| {
-        let missing_field_name_error = CompilerError::new(
-            format!(
-                "Choice payload field '{}' has no leaf name during match-pattern parsing",
-                field.id.to_string(string_table)
-            ),
-            field.value.location.clone(),
-            ErrorType::Compiler,
-        );
-
-        Box::new(missing_field_name_error.into())
+        ExpressionParseError::Infrastructure(Box::new(CompilerError::compiler_error(format!(
+            "Choice payload field '{}' has no leaf name during match-pattern parsing",
+            field.id.to_string(string_table)
+        ))))
     })
 }
 
@@ -334,16 +327,12 @@ fn parse_variant_name(
     choice_nominal_path: &InternedPath,
     _choice_name_display: &str,
     _string_table: &StringTable,
-) -> ChoicePatternResult<(StringId, SourceLocation, Option<SourceSpan>)> {
+) -> ChoicePatternResult<(StringId, Option<SourceSpan>)> {
     let leading_token = token_stream.current_token_kind().to_owned();
 
     match leading_token {
         TokenKind::Symbol(first_name) => {
-            let first_location = token_stream.current_location();
-            let first_span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            let first_span = current_span(token_stream);
             token_stream.advance();
 
             if token_stream.current_token_kind() == &TokenKind::DoubleColon {
@@ -351,12 +340,13 @@ fn parse_variant_name(
                     && first_name != expected_choice_name
                     && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
                 {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
                         None,
                         choice_nominal_path.name(),
-                        first_location,
-                    )));
+                        first_span,
+                    )
+                    .into());
                 }
 
                 token_stream.advance();
@@ -364,23 +354,20 @@ fn parse_variant_name(
 
                 match token_stream.current_token_kind().to_owned() {
                     TokenKind::Symbol(qualified_variant_name) => {
-                        let qualified_location = token_stream.current_location();
-                        let qualified_span = Some(SourceSpan::new(
-                            token_stream.file_id,
-                            token_stream.current_token().span,
-                        ));
+                        let qualified_span = current_span(token_stream);
                         token_stream.advance();
-                        Ok((qualified_variant_name, qualified_location, qualified_span))
+                        Ok((qualified_variant_name, qualified_span))
                     }
-                    _ => Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    _ => Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::ExpectedVariantNameAfterQualifier,
                         None,
                         None,
-                        token_stream.current_location(),
-                    ))),
+                        current_span(token_stream),
+                    )
+                    .into()),
                 }
             } else {
-                Ok((first_name, first_location, first_span))
+                Ok((first_name, first_span))
             }
         }
 
@@ -389,19 +376,21 @@ fn parse_variant_name(
         | TokenKind::BoolLiteral(_)
         | TokenKind::CharLiteral(_)
         | TokenKind::StringSliceLiteral(_)
-        | TokenKind::Negative => Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        | TokenKind::Negative => Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::MustUseVariantNamesNotLiterals,
             None,
             None,
-            token_stream.current_location(),
-        ))),
+            current_span(token_stream),
+        )
+        .into()),
 
-        _ => Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        _ => Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::MustStartWithVariantName,
             None,
             None,
-            token_stream.current_location(),
-        ))),
+            current_span(token_stream),
+        )
+        .into()),
     }
 }
 
@@ -429,7 +418,7 @@ fn resolve_variant_to_tag(
     variants: &[ChoiceVariant],
     variant_name: StringId,
     _choice_name_display: &str,
-    variant_location: &SourceLocation,
+    variant_span: Option<SourceSpan>,
     _string_table: &StringTable,
     choice_nominal_path: &InternedPath,
 ) -> ChoicePatternResult<usize> {
@@ -437,17 +426,24 @@ fn resolve_variant_to_tag(
         .iter()
         .position(|variant| variant.id == variant_name)
     else {
-        return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+        return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::UnknownVariant,
             Some(variant_name),
             choice_nominal_path.name(),
-            variant_location.clone(),
-        )));
+            variant_span,
+        )
+        .into());
     };
 
     Ok(variant_index)
 }
 
+fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
+}
 /// Build a human-readable display name for a choice type from its nominal path.
 ///
 /// WHAT: returns the leaf name of the choice (e.g. `"Result"` for `core::Result`),

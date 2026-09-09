@@ -17,9 +17,9 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -132,7 +132,6 @@ impl TraitEnvironment {
         let this_name = string_table.intern(TRAIT_THIS_NAME);
         let path = InternedPath::from_single_str(trait_name, string_table);
         let source_file = InternedPath::new();
-        let location = SourceLocation::default();
         let this_type = type_environment.register_synthetic_generic_parameter(this_name);
 
         let id = self.allocate_trait_id();
@@ -146,7 +145,7 @@ impl TraitEnvironment {
         let mut returns = vec![ResolvedTraitReturn {
             type_id: success_type,
             channel: ReturnChannel::Success,
-            location: location.clone(),
+            span: None,
         }];
         if let Some(error_type) = error_return_type {
             // Fallible core cast traits propagate the cast failure through a
@@ -155,18 +154,16 @@ impl TraitEnvironment {
             returns.push(ResolvedTraitReturn {
                 type_id: error_type,
                 channel: ReturnChannel::Error,
-                location: location.clone(),
+                span: None,
             });
         }
 
         let requirement = ResolvedTraitRequirement {
             id: requirement_id,
             name: requirement_name,
-            name_location: location.clone(),
             receiver,
             parameters: Vec::new(),
             returns,
-            location: location.clone(),
             span: None,
         };
 
@@ -177,7 +174,7 @@ impl TraitEnvironment {
             source_file,
             this_type,
             requirements: vec![requirement],
-            declaration_location: location,
+            declaration_span: None,
             visibility: TraitVisibility::Core,
         };
 
@@ -516,14 +513,12 @@ pub(crate) fn requirement_parameter_from_type(
     name: InternedPath,
     value_mode: ValueMode,
     type_id: TypeId,
-    location: SourceLocation,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    span: Option<SourceSpan>,
 ) -> ResolvedTraitParameter {
     ResolvedTraitParameter {
         name,
         value_mode,
         type_id,
-        location,
         span,
     }
 }

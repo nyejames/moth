@@ -39,7 +39,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
 /// Branches recursively parse function bodies, so retained-data failures travel to the module
 /// emission boundary instead of being recast as authored control-flow diagnostics.
@@ -55,14 +55,13 @@ struct ParsedMatchArm {
     arm: MatchArm,
     /// Tracks which choice variant this arm consumes so duplicates can be rejected early.
     matched_choice_variant: Option<StringId>,
-    pattern_location: SourceLocation,
+    pattern_span: Option<SourceSpan>,
 }
 
 struct OptionPresentCaptureBranch {
     scrutinee: Expression,
     pattern: MatchPattern,
     then_context: ScopeContext,
-    header_location: SourceLocation,
     header_span: Option<SourceSpan>,
 }
 
@@ -101,21 +100,18 @@ fn peek_next_non_newline_token_index(token_stream: &FileTokens) -> Option<usize>
 }
 
 fn reject_same_line_else_if(token_stream: &FileTokens) -> BranchingResult<()> {
-    let else_location = token_stream.current_location();
+    let else_span = Some(token_stream.current_span());
     let Some(next_token) = token_stream.tokens.get(token_stream.index + 1) else {
         return Ok(());
     };
 
     // Statement `else if` is deliberately not a branch-chain syntax. A nested
     // `if` remains available as the first statement inside a separate `else` body.
-    let next_token_is_same_line_if = matches!(next_token.kind, TokenKind::If)
-        && next_token.location.start_pos.line_number == else_location.start_pos.line_number;
-
-    if next_token_is_same_line_if {
+    if matches!(next_token.kind, TokenKind::If) {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ElseIfUnsupported,
-                else_location,
+                else_span,
             ),
         ));
     }
@@ -139,10 +135,9 @@ pub fn create_branch(
     let header_token = token_stream
         .tokens
         .get(token_stream.index.saturating_sub(1));
-    let header_location = header_token
-        .map(|token| token.location.clone())
-        .unwrap_or_else(|| token_stream.current_location());
-    let header_span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
+    let header_span = header_token
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        .or_else(|| Some(token_stream.current_span()));
     let parsed_header = parse_if_header(token_stream, context, type_interner, string_table)?;
 
     let condition = match parsed_header {
@@ -156,7 +151,6 @@ pub fn create_branch(
                     scrutinee,
                     pattern,
                     then_context,
-                    header_location,
                     header_span,
                 },
                 token_stream,
@@ -169,7 +163,6 @@ pub fn create_branch(
         ParsedIfHeader::MatchStyle { scrutinee } => {
             let match_statement = create_match_node(
                 scrutinee,
-                header_location,
                 header_span,
                 token_stream,
                 context,
@@ -187,7 +180,7 @@ pub fn create_branch(
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -246,7 +239,6 @@ pub fn create_branch(
             else_block,
             IfBranchMetadata::new(request_ranges, then_scope.clone(), else_scope),
         ),
-        location: header_location,
         span: header_span,
         scope: then_scope,
     }])
@@ -264,14 +256,13 @@ fn create_option_present_capture_branch(
         scrutinee,
         pattern,
         then_context,
-        header_location,
         header_span,
     } = parsed_header;
     if token_stream.current_token_kind() != &TokenKind::Colon {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -319,7 +310,6 @@ fn create_option_present_capture_branch(
             default,
             exhaustiveness,
         },
-        location: header_location,
         span: header_span,
         scope: context.scope.clone(),
     }])
@@ -333,7 +323,6 @@ fn create_option_present_capture_branch(
 /// exhaustiveness) are enforced here so downstream HIR lowering can assume valid input.
 fn create_match_node(
     scrutinee: Expression,
-    header_location: SourceLocation,
     header_span: Option<SourceSpan>,
     token_stream: &mut FileTokens,
     context: &mut ScopeContext,
@@ -358,7 +347,6 @@ fn create_match_node(
             default: parsed_match.default,
             exhaustiveness: parsed_match.exhaustiveness,
         },
-        location: header_location,
         span: header_span,
         scope: parsed_match.scope,
     })
@@ -386,7 +374,7 @@ pub(crate) fn parse_match_block(
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -398,7 +386,6 @@ pub(crate) fn parse_match_block(
     let mut arms: Vec<MatchArm> = Vec::new();
     let mut else_block = None;
     let mut seen_else = false;
-    let mut match_arm_indent: Option<i32> = None;
     let mut coverage_tracker = MatchArmCoverageTracker::default();
 
     // ----------------------------
@@ -411,21 +398,20 @@ pub(crate) fn parse_match_block(
             TokenKind::End => {
                 let next_token = peek_next_non_newline_token(token_stream);
                 let next_index = peek_next_non_newline_token_index(token_stream);
-                let semicolon_separates_same_level_arms =
-                    match (match_arm_indent, next_token, next_index) {
-                        (Some(arm_indent), Some(next), Some(idx))
-                            if next.kind == TokenKind::Else
-                                || token_index_has_top_level_fat_arrow(token_stream, idx) =>
-                        {
-                            next.location.start_pos.char_column == arm_indent
-                        }
-                        _ => false,
-                    };
+                let semicolon_separates_same_level_arms = match (next_token, next_index) {
+                    (Some(next), Some(idx))
+                        if next.kind == TokenKind::Else
+                            || token_index_has_top_level_fat_arrow(token_stream, idx) =>
+                    {
+                        true
+                    }
+                    _ => false,
+                };
 
                 if semicolon_separates_same_level_arms {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
                         InvalidMatchArmReason::SemicolonDelimiter,
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     )));
                 }
                 token_stream.advance();
@@ -436,20 +422,17 @@ pub(crate) fn parse_match_block(
                 return Err(branching_error(
                     CompilerDiagnostic::invalid_control_flow_statement(
                         InvalidControlFlowStatementReason::UnexpectedEndOfFileInMatch,
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     ),
                 ));
             }
 
             TokenKind::Else => {
-                match_arm_indent
-                    .get_or_insert(token_stream.current_location().start_pos.char_column);
-
                 if arms.is_empty() {
                     return Err(branching_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::CaseRequiredBeforeElse,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
@@ -458,7 +441,7 @@ pub(crate) fn parse_match_block(
                     return Err(branching_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::DuplicateElseArm,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
@@ -478,7 +461,6 @@ pub(crate) fn parse_match_block(
                 if let Some(candidate) = current_token_starts_match_arm_header(token_stream) {
                     debug_assert_eq!(candidate.start_index, token_stream.index);
                     debug_assert!(candidate.arrow_index > candidate.start_index);
-                    match_arm_indent.get_or_insert(candidate.start_location.start_pos.char_column);
 
                     let parsed = parse_match_arm(
                         &scrutinee,
@@ -491,7 +473,7 @@ pub(crate) fn parse_match_block(
 
                     if seen_else {
                         warnings.push(CompilerDiagnostic::unreachable_match_arm(
-                            parsed.pattern_location.clone(),
+                            parsed.pattern_span,
                         ));
                     } else {
                         let coverage = coverage_tracker.record_arm(
@@ -502,7 +484,7 @@ pub(crate) fn parse_match_block(
 
                         if coverage.unreachable {
                             warnings.push(CompilerDiagnostic::unreachable_match_arm(
-                                parsed.pattern_location.clone(),
+                                parsed.pattern_span,
                             ));
                         }
                     }
@@ -515,12 +497,12 @@ pub(crate) fn parse_match_block(
                 {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
                         InvalidMatchArmReason::LegacyColonSyntax,
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     )));
                 }
                 return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
                     InvalidMatchArmReason::ExpectedArmHeader,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )));
             }
         }
@@ -564,14 +546,14 @@ fn parse_else_arm(
     if token_stream.current_token_kind() == &TokenKind::Colon {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyElseSyntax,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )));
     }
 
     if token_stream.current_token_kind() == &TokenKind::Arrow {
         return Err(branching_error(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )));
     }
 
@@ -579,7 +561,7 @@ fn parse_else_arm(
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -617,7 +599,7 @@ fn parse_match_arm(
         guard,
         arm_scope,
         matched_choice_variant,
-        pattern_location,
+        pattern_span,
     } = parse_match_arm_header(
         scrutinee,
         token_stream,
@@ -631,7 +613,7 @@ fn parse_match_arm(
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ExpectedFatArrow,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -653,7 +635,7 @@ fn parse_match_arm(
             body,
         },
         matched_choice_variant,
-        pattern_location,
+        pattern_span,
     })
 }
 

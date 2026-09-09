@@ -11,15 +11,13 @@ use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::carrier::EmittedFallibleCarrier;
 
 /// Input struct for lowering a handled external fallible call.
 ///
 /// WHAT: packages the external function ID, arguments, result types, error type, handling policy,
-/// call location, and propagation location into one struct so the lowering helper has a short
-/// signature.
+/// and both authored spans needed by call emission and propagation.
 /// WHY: external fallible calls have more metadata than source calls; a context struct keeps the
 /// call site readable while preserving the boundary between ordinary call mapping and propagation
 /// control flow.
@@ -30,24 +28,20 @@ pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
     pub(crate) error_type_id: FrontendTypeId,
     pub(crate) handling:
         &'a crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling,
-    pub(crate) call_location: &'a SourceLocation,
-    pub(crate) span: Option<SourceSpan>,
-    pub(crate) propagation_location: &'a SourceLocation,
+    pub(crate) call_span: &'a Option<SourceSpan>,
+    pub(crate) propagation_span: &'a Option<SourceSpan>,
 }
 
 impl<'a> HirBuilder<'a> {
     /// Builds a fallible carrier from explicit success and error type IDs.
-    ///
-    /// WHAT: interns the fallible carrier type for external calls where the metadata provides the
-    /// error type directly instead of deriving it from a user function signature.
     pub(crate) fn fallible_call_carrier_from_slots(
         &mut self,
         result_type_ids: &[FrontendTypeId],
         error_type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(TypeId, TypeId, TypeId), CompilerError> {
-        let ok_type = self.lower_call_result_type(result_type_ids, location)?;
-        let err_type = self.lower_type_id(error_type_id, location)?;
+        let ok_type = self.lower_call_result_type(result_type_ids, span)?;
+        let err_type = self.lower_type_id(error_type_id, span)?;
         let carrier_type = self
             .type_environment
             .intern_fallible_carrier(ok_type, err_type);
@@ -62,17 +56,15 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         error_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        call_span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
         let (carrier_type, ok_type, err_type) =
-            self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, location)?;
+            self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, call_span)?;
         let result_local = self.emit_result_call_to_current_block(
             CallTarget::External(id),
             args,
             carrier_type,
-            location,
-            span,
+            call_span,
         )?;
 
         Ok(EmittedFallibleCarrier {

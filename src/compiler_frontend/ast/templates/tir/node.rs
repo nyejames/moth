@@ -43,7 +43,6 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReferen
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 // -------------------------
 //  Top-Level Template IR
@@ -51,7 +50,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// A top-level template entry in the TIR store.
 ///
-/// WHAT: connects a root node, style, kind, summary metadata, and source location.
+/// WHAT: connects a root node, style, kind, summary metadata, and source span.
 /// WHY: TIR templates are the authoritative internal representation after parsing.
 /// Each template is a thin handle; the body tree lives in `TemplateIrNode` entries
 /// owned by the store.
@@ -69,8 +68,6 @@ pub(crate) struct TemplateIr {
     /// Summary metadata for capacity planning and quick shape queries.
     pub(crate) summary: TemplateIrSummary,
 
-    /// Source location for diagnostics.
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
     /// Parent `$children(..)` wrappers that must be applied around this
     /// template's output during folding.
@@ -97,7 +94,7 @@ pub(crate) struct TemplateIr {
 impl TemplateIr {
     /// Creates a top-level TIR template with no wrapper set or slot plan attached.
     ///
-    /// WHAT: stores the root node, style, kind, summary, and source location.
+    /// WHAT: stores the root node, style, kind, summary, and source span.
     /// WHY: side-table links (`conditional_child_wrapper_set`, `runtime_slot_plan`)
     ///      are attached later by composition or slot-plan materialization.
     pub(crate) fn new(
@@ -105,7 +102,6 @@ impl TemplateIr {
         style: Style,
         kind: TemplateType,
         summary: TemplateIrSummary,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     ) -> Self {
         Self {
@@ -113,7 +109,6 @@ impl TemplateIr {
             style,
             kind,
             summary,
-            location,
             span,
             conditional_child_wrapper_set: None,
             runtime_slot_plan: None,
@@ -127,31 +122,22 @@ impl TemplateIr {
 
 /// A single node in a template body tree.
 ///
-/// WHAT: pairs a `TemplateIrNodeKind` with a source location.
-/// WHY: every node carries its source position for diagnostics, and the kind
+/// WHAT: pairs a `TemplateIrNodeKind` with a source span.
+/// WHY: every node carries its exact authored range for diagnostics, and the kind
 /// enum determines what the node represents (text, expression, slot, etc.).
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateIrNode {
     /// Discriminant and payload for this node.
     pub(crate) kind: TemplateIrNodeKind,
 
-    /// Source location for diagnostics and source-map output.
-    pub(crate) location: SourceLocation,
+    /// Exact source span for diagnostics and source-map output.
     pub(crate) span: Option<SourceSpan>,
 }
 
 impl TemplateIrNode {
-    /// Creates a TIR node with the given structural kind and source location.
-    pub(crate) fn new(
-        kind: TemplateIrNodeKind,
-        location: SourceLocation,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self {
-            kind,
-            location,
-            span,
-        }
+    /// Creates a TIR node with the given structural kind and source span.
+    pub(crate) fn new(kind: TemplateIrNodeKind, span: Option<SourceSpan>) -> Self {
+        Self { kind, span }
     }
 }
 
@@ -253,9 +239,9 @@ pub(crate) enum TemplateIrNodeKind {
         /// Authored provenance of the `[else]` marker that introduced the
         /// fallback body.
         ///
-        /// WHAT: records the exact source location and span of the `[else]`
-        ///       sentinel as separate fallback metadata. `None` when the chain
-        ///       has no fallback or was created by a compiler composition step.
+        /// WHAT: records the exact source span of the `[else]` sentinel as
+        ///       separate fallback metadata. `None` when the chain has no
+        ///       fallback or was created by a compiler composition step.
         /// WHY: the marker is authored metadata independent of the fallback
         ///      body and of the enclosing `if` opening, so neither body nor
         ///      chain spans may substitute for it.
@@ -343,22 +329,19 @@ pub(crate) enum TemplateIrNodeKind {
 
 /// TIR-owned payload for an unresolved slot occurrence.
 ///
-/// WHAT: records the slot key, stable occurrence ID, source location, and the
+/// WHAT: records the slot key, stable occurrence ID, and the
 /// TIR-owned wrapper-set IDs needed by the remaining runtime slot planner.
 /// WHY: the AST `SlotPlaceholder` stores recursive `Template` values. TIR must
 /// not own those templates directly; wrapper sets store module-local
 /// `TemplateIrId`s instead, keeping wrapper routing in the store-owned plan.
 #[derive(Clone, Debug)]
 pub(crate) struct TirSlotPlaceholder {
-    /// Slot key (name and source location from the original placeholder).
+    /// Slot key (name and source span from the original placeholder).
     pub(crate) key: SlotKey,
 
     /// Stable occurrence ID for this slot placeholder.
     pub(crate) occurrence_id: SlotOccurrenceId,
 
-    /// Source location for diagnostics.
-    pub(crate) location: SourceLocation,
-    pub(crate) span: Option<SourceSpan>,
     /// Wrappers already applied around this slot's fallback content.
     ///
     /// WHAT: references a `TemplateWrapperSet` that was already resolved and
@@ -390,8 +373,6 @@ impl TirSlotPlaceholder {
     pub(crate) fn with_wrapper_sets(
         key: SlotKey,
         occurrence_id: SlotOccurrenceId,
-        location: SourceLocation,
-        span: Option<SourceSpan>,
         applied_child_wrapper_set: Option<TemplateWrapperSetId>,
         child_wrapper_set: Option<TemplateWrapperSetId>,
         skip_parent_child_wrappers: bool,
@@ -399,8 +380,6 @@ impl TirSlotPlaceholder {
         Self {
             key,
             occurrence_id,
-            location,
-            span,
             applied_child_wrapper_set,
             child_wrapper_set,
             skip_parent_child_wrappers,
@@ -467,8 +446,7 @@ pub(crate) struct TemplateIrBranch {
     /// Body node to execute when the selector condition is satisfied.
     pub(crate) body: TemplateIrNodeId,
 
-    /// Source location for diagnostics.
-    pub(crate) location: SourceLocation,
+    /// Exact source span for diagnostics.
     pub(crate) span: Option<SourceSpan>,
     /// Document-order expression-site ID for the branch selector expression.
     ///
@@ -485,14 +463,12 @@ impl TemplateIrBranch {
     pub(crate) fn new(
         selector: TemplateBranchSelector,
         body: TemplateIrNodeId,
-        location: SourceLocation,
         span: Option<SourceSpan>,
         selector_site_id: ExpressionSiteId,
     ) -> Self {
         Self {
             selector,
             body,
-            location,
             span,
             selector_site_id,
         }

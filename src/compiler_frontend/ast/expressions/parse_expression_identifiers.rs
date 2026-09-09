@@ -13,7 +13,7 @@ use super::function_calls::{
 };
 use super::namespace_access::{NamespaceAccessInput, parse_namespace_access};
 use super::parse_expression_dispatch::{
-    ExpressionOperandInput, push_expression_operand, push_expression_operand_at_location,
+    ExpressionOperandInput, push_expression_operand, push_expression_operand_with_span,
 };
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
@@ -31,7 +31,6 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateSlotReason, InvalidThisUsageReason, NameNamespace,
 };
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -71,7 +70,7 @@ pub(super) fn parse_identifier_or_call(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -102,7 +101,7 @@ pub(super) fn parse_identifier_or_call(
                 return Err(CompilerDiagnostic::invalid_template_slot(
                     InvalidTemplateSlotReason::InsertOutsideParentSlot,
                     None,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -115,7 +114,7 @@ pub(super) fn parse_identifier_or_call(
         {
             return Err(CompilerDiagnostic::const_record_used_as_value(
                 identifier,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -185,7 +184,7 @@ pub(super) fn parse_identifier_or_call(
                 identifier,
                 NameNamespace::Type,
                 NameNamespace::Value,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -199,7 +198,7 @@ pub(super) fn parse_identifier_or_call(
                 identifier,
                 NameNamespace::Value,
                 NameNamespace::Type,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -221,7 +220,7 @@ pub(super) fn parse_identifier_or_call(
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
                     Some(identifier),
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -230,11 +229,7 @@ pub(super) fn parse_identifier_or_call(
         match context.source_callable_signature(binding.as_declaration()) {
             Some(signature) => {
                 let generic_template = context.lookup_generic_function_template(&binding.id);
-                let call_location = token_stream.current_location();
-                let call_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
+                let call_span = Some(token_stream.current_span());
 
                 parse_source_callable_member(SourceCallableMemberInput {
                     token_stream,
@@ -242,7 +237,6 @@ pub(super) fn parse_identifier_or_call(
                     signature,
                     generic_template,
                     visible_name: identifier,
-                    call_location,
                     call_span,
                     context,
                     expression,
@@ -256,21 +250,16 @@ pub(super) fn parse_identifier_or_call(
             }
 
             None => {
-                let reference_location = token_stream.current_location();
-                let reference_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
+                let reference_span = Some(token_stream.current_span());
                 let reference_expression = reference_expression_from_declaration(
                     binding.as_declaration(),
                     context,
                     type_interner,
-                    reference_location.clone(),
                     reference_span,
                 );
                 token_stream.advance();
 
-                push_expression_operand_at_location(
+                push_expression_operand_with_span(
                     token_stream,
                     context,
                     type_interner,
@@ -279,7 +268,6 @@ pub(super) fn parse_identifier_or_call(
                     allow_boundary_catch,
                     ExpressionOperandInput {
                         operand: reference_expression,
-                        wrapper_location: reference_location,
                         wrapper_span: reference_span,
                     },
                 )?;
@@ -312,7 +300,7 @@ pub(super) fn parse_identifier_or_call(
 
         return Err(CompilerDiagnostic::dependency_namespace_used_as_value(
             identifier,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -321,35 +309,27 @@ pub(super) fn parse_identifier_or_call(
     //  External constant
     // ------------------------------------
     if let Some((_const_id, const_def)) = context.lookup_visible_external_constant(identifier) {
-        let location = token_stream.current_location();
-        let span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
+        let span = Some(token_stream.current_span());
         token_stream.advance();
 
         if context.kind.is_constant_context() && !const_def.value.is_scalar() {
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
                 Some(identifier),
-                location,
+                span,
             )
             .into());
         }
 
         let value_mode = ValueMode::ImmutableOwned;
         let const_expr = match const_def.value {
-            ExternalConstantValue::Float(value) => {
-                Expression::float(value, location, span, value_mode)
-            }
-            ExternalConstantValue::Int(value) => Expression::int(value, location, span, value_mode),
+            ExternalConstantValue::Float(value) => Expression::float(value, span, value_mode),
+            ExternalConstantValue::Int(value) => Expression::int(value, span, value_mode),
             ExternalConstantValue::StringSlice(value) => {
                 let string_id = string_table.intern(value);
-                Expression::string_slice(string_id, location, span, value_mode)
+                Expression::string_slice(string_id, span, value_mode)
             }
-            ExternalConstantValue::Bool(value) => {
-                Expression::bool(value, location, span, value_mode)
-            }
+            ExternalConstantValue::Bool(value) => Expression::bool(value, span, value_mode),
         };
 
         push_expression_operand(
@@ -374,25 +354,17 @@ pub(super) fn parse_identifier_or_call(
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
                 Some(identifier),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
-
-        // External calls parse from metadata directly; do not synthesize fake parameter declarations.
-        let call_location = token_stream.current_location();
-        let call_span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
-        token_stream.advance();
+        let call_span = Some(token_stream.current_span());
 
         let function_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
                 token_stream,
                 external_function_id: function_id,
                 external_function: host_function_definition,
-                call_location,
                 call_span,
                 context,
                 value_required: true,
@@ -424,7 +396,7 @@ pub(super) fn parse_identifier_or_call(
         let diagnostic = free_function_receiver_method_call_error(
             identifier,
             method_entry,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
             string_table,
         );
 
@@ -438,7 +410,7 @@ pub(super) fn parse_identifier_or_call(
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported,
             Some(identifier),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -449,7 +421,7 @@ pub(super) fn parse_identifier_or_call(
             identifier,
             NameNamespace::Value,
             NameNamespace::Type,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -459,12 +431,15 @@ pub(super) fn parse_identifier_or_call(
     if is_core_cast_trait_name(string_table.resolve(identifier)) {
         return Err(CompilerDiagnostic::trait_name_used_as_type(
             identifier,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
-    Err(CompilerDiagnostic::unknown_value_name(identifier, token_stream.current_location()).into())
+    Err(
+        CompilerDiagnostic::unknown_value_name(identifier, Some(token_stream.current_span()))
+            .into(),
+    )
 }
 
 /// Parse a `this` reference inside a receiver method body.
@@ -491,7 +466,7 @@ fn parse_this_reference(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -499,26 +474,21 @@ fn parse_this_reference(
     let Some(receiver_declaration) = context.get_reference(&this_id) else {
         return Err(CompilerDiagnostic::invalid_this_usage(
             InvalidThisUsageReason::NotInReceiverMethod,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
 
-    let reference_location = token_stream.current_location();
-    let reference_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let reference_span = Some(token_stream.current_span());
     let reference_expression = reference_expression_from_declaration(
         receiver_declaration.as_declaration(),
         context,
         type_interner,
-        reference_location.clone(),
         reference_span,
     );
     token_stream.advance();
 
-    push_expression_operand_at_location(
+    push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
@@ -527,7 +497,6 @@ fn parse_this_reference(
         allow_boundary_catch,
         ExpressionOperandInput {
             operand: reference_expression,
-            wrapper_location: reference_location,
             wrapper_span: reference_span,
         },
     )?;

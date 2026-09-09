@@ -12,7 +12,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -169,18 +169,6 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
             id: scope.append(const_before),
             value: Expression::string_slice(
                 string_table.intern("Hello "),
-                SourceLocation {
-                    scope: InternedPath::new(),
-                    start_pos: CharPosition {
-                        line_number: 1,
-                        char_column: 0,
-                    },
-                    end_pos: CharPosition {
-                        line_number: 1,
-                        char_column: 120, // Arbitrary number
-                    },
-                    ..Default::default()
-                },
                 None,
                 ValueMode::ImmutableOwned,
             ),
@@ -191,18 +179,6 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
             id: scope.append(const_after),
             value: Expression::string_slice(
                 string_table.intern("World!"),
-                SourceLocation {
-                    scope: InternedPath::new(),
-                    start_pos: CharPosition {
-                        line_number: 1,
-                        char_column: 0,
-                    },
-                    end_pos: CharPosition {
-                        line_number: 1,
-                        char_column: 120, // Arbitrary number
-                    },
-                    ..Default::default()
-                },
                 None,
                 ValueMode::ImmutableOwned,
             ),

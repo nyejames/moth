@@ -33,7 +33,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 };
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -105,13 +105,13 @@ impl<'a> HirBuilder<'a> {
                         &key,
                         nominal_path,
                         expr.type_id,
-                        &expr.location,
+                        &expr.span,
                     )?
                 } else {
-                    self.resolve_choice_id(nominal_path, &expr.location)?
+                    self.resolve_choice_id(nominal_path, &expr.span)?
                 };
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
 
                 let mut prelude = Vec::new();
                 let mut hir_fields = Vec::with_capacity(fields.len());
@@ -141,7 +141,7 @@ impl<'a> HirBuilder<'a> {
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::VariantConstruct {
                             carrier: HirVariantCarrier::Choice { choice_id },
                             variant_index: *tag,
@@ -155,59 +155,59 @@ impl<'a> HirBuilder<'a> {
             }
 
             ExpressionKind::Int(value) => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::Int(*value),
             ),
 
             ExpressionKind::Float(value) => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::Float(*value),
             ),
 
             ExpressionKind::Bool(value) => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::Bool(*value),
             ),
 
             ExpressionKind::Char(value) => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::Char(*value),
             ),
 
             ExpressionKind::StringSlice(value) => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::StringLiteral(self.string_table.resolve(*value).to_owned()),
             ),
 
             ExpressionKind::StructuralString { pieces } => self.lower_literal_expression(
-                &expr.location,
+                &expr.span,
                 expr.type_id,
                 HirExpressionKind::StructuralString {
                     pieces: pieces.clone(),
                 },
             ),
             ExpressionKind::Cast(cast) => {
-                self.lower_cast_expression(cast, expr.type_id, &expr.location, expr.span)
+                self.lower_cast_expression(cast, expr.type_id, &expr.span)
             }
 
             ExpressionKind::Reference(name) => {
-                self.lower_reference_expression(name, expr.type_id, &expr.location)
+                self.lower_reference_expression(name, expr.type_id, &expr.span)
             }
 
             ExpressionKind::Copy(place) => {
-                let region = self.current_region_or_error(&expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
                 let (prelude, place) = self.lower_place_expression_to_hir_place(place)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
 
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::Copy(place),
                         ty,
                         ValueKind::RValue,
@@ -219,11 +219,11 @@ impl<'a> HirBuilder<'a> {
             ExpressionKind::Runtime(nodes) => {
                 // Runtime RPN leaves keep their own spans; generated numeric/branch
                 // scaffolding stays spanless and the root span is restored below.
-                self.lower_runtime_rpn_expression(nodes, &expr.location, expr.type_id)
+                self.lower_runtime_rpn_expression(nodes, &expr.span, expr.type_id)
             }
 
             ExpressionKind::FieldAccess { base, field } => {
-                self.lower_field_access_expression(base, *field, expr.type_id, &expr.location)
+                self.lower_field_access_expression(base, *field, expr.type_id, &expr.span)
             }
 
             ExpressionKind::MethodCall {
@@ -231,14 +231,13 @@ impl<'a> HirBuilder<'a> {
                 method_path,
                 args,
                 result_type_ids,
-                location,
+                span,
             } => self.lower_receiver_method_call_expression(
                 method_path,
                 receiver,
                 args,
                 result_type_ids,
-                location,
-                expr.span,
+                &span,
             ),
 
             ExpressionKind::CollectionBuiltinCall {
@@ -246,14 +245,13 @@ impl<'a> HirBuilder<'a> {
                 op,
                 args,
                 result_type_ids,
-                location,
+                span,
             } => self.lower_collection_builtin_call_expression(
                 *op,
                 receiver,
                 args,
                 result_type_ids,
-                location,
-                expr.span,
+                &span,
             ),
 
             ExpressionKind::MapBuiltinCall {
@@ -262,15 +260,14 @@ impl<'a> HirBuilder<'a> {
                 receiver_requires_mutable,
                 args,
                 result_type_ids,
-                location,
+                span,
             } => self.lower_map_builtin_call_expression(
                 *op,
                 receiver,
                 *receiver_requires_mutable,
                 args,
                 result_type_ids,
-                location,
-                expr.span,
+                &span,
             ),
 
             ExpressionKind::FunctionCall {
@@ -278,8 +275,8 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
             } => {
-                let target = self.resolve_call_target_or_error(name, &expr.location)?;
-                self.lower_call_expression(target, args, result_type_ids, &expr.location, expr.span)
+                let target = self.resolve_call_target_or_error(name, &expr.span)?;
+                self.lower_call_expression(target, args, result_type_ids, &expr.span)
             }
 
             ExpressionKind::HandledFallibleFunctionCall {
@@ -289,15 +286,15 @@ impl<'a> HirBuilder<'a> {
                 handling,
                 ..
             } => {
-                let target = self.resolve_call_target_or_error(name, &expr.location)?;
+                let target = self.resolve_call_target_or_error(name, &expr.span)?;
+                let propagation_span = expr.propagation_span().or(expr.span);
                 self.lower_handled_fallible_call_expression(
                     target,
                     args,
                     result_type_ids,
                     handling,
-                    &expr.location,
-                    expr.propagation_location().unwrap_or(&expr.location),
-                    expr.span,
+                    &expr.span,
+                    &propagation_span,
                 )
             }
 
@@ -308,25 +305,27 @@ impl<'a> HirBuilder<'a> {
                 error_type_id,
                 handling,
                 ..
-            } => self.lower_handled_external_fallible_call_expression(
-                ExternalFallibleCallLoweringInput {
-                    id: *id,
-                    args,
-                    result_type_ids,
-                    error_type_id: *error_type_id,
-                    handling,
-                    call_location: &expr.location,
-                    propagation_location: expr.propagation_location().unwrap_or(&expr.location),
-                    span: expr.span,
-                },
-            ),
+            } => {
+                let propagation_span = expr.propagation_span().or(expr.span);
+                self.lower_handled_external_fallible_call_expression(
+                    ExternalFallibleCallLoweringInput {
+                        id: *id,
+                        args,
+                        result_type_ids,
+                        error_type_id: *error_type_id,
+                        handling,
+                        call_span: &expr.span,
+                        propagation_span: &propagation_span,
+                    },
+                )
+            }
 
             #[cfg(test)]
             ExpressionKind::FallibleCarrierConstruct { variant, value } => {
                 let mut prelude = Vec::new();
                 let lowered_value = self.lower_child_expression_for_parent(&mut prelude, value)?;
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
                 let variant_index = match variant {
                     AstFallibleCarrierVariant::Success => 0,
                     AstFallibleCarrierVariant::Error => 1,
@@ -336,7 +335,7 @@ impl<'a> HirBuilder<'a> {
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::VariantConstruct {
                             carrier: HirVariantCarrier::Fallible,
                             variant_index,
@@ -354,17 +353,19 @@ impl<'a> HirBuilder<'a> {
 
             ExpressionKind::HandledFallibleExpression {
                 value, handling, ..
-            } => self.lower_handled_fallible_expression(
-                value,
-                handling,
-                &expr.location,
-                expr.propagation_location().unwrap_or(&expr.location),
-                expr.type_id,
-                expr.span,
-            ),
+            } => {
+                let propagation_span = expr.propagation_span().or(expr.span);
+                self.lower_handled_fallible_expression(
+                    value,
+                    handling,
+                    &expr.span,
+                    &propagation_span,
+                    expr.type_id,
+                )
+            }
 
             ExpressionKind::OptionPropagation { value } => {
-                self.lower_option_expression_to_present_value(value, &expr.location, expr.span)
+                self.lower_option_expression_to_present_value(value, &expr.span)
             }
 
             ExpressionKind::HostFunctionCall {
@@ -377,16 +378,14 @@ impl<'a> HirBuilder<'a> {
                         *host_id,
                         args,
                         result_type_ids,
-                        &expr.location,
-                        expr.span,
+                        &expr.span,
                     )
                 } else {
                     self.lower_call_expression(
                         CallTarget::External(*host_id),
                         args,
                         result_type_ids,
-                        &expr.location,
-                        expr.span,
+                        &expr.span,
                     )
                 }
             }
@@ -401,13 +400,13 @@ impl<'a> HirBuilder<'a> {
                     lowered_items.push(lowered_item);
                 }
 
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
 
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::Collection(lowered_items),
                         ty,
                         ValueKind::RValue,
@@ -425,12 +424,12 @@ impl<'a> HirBuilder<'a> {
                         self.lower_child_expression_for_parent(&mut prelude, &entry.value)?;
                     hir_entries.push(HirMapEntry { key, value });
                 }
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::MapLiteral(hir_entries),
                         ty,
                         ValueKind::RValue,
@@ -444,13 +443,13 @@ impl<'a> HirBuilder<'a> {
                 let lowered_start = self.lower_child_expression_for_parent(&mut prelude, start)?;
                 let lowered_end = self.lower_child_expression_for_parent(&mut prelude, end)?;
 
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
 
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::Range {
                             start: Box::new(lowered_start),
                             end: Box::new(lowered_end),
@@ -468,7 +467,7 @@ impl<'a> HirBuilder<'a> {
                 // runtime lowering should never be requested.
                 return_hir_transformation_error!(
                     "HIR invariant: anonymous const record reached runtime HIR lowering; field access should select a member before HIR generation",
-                    self.hir_error_location(&expr.location)
+                    self.hir_error_location(&expr.span)
                 );
             }
             ExpressionKind::StructInstance(args) => {
@@ -478,14 +477,14 @@ impl<'a> HirBuilder<'a> {
                 if expr.is_const_record_value() {
                     return_hir_transformation_error!(
                         "HIR invariant: Const record reached runtime HIR struct lowering; field access should select a member before HIR generation",
-                        self.hir_error_location(&expr.location)
+                        self.hir_error_location(&expr.span)
                     );
                 }
 
                 let Some(nominal_path) = self.type_environment.nominal_path(expr.type_id) else {
                     return_hir_transformation_error!(
                         "Struct instance reached HIR lowering without a nominal struct identity",
-                        self.hir_error_location(&expr.location)
+                        self.hir_error_location(&expr.span)
                     );
                 };
                 let nominal_path = nominal_path.to_owned();
@@ -497,29 +496,29 @@ impl<'a> HirBuilder<'a> {
                         &key,
                         &nominal_path,
                         expr.type_id,
-                        &expr.location,
+                        &expr.span,
                     )?
                 } else {
-                    self.resolve_struct_id_from_nominal_path(&nominal_path, &expr.location)?
+                    self.resolve_struct_id_from_nominal_path(&nominal_path, &expr.span)?
                 };
                 let mut prelude = Vec::new();
                 let mut fields = Vec::with_capacity(args.len());
 
                 for arg in args {
                     let field_id =
-                        self.resolve_field_id_or_error(struct_id, &arg.id, &expr.location)?;
+                        self.resolve_field_id_or_error(struct_id, &arg.id, &expr.span)?;
                     let lowered_value =
                         self.lower_child_expression_for_parent(&mut prelude, &arg.value)?;
                     fields.push((field_id, lowered_value));
                 }
 
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
 
                 Ok(LoweredExpression {
                     prelude,
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::StructConstruct { struct_id, fields },
                         ty,
                         ValueKind::RValue,
@@ -534,20 +533,17 @@ impl<'a> HirBuilder<'a> {
                 // reaching this dispatcher means AST failed to finish its job.
                 return_hir_transformation_error!(
                     "Raw template reached HIR runtime-template lowering after AST finalization.",
-                    self.hir_error_location(&expr.location)
+                    self.hir_error_location(&expr.span)
                 )
             }
 
             ExpressionKind::RuntimeTemplateHandoff(handoff) => self
-                .lower_runtime_template_expression_from_owned_handoff(
-                    handoff.as_ref(),
-                    &expr.location,
-                ),
+                .lower_runtime_template_expression_from_owned_handoff(handoff.as_ref(), &expr.span),
 
             ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => self
                 .lower_runtime_slot_application_expression_from_owned_handoff(
                     handoff.as_ref(),
-                    &expr.location,
+                    &expr.span,
                 ),
 
             // Lower the inner value and override the HIR type with the declared
@@ -558,12 +554,12 @@ impl<'a> HirBuilder<'a> {
                 let mut prelude = Vec::new();
                 let mut lowered_value =
                     self.lower_child_expression_for_parent(&mut prelude, value)?;
-                let coerced_ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let coerced_ty = self.lower_type_id(expr.type_id, &expr.span)?;
                 if self.type_environment.option_inner_type(expr.type_id) == Some(lowered_value.ty) {
                     let value_name = self.string_table.intern("value");
                     let region = lowered_value.region;
                     lowered_value = self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::VariantConstruct {
                             carrier: HirVariantCarrier::Option,
                             variant_index: 1,
@@ -593,38 +589,38 @@ impl<'a> HirBuilder<'a> {
             ExpressionKind::Function(_) => {
                 return_hir_transformation_error!(
                     "Function expressions are not lowered in this phase",
-                    self.hir_error_location(&expr.location)
+                    self.hir_error_location(&expr.span)
                 )
             }
 
             ExpressionKind::StructDefinition(_) => {
                 return_hir_transformation_error!(
                     "Struct definition expressions are not lowered in this phase",
-                    self.hir_error_location(&expr.location)
+                    self.hir_error_location(&expr.span)
                 )
             }
 
             ExpressionKind::ValueBlock { block } => {
                 // Value blocks are composite control flow; branch scaffolding stays
                 // spanless and the root span is restored below.
-                self.lower_value_block(block, &expr.location, expr.type_id)
+                self.lower_value_block(block, &expr.span, expr.type_id)
             }
 
             ExpressionKind::NoValue => {
-                let region = self.current_region_or_error(&expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
                 Ok(LoweredExpression {
                     prelude: vec![],
-                    value: self.unit_expression(&expr.location, region),
+                    value: self.unit_expression(&expr.span, region),
                 })
             }
 
             ExpressionKind::OptionNone => {
-                let region = self.current_region_or_error(&expr.location)?;
-                let ty = self.lower_type_id(expr.type_id, &expr.location)?;
+                let region = self.current_region_or_error(&expr.span)?;
+                let ty = self.lower_type_id(expr.type_id, &expr.span)?;
                 Ok(LoweredExpression {
                     prelude: vec![],
                     value: self.make_expression(
-                        &expr.location,
+                        &expr.span,
                         HirExpressionKind::VariantConstruct {
                             carrier: HirVariantCarrier::Option,
                             variant_index: 0,
@@ -659,14 +655,14 @@ impl<'a> HirBuilder<'a> {
         expr: &Expression,
     ) -> Result<HirExpression, CompilerError> {
         if let Some(success_value) =
-            self.lower_fallible_expression_to_success_value(expr, &expr.location)?
+            self.lower_fallible_expression_to_success_value(expr, &expr.span)?
         {
             return Ok(success_value);
         }
 
         let lowered = self.lower_expression(expr)?;
         for prelude in lowered.prelude {
-            self.emit_statement_to_current_block(prelude, &expr.location)?;
+            self.emit_statement_to_current_block(prelude, &expr.span)?;
         }
 
         Ok(lowered.value)
@@ -686,7 +682,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirExpression, CompilerError> {
         if self.expression_needs_current_block_lowering(expr) {
             for prelude in pending_prelude.drain(..) {
-                self.emit_statement_to_current_block(prelude, &expr.location)?;
+                self.emit_statement_to_current_block(prelude, &expr.span)?;
             }
 
             return self.lower_expression_value_to_current_block(expr);
@@ -814,21 +810,19 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_value_block(
         &mut self,
         block: &ValueBlock,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
         match block {
-            ValueBlock::If(value_if) => {
-                self.lower_value_block_if(value_if, location, result_type_id)
-            }
+            ValueBlock::If(value_if) => self.lower_value_block_if(value_if, span, result_type_id),
             ValueBlock::LexicalScope(value_lexical_scope) => {
-                self.lower_value_lexical_scope(value_lexical_scope, location, result_type_id)
+                self.lower_value_lexical_scope(value_lexical_scope, span, result_type_id)
             }
             ValueBlock::Match(value_match) => {
-                self.lower_value_block_match(value_match, location, result_type_id)
+                self.lower_value_block_match(value_match, span, result_type_id)
             }
             ValueBlock::Catch(value_catch) => {
-                self.lower_value_block_catch(value_catch, location, result_type_id)
+                self.lower_value_block_catch(value_catch, span, result_type_id)
             }
         }
     }
@@ -840,11 +834,12 @@ impl<'a> HirBuilder<'a> {
     fn lower_value_block_catch(
         &mut self,
         value_catch: &ValueCatchBlock,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         result_type_id: TypeId,
     ) -> Result<LoweredExpression, CompilerError> {
         let result_type_ids = &value_catch.result_type_ids;
         let value_required = !result_type_ids.is_empty();
+        let handled_span = value_catch.handled_value.span;
 
         match &value_catch.handled_value.kind {
             ExpressionKind::HandledFallibleFunctionCall {
@@ -853,15 +848,14 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids: call_result_type_ids,
                 ..
             } => {
-                let target = self.resolve_call_target_or_error(name, location)?;
+                let target = self.resolve_call_target_or_error(name, span)?;
                 let (carrier_type, ok_type, err_type) =
-                    self.result_call_carrier_slots(&target, location)?;
-                let requested_ok_type =
-                    self.lower_call_result_type(call_result_type_ids, location)?;
+                    self.result_call_carrier_slots(&target, span)?;
+                let requested_ok_type = self.lower_call_result_type(call_result_type_ids, span)?;
                 if requested_ok_type != ok_type {
                     return_hir_transformation_error!(
                         "Value catch call lowered with mismatched success type",
-                        self.hir_error_location(location)
+                        self.hir_error_location(span)
                     );
                 }
 
@@ -875,10 +869,9 @@ impl<'a> HirBuilder<'a> {
                         ok_type,
                         err_type,
                         value_required,
-                        location,
+                        span: &handled_span,
                         validate_float_success: false,
                     },
-                    value_catch.handled_value.span,
                 )
             }
 
@@ -892,7 +885,7 @@ impl<'a> HirBuilder<'a> {
                 let (carrier_type, ok_type, err_type) = self.fallible_call_carrier_from_slots(
                     call_result_type_ids,
                     *error_type_id,
-                    location,
+                    span,
                 )?;
                 self.lower_handled_fallible_call_with_branching(
                     CallTarget::External(*id),
@@ -904,10 +897,9 @@ impl<'a> HirBuilder<'a> {
                         ok_type,
                         err_type,
                         value_required,
-                        location,
+                        span: &handled_span,
                         validate_float_success: self.type_id_is_float(ok_type),
                     },
-                    value_catch.handled_value.span,
                 )
             }
 
@@ -917,21 +909,19 @@ impl<'a> HirBuilder<'a> {
                     &value_catch.handler,
                     result_type_ids,
                     value_required,
-                    location,
-                    value_catch.handled_value.span,
+                    &handled_span,
                 ),
 
             ExpressionKind::Cast(cast) => self.lower_recovering_cast_expression(
                 cast,
                 &value_catch.handler,
                 result_type_id,
-                location,
-                value_catch.handled_value.span,
+                &handled_span,
             ),
 
             _ => return_hir_transformation_error!(
                 "Value catch block did not contain a recoverable expression",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             ),
         }
     }
@@ -952,38 +942,23 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         cast: &ResolvedCastExpression,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         match &cast.evidence {
             ResolvedCastEvidence::Builtin { policy } => match &cast.handling {
-                CastHandling::Infallible => self.lower_infallible_builtin_cast_expression(
-                    cast,
-                    *policy,
-                    expr_type_id,
-                    location,
-                    span,
-                ),
-                CastHandling::Propagate | CastHandling::Recover => self
-                    .lower_fallible_builtin_cast_expression(
-                        cast,
-                        *policy,
-                        expr_type_id,
-                        location,
-                        span,
-                    ),
+                CastHandling::Infallible => {
+                    self.lower_infallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
+                }
+                CastHandling::Propagate | CastHandling::Recover => {
+                    self.lower_fallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
+                }
             },
-            ResolvedCastEvidence::UserDefined { method_path, .. } => self
-                .lower_user_defined_cast_expression(
-                    cast,
-                    method_path,
-                    expr_type_id,
-                    location,
-                    span,
-                ),
+            ResolvedCastEvidence::UserDefined { method_path, .. } => {
+                self.lower_user_defined_cast_expression(cast, method_path, expr_type_id, span)
+            }
             ResolvedCastEvidence::GenericBound { .. } => Err(CompilerError::new(
                 "Generic-bound cast evidence reached HIR lowering",
-                self.hir_error_location(location),
+                self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )),
         }
@@ -995,8 +970,7 @@ impl<'a> HirBuilder<'a> {
         cast: &ResolvedCastExpression,
         policy: BuiltinCastPolicyId,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let mut prelude = Vec::new();
         let source = self.lower_child_expression_for_parent(&mut prelude, &cast.source)?;
@@ -1006,22 +980,21 @@ impl<'a> HirBuilder<'a> {
         // templates use the same Moth-owned formatter.
         if policy == BuiltinCastPolicyId::FloatToString {
             for prelude_statement in prelude.drain(..) {
-                self.emit_statement_to_current_block(prelude_statement, location)?;
+                self.emit_statement_to_current_block(prelude_statement, span)?;
             }
 
-            let formatted = self.emit_formatted_float_value(source, location, span)?;
-            let value =
-                self.wrap_cast_result_optional_if_needed(formatted, expr_type_id, location)?;
+            let formatted = self.emit_formatted_float_value(source, span)?;
+            let value = self.wrap_cast_result_optional_if_needed(formatted, expr_type_id, span)?;
             return Ok(LoweredExpression {
                 prelude: vec![],
                 value,
             });
         }
 
-        let target_type = self.lower_type_id(cast.target_type_id, location)?;
-        let region = self.current_region_or_error(location)?;
+        let target_type = self.lower_type_id(cast.target_type_id, span)?;
+        let region = self.current_region_or_error(span)?;
         let value = self.make_expression(
-            location,
+            span,
             HirExpressionKind::Cast {
                 source: Box::new(source),
                 policy,
@@ -1030,7 +1003,7 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             region,
         );
-        let value = self.wrap_cast_result_optional_if_needed(value, expr_type_id, location)?;
+        let value = self.wrap_cast_result_optional_if_needed(value, expr_type_id, span)?;
 
         Ok(LoweredExpression { prelude, value })
     }
@@ -1040,20 +1013,19 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         cast: &ResolvedCastExpression,
         policy: BuiltinCastPolicyId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
         let lowered_source = self.lower_expression(&cast.source)?;
         for prelude_statement in lowered_source.prelude {
-            self.emit_statement_to_current_block(prelude_statement, location)?;
+            self.emit_statement_to_current_block(prelude_statement, span)?;
         }
 
-        let ok_type = self.lower_type_id(cast.target_type_id, location)?;
-        let err_type = self.builtin_error_type_id(location)?;
+        let ok_type = self.lower_type_id(cast.target_type_id, span)?;
+        let err_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
             .intern_fallible_carrier(ok_type, err_type);
-        let result_local = self.allocate_temp_local(carrier_type, Some(location.to_owned()))?;
+        let result_local = self.allocate_temp_local(carrier_type, None)?;
 
         let cast_statement = HirStatement {
             id: self.allocate_node_id(),
@@ -1062,11 +1034,10 @@ impl<'a> HirBuilder<'a> {
                 source: lowered_source.value,
                 result: Some(result_local),
             },
-            location: location.to_owned(),
-            span,
+            span: *span,
         };
-        self.side_table.map_statement(location, &cast_statement);
-        self.emit_statement_to_current_block(cast_statement, location)?;
+        self.side_table.map_statement(*span, &cast_statement);
+        self.emit_statement_to_current_block(cast_statement, span)?;
 
         Ok(EmittedFallibleCarrier {
             result_local,
@@ -1083,20 +1054,15 @@ impl<'a> HirBuilder<'a> {
         cast: &ResolvedCastExpression,
         policy: BuiltinCastPolicyId,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let carrier = self.emit_builtin_cast_carrier(cast, policy, location, span)?;
+        let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
 
         match &cast.handling {
             CastHandling::Propagate => {
-                let success_value =
-                    self.lower_fallible_carrier_to_success_value(carrier, location, span)?;
-                let value = self.wrap_cast_result_optional_if_needed(
-                    success_value,
-                    expr_type_id,
-                    location,
-                )?;
+                let success_value = self.lower_fallible_carrier_to_success_value(carrier, span)?;
+                let value =
+                    self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
                 Ok(LoweredExpression {
                     prelude: vec![],
                     value,
@@ -1104,11 +1070,11 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering builtin cast reached HIR outside a value catch block",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             ),
             CastHandling::Infallible => Err(CompilerError::new(
                 "Fallible builtin cast reached HIR with Infallible handling",
-                self.hir_error_location(location),
+                self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )),
         }
@@ -1120,15 +1086,11 @@ impl<'a> HirBuilder<'a> {
         cast: &ResolvedCastExpression,
         method_path: &InternedPath,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let call_target = self.resolve_call_target_or_error(method_path, location)?;
-        let source_argument = CallArgument::positional(
-            (*cast.source).clone(),
-            CallAccessMode::Shared,
-            location.to_owned(),
-        );
+        let call_target = self.resolve_call_target_or_error(method_path, span)?;
+        let source_argument =
+            CallArgument::positional((*cast.source).clone(), CallAccessMode::Shared, *span);
 
         match &cast.handling {
             CastHandling::Infallible => {
@@ -1137,33 +1099,21 @@ impl<'a> HirBuilder<'a> {
                     call_target,
                     &[source_argument],
                     &result_type_ids,
-                    location,
                     span,
                 )?;
-                let value = self.wrap_cast_result_optional_if_needed(
-                    lowered.value,
-                    expr_type_id,
-                    location,
-                )?;
+                let value =
+                    self.wrap_cast_result_optional_if_needed(lowered.value, expr_type_id, span)?;
                 Ok(LoweredExpression {
                     prelude: lowered.prelude,
                     value,
                 })
             }
             CastHandling::Propagate => {
-                let carrier = self.emit_user_defined_cast_call_carrier(
-                    call_target,
-                    &source_argument,
-                    location,
-                    span,
-                )?;
-                let success_value =
-                    self.lower_fallible_carrier_to_success_value(carrier, location, span)?;
-                let value = self.wrap_cast_result_optional_if_needed(
-                    success_value,
-                    expr_type_id,
-                    location,
-                )?;
+                let carrier =
+                    self.emit_user_defined_cast_call_carrier(call_target, &source_argument, span)?;
+                let success_value = self.lower_fallible_carrier_to_success_value(carrier, span)?;
+                let value =
+                    self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
                 Ok(LoweredExpression {
                     prelude: vec![],
                     value,
@@ -1171,7 +1121,7 @@ impl<'a> HirBuilder<'a> {
             }
             CastHandling::Recover => return_hir_transformation_error!(
                 "Recovering user-defined cast reached HIR outside a value catch block",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             ),
         }
     }
@@ -1182,50 +1132,40 @@ impl<'a> HirBuilder<'a> {
         cast: &ResolvedCastExpression,
         handler: &FallibleHandling,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         match &cast.evidence {
             ResolvedCastEvidence::Builtin { policy } => {
-                let carrier = self.emit_builtin_cast_carrier(cast, *policy, location, span)?;
+                let carrier = self.emit_builtin_cast_carrier(cast, *policy, span)?;
                 self.lower_cast_catch_with_optional_wrap(
                     carrier,
                     handler,
                     expr_type_id,
                     cast.target_type_id,
                     cast.requires_optional_wrap_after_cast,
-                    location,
                     span,
                 )
             }
 
             ResolvedCastEvidence::UserDefined { method_path, .. } => {
-                let call_target = self.resolve_call_target_or_error(method_path, location)?;
-                let source_argument = CallArgument::positional(
-                    (*cast.source).clone(),
-                    CallAccessMode::Shared,
-                    location.to_owned(),
-                );
-                let carrier = self.emit_user_defined_cast_call_carrier(
-                    call_target,
-                    &source_argument,
-                    location,
-                    span,
-                )?;
+                let call_target = self.resolve_call_target_or_error(method_path, span)?;
+                let source_argument =
+                    CallArgument::positional((*cast.source).clone(), CallAccessMode::Shared, *span);
+                let carrier =
+                    self.emit_user_defined_cast_call_carrier(call_target, &source_argument, span)?;
                 self.lower_cast_catch_with_optional_wrap(
                     carrier,
                     handler,
                     expr_type_id,
                     cast.target_type_id,
                     cast.requires_optional_wrap_after_cast,
-                    location,
                     span,
                 )
             }
 
             ResolvedCastEvidence::GenericBound { .. } => Err(CompilerError::new(
                 "Generic-bound cast evidence reached recovering HIR lowering",
-                self.hir_error_location(location),
+                self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )),
         }
@@ -1246,38 +1186,34 @@ impl<'a> HirBuilder<'a> {
         expr_type_id: FrontendTypeId,
         target_type_id: FrontendTypeId,
         requires_optional_wrap_after_cast: bool,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let current_block = self.current_block_id_or_error(location)?;
+        let current_block = self.current_block_id_or_error(span)?;
 
         if !requires_optional_wrap_after_cast {
             let result_type_ids = self.handled_expression_result_type_ids(expr_type_id);
-            return self.lower_fallible_carrier_with_branching(
-                FallibleCarrierBranchingContext {
-                    current_block,
-                    result_local: carrier.result_local,
-                    handled_result: FallibleBranchingContext {
-                        result_type_ids: &result_type_ids,
-                        handling,
-                        carrier_type: carrier.carrier_type,
-                        ok_type: carrier.ok_type,
-                        err_type: carrier.err_type,
-                        value_required: true,
-                        location,
-                        validate_float_success: false,
-                    },
+            return self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
+                current_block,
+                result_local: carrier.result_local,
+                handled_result: FallibleBranchingContext {
+                    result_type_ids: &result_type_ids,
+                    handling,
+                    carrier_type: carrier.carrier_type,
+                    ok_type: carrier.ok_type,
+                    err_type: carrier.err_type,
+                    value_required: true,
+                    span,
+                    validate_float_success: false,
                 },
-                span,
-            );
+            });
         }
 
         // For an optional receiving context, lower the branching with inner target result
         // locals so the catch handler's `then` value is the same type as the success payload.
         // After the merge, wrap the unified inner value into `some(...)` to produce `T?`.
         let inner_result_type_ids = self.handled_expression_result_type_ids(target_type_id);
-        let inner_lowered = self.lower_fallible_carrier_with_branching(
-            FallibleCarrierBranchingContext {
+        let inner_lowered =
+            self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
                 current_block,
                 result_local: carrier.result_local,
                 handled_result: FallibleBranchingContext {
@@ -1287,15 +1223,13 @@ impl<'a> HirBuilder<'a> {
                     ok_type: carrier.ok_type,
                     err_type: carrier.err_type,
                     value_required: true,
-                    location,
+                    span,
                     validate_float_success: false,
                 },
-            },
-            span,
-        )?;
+            })?;
 
         let wrapped_value =
-            self.wrap_cast_result_optional_if_needed(inner_lowered.value, expr_type_id, location)?;
+            self.wrap_cast_result_optional_if_needed(inner_lowered.value, expr_type_id, span)?;
 
         Ok(LoweredExpression {
             prelude: inner_lowered.prelude,
@@ -1308,18 +1242,16 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         target: CallTarget,
         source_argument: &CallArgument,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
-        let (carrier_type, ok_type, err_type) =
-            self.result_call_carrier_slots(&target, location)?;
+        let (carrier_type, ok_type, err_type) = self.result_call_carrier_slots(&target, span)?;
 
-        let lowered_argument = self.lower_call_argument_value(source_argument, location, 0)?;
+        let lowered_argument = self.lower_call_argument_value(source_argument, span, 0)?;
         for prelude_statement in lowered_argument.prelude {
-            self.emit_statement_to_current_block(prelude_statement, location)?;
+            self.emit_statement_to_current_block(prelude_statement, span)?;
         }
 
-        let result_local = self.allocate_temp_local(carrier_type, Some(location.to_owned()))?;
+        let result_local = self.allocate_temp_local(carrier_type, None)?;
         let call_statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Call {
@@ -1327,11 +1259,10 @@ impl<'a> HirBuilder<'a> {
                 args: vec![lowered_argument.value],
                 result: Some(result_local),
             },
-            location: location.to_owned(),
-            span,
+            span: *span,
         };
-        self.side_table.map_statement(location, &call_statement);
-        self.emit_statement_to_current_block(call_statement, location)?;
+        self.side_table.map_statement(*span, &call_statement);
+        self.emit_statement_to_current_block(call_statement, span)?;
 
         Ok(EmittedFallibleCarrier {
             result_local,
@@ -1347,9 +1278,9 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: HirExpression,
         expr_type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let expected_type = self.lower_type_id(expr_type_id, location)?;
+        let expected_type = self.lower_type_id(expr_type_id, span)?;
         if value.ty == expected_type {
             return Ok(value);
         }
@@ -1360,7 +1291,7 @@ impl<'a> HirBuilder<'a> {
                     "Cast result type {:?} cannot be wrapped to expected optional type {:?}",
                     value.ty, expected_type
                 ),
-                self.hir_error_location(location),
+                self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             ));
         }
@@ -1368,7 +1299,7 @@ impl<'a> HirBuilder<'a> {
         let value_name = self.string_table.intern("value");
         let region = value.region;
         Ok(self.make_expression(
-            location,
+            span,
             HirExpressionKind::VariantConstruct {
                 carrier: HirVariantCarrier::Option,
                 variant_index: OPTION_SOME_VARIANT_INDEX,
@@ -1386,7 +1317,7 @@ impl<'a> HirBuilder<'a> {
     /// Resolves the builtin `Error` type id for fallible carrier error slots.
     fn builtin_error_type_id(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
         type_id_for_builtin_target(
             BuiltinCastTarget::Error,
@@ -1396,7 +1327,7 @@ impl<'a> HirBuilder<'a> {
         .ok_or_else(|| {
             CompilerError::new(
                 "Builtin Error type is not registered in the type environment",
-                self.hir_error_location(location),
+                self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
             )
         })
@@ -1412,9 +1343,9 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn emit_statement_to_current_block(
         &mut self,
         statement: HirStatement,
-        source_location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let block = self.current_block_mut_or_error(source_location)?;
+        let block = self.current_block_mut_or_error(span)?;
         block.statements.push(statement);
         Ok(())
     }
@@ -1426,7 +1357,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         local: LocalId,
         value: HirExpression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let assign_statement = HirStatement {
             id: self.allocate_node_id(),
@@ -1434,12 +1365,11 @@ impl<'a> HirBuilder<'a> {
                 target: HirPlace::Local(local),
                 value,
             },
-            location: location.to_owned(),
             span: None,
         };
 
-        self.side_table.map_statement(location, &assign_statement);
-        self.emit_statement_to_current_block(assign_statement, location)
+        self.side_table.map_statement(None, &assign_statement);
+        self.emit_statement_to_current_block(assign_statement, span)
     }
 
     // -------------------------
@@ -1452,7 +1382,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn allocate_temp_local(
         &mut self,
         ty: TypeId,
-        source_info: Option<SourceLocation>,
+        source_info: Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
         self.allocate_compiler_local(
             ty,
@@ -1466,15 +1396,15 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn allocate_fresh_mutable_call_arg_local(
         &mut self,
         ty: TypeId,
-        source_info: Option<SourceLocation>,
-        call_location: &SourceLocation,
+        source_info: Option<SourceSpan>,
+        call_span: Option<SourceSpan>,
         argument_index: usize,
     ) -> Result<LocalId, CompilerError> {
         self.allocate_compiler_local(
             ty,
             source_info,
             HirLocalOriginKind::CompilerFreshMutableArg,
-            Some(call_location),
+            call_span,
             Some(argument_index),
         )
     }
@@ -1482,14 +1412,14 @@ impl<'a> HirBuilder<'a> {
     fn allocate_compiler_local(
         &mut self,
         ty: TypeId,
-        source_info: Option<SourceLocation>,
+        source_info: Option<SourceSpan>,
         origin: HirLocalOriginKind,
-        call_location: Option<&SourceLocation>,
+        call_span: Option<SourceSpan>,
         argument_index: Option<usize>,
     ) -> Result<LocalId, CompilerError> {
-        let location = source_info.to_owned().unwrap_or_default();
-        let region = self.current_region_or_error(&location)?;
-        let block_id = self.current_block_id_or_error(&location)?;
+        let span = source_info;
+        let region = self.current_region_or_error(&span)?;
+        let block_id = self.current_block_id_or_error(&span)?;
         let local_id = self.allocate_local_id();
 
         let local = HirLocal {
@@ -1497,12 +1427,11 @@ impl<'a> HirBuilder<'a> {
             ty,
             mutable: true,
             region,
-            source_info,
-            span: None,
+            span: source_info,
         };
 
         self.side_table.map_local_source(&local);
-        self.register_local_in_block(block_id, local, &location)?;
+        self.register_local_in_block(block_id, local, &span)?;
 
         let temp_name = format!("__hir_tmp_{}", self.temp_local_counter);
         self.temp_local_counter += 1;
@@ -1512,7 +1441,7 @@ impl<'a> HirBuilder<'a> {
         // They are named only for diagnostics/debug rendering via the side table.
         self.side_table.bind_local_name(local_id, temp_name_id);
         self.side_table
-            .bind_local_origin(local_id, origin, call_location, argument_index);
+            .bind_local_origin(local_id, origin, call_span, argument_index);
 
         Ok(local_id)
     }
@@ -1526,10 +1455,10 @@ impl<'a> HirBuilder<'a> {
     //      produces clearer diagnostics than assuming block state exists.
     pub(crate) fn current_block_mut_or_error(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<&mut HirBlock, CompilerError> {
-        let block_id = self.current_block_id_or_error(location)?;
-        self.block_mut_by_id_or_error(block_id, location)
+        let block_id = self.current_block_id_or_error(span)?;
+        self.block_mut_by_id_or_error(block_id, span)
     }
 
     // WHAT: allocates one HIR expression node with its identity and typing metadata attached.
@@ -1537,14 +1466,14 @@ impl<'a> HirBuilder<'a> {
     //      uniform across every lowering helper.
     pub(crate) fn make_expression(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         kind: HirExpressionKind,
         ty: TypeId,
         value_kind: ValueKind,
         region: RegionId,
     ) -> HirExpression {
         let id = self.allocate_value_id();
-        self.side_table.map_value(location, id, location);
+        self.side_table.map_value(*span, id, *span);
 
         HirExpression {
             id,
@@ -1552,7 +1481,7 @@ impl<'a> HirBuilder<'a> {
             ty,
             value_kind,
             region,
-            span: None,
+            span: *span,
         }
     }
 
@@ -1563,11 +1492,11 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         local: LocalId,
         ty: TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         region: RegionId,
     ) -> HirExpression {
         self.make_expression(
-            location,
+            span,
             HirExpressionKind::Load(HirPlace::Local(local)),
             ty,
             ValueKind::RValue,
@@ -1579,12 +1508,12 @@ impl<'a> HirBuilder<'a> {
     // WHY: unit values should lower through the same tuple machinery every other pass expects.
     pub(crate) fn unit_expression(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         region: RegionId,
     ) -> HirExpression {
         let unit_ty = self.type_environment.builtins().none;
         self.make_expression(
-            location,
+            span,
             HirExpressionKind::TupleConstruct { elements: vec![] },
             unit_ty,
             ValueKind::Const,
@@ -1605,7 +1534,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn register_choice_id(
         &mut self,
         nominal_path: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
         if let Some(&choice_id) = self.choices_by_name.get(nominal_path) {
             return Ok(choice_id);
@@ -1638,7 +1567,7 @@ impl<'a> HirBuilder<'a> {
             variants: vec![],
         });
 
-        let hir_variants = self.lower_choice_variants_for_type_id(frontend_type_id, location)?;
+        let hir_variants = self.lower_choice_variants_for_type_id(frontend_type_id, span)?;
         self.module.choices[index].variants = hir_variants;
 
         Ok(choice_id)
@@ -1652,7 +1581,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_choice_id(
         &self,
         nominal_path: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
         let Some(choice_id) = self.choices_by_name.get(nominal_path).copied() else {
             return_hir_transformation_error!(
@@ -1660,7 +1589,7 @@ impl<'a> HirBuilder<'a> {
                     "Choice '{}' was not pre-registered during HIR declaration preparation",
                     self.symbol_name_for_diagnostics(nominal_path)
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
         Ok(choice_id)
@@ -1670,16 +1599,16 @@ impl<'a> HirBuilder<'a> {
     //  Diagnostics & Logging
     // -------------------------
 
-    // WHAT: converts a frontend text location into the shared compiler error-location format.
+    // WHAT: preserves exact source-span provenance for HIR transformation errors.
     // WHY: HIR lowering uses one helper so all transformation errors preserve consistent source metadata.
-    pub(crate) fn hir_error_location(&self, location: &SourceLocation) -> SourceLocation {
-        location.clone()
+    pub(crate) fn hir_error_location(&self, span: &Option<SourceSpan>) -> Option<SourceSpan> {
+        *span
     }
 
     fn log_expression_input(&self, _expr: &Expression) {
         hir_log!(format!(
             "[HIR] Lowering expression {:?} @ {:?}",
-            _expr.kind, _expr.location
+            _expr.kind, _expr.span
         ));
     }
 
@@ -1699,13 +1628,13 @@ impl<'a> HirBuilder<'a> {
 
     fn log_call_result_binding(
         &self,
-        _location: &SourceLocation,
+        _span: &Option<SourceSpan>,
         _local: Option<LocalId>,
         _value: &HirExpression,
     ) {
         hir_log!(format!(
             "[HIR] Emitted call binding @ {:?}: result={:?}, value={}",
-            _location,
+            span,
             _local,
             _value.display_with_context(
                 &crate::compiler_frontend::hir::hir_display::HirDisplayContext::new(

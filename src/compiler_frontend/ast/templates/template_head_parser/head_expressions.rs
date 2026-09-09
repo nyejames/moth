@@ -30,7 +30,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 pub(super) struct TemplateHeadExpressionContext<'a> {
@@ -61,18 +61,16 @@ fn is_unresolved_constant_placeholder_reference(
 
 fn validate_template_head_value_type(
     expression: &Expression,
-    location: &SourceLocation,
-    source_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> HeadExpressionResult<()> {
     if type_environment.is_fallible_carrier(expression.type_id) {
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::FallibleValueInTemplateHead,
-                location.to_owned(),
+                span,
             ),
-            source_span,
-            location,
+            span,
         )
         .into());
     }
@@ -92,21 +90,19 @@ fn validate_template_head_value_type(
             InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead {
                 type_id: expression.type_id,
             },
-            location.to_owned(),
+            span,
         ),
-        source_span,
-        location,
+        span,
     )
     .into())
 }
 
 fn with_source_span(
     mut diagnostic: CompilerDiagnostic,
-    source_span: Option<SourceSpan>,
-    expected_location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
-        diagnostic.primary_span = source_span;
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = span;
     }
     diagnostic
 }
@@ -117,8 +113,7 @@ pub(super) fn handle_template_value_in_template_head(
     value: &Template,
     context: &ScopeContext,
     construction_context: &mut TemplateConstructionContext,
-    location: &SourceLocation,
-    source_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
 ) -> HeadExpressionResult<()> {
     let template_kind = {
         let store = context.template_ir_store.borrow();
@@ -139,10 +134,9 @@ pub(super) fn handle_template_value_in_template_head(
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::RuntimeTemplateInConst,
-                location.to_owned(),
+                span,
             ),
-            source_span,
-            location,
+            span,
         )
         .into());
     }
@@ -155,10 +149,9 @@ pub(super) fn handle_template_value_in_template_head(
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::SlotInHead,
-                location.to_owned(),
+                span,
             ),
-            source_span,
-            location,
+            span,
         )
         .into());
     }
@@ -169,17 +162,12 @@ pub(super) fn handle_template_value_in_template_head(
     // TIR-native slot routing bucket them by the helper's target slot key
     // rather than treating them as loose fill content.
     if matches!(&template_kind, TemplateType::SlotInsert(_)) {
-        construction_context.record_insert_contribution(
-            child_reference.root,
-            location.to_owned(),
-            source_span,
-        );
+        construction_context.record_insert_contribution(child_reference.root, span);
     } else {
         construction_context.record_child_template(
             child_reference,
             TemplateSegmentOrigin::Head,
-            location.to_owned(),
-            source_span,
+            span,
         );
     }
 
@@ -190,8 +178,7 @@ pub(super) fn handle_template_value_in_template_head(
 pub(super) fn push_template_head_expression(
     expression: Expression,
     target: TemplateHeadExpressionContext<'_>,
-    location: &SourceLocation,
-    source_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
     if let ExpressionKind::Template(template_value) = &expression.kind {
@@ -199,8 +186,7 @@ pub(super) fn push_template_head_expression(
             template_value,
             target.context,
             target.construction_context,
-            location,
-            source_span,
+            span,
         );
     }
 
@@ -208,12 +194,7 @@ pub(super) fn push_template_head_expression(
         is_unresolved_constant_placeholder_reference(&expression, target.context);
 
     if !defer_inferred_type_validation {
-        validate_template_head_value_type(
-            &expression,
-            location,
-            source_span,
-            target.type_environment,
-        )?;
+        validate_template_head_value_type(&expression, span, target.type_environment)?;
     }
 
     let expression_needs_constness =
@@ -235,10 +216,9 @@ pub(super) fn push_template_head_expression(
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead,
-                location.to_owned(),
+                span,
             ),
-            source_span,
-            location,
+            span,
         )
         .into());
     }
@@ -253,20 +233,16 @@ pub(super) fn push_template_head_expression(
     match &snapshot_expression.kind {
         ExpressionKind::StringSlice(text) => {
             let byte_len = string_table.resolve(*text).len();
-            target.construction_context.record_head_text(
-                *text,
-                byte_len,
-                location.to_owned(),
-                source_span,
-            );
+            target
+                .construction_context
+                .record_head_text(*text, byte_len, span);
         }
 
         _ => {
             target.construction_context.record_head_dynamic_expression(
                 snapshot_expression.clone(),
                 None,
-                location.to_owned(),
-                source_span,
+                span,
             );
         }
     }
@@ -284,29 +260,26 @@ pub(super) fn push_template_head_reactive_subscription(
     expression: Expression,
     source: ReactiveSource,
     target: TemplateHeadExpressionContext<'_>,
-    location: &SourceLocation,
-    source_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
     if target.context.kind.is_constant_context() {
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate,
-                location.to_owned(),
+                span,
             ),
-            source_span,
-            location,
+            span,
         )
         .into());
     }
 
-    validate_template_head_value_type(&expression, location, source_span, target.type_environment)?;
+    validate_template_head_value_type(&expression, span, target.type_environment)?;
 
     let subscription = ReactiveSubscription {
         source,
         type_id: expression.type_id,
-        location: location.to_owned(),
-        span: source_span,
+        span,
     };
     // Reactive literal text in the head is recorded as a Text node carrying the
     // subscription in the store side-table, not as a dynamic-expression anchor.
@@ -318,22 +291,21 @@ pub(super) fn push_template_head_reactive_subscription(
                 *text,
                 byte_len,
                 Some(subscription.clone()),
-                location.to_owned(),
-                source_span,
+                span,
             );
         }
         _ => {
             target.construction_context.record_head_dynamic_expression(
                 expression.clone(),
                 Some(subscription.clone()),
-                location.to_owned(),
-                source_span,
+                span,
             );
         }
     }
 
     Ok(())
 }
+
 /// Resolves a compile-time file value in template-head context and records its expression.
 ///
 /// Stage 0 owns physical resolution for every authored path occurrence. Reusing the ordinary
@@ -348,11 +320,7 @@ pub(super) fn push_template_head_path_expression(
     string_table: &mut StringTable,
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
-    let location = token_stream.current_location();
-    let source_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let source_span = Some(token_stream.current_span());
     let expression = resolve_file_value(
         path_syntax,
         token_stream,
@@ -361,7 +329,7 @@ pub(super) fn push_template_head_path_expression(
         &value_mode,
         string_table,
     )
-    .map_err(|error| with_source_span_error(source_span, &location, TemplateError::from(error)))?;
+    .map_err(|error| with_source_span_error(source_span, TemplateError::from(error)))?;
 
     push_template_head_expression(
         expression,
@@ -370,19 +338,14 @@ pub(super) fn push_template_head_path_expression(
             type_environment: type_interner.environment(),
             construction_context,
         },
-        &location,
         source_span,
         string_table,
     )
 }
 
-fn with_source_span_error(
-    source_span: Option<SourceSpan>,
-    expected_location: &SourceLocation,
-    error: TemplateError,
-) -> TemplateError {
+fn with_source_span_error(source_span: Option<SourceSpan>, error: TemplateError) -> TemplateError {
     error.map_diagnostic(|mut diagnostic| {
-        if diagnostic.primary_span.is_none() && diagnostic.primary_location == *expected_location {
+        if diagnostic.primary_span.is_none() {
             diagnostic.primary_span = source_span;
         }
         diagnostic

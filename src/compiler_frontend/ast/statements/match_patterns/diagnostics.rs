@@ -24,21 +24,21 @@ pub fn reject_deferred_pattern_lead_token(token_stream: &FileTokens) -> Option<C
                 InvalidMatchPatternReason::WildcardNotSupported,
                 None,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ));
         }
 
         TokenKind::Not => {
             return Some(deferred_feature_reason_diagnostic(
                 DeferredFeatureReason::NegatedMatchPattern,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ));
         }
 
         TokenKind::TypeParameterBracket => {
             return Some(deferred_feature_reason_diagnostic(
                 DeferredFeatureReason::CaptureTaggedPattern,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ));
         }
 
@@ -47,7 +47,7 @@ pub fn reject_deferred_pattern_lead_token(token_stream: &FileTokens) -> Option<C
                 InvalidMatchPatternReason::AsNotValid,
                 None,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ));
         }
 

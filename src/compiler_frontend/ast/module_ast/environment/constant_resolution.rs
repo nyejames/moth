@@ -4,7 +4,7 @@
 //! constant initializers for one Stage 3 declaration walk in header dependency order.
 //! WHY: headers are already sorted by the dependency stage, so a walk reads one unchanging view
 //! of the module. Building that view once means a module with many constants prepares its side
-//! tables, canonical file scopes and compatibility cache a fixed number of times instead of once
+//! tables, source-file scopes and compatibility cache a fixed number of times instead of once
 //! per constant. A module with constant-dependent aliases runs a bounded prefix walk before user
 //! traits resolve and then the full walk, so it owns one session per walk rather than one per
 //! module.
@@ -113,12 +113,6 @@ struct ConstantHeaderScopeInput<'a> {
 pub(crate) struct ConstantResolutionSession {
     module_view: ConstantResolutionSessionInput,
 
-    /// Canonical scope path of each source file that declares a constant.
-    ///
-    /// WHY: interning the canonical file path needs the string table and is identical for every
-    /// constant declared in the same file.
-    source_file_scopes: FxHashMap<InternedPath, InternedPath>,
-
     /// One compatibility cache for the whole pass.
     ///
     /// The cache is keyed purely on canonical `TypeId` pairs and the pass only ever adds new
@@ -130,7 +124,6 @@ impl ConstantResolutionSession {
     pub(crate) fn new(module_view: ConstantResolutionSessionInput) -> Self {
         Self {
             module_view,
-            source_file_scopes: FxHashMap::default(),
             compatibility_cache: TypeCompatibilityCache::new(),
         }
     }
@@ -173,7 +166,6 @@ impl ConstantResolutionSession {
                 choice_variant_shells_by_path,
                 file_visibility,
             },
-            string_table,
         );
 
         let mut type_interner =
@@ -190,10 +182,7 @@ impl ConstantResolutionSession {
         let mut declaration = declaration_result?;
         // Top-level constant binding anchor is the header name token, not the
         // initializer value span left empty by `resolve_declaration_syntax`.
-        declaration.binding_span = Some(crate::compiler_frontend::source::SourceSpan::new(
-            header.tokens.file_id,
-            header.name_span,
-        ));
+        declaration.binding_span = header.name_span;
         if let Some(config_resolution) = &self.module_view.config_resolution {
             resolve_direct_project_config_qualifiers(
                 &mut declaration,
@@ -226,7 +215,7 @@ impl ConstantResolutionSession {
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 declaration.id.name(),
-                header.name_location.clone(),
+                header.name_span,
             )
             .into());
         }
@@ -246,7 +235,6 @@ impl ConstantResolutionSession {
         &mut self,
         header: &Header,
         input: ConstantHeaderScopeInput<'_>,
-        string_table: &mut StringTable,
     ) -> ScopeContext {
         let ConstantHeaderScopeInput {
             top_level_declarations,
@@ -260,10 +248,6 @@ impl ConstantResolutionSession {
         increment_ast_counter(AstCounter::ConstantResolutionContextsCreated);
 
         let module_view = &self.module_view;
-        let source_file_scope = self
-            .source_file_scopes
-            .entry(header.source_file.to_owned())
-            .or_insert_with(|| header.canonical_source_file(string_table));
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
@@ -281,7 +265,7 @@ impl ConstantResolutionSession {
         // through the header-built visibility package so namespace bindings and aliases behave
         // exactly like they do in function/start body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
-        .with_source_file_scope(source_file_scope.to_owned())
+        .with_source_file_scope(header.source_file.clone())
         .with_declaring_file_id(header.tokens.file_id)
         .with_resolved_type_aliases(resolved_type_aliases)
         .with_resolved_module_constants(resolved_constants)

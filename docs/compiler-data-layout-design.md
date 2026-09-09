@@ -6,10 +6,12 @@
 > `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`; user-facing
 > diagnostic improvement work remains paused until that plan completes.
 >
-> **Activation baseline:** `b6f81fe58` on `token-and-diagnostic-data-layout-changes`, with the
-> delivered Compiler Test Suite Hardening prerequisite at `03168082d`. Baseline validation was green:
+> **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
+> `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
+> prerequisite at `03168082d`. The baseline validation was green:
 > `just validate`, plus Clippy with warnings denied on `aarch64-apple-darwin`,
-> `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` under Rust 1.97.1.
+> `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` under Rust 1.97.1. This records the
+> starting point only; it is not a report of the current workspace.
 
 ## Authority and ownership
 
@@ -172,9 +174,13 @@ The following are also hard rules:
 - no missing identity is represented by a magic valid ID
 - reserved bits must be zero on construction and validated when records cross a trust boundary
 
-## Current-to-target architecture
+## Historical activation shape and current target
 
-| Current shape | Target shape |
+The left-hand column records the predecessor representation measured at plan activation. It is
+historical evidence, not a description of the current workspace; the right-hand column is the
+accepted layout.
+
+| Historical activation shape | Current target shape |
 |---|---|
 | `SourceLocation { InternedPath, start line/column, end line/column }` | `SourceSpan { SourceId, LocalSpan }` |
 | source paths cloned into each token and diagnostic | one path and source record in shared tables |
@@ -910,9 +916,8 @@ compiler stage
 -> terminal, terse, dev-server and tooling renderers
 ```
 
-`DiagnosticDraft` is move-only. It is small enough to travel through local `Result` paths without
-boxing every diagnostic. Rare draft data may use one heap allocation because only the exceptional
-case pays for it.
+`DiagnosticDraft` is move-only and travels through local `Result` paths as a plain value. Rare
+draft data may use one heap allocation because only the exceptional case pays for it.
 
 `DiagnosticRecord` is the durable fixed record stored densely in `DiagnosticStore`.
 
@@ -1026,9 +1031,9 @@ larger than 48 bytes on supported 64-bit targets.
 - draft facts use the producing worker's current identity domain
 - deterministic remapping happens before the draft becomes durable
 - draft destruction after compaction releases all temporary allocation
-
-Returning `Box<DiagnosticDraft>` or `Box<CompilerDiagnostic>` from every validation helper is not an
-accepted solution.
+Returning an owning pointer for every draft or diagnostic is not part of the compact plain
+diagnostic boundary. Keep common diagnosed failures as values and reserve indirection for typed
+rare data that the schema explicitly places in a side store.
 
 ### Diagnostic IDs and store
 
@@ -1467,6 +1472,11 @@ Compiler bugs are not another `Result` variant. They panic.
 
 ### Current `CompilerError` migration
 
+Phase 1 keeps expected operational failures in the typed outer `CompilerError` lane while
+user-caused failures use plain `CompilerDiagnostic` values. This is the transitional boundary:
+the infrastructure result described above is the Phase 5 target, after infrastructure and compiler
+bug context ownership are settled.
+
 Every current `CompilerError` construction site must be audited and assigned to one lane before the
 type is deleted:
 
@@ -1475,8 +1485,9 @@ type is deleted:
 - a proven invariant becomes `compiler_bug!`
 
 No broad automatic conversion is allowed. The audit records the old site, chosen lane and reason.
-`CompilerError`, `ErrorType`, metadata maps and the `DiagnosticPayload::InfrastructureError` bridge are
-deleted only after the inventory reaches zero.
+`CompilerError`, `ErrorType` and metadata maps are deleted only after the inventory reaches zero;
+the `DiagnosticPayload::InfrastructureError` bridge has already been removed by the Phase 1
+diagnostic boundary.
 
 ## Tooling host isolation
 
@@ -1784,8 +1795,8 @@ Implementation of this design requires synchronized changes to:
 - `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries
-- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; remove
-  boxing as the normal `result_large_err` answer
+- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; keep
+  diagnosed failures plain and do not recommend boxing or lint suppression at local `Result` boundaries
 - `docs/src/developer-docs/style-guide/testing.mtf` — layout/property/failure-lane ownership
 - `docs/src/developer-docs/style-guide/validation.mtf` — updated manual architecture audit
 - `docs/src/docs/progress/@page.moth` — current implementation status during and after migration
@@ -1893,7 +1904,7 @@ This architecture is implemented only when:
 - every former `CompilerError` site has one explicit failure lane
 - only proven invariant bugs panic
 - long-lived tooling isolates compilation state and no longer recovers poisoned compiler state
-- CI Clippy passes without `result_large_err` boxing or lint suppression
+- CI validates the compact plain diagnostic boundary without local boxing or lint suppression
 - representative memory measurements improve and timing stays within accepted bounds
 - the authority documents, progress matrix, roadmap and codebase index describe the final owners
 - no compatibility adapter preserves the old source-location, token, diagnostic or error path

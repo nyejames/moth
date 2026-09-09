@@ -18,12 +18,10 @@ use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
-/// Boxed diagnostic result for provider-backed dependency resolution.
+/// Result for provider-backed dependency resolution.
 ///
-/// WHAT: gives provider-backed selection and namespace resolution one small error boundary.
-/// WHY: the external registration, namespace record, and namespace name helpers this family
-///      calls already return boxed diagnostics, so boxing here lets `?` propagate directly
-///      without temporary unboxing adapters.
+/// Provider selection preserves plain diagnosed values and typed infrastructure
+/// failures in `BindingEnvironmentError` through the connected helper family.
 type ProviderDependencyResult<T> = Result<T, BindingEnvironmentError>;
 
 impl<'a> BindingEnvironmentBuilder<'a> {
@@ -51,10 +49,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // A retained provider root must match the provider prefix exactly. Any remaining path
         // component is a malformed provider identity, not a selected source name.
         if !remaining.is_empty() {
-            return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
+            return Err(CompilerDiagnostic::direct_symbol_path_import(
                 dependency.dependency.path.clone(),
-                dependency.dependency.location.clone(),
-            ))
+                Some(dependency.dependency.span),
+            )
             .into());
         }
 
@@ -62,10 +60,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .external_package_registry
             .get_package_by_id(resolved.package_id);
         let Some(package) = package else {
-            return Err(Box::new(super::diagnostics::missing_dependency_target(
+            return Err(super::diagnostics::missing_dependency_target(
                 &dependency.dependency.path,
-                dependency.dependency.location.clone(),
-            ))
+                Some(dependency.dependency.span),
+            )
             .into());
         };
 
@@ -73,10 +71,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             let symbol_id = self
                 .lookup_external_symbol_id_by_name(&package.path, selection.source_name)
                 .ok_or_else(|| {
-                    Box::new(super::diagnostics::missing_dependency_target(
+                    super::diagnostics::missing_dependency_target(
                         &dependency.dependency.path.append(selection.source_name),
-                        selection.source_location.clone(),
-                    ))
+                        Some(selection.source_span),
+                    )
                 })?;
             let local_name = selection.local_name();
             self.register_external_import(
@@ -85,7 +83,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 super::external_imports::ExternalImportInput {
                     symbol_name: selection.source_name,
                     local_name,
-                    source_location: &selection.source_location,
+                    source_span: Some(selection.source_span),
                     local_alias: selection.local_alias(),
                     symbol_id,
                 },
@@ -118,10 +116,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // If there are remaining components after the provider-backed prefix, this is a
         // direct symbol-path dependency, which is invalid for bare dependencies.
         if !remaining.is_empty() {
-            return Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
+            return Err(CompilerDiagnostic::direct_symbol_path_import(
                 dependency.dependency.path.clone(),
-                dependency.dependency.location.clone(),
-            ))
+                Some(dependency.dependency.span),
+            )
             .into());
         }
 
@@ -129,31 +127,36 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .external_package_registry
             .get_package_by_id(resolved.package_id);
         let Some(package) = package else {
-            return Err(Box::new(super::diagnostics::missing_dependency_target(
+            return Err(super::diagnostics::missing_dependency_target(
                 &dependency.dependency.path,
-                dependency.dependency.location.clone(),
-            ))
+                Some(dependency.dependency.span),
+            )
             .into());
         };
 
         let package_path_id = self.string_table.intern(&package.path);
-        let namespace_record =
-            self.build_external_namespace_record(package_path_id, &dependency.dependency.location)?;
+        let namespace_record = self
+            .build_external_namespace_record(package_path_id, Some(dependency.dependency.span))?;
 
         let local_name = self.derive_namespace_name(dependency)?;
 
+        let local_name_span = match &dependency.binding {
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::Namespace {
+                alias: Some(alias),
+            } => Some(alias.span),
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::Namespace {
+                alias: None,
+            } => Some(dependency.dependency.span),
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::DirectSelections {
+                ..
+            } => None,
+        };
         registry.register(
             local_name,
             super::VisibleNameBinding::NamespaceRecord {
                 record_source: super::NamespaceRecordSource::ExternalPackage(package_path_id),
             },
-            Some(
-                dependency
-                    .namespace_binding_location()
-                    .cloned()
-                    .unwrap_or_else(|| dependency.dependency.location.clone()),
-            ),
-            None,
+            local_name_span,
         )?;
 
         file_visibility

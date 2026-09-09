@@ -24,7 +24,6 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::VecDeque;
 
 fn module_origin() -> StableModuleOriginIdentity {
@@ -95,7 +94,6 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
                     args: Vec::new(),
                     result: None,
                 },
-                location: SourceLocation::default(),
                 span: None,
             })
             .collect(),

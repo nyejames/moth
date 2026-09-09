@@ -24,18 +24,15 @@ use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, He
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use rustc_hash::FxHashMap;
 
-/// Boxed-diagnostic result for trait-evidence conformance validation.
+/// Result for trait-evidence conformance validation.
 ///
-/// `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err` when
-/// returned directly in `Result`. Boxing the error variant keeps the validation
-/// family's `Result` enum small; callers unbox at existing plain-diagnostic
-/// accumulation boundaries.
-type TraitEvidenceValidationResult<T = ()> = Result<T, Box<CompilerDiagnostic>>;
+/// Diagnosed failures remain plain `CompilerDiagnostic` values at this
+/// boundary; infrastructure failures use their typed outer lane.
+type TraitEvidenceValidationResult<T = ()> = Result<T, CompilerDiagnostic>;
 
 /// Inputs needed to validate evidence after trait definitions and receiver methods exist.
 pub(crate) struct ValidateTraitEvidenceInput<'a> {
@@ -56,14 +53,13 @@ struct PendingConformanceEvidence {
     trait_id: TraitId,
     trait_name: StringId,
     source_file: InternedPath,
-    declaration_location: SourceLocation,
-    trait_location: SourceLocation,
+    declaration_span: Option<SourceSpan>,
     trait_span: Option<SourceSpan>,
 }
 
 struct IncompatibleEvidence {
     trait_name: StringId,
-    declaration_location: SourceLocation,
+    declaration_span: Option<SourceSpan>,
 }
 
 /// Validate explicit conformance declarations and store indexed evidence facts.
@@ -80,7 +76,7 @@ pub(crate) fn validate_trait_evidence(
     evidence_environment: &mut TraitEvidenceEnvironment,
 ) -> TraitEvidenceValidationResult {
     let mut pending_evidence = Vec::new();
-    let mut pending_canonical_locations: FxHashMap<(TypeId, TraitId), SourceLocation> =
+    let mut pending_canonical_spans: FxHashMap<(TypeId, TraitId), Option<SourceSpan>> =
         FxHashMap::default();
 
     for header in input.sorted_headers {
@@ -93,7 +89,7 @@ pub(crate) fn validate_trait_evidence(
                 conformance.target.name,
                 conformance.traits.first().map(|trait_ref| trait_ref.name),
                 InvalidTraitConformanceReason::ImportedModuleRoot,
-                conformance.target.location.clone(),
+                Some(conformance.target.span),
                 Vec::new(),
             )
             .into());
@@ -107,11 +103,11 @@ pub(crate) fn validate_trait_evidence(
                     conformance.target.name,
                     conformance.traits.first().map(|trait_ref| trait_ref.name),
                     InvalidTraitConformanceReason::NonCanonicalTarget,
-                    conformance.target.location.clone(),
+                    Some(conformance.target.span),
                     Vec::new(),
                 )
             })?;
-        let conformance_source_file = header.canonical_source_file(input.string_table);
+        let conformance_source_file = header.source_file.clone();
 
         let target_context = ResolveConformanceTargetContext {
             conformance_source_file: &conformance_source_file,
@@ -124,10 +120,7 @@ pub(crate) fn validate_trait_evidence(
         };
         let target = resolve_conformance_target(&conformance.target, target_context).map_err(
             |mut diagnostic| {
-                diagnostic.primary_span = Some(SourceSpan::new(
-                    header.tokens.file_id,
-                    conformance.target.span,
-                ));
+                diagnostic.primary_span = Some(conformance.target.span);
                 diagnostic
             },
         )?;
@@ -140,37 +133,34 @@ pub(crate) fn validate_trait_evidence(
                 input.string_table,
             )
             .map_err(|mut diagnostic| {
-                diagnostic.primary_span =
-                    Some(SourceSpan::new(header.tokens.file_id, trait_ref.span));
+                diagnostic.primary_span = Some(trait_ref.span);
                 diagnostic
             })?;
 
             if let Some(existing_id) = evidence_environment.builtin_for(target.type_id, trait_id) {
-                let previous_location = evidence_environment
+                let previous_span = evidence_environment
                     .get(existing_id)
-                    .map(|definition| definition.declaration_location.clone());
+                    .and_then(|definition| definition.declaration_span);
 
-                let mut diagnostic = invalid_conformance(
+                let diagnostic = invalid_conformance(
                     conformance.target.name,
                     Some(trait_ref.name),
                     InvalidTraitConformanceReason::BuiltinEvidenceOverride,
-                    trait_ref.location.clone(),
-                    previous_declaration_label(previous_location),
+                    Some(trait_ref.span),
+                    previous_declaration_label(previous_span),
                 );
-                attach_trait_reference_span(&mut diagnostic, header, trait_ref);
                 return Err(diagnostic.into());
             }
 
             let key = (target.type_id, trait_id);
-            if let Some(previous_location) = pending_canonical_locations.get(&key) {
-                let mut diagnostic = invalid_conformance(
+            if let Some(previous_span) = pending_canonical_spans.get(&key).copied() {
+                let diagnostic = invalid_conformance(
                     conformance.target.name,
                     Some(trait_ref.name),
                     InvalidTraitConformanceReason::DuplicateCanonicalEvidence,
-                    trait_ref.location.clone(),
-                    previous_declaration_label(Some(previous_location.clone())),
+                    Some(trait_ref.span),
+                    previous_declaration_label(previous_span),
                 );
-                attach_trait_reference_span(&mut diagnostic, header, trait_ref);
                 return Err(diagnostic.into());
             }
 
@@ -181,24 +171,18 @@ pub(crate) fn validate_trait_evidence(
                 &pending_evidence,
                 input.trait_environment,
             ) {
-                let secondary_labels = previous_declaration_label(non_default_location(
-                    incompatible.declaration_location,
-                ));
-
-                let mut diagnostic = invalid_conformance(
+                let diagnostic = invalid_conformance(
                     conformance.target.name,
                     Some(trait_ref.name),
                     InvalidTraitConformanceReason::IncompatibleTraitEvidence {
                         incompatible_trait_name: incompatible.trait_name,
                     },
-                    trait_ref.location.clone(),
-                    secondary_labels,
+                    Some(trait_ref.span),
+                    previous_declaration_label(incompatible.declaration_span),
                 );
-                attach_trait_reference_span(&mut diagnostic, header, trait_ref);
                 return Err(diagnostic.into());
             }
-
-            pending_canonical_locations.insert(key, conformance.target.location.clone());
+            pending_canonical_spans.insert(key, Some(conformance.target.span));
 
             pending_evidence.push(PendingConformanceEvidence {
                 target: target.clone(),
@@ -206,19 +190,16 @@ pub(crate) fn validate_trait_evidence(
                 trait_id,
                 trait_name: trait_ref.name,
                 source_file: conformance_source_file.clone(),
-                declaration_location: conformance.target.location.clone(),
-                trait_location: trait_ref.location.clone(),
-                trait_span: Some(SourceSpan::new(header.tokens.file_id, trait_ref.span)),
+                declaration_span: Some(conformance.target.span),
+                trait_span: Some(trait_ref.span),
             });
         }
     }
 
     for pending in pending_evidence {
         let Some(trait_definition) = input.trait_environment.get(pending.trait_id) else {
-            let mut diagnostic = CompilerDiagnostic::unknown_trait_name(
-                pending.trait_name,
-                pending.trait_location.clone(),
-            );
+            let mut diagnostic =
+                CompilerDiagnostic::unknown_trait_name(pending.trait_name, pending.trait_span);
             diagnostic.primary_span = pending.trait_span;
             return Err(diagnostic.into());
         };
@@ -228,7 +209,7 @@ pub(crate) fn validate_trait_evidence(
             type_environment: input.type_environment,
             target_name: pending.target_name,
             trait_name: pending.trait_name,
-            conformance_location: pending.declaration_location.clone(),
+            conformance_span: pending.declaration_span,
             string_table: input.string_table,
         };
         let requirement_methods = validate_requirements(
@@ -244,7 +225,7 @@ pub(crate) fn validate_trait_evidence(
             target_type_id: pending.target.type_id,
             trait_id: pending.trait_id,
             source_file: pending.source_file,
-            declaration_location: pending.declaration_location,
+            declaration_span: pending.declaration_span,
             requirements: requirement_methods,
         };
 
@@ -252,16 +233,6 @@ pub(crate) fn validate_trait_evidence(
     }
 
     Ok(())
-}
-
-/// Attach the authored trait-name anchor while the declaring header still owns its source ID.
-/// The legacy location and existing labels remain the compatibility bridge until 1H.
-fn attach_trait_reference_span(
-    diagnostic: &mut CompilerDiagnostic,
-    header: &Header,
-    trait_ref: &super::super::syntax::TraitReferenceSyntax,
-) {
-    diagnostic.primary_span = Some(SourceSpan::new(header.tokens.file_id, trait_ref.span));
 }
 
 fn find_incompatible_evidence(
@@ -281,7 +252,7 @@ fn find_incompatible_evidence(
 
         return Some(IncompatibleEvidence {
             trait_name: pending.trait_name,
-            declaration_location: pending.declaration_location.clone(),
+            declaration_span: pending.declaration_span,
         });
     }
 
@@ -299,17 +270,9 @@ fn find_incompatible_evidence(
 
         return Some(IncompatibleEvidence {
             trait_name,
-            declaration_location: definition.declaration_location.clone(),
+            declaration_span: definition.declaration_span,
         });
     }
 
     None
-}
-
-fn non_default_location(location: SourceLocation) -> Option<SourceLocation> {
-    if location == SourceLocation::default() {
-        None
-    } else {
-        Some(location)
-    }
 }

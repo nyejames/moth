@@ -7,7 +7,6 @@
 
 use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::output_path::{canonicalize_output_path, normalize_relative_path};
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::utilities::basic::normalize_path;
@@ -116,7 +115,7 @@ impl CleanupPolicy {
 pub struct ValidatedOutputFolder {
     pub relative_path: PathBuf,
     pub resolved_path: PathBuf,
-    pub location: SourceLocation,
+    /// Exact authored config span, when this folder came from source config.
     pub span: Option<SourceSpan>,
 }
 
@@ -145,7 +144,6 @@ impl ValidatedDirectoryOutputSettings {
             project_root,
             entry_root,
             owner,
-            setting_location: folder.location.clone(),
             setting_span: folder.span,
         }
     }
@@ -157,7 +155,6 @@ pub struct ValidatedOutputPlan {
     pub project_root: PathBuf,
     pub entry_root: PathBuf,
     pub owner: OutputOwner,
-    pub setting_location: SourceLocation,
     pub setting_span: Option<SourceSpan>,
 }
 
@@ -167,7 +164,6 @@ pub struct SingleFileOutputPlan {
     pub output_root: PathBuf,
     pub project_root: Option<PathBuf>,
     pub owner: OutputOwner,
-    pub setting_location: SourceLocation,
     /// Single-file paths are command/filesystem facts, never authored config spans.
     pub setting_span: Option<SourceSpan>,
 }
@@ -205,13 +201,6 @@ impl OutputPlan {
         match self {
             Self::Directory(plan) => plan.owner,
             Self::SingleFile(plan) => plan.owner,
-        }
-    }
-
-    pub(crate) fn setting_location(&self) -> &SourceLocation {
-        match self {
-            Self::Directory(plan) => &plan.setting_location,
-            Self::SingleFile(plan) => &plan.setting_location,
         }
     }
 
@@ -258,7 +247,6 @@ pub(crate) fn classify_output_folder(
     Ok(ValidatedOutputFolder {
         relative_path,
         resolved_path,
-        location: SourceLocation::default(),
         span: None,
     })
 }

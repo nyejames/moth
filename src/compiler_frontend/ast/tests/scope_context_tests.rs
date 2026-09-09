@@ -54,7 +54,7 @@ fn scope_context_new_leaves_no_visibility_gate() {
 fn add_var_extends_visibility_gate_when_gate_is_set() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -76,7 +76,6 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         id: variable_path.to_owned(),
         value: Expression::new(
             ExpressionKind::NoValue,
-            SourceLocation::default(),
             None,
             builtin_type_ids::INT,
             DataType::Int,
@@ -85,7 +84,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, SourceLocation::default());
+    context.add_var(declaration, None);
 
     assert!(
         context
@@ -106,7 +105,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
 fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -127,7 +126,6 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         id: constant_path.to_owned(),
         value: Expression::new(
             ExpressionKind::NoValue,
-            SourceLocation::default(),
             None,
             builtin_type_ids::INT,
             DataType::Int,
@@ -136,7 +134,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_compile_time_var(declaration, SourceLocation::default());
+    context.add_compile_time_var(declaration, None);
 
     assert!(
         context
@@ -297,7 +295,7 @@ fn new_constant_inherits_parent_visibility_gate() {
 fn parent_frame_lookup_finds_ancestor_declaration() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -318,7 +316,6 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
             id: variable_path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -327,7 +324,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
@@ -346,7 +343,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
 fn child_frame_declaration_is_not_visible_to_parent() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -368,7 +365,6 @@ fn child_frame_declaration_is_not_visible_to_parent() {
             id: variable_path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -377,7 +373,7 @@ fn child_frame_declaration_is_not_visible_to_parent() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     assert!(
@@ -401,7 +397,7 @@ fn child_function_frame_does_not_capture_parent_locals() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
     use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -422,7 +418,6 @@ fn child_function_frame_does_not_capture_parent_locals() {
             id: parent_path,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -431,7 +426,7 @@ fn child_function_frame_does_not_capture_parent_locals() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let function_name = string_table.intern("inner_function");
@@ -456,7 +451,7 @@ fn child_function_frame_does_not_capture_parent_locals() {
 fn same_frame_duplicate_lookup_returns_latest_declaration() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -479,7 +474,6 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             id: first_path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -488,14 +482,13 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
     context.add_var(
         Declaration {
             id: second_path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -504,7 +497,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let resolved = context
@@ -520,7 +513,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
 fn no_shadowing_across_ancestor_frames() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -541,7 +534,6 @@ fn no_shadowing_across_ancestor_frames() {
             id: parent_path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -550,7 +542,7 @@ fn no_shadowing_across_ancestor_frames() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
@@ -597,7 +589,7 @@ fn new_child_control_flow_inherits_visibility_gate() {
 fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -622,7 +614,6 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         id: local_path.to_owned(),
         value: Expression::new(
             ExpressionKind::NoValue,
-            SourceLocation::default(),
             None,
             builtin_type_ids::INT,
             DataType::Int,
@@ -633,7 +624,7 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     };
 
     let mut child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
-    child.add_var(declaration, SourceLocation::default());
+    child.add_var(declaration, None);
 
     assert!(
         child
@@ -693,7 +684,7 @@ fn new_child_expression_propagates_expected_result_type_ids() {
 fn cloned_context_does_not_share_current_frame() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -716,7 +707,6 @@ fn cloned_context_does_not_share_current_frame() {
             id: path.to_owned(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -725,7 +715,7 @@ fn cloned_context_does_not_share_current_frame() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     assert!(
@@ -742,7 +732,7 @@ fn cloned_context_does_not_share_current_frame() {
 fn child_frame_shares_ancestors_but_not_current_frame() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
     use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -763,7 +753,6 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             id: parent_path,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -772,7 +761,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut child = context.new_child_control_flow(ContextKind::Branch, &mut string_table);
@@ -783,7 +772,6 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             id: child_path,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
                 None,
                 builtin_type_ids::INT,
                 DataType::Int,
@@ -792,7 +780,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     assert!(

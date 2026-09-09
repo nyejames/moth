@@ -35,8 +35,8 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // -------------------------
@@ -50,7 +50,6 @@ fn bool_expression() -> Expression {
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
-        location: SourceLocation::default(),
         span: None,
         reactive_source: None,
         reactive_template: None,
@@ -72,14 +71,14 @@ fn build_template_with_dynamic_expression(
         bool_expression(),
         TemplateSegmentOrigin::Body,
         None,
-        SourceLocation::default(),
+        None,
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
     (template_id, root)
 }
@@ -87,13 +86,13 @@ fn build_template_with_dynamic_expression(
 /// Builds a single empty template inside `store` and returns its `TemplateIrId`.
 fn build_empty_template(store: &mut super::super::store::TemplateIrStore) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_sequence_node(vec![], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![], None);
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -110,15 +109,15 @@ fn build_template_with_text_child(
         text_string_id,
         5,
         crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
+        None,
     );
-    let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![text_node], None);
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -1058,69 +1057,59 @@ fn overlay_dimension_accessors_resolve_each_dimension() {
 }
 
 // -------------------------
-//  Source-location recovery tests
+// Source-span recovery tests
 // -------------------------
 
-/// Creates a `SourceLocation` with a specific line and column so tests can
-/// distinguish locations by their position data.
+/// Creates a synthetic, source-qualified span with an explicit byte range.
 ///
-/// WHAT: builds a `SourceLocation` using the default interned scope and the
-///       given start/end line and column. Using non-default positions lets
-///       assertions prove the correct location was returned rather than a
-///       coincidental `Default`.
-fn location_at(line: i32, column: i32) -> SourceLocation {
-    use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
-    use crate::compiler_frontend::symbols::interned_path::InternedPath;
-
-    SourceLocation::new(
-        InternedPath::default(),
-        CharPosition {
-            line_number: line,
-            char_column: column,
-        },
-        CharPosition {
-            line_number: line,
-            char_column: column,
-        },
+/// WHAT: uses the same compact local-span codec as authored spans while keeping
+/// the reserved compilation-root identity explicit.
+/// WHY: TIR tests must assert exact byte ranges and source identity rather than
+/// relying on the deleted line/column location bridge.
+fn span_at(start: u32, end: u32) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(start, end - start, &mut span_builder)
+            .expect("synthetic test span should fit"),
     )
 }
 
-/// Asserts that an optional location result matches the expected line and column.
-fn assert_location(
-    result: Result<
-        Option<SourceLocation>,
-        crate::compiler_frontend::compiler_errors::CompilerError,
-    >,
-    line: i32,
-    column: i32,
+/// Asserts that an optional source span result matches an exact byte range and source identity.
+fn assert_span(
+    result: Result<Option<SourceSpan>, crate::compiler_frontend::compiler_errors::CompilerError>,
+    start: u32,
+    end: u32,
 ) {
-    let location = result
-        .expect("location lookup should succeed")
-        .expect("location should be found");
-    assert_eq!(location.start_pos.line_number, line);
-    assert_eq!(location.start_pos.char_column, column);
+    let span = result
+        .expect("source-span lookup should succeed")
+        .expect("source span should be found");
+    assert_eq!(span.source(), SourceId::COMPILATION_ROOT);
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!((range.start(), range.end()), (start, end));
 }
 
 /// Builds a template whose root is a `Sequence` containing one `Slot` node.
 ///
 /// WHAT: returns the template ID, the root node ID, and the slot occurrence ID
-///       so tests can query the view for the slot's source location.
+///       so tests can query the view for the slot's exact source span.
 fn build_template_with_slot(
     store: &mut super::super::store::TemplateIrStore,
-    slot_location: SourceLocation,
+    slot_span: SourceSpan,
 ) -> (TemplateIrId, SlotOccurrenceId) {
     let mut builder = TemplateIrBuilder::new(store);
     let slot_node = builder.push_slot_node(
         crate::compiler_frontend::ast::templates::template::SlotKey::Default,
-        slot_location,
+        Some(slot_span),
     );
-    let root = builder.push_sequence_node(vec![slot_node], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![slot_node], None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
     let occurrence_id = {
         let node = store.get_node(slot_node).expect("slot node should exist");
@@ -1136,12 +1125,12 @@ fn build_template_with_slot(
 /// node referencing a second empty template in the module-local store.
 ///
 /// WHAT: returns the parent template ID, the child template ID, and the
-///       child-template occurrence ID so tests can verify the occurrence location
-///       is recovered and that traversal does not cross into the child root.
+///       child-template occurrence ID so tests can verify exact span recovery
+///       and that traversal does not cross into the child root.
 fn build_template_with_child_template(
     store: &mut super::super::store::TemplateIrStore,
-    child_template_location: SourceLocation,
-    child_occurrence_location: SourceLocation,
+    child_template_span: SourceSpan,
+    child_occurrence_span: SourceSpan,
 ) -> (
     TemplateIrId,
     TemplateIrId,
@@ -1150,23 +1139,24 @@ fn build_template_with_child_template(
     let mut builder = TemplateIrBuilder::new(store);
 
     // Build the child template first so the parent can reference it.
-    let child_root = builder.push_sequence_node(vec![], SourceLocation::default());
+    let child_root = builder.push_sequence_node(vec![], None);
     let child_template_id = builder.finish_template(
         child_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        child_template_location,
+        Some(child_template_span),
     );
 
-    let child_node = builder.push_child_template_node(child_template_id, child_occurrence_location);
-    let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+    let child_node =
+        builder.push_child_template_node(child_template_id, Some(child_occurrence_span));
+    let root = builder.push_sequence_node(vec![child_node], None);
     let parent_template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
 
     let occurrence_id = {
@@ -1181,25 +1171,25 @@ fn build_template_with_child_template(
 }
 
 /// Builds a template whose root is a `Sequence` containing one
-/// `DynamicExpression` node, using a caller-provided source location.
+/// `DynamicExpression` node with a caller-provided source span.
 fn build_template_with_dynamic_expression_at(
     store: &mut super::super::store::TemplateIrStore,
-    expression_location: SourceLocation,
+    expression_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let mut builder = TemplateIrBuilder::new(store);
     let expr_node = builder.push_dynamic_expression_node(
-        bool_expression_with_location(&expression_location),
+        bool_expression_with_span(expression_span),
         TemplateSegmentOrigin::Body,
         None,
-        expression_location,
+        Some(expression_span),
     );
-    let root = builder.push_sequence_node(vec![expr_node], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![expr_node], None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
     let site_id = {
         let node = store
@@ -1213,16 +1203,15 @@ fn build_template_with_dynamic_expression_at(
     (template_id, site_id)
 }
 
-/// A bool expression that carries a specific source location.
-fn bool_expression_with_location(location: &SourceLocation) -> Expression {
+/// A bool expression that carries a specific source span.
+fn bool_expression_with_span(span: SourceSpan) -> Expression {
     Expression {
         kind: ExpressionKind::Bool(true),
         type_id: builtin_type_ids::BOOL,
         diagnostic_type: DataType::Bool,
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
-        location: location.clone(),
-        span: None,
+        span: Some(span),
         reactive_source: None,
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
@@ -1233,41 +1222,31 @@ fn bool_expression_with_location(location: &SourceLocation) -> Expression {
 
 /// Builds a template whose root is a `BranchChain` with one branch whose
 /// selector is a `Bool` expression, plus a fallback body.
-///
-/// WHAT: returns the template ID and the branch selector's `ExpressionSiteId`
-///       so tests can verify the selector site location is recovered from
-///       `TemplateIrBranch::location`.
 fn build_template_with_branch_chain(
     store: &mut super::super::store::TemplateIrStore,
-    branch_location: SourceLocation,
+    branch_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 
     let mut builder = TemplateIrBuilder::new(store);
 
-    let branch_body = builder.push_sequence_node(vec![], SourceLocation::default());
-    let fallback_body = builder.push_sequence_node(vec![], SourceLocation::default());
+    let branch_body = builder.push_sequence_node(vec![], None);
+    let fallback_body = builder.push_sequence_node(vec![], None);
 
     let branch = super::super::node::TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(bool_expression_with_location(&branch_location)),
+        TemplateBranchSelector::Bool(bool_expression_with_span(branch_span)),
         branch_body,
-        branch_location,
-        None,
+        Some(branch_span),
         builder.store.next_expression_site_id(),
     );
 
-    let root = builder.push_branch_chain_node(
-        vec![branch],
-        Some(fallback_body),
-        None,
-        SourceLocation::default(),
-    );
+    let root = builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
 
     let site_id = {
@@ -1284,30 +1263,29 @@ fn build_template_with_branch_chain(
 }
 
 /// Builds a template whose root is a `Loop` with a `Conditional` (while) header,
-/// so tests can verify the loop-header expression-site location is recovered from
-/// the `Loop` node location.
+/// so tests can verify exact loop-header expression-site span recovery.
 fn build_template_with_conditional_loop(
     store: &mut super::super::store::TemplateIrStore,
-    loop_location: SourceLocation,
+    loop_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 
     let mut builder = TemplateIrBuilder::new(store);
-    let body = builder.push_sequence_node(vec![], SourceLocation::default());
+    let body = builder.push_sequence_node(vec![], None);
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression_with_location(&loop_location)),
+            condition: Box::new(bool_expression_with_span(loop_span)),
         },
         body,
         None,
-        loop_location,
+        Some(loop_span),
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
 
     let site_id = {
@@ -1327,9 +1305,9 @@ fn build_template_with_conditional_loop(
 }
 
 #[test]
-fn source_location_for_slot_occurrence_resolves_present_and_missing() {
+fn source_span_for_slot_occurrence_resolves_present_and_missing() {
     let mut store = TemplateIrStore::new();
-    let (template_id, occurrence_id) = build_template_with_slot(&mut store, location_at(7, 12));
+    let (template_id, occurrence_id) = build_template_with_slot(&mut store, span_at(7, 12));
 
     let view = TirView::new(
         &store,
@@ -1339,16 +1317,12 @@ fn source_location_for_slot_occurrence_resolves_present_and_missing() {
     )
     .expect("view should construct");
 
-    // Present: the slot node location is recovered.
-    assert_location(
-        view.source_location_for_slot_occurrence(occurrence_id),
-        7,
-        12,
-    );
+    // Present: the slot node's exact source span is recovered.
+    assert_span(view.source_span_for_slot_occurrence(occurrence_id), 7, 12);
 
     // Missing: an unknown occurrence id returns Ok(None).
     assert!(
-        view.source_location_for_slot_occurrence(super::super::ids::SlotOccurrenceId::new(99))
+        view.source_span_for_slot_occurrence(super::super::ids::SlotOccurrenceId::new(99))
             .expect("lookup should succeed")
             .is_none(),
         "missing slot occurrence should return Ok(None)"
@@ -1356,10 +1330,10 @@ fn source_location_for_slot_occurrence_resolves_present_and_missing() {
 }
 
 #[test]
-fn source_location_for_child_template_occurrence_resolves_present_and_missing() {
+fn source_span_for_child_template_occurrence_resolves_present_and_missing() {
     let mut store = TemplateIrStore::new();
     let (parent_template_id, _child_template_id, occurrence_id) =
-        build_template_with_child_template(&mut store, location_at(1, 1), location_at(9, 20));
+        build_template_with_child_template(&mut store, span_at(1, 2), span_at(9, 20));
 
     let view = TirView::new(
         &store,
@@ -1369,16 +1343,16 @@ fn source_location_for_child_template_occurrence_resolves_present_and_missing() 
     )
     .expect("view should construct");
 
-    // Present: the child-template occurrence location is recovered.
-    assert_location(
-        view.source_location_for_child_template_occurrence(occurrence_id),
+    // Present: the child-template occurrence span is recovered exactly.
+    assert_span(
+        view.source_span_for_child_template_occurrence(occurrence_id),
         9,
         20,
     );
 
     // Missing: an unknown occurrence id returns Ok(None).
     assert!(
-        view.source_location_for_child_template_occurrence(
+        view.source_span_for_child_template_occurrence(
             super::super::ids::ChildTemplateOccurrenceId::new(99)
         )
         .expect("lookup should succeed")
@@ -1388,12 +1362,12 @@ fn source_location_for_child_template_occurrence_resolves_present_and_missing() 
 }
 
 #[test]
-fn source_location_for_expression_site_resolves_each_node_kind_and_missing() {
+fn source_span_for_expression_site_resolves_each_node_kind_and_missing() {
     let mut store = TemplateIrStore::new();
 
-    // DynamicExpression site: location recovered from the expression node.
+    // DynamicExpression site: span recovered from the expression node.
     let (dynamic_template_id, dynamic_site_id) =
-        build_template_with_dynamic_expression_at(&mut store, location_at(11, 30));
+        build_template_with_dynamic_expression_at(&mut store, span_at(11, 30));
     let dynamic_view = TirView::new(
         &store,
         dynamic_template_id,
@@ -1401,8 +1375,8 @@ fn source_location_for_expression_site_resolves_each_node_kind_and_missing() {
         TemplateViewContext::default(),
     )
     .expect("view should construct");
-    assert_location(
-        dynamic_view.source_location_for_expression_site(dynamic_site_id),
+    assert_span(
+        dynamic_view.source_span_for_expression_site(dynamic_site_id),
         11,
         30,
     );
@@ -1411,15 +1385,15 @@ fn source_location_for_expression_site_resolves_each_node_kind_and_missing() {
     // immutable view borrow ends before the next mutable template build.
     assert!(
         dynamic_view
-            .source_location_for_expression_site(ExpressionSiteId::new(99))
+            .source_span_for_expression_site(ExpressionSiteId::new(99))
             .expect("lookup should succeed")
             .is_none(),
         "missing expression site should return Ok(None)"
     );
 
-    // BranchChain selector site: location recovered from the branch node.
+    // BranchChain selector site: span recovered from the branch node.
     let (branch_template_id, branch_site_id) =
-        build_template_with_branch_chain(&mut store, location_at(15, 8));
+        build_template_with_branch_chain(&mut store, span_at(15, 23));
     let branch_view = TirView::new(
         &store,
         branch_template_id,
@@ -1427,15 +1401,15 @@ fn source_location_for_expression_site_resolves_each_node_kind_and_missing() {
         TemplateViewContext::default(),
     )
     .expect("view should construct");
-    assert_location(
-        branch_view.source_location_for_expression_site(branch_site_id),
+    assert_span(
+        branch_view.source_span_for_expression_site(branch_site_id),
         15,
-        8,
+        23,
     );
 
-    // Loop header site: location recovered from the conditional loop node.
+    // Loop header site: span recovered from the conditional loop node.
     let (loop_template_id, loop_site_id) =
-        build_template_with_conditional_loop(&mut store, location_at(21, 4));
+        build_template_with_conditional_loop(&mut store, span_at(21, 25));
     let loop_view = TirView::new(
         &store,
         loop_template_id,
@@ -1443,15 +1417,15 @@ fn source_location_for_expression_site_resolves_each_node_kind_and_missing() {
         TemplateViewContext::default(),
     )
     .expect("view should construct");
-    assert_location(
-        loop_view.source_location_for_expression_site(loop_site_id),
+    assert_span(
+        loop_view.source_span_for_expression_site(loop_site_id),
         21,
-        4,
+        25,
     );
 }
 
 #[test]
-fn source_location_lookup_does_not_cross_into_child_template() {
+fn source_span_lookup_does_not_cross_into_child_template() {
     let mut store = TemplateIrStore::new();
 
     // Build a parent template that references a child template. The child has
@@ -1462,28 +1436,26 @@ fn source_location_lookup_does_not_cross_into_child_template() {
 
             let child_slot_node = builder.push_slot_node(
                 crate::compiler_frontend::ast::templates::template::SlotKey::Default,
-                location_at(31, 6),
+                Some(span_at(31, 37)),
             );
-            let child_root =
-                builder.push_sequence_node(vec![child_slot_node], SourceLocation::default());
+            let child_root = builder.push_sequence_node(vec![child_slot_node], None);
             let child_template_id = builder.finish_template(
                 child_root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                location_at(1, 1),
+                Some(span_at(1, 2)),
             );
 
             let parent_child_node =
-                builder.push_child_template_node(child_template_id, location_at(9, 20));
-            let parent_root =
-                builder.push_sequence_node(vec![parent_child_node], SourceLocation::default());
+                builder.push_child_template_node(child_template_id, Some(span_at(9, 20)));
+            let parent_root = builder.push_sequence_node(vec![parent_child_node], None);
             let parent_template_id = builder.finish_template(
                 parent_root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
 
             (parent_template_id, child_template_id, child_slot_node)
@@ -1516,7 +1488,7 @@ fn source_location_lookup_does_not_cross_into_child_template() {
     // The child-owned slot exists, but the parent view must not traverse into it.
     assert!(
         parent_view
-            .source_location_for_slot_occurrence(child_slot_occurrence_id)
+            .source_span_for_slot_occurrence(child_slot_occurrence_id)
             .expect("lookup should succeed")
             .is_none(),
         "parent view must not cross into child template for slot occurrence lookup"
@@ -1527,9 +1499,9 @@ fn source_location_lookup_does_not_cross_into_child_template() {
     let child_view = TirView::new(&store, child_template_id, TemplateTirPhase::Parsed, context)
         .expect("child view should construct");
 
-    assert_location(
-        child_view.source_location_for_slot_occurrence(child_slot_occurrence_id),
+    assert_span(
+        child_view.source_span_for_slot_occurrence(child_slot_occurrence_id),
         31,
-        6,
+        37,
     );
 }

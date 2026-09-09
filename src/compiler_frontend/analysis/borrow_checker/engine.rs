@@ -141,7 +141,7 @@ impl<'a> BorrowChecker<'a> {
                         "Borrow checker could not map parameter '{}' into function state layout",
                         self.diagnostics.local_name(*param)
                     ),
-                    self.diagnostics.function_error_location(function.id),
+                    self.diagnostics.function_error_span(function.id),
                 ));
             };
 
@@ -346,7 +346,7 @@ impl<'a> BorrowChecker<'a> {
 
         Err(self.diagnostics.internal_error(
             "Borrow checker could not stabilize local mutation summaries",
-            self.diagnostics.module_error_location(),
+            self.diagnostics.module_error_span(),
         ))
     }
 
@@ -485,7 +485,7 @@ impl<'a> BorrowChecker<'a> {
                     block_id,
                     self.diagnostics.function_name(function_id)
                 ),
-                self.diagnostics.function_error_location(function_id),
+                self.diagnostics.function_error_span(function_id),
             ));
         };
 
@@ -523,7 +523,7 @@ impl<'a> BorrowChecker<'a> {
                     args.len(),
                     successor_block.locals.len()
                 ),
-                self.diagnostics.function_error_location(function_id),
+                self.diagnostics.function_error_span(function_id),
             ));
         }
 
@@ -536,7 +536,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not map jump argument local '{}' into function state layout",
                             self.diagnostics.local_name(*source_local)
                         ),
-                        self.diagnostics.function_error_location(function_id),
+                        self.diagnostics.function_error_span(function_id),
                     ));
                 };
 
@@ -555,7 +555,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not map jump target local '{}' into function state layout",
                             self.diagnostics.local_name(local.id)
                         ),
-                        self.diagnostics.function_error_location(function_id),
+                        self.diagnostics.function_error_span(function_id),
                     ));
                 };
 

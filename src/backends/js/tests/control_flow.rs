@@ -28,7 +28,6 @@ fn emits_structured_if_without_dispatcher() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 2, types.int, RegionId(0)),
         },
-        2,
     );
 
     let assign_else = statement(
@@ -37,7 +36,6 @@ fn emits_structured_if_without_dispatcher() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(2, 3, types.int, RegionId(0)),
         },
-        3,
     );
 
     let blocks = vec![
@@ -126,7 +124,6 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 1, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -230,7 +227,6 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 2, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -364,7 +360,6 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
                     target: HirPlace::Local(LocalId(0)),
                     value: option_value,
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -468,7 +463,6 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 0, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -575,7 +569,6 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(1)),
             value: int_expression(1, 10, types.int, RegionId(0)),
         },
-        1,
     );
     let assign_arm1 = statement(
         2,
@@ -583,7 +576,6 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(2)),
             value: int_expression(2, 20, types.int, RegionId(0)),
         },
-        2,
     );
     let assign_default = statement(
         3,
@@ -591,7 +583,6 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(3)),
             value: int_expression(3, 30, types.int, RegionId(0)),
         },
-        3,
     );
 
     let blocks = vec![
@@ -605,7 +596,6 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(4, 1, types.int, RegionId(0)),
                 },
-                4,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -740,7 +730,6 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 0, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -789,7 +778,6 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
                     target: HirPlace::Local(LocalId(1)),
                     value: int_expression(5, 10, types.int, RegionId(0)),
                 },
-                5,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(5),
@@ -806,7 +794,6 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
                     target: HirPlace::Local(LocalId(2)),
                     value: int_expression(6, 20, types.int, RegionId(0)),
                 },
-                6,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(5),
@@ -823,7 +810,6 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
                     target: HirPlace::Local(LocalId(3)),
                     value: int_expression(7, 30, types.int, RegionId(0)),
                 },
-                7,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(5),
@@ -912,7 +898,6 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
                         target: HirPlace::Local(LocalId(0)),
                         value: int_expression(1, 1, types.int, RegionId(0)),
                     },
-                    1,
                 ),
                 statement(
                     2,
@@ -920,7 +905,6 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
                         target: HirPlace::Local(LocalId(1)),
                         value: bool_expression(2, true, types.boolean, RegionId(0)),
                     },
-                    2,
                 ),
             ],
             terminator: HirTerminator::Match {
@@ -1021,7 +1005,6 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 0, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -1108,7 +1091,6 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 1, types.int, RegionId(0)),
         },
-        2,
     );
 
     let blocks = vec![
@@ -1265,7 +1247,6 @@ fn jump_args_lower_block_to_block_value_transfer() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 7, types.int, RegionId(0)),
         },
-        1,
     );
 
     let blocks = vec![
@@ -1349,7 +1330,6 @@ fn structured_branch_merge_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 10, types.int, RegionId(0)),
         },
-        1,
     );
     let assign_else = statement(
         2,
@@ -1357,7 +1337,6 @@ fn structured_branch_merge_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(1)),
             value: int_expression(2, 20, types.int, RegionId(0)),
         },
-        2,
     );
 
     let blocks = vec![
@@ -1462,7 +1441,6 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 1, types.int, RegionId(0)),
         },
-        1,
     );
     let assign_back_edge = statement(
         2,
@@ -1470,7 +1448,6 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
             target: HirPlace::Local(LocalId(2)),
             value: int_expression(2, 2, types.int, RegionId(0)),
         },
-        2,
     );
 
     let blocks = vec![
@@ -1575,7 +1552,6 @@ fn jump_args_write_through_alias_only_target_local() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let blocks = vec![
@@ -1672,7 +1648,6 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(1, "loop_body", types.string, RegionId(0)),
         },
-        2,
     );
 
     let blocks = vec![
@@ -1811,7 +1786,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(1, "a", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_b = statement(
         2,
@@ -1819,7 +1793,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(2, "b", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_c = statement(
         3,
@@ -1827,7 +1800,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(3, "c", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_d = statement(
         4,
@@ -1835,7 +1807,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(4, "d", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_e = statement(
         5,
@@ -1843,7 +1814,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(5, "e", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_f = statement(
         6,
@@ -1851,7 +1821,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(6, "f", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_g = statement(
         7,
@@ -1859,7 +1828,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(7, "g", types.string, RegionId(0)),
         },
-        1,
     );
     let assign_h = statement(
         8,
@@ -1867,7 +1835,6 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(8, "h", types.string, RegionId(0)),
         },
-        1,
     );
 
     let blocks = vec![

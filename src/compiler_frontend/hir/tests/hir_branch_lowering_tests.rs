@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_if_branch_metadata, test_source_location,
+    function_node, make_test_variable, node, test_if_branch_metadata,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -94,31 +94,30 @@ fn lowers_if_to_then_else_merge_blocks() {
             runtime_expr(
                 vec![runtime_operand_item(Expression::bool(
                     true,
-                    test_source_location(2),
                     None,
                     ValueMode::ImmutableOwned,
                 ))],
                 builtin_type_ids::BOOL,
-                test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
             ),
             vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
+                    Expression::int(1, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(2),
+                None,
             )],
             Some(vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::int(2, test_source_location(3), None, ValueMode::ImmutableOwned),
+                    Expression::int(2, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(3),
+                None,
             )]),
             test_if_branch_metadata(true),
         ),
-        test_source_location(2),
+        None,
     );
 
     let start_fn = function_node(
@@ -128,7 +127,7 @@ fn lowers_if_to_then_else_merge_blocks() {
             returns: vec![],
         },
         vec![if_node],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -161,7 +160,7 @@ fn lowers_if_to_then_else_merge_blocks() {
 fn rejects_statically_decided_statement_if_at_hir_boundary() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-    let location = test_source_location(2);
+    let location = None;
 
     let start_fn = function_node(
         start_name,
@@ -171,14 +170,14 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
         },
         vec![node(
             NodeKind::If(
-                Expression::bool(true, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
                 vec![],
                 None,
                 test_if_branch_metadata(false),
             ),
             location.clone(),
         )],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -191,7 +190,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let rhs_name = super::symbol("rhs_and", &mut string_table);
-    let location = test_source_location(30);
+    let location = None;
 
     let rhs_fn = function_node(
         rhs_name.clone(),
@@ -203,7 +202,6 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             NodeKind::Return(vec![Expression::bool(
                 true,
                 location.clone(),
-                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -216,7 +214,6 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             runtime_operand_item(Expression::bool(
                 false,
                 location.clone(),
-                None,
                 ValueMode::ImmutableOwned,
             )),
             runtime_function_call_item(
@@ -244,7 +241,6 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
                         location.clone(),
-                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     location.clone(),
@@ -323,7 +319,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let rhs_name = super::symbol("rhs_or", &mut string_table);
-    let location = test_source_location(40);
+    let location = None;
 
     let rhs_fn = function_node(
         rhs_name.clone(),
@@ -335,7 +331,6 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             NodeKind::Return(vec![Expression::bool(
                 false,
                 location.clone(),
-                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -348,7 +343,6 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             runtime_operand_item(Expression::bool(
                 true,
                 location.clone(),
-                None,
                 ValueMode::ImmutableOwned,
             )),
             runtime_function_call_item(
@@ -376,7 +370,6 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
                         location.clone(),
-                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     location.clone(),
@@ -448,7 +441,7 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let lhs_name = super::symbol("lhs", &mut string_table);
     let rhs_name = super::symbol("rhs", &mut string_table);
-    let location = test_source_location(60);
+    let location = None;
 
     let condition = runtime_expr(
         vec![
@@ -481,14 +474,14 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     lhs_name,
-                    Expression::bool(false, location.clone(), None, ValueMode::ImmutableOwned),
+                    Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     rhs_name,
-                    Expression::bool(true, location.clone(), None, ValueMode::MutableOwned),
+                    Expression::bool(true, location.clone(), ValueMode::MutableOwned),
                 )),
                 location.clone(),
             ),
@@ -499,7 +492,6 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
                         NodeKind::ExpressionStatement(Expression::int(
                             1,
                             location.clone(),
-                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         location.clone(),
@@ -553,7 +545,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
     let left_name = super::symbol("left", &mut string_table);
     let right_name = super::symbol("right", &mut string_table);
     let result_name = super::symbol("result", &mut string_table);
-    let location = test_source_location(70);
+    let location = None;
 
     let then_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
@@ -563,7 +555,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                 location.clone(),
                 ValueMode::ImmutableReference,
             )],
-            location: location.clone(),
+            span: location.clone(),
         }),
         location.clone(),
     )];
@@ -576,7 +568,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                 location.clone(),
                 ValueMode::ImmutableReference,
             )],
-            location: location.clone(),
+            span: location.clone(),
         }),
         location.clone(),
     )];
@@ -588,7 +580,6 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                     vec![runtime_operand_item(Expression::bool(
                         true,
                         location.clone(),
-                        None,
                         ValueMode::ImmutableOwned,
                     ))],
                     builtin_type_ids::BOOL,
@@ -597,15 +588,14 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                 ),
                 then_body,
                 else_body,
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: entry_path.clone(),
+                else_scope: entry_path.clone(),
+                span: location.clone(),
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
         location.clone(),
-        None,
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -621,14 +611,14 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     left_name,
-                    Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned),
+                    Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     right_name,
-                    Expression::int(2, location.clone(), None, ValueMode::ImmutableOwned),
+                    Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
@@ -684,7 +674,7 @@ fn assertion_failure_uses_message_value_block_tail() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let condition_name = super::symbol("condition", &mut string_table);
-    let location = test_source_location(80);
+    let location = None;
 
     let message_value = Expression::new(
         ExpressionKind::ValueBlock {
@@ -700,10 +690,9 @@ fn assertion_failure_uses_message_value_block_tail() {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
                             location.clone(),
-                            None,
                             ValueMode::ImmutableOwned,
                         )],
-                        location: location.clone(),
+                        span: location.clone(),
                     }),
                     location.clone(),
                 )],
@@ -712,22 +701,20 @@ fn assertion_failure_uses_message_value_block_tail() {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
                             location.clone(),
-                            None,
                             ValueMode::ImmutableOwned,
                         )],
-                        location: location.clone(),
+                        span: location.clone(),
                     }),
                     location.clone(),
                 )],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: entry_path.clone(),
+                else_scope: entry_path.clone(),
+                span: location.clone(),
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
         location.clone(),
-        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -814,7 +801,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let message_name = super::symbol("runtime_message", &mut string_table);
-    let location = test_source_location(86);
+    let location = None;
 
     let message_fn = function_node(
         message_name.clone(),
@@ -826,7 +813,6 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("message"),
                 location.clone(),
-                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -855,12 +841,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(
-                    true,
-                    location.clone(),
-                    None,
-                    ValueMode::ImmutableOwned,
-                ),
+                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
                 message: Expression::coerced(message, option_string),
             },
             location.clone(),
@@ -900,7 +881,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let condition_name = super::symbol("message_condition", &mut string_table);
-    let location = test_source_location(90);
+    let location = None;
 
     let message_value = Expression::new(
         ExpressionKind::ValueBlock {
@@ -916,10 +897,9 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
                             location.clone(),
-                            None,
                             ValueMode::ImmutableOwned,
                         )],
-                        location: location.clone(),
+                        span: location.clone(),
                     }),
                     location.clone(),
                 )],
@@ -928,22 +908,20 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
                             location.clone(),
-                            None,
                             ValueMode::ImmutableOwned,
                         )],
-                        location: location.clone(),
+                        span: location.clone(),
                     }),
                     location.clone(),
                 )],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: entry_path.clone(),
+                else_scope: entry_path.clone(),
+                span: location.clone(),
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
         location.clone(),
-        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -968,12 +946,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(
-                    false,
-                    location.clone(),
-                    None,
-                    ValueMode::ImmutableOwned,
-                ),
+                condition: Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
                 message,
             },
             location.clone(),
@@ -1026,37 +999,26 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                 runtime_expr(
                     vec![runtime_operand_item(Expression::bool(
                         true,
-                        test_source_location(8),
                         None,
                         ValueMode::ImmutableOwned,
                     ))],
                     builtin_type_ids::BOOL,
-                    test_source_location(8),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 vec![node(
-                    NodeKind::Return(vec![Expression::int(
-                        1,
-                        test_source_location(8),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )]),
-                    test_source_location(8),
+                    NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
+                    None,
                 )],
                 Some(vec![node(
-                    NodeKind::Return(vec![Expression::int(
-                        2,
-                        test_source_location(9),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )]),
-                    test_source_location(9),
+                    NodeKind::Return(vec![Expression::int(2, None, ValueMode::ImmutableOwned)]),
+                    None,
                 )]),
                 test_if_branch_metadata(true),
             ),
-            test_source_location(8),
+            None,
         )],
-        test_source_location(7),
+        None,
     );
 
     let start_fn = function_node(
@@ -1066,7 +1028,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);

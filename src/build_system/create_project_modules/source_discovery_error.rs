@@ -48,7 +48,7 @@ impl FinalizedDiscoveryFailure {
 
 /// Stage 0 source discovery failure.
 pub(crate) enum SourceDiscoveryError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Premerge(PremergeFailure),
     Finalized(Box<FinalizedDiscoveryFailure>),
     Infrastructure(CompilerError),
@@ -83,8 +83,7 @@ impl SourceDiscoveryError {
             SourceDiscoveryError::Diagnostic(diagnostic) => {
                 let table = std::mem::take(string_table);
                 PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                    *diagnostic,
-                    table,
+                    diagnostic, table,
                 ))
             }
             SourceDiscoveryError::Premerge(failure) => failure,
@@ -101,12 +100,6 @@ impl SourceDiscoveryError {
 
 impl From<CompilerDiagnostic> for SourceDiscoveryError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        SourceDiscoveryError::Diagnostic(Box::new(diagnostic))
-    }
-}
-
-impl From<Box<CompilerDiagnostic>> for SourceDiscoveryError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
         SourceDiscoveryError::Diagnostic(diagnostic)
     }
 }

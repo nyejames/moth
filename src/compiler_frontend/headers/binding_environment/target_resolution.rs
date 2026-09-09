@@ -12,9 +12,9 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::{ExternalPackageRegistry, ExternalSymbolId};
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::module_symbols::PublicExportEntry;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashSet;
 
 /// Resolved target of a single dependency path.
@@ -50,7 +50,7 @@ pub(crate) enum SourceDependencyAccess {
 /// WHY: avoids threading many state references as separate function parameters.
 pub(crate) struct DependencyTargetResolutionInput<'a> {
     pub(crate) dependency_path: &'a InternedPath,
-    pub(crate) location: &'a SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) module_file_paths: &'a FxHashSet<InternedPath>,
     pub(crate) dependency_bindable_symbol_paths: &'a FxHashSet<InternedPath>,
     pub(crate) external_package_registry: &'a ExternalPackageRegistry,
@@ -114,7 +114,7 @@ pub(crate) fn resolve_external_package_symbol(
 /// the caller will later prove a more specific internal or public export access surface.
 pub(crate) fn resolve_dependency_target(
     input: DependencyTargetResolutionInput<'_>,
-) -> Result<ResolvedDependencyTarget, Box<CompilerDiagnostic>> {
+) -> Result<ResolvedDependencyTarget, CompilerDiagnostic> {
     // Resolve as a source symbol dependency first.
     match resolve_dependency_target_path(
         input.dependency_path,
@@ -125,10 +125,10 @@ pub(crate) fn resolve_dependency_target(
             symbol_path,
             access: SourceDependencyAccess::DirectSourceExport,
         }),
-        DependencyPathMatch::Ambiguous => Err(Box::new(diagnostics::ambiguous_dependency_target(
+        DependencyPathMatch::Ambiguous => Err(diagnostics::ambiguous_dependency_target(
             input.dependency_path,
-            input.location.clone(),
-        ))),
+            input.span,
+        )),
         DependencyPathMatch::Missing => {
             // File→symbol inference: if the path matches a source file but not a symbol,
             // try appending the path's last component to the file path as the symbol name.
@@ -151,10 +151,10 @@ pub(crate) fn resolve_dependency_target(
                         });
                     }
                     DependencyPathMatch::Ambiguous => {
-                        return Err(Box::new(diagnostics::ambiguous_dependency_target(
+                        return Err(diagnostics::ambiguous_dependency_target(
                             &inferred_path,
-                            input.location.clone(),
-                        )));
+                            input.span,
+                        ));
                     }
                     DependencyPathMatch::Missing => {
                         // The file exists but the inferred symbol does not.
@@ -176,11 +176,11 @@ pub(crate) fn resolve_dependency_target(
                     package_path,
                     symbol_name,
                 } => {
-                    return Err(Box::new(diagnostics::missing_package_symbol(
+                    return Err(diagnostics::missing_package_symbol(
                         symbol_name,
                         package_path,
-                        input.location.clone(),
-                    )));
+                        input.span,
+                    ));
                 }
                 ExternalPackageSymbolLookup::NoMatch => {}
             }
@@ -193,16 +193,16 @@ pub(crate) fn resolve_dependency_target(
                     input.string_table,
                 )
             {
-                return Err(Box::new(diagnostics::bare_file_dependency(
+                return Err(diagnostics::bare_file_dependency(
                     input.dependency_path,
-                    input.location.clone(),
-                )));
+                    input.span,
+                ));
             }
 
-            Err(Box::new(diagnostics::missing_dependency_target(
+            Err(diagnostics::missing_dependency_target(
                 input.dependency_path,
-                input.location.clone(),
-            )))
+                input.span,
+            ))
         }
     }
 }

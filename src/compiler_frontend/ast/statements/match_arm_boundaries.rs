@@ -18,19 +18,17 @@ use crate::compiler_frontend::tokenizer::line_scanning::{
     find_top_level_colon_on_line, find_top_level_fat_arrow_on_line,
     find_top_level_match_arm_fat_arrow,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 pub(crate) struct MatchArmHeaderCandidate {
     pub(crate) start_index: usize,
     pub(crate) arrow_index: usize,
-    pub(crate) start_location: SourceLocation,
 }
 
 /// Returns true when the token at `index` is the first real token of a logical line.
 ///
 /// A token starts a logical line when:
 /// - it is not `Newline`, `End`, or `Eof`;
-/// - either it is at index `0`, or the immediately previous token is `Newline`.
 pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> bool {
     if index >= token_stream.length {
         return false;
@@ -44,30 +42,7 @@ pub(crate) fn token_is_line_initial(token_stream: &FileTokens, index: usize) -> 
         return false;
     }
 
-    if index == 0 {
-        return true;
-    }
-
-    let current_line = token.location.start_pos.line_number;
-
-    // Scan backwards to find the nearest preceding token on this or a prior line.
-    // A Newline token or any token on an earlier line means this token is line-initial.
-    // If we encounter a token on the same line first, this token is not line-initial.
-    for previous in token_stream.tokens[..index].iter().rev() {
-        if previous.kind == TokenKind::Newline {
-            return true;
-        }
-
-        if previous.location.start_pos.line_number < current_line {
-            return true;
-        }
-
-        if previous.location.start_pos.line_number == current_line {
-            return false;
-        }
-    }
-
-    true
+    index == 0 || token_stream.tokens[index - 1].kind == TokenKind::Newline
 }
 
 /// Returns true when the token at `start_index` has a top-level `=>` in a match
@@ -100,7 +75,7 @@ pub(crate) fn current_token_starts_match_arm_header(
 pub(crate) fn token_index_starts_match_arm_header(
     token_stream: &FileTokens,
     start_index: usize,
-    required_column: Option<i32>,
+    _required_column: Option<i32>,
 ) -> Option<MatchArmHeaderCandidate> {
     if !token_is_line_initial(token_stream, start_index) {
         return None;
@@ -117,18 +92,11 @@ pub(crate) fn token_index_starts_match_arm_header(
         return None;
     }
 
-    if let Some(column) = required_column
-        && start_token.location.start_pos.char_column != column
-    {
-        return None;
-    }
-
     let arrow_index = find_top_level_match_arm_fat_arrow(token_stream, start_index)?;
 
     Some(MatchArmHeaderCandidate {
         start_index,
         arrow_index,
-        start_location: start_token.location.clone(),
     })
 }
 

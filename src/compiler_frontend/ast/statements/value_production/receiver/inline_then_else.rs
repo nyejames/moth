@@ -29,7 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedType, cast_target_context_for_type_id,
@@ -68,15 +68,26 @@ struct ParsedInlineBranchValues {
 
 /// Returns `true` when both source locations are on the same logical line.
 ///
+/// Returns `true` when no explicit newline token separates two token positions.
+///
 /// WHAT: used to enforce that inline value-if/match arms stay on one line.
+/// WHY: token spans intentionally carry byte ranges only; newline tokens are the
+/// parser's retained physical-line boundary and avoid reconstructing locations.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn same_logical_line(
-    left: &SourceLocation,
-    right: &SourceLocation,
+    token_stream: &FileTokens,
+    left_index: usize,
+    right_index: usize,
 ) -> bool {
-    left.start_pos.line_number == right.start_pos.line_number
-}
+    let (start, end) = if left_index <= right_index {
+        (left_index, right_index)
+    } else {
+        (right_index, left_index)
+    };
 
-/// Inline branch expressions share the AST body parser's two-lane error boundary. This avoids
+    token_stream.tokens[start..=end]
+        .iter()
+        .all(|token| token.kind != TokenKind::Newline)
+}
 /// converting a retained-token lifecycle fault into a source diagnostic mid-parse.
 type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 
@@ -95,17 +106,14 @@ fn parse_inline_then_else_with_target(
     string_table: &mut StringTable,
 ) -> InlineThenElseResult<ParsedInlineBranchValues> {
     let then_request_start = then_context.generic_request_checkpoint();
-    let then_location = token_stream.current_location();
-    let then_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let then_index = token_stream.index;
+    let then_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -115,7 +123,7 @@ fn parse_inline_then_else_with_target(
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -130,11 +138,8 @@ fn parse_inline_then_else_with_target(
     })?;
     let then_request_end = then_context.generic_request_checkpoint();
 
-    require_else_inline(token_stream, &then_location)?;
-    let else_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    require_else_inline(token_stream, then_index)?;
+    let else_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `else`
 
     reject_else_then(token_stream)?;
@@ -221,18 +226,15 @@ pub(super) fn parse_inline_then_else(
         });
     }
 
-    let then_location = token_stream.current_location();
-    let then_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let then_index = token_stream.index;
+    let then_span = Some(token_stream.current_span());
     let then_request_start = then_context.generic_request_checkpoint();
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -242,7 +244,7 @@ pub(super) fn parse_inline_then_else(
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterThen,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -257,7 +259,7 @@ pub(super) fn parse_inline_then_else(
 
     // An authored `else` keeps the existing bounded branch parse. Without one,
     // stop at the first receiving boundary so the missing-keyword diagnostic
-    // retains that boundary's real source location.
+    // retains that boundary's real source span.
     let else_follows = inline_else_follows_before_statement_end(token_stream);
 
     let input = ExpressionParseInput::until(ExpressionParseResources {
@@ -286,11 +288,8 @@ pub(super) fn parse_inline_then_else(
     };
     let then_request_end = then_context.generic_request_checkpoint();
 
-    require_else_inline(token_stream, &then_location)?;
-    let else_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    require_else_inline(token_stream, then_index)?;
+    let else_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `else`
 
     reject_else_then(token_stream)?;
@@ -303,6 +302,7 @@ pub(super) fn parse_inline_then_else(
         .unwrap_or(ExpectedType::Infer);
     let mut else_cast_target_context =
         cast_target_context_for_inline_branch(expected_type_id, type_interner, string_table);
+    let else_expression_start_index = token_stream.index;
     let input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
             token_stream,
@@ -318,10 +318,10 @@ pub(super) fn parse_inline_then_else(
     let else_expr = create_expression_with_trailing_newline_policy(input)?;
     let else_request_end = else_context.generic_request_checkpoint();
 
-    if !same_logical_line(&then_location, &else_expr.location) {
+    if !same_logical_line(token_stream, then_index, else_expression_start_index) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            else_expr.location.clone(),
+            else_expr.span,
         )
         .into());
     }
@@ -334,7 +334,7 @@ pub(super) fn parse_inline_then_else(
             else_expr.type_id,
             None,
             type_interner,
-            &then_expr.location,
+            then_expr.span,
             receiver_kind,
         )?
     };
@@ -447,22 +447,19 @@ fn inline_else_follows_before_statement_end(token_stream: &FileTokens) -> bool {
 }
 
 /// Requires that the current token is `else` and that it is on the same logical line.
-fn require_else_inline(
-    token_stream: &FileTokens,
-    then_location: &SourceLocation,
-) -> InlineThenElseResult<()> {
+fn require_else_inline(token_stream: &FileTokens, then_index: usize) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() != &TokenKind::Else {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
-    if !same_logical_line(then_location, &token_stream.current_location()) {
+    if !same_logical_line(token_stream, then_index, token_stream.index) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -475,7 +472,7 @@ fn reject_else_then(token_stream: &FileTokens) -> InlineThenElseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Then {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfElseThen,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -488,7 +485,7 @@ fn reject_newline_after_else(token_stream: &FileTokens) -> InlineThenElseResult<
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -501,7 +498,7 @@ fn reject_empty_value_after_else(token_stream: &FileTokens) -> InlineThenElseRes
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedValueAfterElse,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }

@@ -15,13 +15,17 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitDeclarationSyntax;
+
+fn root_span() -> SourceSpan {
+    SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+}
 
 fn trait_header(
     name: &str,
@@ -33,16 +37,15 @@ fn trait_header(
         kind: HeaderKind::Trait {
             declaration: TraitDeclarationSyntax {
                 name: string_table.intern(name),
-                name_location: SourceLocation::default(),
+                name_span: root_span(),
                 requirements: Vec::new(),
-                span: LocalSpan::source_start(),
+                span: root_span(),
             },
         },
         file_role,
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
-        name_location: SourceLocation::default(),
-        name_span: LocalSpan::source_start(),
+        name_span: Some(root_span()),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
             SourceId::COMPILATION_ROOT,
@@ -67,8 +70,7 @@ fn function_header(
         file_role,
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
-        name_location: SourceLocation::default(),
-        name_span: LocalSpan::source_start(),
+        name_span: Some(root_span()),
         tokens: FileTokens::new(
             InternedPath::from_single_str(name, string_table),
             SourceId::COMPILATION_ROOT,
@@ -97,7 +99,7 @@ fn register_source_trait(
         source_file: InternedPath::new(),
         this_type,
         requirements: Vec::new(),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         visibility: TraitVisibility::Source { exported: true },
     };
     trait_environment.insert(definition);

@@ -18,9 +18,7 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType, SourceLocation,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
@@ -35,11 +33,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn unused_variable_warning(name: StringId, location: SourceLocation) -> CompilerDiagnostic {
+fn unused_variable_warning(name: StringId) -> CompilerDiagnostic {
     CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
         DiagnosticSeverity::Warning,
-        location,
+        None,
         DiagnosticPayload::UnusedName { name },
     )
 }
@@ -139,10 +137,7 @@ fn html_build_result_without_entry_page() -> BuildResult {
 
 fn html_build_result_with_warning() -> BuildResult {
     let mut string_table = StringTable::new();
-    let warning = unused_variable_warning(
-        string_table.get_or_intern("dev_warning".to_string()),
-        SourceLocation::default(),
-    );
+    let warning = unused_variable_warning(string_table.get_or_intern("dev_warning".to_string()));
 
     BuildResult {
         project: Project {
@@ -191,7 +186,6 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             project_root: project_root.to_path_buf(),
             entry_root: project_root.to_path_buf(),
             owner,
-            setting_location: SourceLocation::default(),
             setting_span: None,
         }),
     }
@@ -254,7 +248,6 @@ impl DevBuildExecutor for FakeExecutor {
                         output_root: project_root.join("dev"),
                         project_root: Some(project_root),
                         owner: build_result.output_owner,
-                        setting_location: SourceLocation::default(),
                         setting_span: None,
                     })
                 };
@@ -279,7 +272,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
     fn build_backend(
         &self,
         _project_compilation: crate::build_system::build::ProjectCompilation,
-        config: &Config,
+        _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         string_table: &mut StringTable,
@@ -293,7 +286,6 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
             cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
                 string_table.get_or_intern("x".to_string()),
-                SourceLocation::from_path(&config.entry_dir, string_table),
             )],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
@@ -550,10 +542,10 @@ fn dev_server_error_messages_use_dev_server_error_type() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let messages = dev_server_error_messages(Path::new("x.moth"), "oops");
     assert_eq!(messages.error_count(), 1);
-    let (error_type, _message, _location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("dev-server failure should be wrapped for rendering");
-    assert_eq!(error_type, &ErrorType::DevServer);
+    assert_eq!(&error.error_type, &ErrorType::DevServer);
 }
 
 #[test]
@@ -674,19 +666,21 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     assert_eq!(messages.error_count(), 1);
     let warnings: Vec<_> = messages.warnings().collect();
     assert_eq!(warnings.len(), 1);
-    let (_error_type, _message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("output write failure should be wrapped for rendering");
     assert_eq!(
-        location.scope.to_path_buf(&messages.string_table),
-        PathBuf::from("../escape.js")
+        error.host_path.as_deref(),
+        Some(Path::new("../escape.js")),
+        "output path failures should retain the rejected host path"
     );
-    assert_eq!(
-        warnings[0]
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        entry_file
+    assert!(
+        error.source_span.is_none(),
+        "path-only output failures must not fabricate a source excerpt"
+    );
+    assert!(
+        warnings[0].primary_span.is_none(),
+        "synthetic warnings must not fabricate a source span"
     );
 }
 

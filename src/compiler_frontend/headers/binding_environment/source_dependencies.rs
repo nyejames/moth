@@ -15,16 +15,15 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-/// Boxed diagnostic result for source dependency registration.
+/// Result for source dependency registration.
 ///
-/// WHAT: gives source dependency registration one small error boundary.
-/// WHY: local-name derivation is already boxed, so registration can propagate it directly
-///      and adapt the plain visible-name registry once.
+/// Diagnosed failures remain plain `CompilerDiagnostic` values and
+/// infrastructure failures remain typed in `BindingEnvironmentError`.
 type SourceDependencyResult<T> = Result<T, BindingEnvironmentError>;
 
 /// Registration facts for one source declaration binding.
@@ -35,7 +34,7 @@ type SourceDependencyResult<T> = Result<T, BindingEnvironmentError>;
 pub(super) struct SourceDependencyInput<'a> {
     pub(super) symbol_path: &'a InternedPath,
     pub(super) local_name: StringId,
-    pub(super) source_location: &'a SourceLocation,
+    pub(super) source_span: Option<SourceSpan>,
     pub(super) local_alias: Option<&'a DependencyAlias>,
     pub(super) access: SourceDependencyAccess,
 }
@@ -84,7 +83,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         file_visibility,
                         name,
                         path,
-                        SourceLocation::default(),
+                        self.module_symbols
+                            .declaration_spans_by_symbol_path
+                            .get(path)
+                            .copied(),
                     );
                 }
             }
@@ -145,17 +147,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let SourceDependencyInput {
             symbol_path,
             local_name,
-            source_location,
+            source_span,
             local_alias,
             access,
         } = input;
 
-        let local_name_location = local_alias.map_or(source_location, |alias| &alias.location);
-        ensure_not_keyword_shadow_identifier(
-            local_name,
-            local_name_location.clone(),
-            self.string_table,
-        )?;
+        let local_name_span = local_alias.map_or(source_span, |alias| Some(alias.span));
+        ensure_not_keyword_shadow_identifier(local_name, local_name_span, self.string_table)?;
 
         if let Some(symbol_name) = symbol_path.name() {
             self.emit_alias_case_warning_if_needed(local_alias, symbol_name);
@@ -171,10 +169,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if is_receiver_method {
             // Source-authored receiver methods are not independently bindable or aliasable.
             // They travel with their receiver type's visibility.
-            return Err(Box::new(CompilerDiagnostic::invalid_receiver_declaration(
+            return Err(CompilerDiagnostic::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
-                source_location.clone(),
-            ))
+                source_span,
+            )
             .into());
         }
 
@@ -186,11 +184,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .dependency_bindable_source_symbol_paths
                 .contains(symbol_path);
             if !is_dependency_bindable {
-                return Err(Box::new(diagnostics::not_exported_by_source_file(
-                    symbol_path,
-                    source_location.clone(),
-                ))
-                .into());
+                return Err(
+                    diagnostics::not_exported_by_source_file(symbol_path, source_span).into(),
+                );
             }
         }
 
@@ -212,7 +208,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         };
 
-        registry.register(local_name, binding, Some(local_name_location.clone()), None)?;
+        registry.register(local_name, binding, local_name_span)?;
 
         if is_type_alias {
             file_visibility.visible_type_alias_names.insert(

@@ -29,8 +29,8 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::resolve_type::resolve_diagnostic_type_to_type_id;
 
@@ -46,10 +46,9 @@ pub(super) fn instantiate_generic_nominal(
     base_path: &InternedPath,
     kind: &GenericDeclarationKind,
     arguments: &[DataType],
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<Option<DataType>> {
-    // Build argument identity keys for the HIR/diagnostic compatibility bridge.
     // If any argument cannot be keyed (for example, `T` in an unresolved generic
     // function body), the canonical TypeId instance is still interned while the
     // bridge `GenericInstantiationKey` is omitted from display-only DataType data.
@@ -76,7 +75,7 @@ pub(super) fn instantiate_generic_nominal(
             }
 
             let type_id = intern_generic_instance_type_id(base_path, arguments, context);
-            validate_nominal_bound_evidence_for_instantiation(type_id, location, context)?;
+            validate_nominal_bound_evidence_for_instantiation(type_id, span, context)?;
 
             DataType::Struct {
                 nominal_path: base_path.to_owned(),
@@ -87,7 +86,7 @@ pub(super) fn instantiate_generic_nominal(
         }
         GenericDeclarationKind::Choice => {
             let type_id = intern_generic_instance_type_id(base_path, arguments, context);
-            validate_nominal_bound_evidence_for_instantiation(type_id, location, context)?;
+            validate_nominal_bound_evidence_for_instantiation(type_id, span, context)?;
 
             DataType::Choices {
                 nominal_path: base_path.to_owned(),
@@ -137,7 +136,7 @@ fn intern_generic_instance_type_id(
 ///      validator can inspect `TypeEnvironment` definitions and recursively check arguments.
 fn validate_nominal_bound_evidence_for_instantiation(
     type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<()> {
     let evidence_context = GenericBoundEvidenceContext {
@@ -152,5 +151,5 @@ fn validate_nominal_bound_evidence_for_instantiation(
         resolved_type_aliases: context.resolved_type_aliases,
     };
 
-    validate_nominal_generic_bound_evidence(type_id, location.clone(), &evidence_context)
+    validate_nominal_generic_bound_evidence(type_id, span, &evidence_context)
 }

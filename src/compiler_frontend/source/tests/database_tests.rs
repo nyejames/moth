@@ -5,7 +5,6 @@ use super::{
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::mem::{align_of, size_of};
 use std::path::{Path, PathBuf};
@@ -203,19 +202,11 @@ fn source_database_keeps_each_load_failure_with_its_source_identity() {
         .expect("pending source should be registered")
         .id;
 
-    let first_error = CompilerError::file_error(
-        &first_failed_path,
-        "first source read failed",
-        &mut string_table,
-    );
+    let first_error = CompilerError::file_error(&first_failed_path, "first source read failed");
     database
         .record_source_load_error(first_failed_id, first_error)
         .expect("first source load error should be retained");
-    let second_error = CompilerError::file_error(
-        &second_failed_path,
-        "second source read failed",
-        &mut string_table,
-    );
+    let second_error = CompilerError::file_error(&second_failed_path, "second source read failed");
     database
         .record_source_load_error(second_failed_id, second_error)
         .expect("second source load error should be retained");
@@ -558,47 +549,41 @@ fn source_snapshot_size_bound_rejects_u32_max_by_provenance() {
     let limit = u32::MAX as usize;
     let largest_accepted = limit - 1;
     let source_path = PathBuf::from("/project/huge.moth");
-    let mut string_table = StringTable::new();
-    let logical_path = InternedPath::from_single_str("huge.moth", &mut string_table);
-    let root_path = InternedPath::from_single_str("<compilation root>", &mut string_table);
 
     ensure_source_snapshot_fits(
         largest_accepted,
         SourceProvenance::AuthoredPhysical,
-        &logical_path,
         Some(source_path.as_path()),
     )
     .expect("physical snapshot just under u32::MAX must be accepted");
-    ensure_source_snapshot_fits(
-        largest_accepted,
-        SourceProvenance::CompilationRoot,
-        &root_path,
-        None,
-    )
-    .expect("synthetic snapshot just under u32::MAX must be accepted");
+    ensure_source_snapshot_fits(largest_accepted, SourceProvenance::CompilationRoot, None)
+        .expect("synthetic snapshot just under u32::MAX must be accepted");
 
     let physical = ensure_source_snapshot_fits(
         limit,
         SourceProvenance::AuthoredPhysical,
-        &logical_path,
         Some(source_path.as_path()),
     )
     .expect_err("physical snapshot of u32::MAX bytes must be rejected");
-    let synthetic =
-        ensure_source_snapshot_fits(limit, SourceProvenance::CompilationRoot, &root_path, None)
-            .expect_err("synthetic snapshot of u32::MAX bytes must be rejected");
+    let physical_without_path =
+        ensure_source_snapshot_fits(limit, SourceProvenance::AuthoredPhysical, None)
+            .expect_err("a pathless physical snapshot must be rejected");
+    let synthetic = ensure_source_snapshot_fits(limit, SourceProvenance::CompilationRoot, None)
+        .expect_err("synthetic snapshot of u32::MAX bytes must be rejected");
 
     assert_eq!(physical.error_type, ErrorType::File);
+    assert_eq!(physical.source_span, None);
+    assert_eq!(physical.host_path.as_deref(), Some(source_path.as_path()));
+    assert_eq!(physical_without_path.error_type, ErrorType::File);
+    assert_eq!(physical_without_path.source_span, None);
+    assert_eq!(physical_without_path.host_path, None);
     assert_eq!(synthetic.error_type, ErrorType::Compiler);
+    assert_eq!(synthetic.source_span, None);
+    assert_eq!(synthetic.host_path, None);
     assert!(
         physical.msg.contains("huge.moth") && physical.msg.contains(&limit.to_string()),
         "the user-facing failure must name the oversized file and the limit: {}",
         physical.msg
-    );
-    // A renderer resolves the frame from the location's scope, not from the message text.
-    assert_eq!(
-        physical.location.scope, logical_path,
-        "the user-facing failure must carry the source's own identity so it can be located"
     );
     assert!(
         synthetic.msg.contains(&limit.to_string()),
@@ -651,8 +636,7 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
     );
     assert!(database.source_load_error(empty_id).is_none());
 
-    let load_error =
-        CompilerError::file_error(&failed_path, "source read failed", &mut string_table);
+    let load_error = CompilerError::file_error(&failed_path, "source read failed");
     database
         .record_source_load_error(failed_id, load_error)
         .expect("source load error should be retained");
@@ -677,8 +661,7 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
     assert!(database.retained_text(failed_id).is_none());
     assert!(database.source_load_error(failed_id).is_some());
 
-    let repeated_failure =
-        CompilerError::file_error(&failed_path, "source read failed again", &mut string_table);
+    let repeated_failure = CompilerError::file_error(&failed_path, "source read failed again");
     database
         .record_source_load_error(failed_id, repeated_failure)
         .expect_err("an unreadable source cannot record a second failure");
@@ -689,11 +672,8 @@ fn source_database_distinguishes_empty_text_from_unloaded_and_failed_slots() {
         .retain_text(SourceId::from_index(0), "root snapshot".to_owned())
         .expect_err("the compilation root cannot retain source text");
 
-    let load_after_snapshot = CompilerError::file_error(
-        &empty_path,
-        "source read failed after snapshot",
-        &mut string_table,
-    );
+    let load_after_snapshot =
+        CompilerError::file_error(&empty_path, "source read failed after snapshot");
     database
         .record_source_load_error(empty_id, load_after_snapshot)
         .expect_err("a loaded source cannot receive a second load status");

@@ -2,30 +2,15 @@
 //!
 //! WHAT: proves field provenance is carried without changing nominal identity agreement, including
 //!       struct and choice payload blueprints.
-//! WHY: imported public projections have no authored field range, so their default diagnostic
-//!      location must agree with the source declaration lane without replacing its provenance.
+//! WHY: imported public projections have no authored field range, so generated defaults must not
+//! replace source-owned spans when equivalent nominal blueprints are merged.
 
 use super::*;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 
-fn location(line: i32) -> StableSourceLocation {
-    let position = crate::compiler_frontend::tokenizer::tokens::CharPosition {
-        line_number: line,
-        char_column: 1,
-    };
-    StableSourceLocation {
-        scope: vec!["provider.moth".to_owned()].into_boxed_slice(),
-        start: position,
-        end: position,
-    }
-}
-
-fn default_location() -> StableSourceLocation {
-    StableSourceLocation {
-        scope: Box::new([]),
-        start: Default::default(),
-        end: Default::default(),
-    }
+fn authored_span() -> SourceSpan {
+    SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
 
 fn exported_identity() -> ExportedGenericParameterIdentity {
@@ -52,7 +37,7 @@ fn field() -> NominalFieldBlueprint {
             CanonicalBuiltinType::Int,
         )),
         folded_default: Some(PublicFoldedValue::Int(7)),
-        location: location(10),
+        span: Some(authored_span()),
     }
 }
 
@@ -93,7 +78,7 @@ fn nominal_blueprint_agreement_ignores_provenance_but_checks_identity() {
     else {
         unreachable!();
     };
-    fields[0].location = location(99);
+    fields[0].span = None;
     assert!(
         source == provenance_only,
         "field provenance must not decide nominal blueprint agreement"
@@ -156,7 +141,7 @@ fn nominal_blueprint_agreement_ignores_provenance_but_checks_identity() {
     else {
         unreachable!();
     };
-    variants[0].payload_fields[0].location = location(101);
+    variants[0].payload_fields[0].span = None;
     assert!(
         choice == choice_provenance_only,
         "choice payload provenance must not decide nominal blueprint agreement"
@@ -197,7 +182,7 @@ fn equivalent_nominal_blueprints_keep_authored_provenance_deterministically() {
     let NominalMaterialisationDefinition::Struct { fields, .. } = &mut imported.definition else {
         unreachable!();
     };
-    fields[0].location = default_location();
+    fields[0].span = None;
 
     let mut imported_first = imported.clone();
     imported_first.merge_provenance_from(&authored);
@@ -208,7 +193,7 @@ fn equivalent_nominal_blueprints_keep_authored_provenance_deterministically() {
     else {
         unreachable!();
     };
-    assert!(imported_first_fields[0].location == location(10));
+    assert!(imported_first_fields[0].span == Some(authored_span()));
 
     let mut authored_first = authored.clone();
     authored_first.merge_provenance_from(&imported);
@@ -219,14 +204,14 @@ fn equivalent_nominal_blueprints_keep_authored_provenance_deterministically() {
     else {
         unreachable!();
     };
-    assert!(authored_first_fields[0].location == location(10));
+    assert!(authored_first_fields[0].span == Some(authored_span()));
 
     let mut later_authored = authored.clone();
     let NominalMaterialisationDefinition::Struct { fields, .. } = &mut later_authored.definition
     else {
         unreachable!();
     };
-    fields[0].location = location(99);
+    fields[0].span = Some(authored_span());
     let mut earlier_authored = authored.clone();
     earlier_authored.merge_provenance_from(&later_authored);
     let NominalMaterialisationDefinition::Struct { fields, .. } = &earlier_authored.definition
@@ -234,7 +219,7 @@ fn equivalent_nominal_blueprints_keep_authored_provenance_deterministically() {
         unreachable!();
     };
     assert!(
-        fields[0].location == location(10),
+        fields[0].span == Some(authored_span()),
         "both authored ranges use a stable tie-break independent of lane order"
     );
 }

@@ -10,7 +10,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// One arm of a match expression, pairing a pattern with an optional guard and body.
 #[derive(Debug, Clone)]
@@ -30,11 +29,9 @@ pub struct ParsedChoicePayloadCapture {
     pub binding_name: StringId,
     pub field_index: usize,
     pub type_id: TypeId,
-    /// Location/span of the declared payload field name in the pattern.
-    pub location: SourceLocation,
+    /// Exact span of the declared payload field name in the pattern.
     pub span: Option<SourceSpan>,
-    /// Location/span of the actual local binding (`as` alias or field name).
-    pub binding_location: SourceLocation,
+    /// Exact span of the actual local binding (`as` alias or field name).
     pub binding_span: Option<SourceSpan>,
 }
 
@@ -47,11 +44,9 @@ pub struct ChoicePayloadCapture {
     pub field_index: usize,
     pub type_id: TypeId,
     pub binding_path: InternedPath,
-    /// Location/span of the declared payload field name in the pattern.
-    pub location: SourceLocation,
+    /// Exact span of the declared payload field name in the pattern.
     pub span: Option<SourceSpan>,
-    /// Location/span of the actual local binding (`as` alias or field name).
-    pub binding_location: SourceLocation,
+    /// Exact span of the actual local binding (`as` alias or field name).
     pub binding_span: Option<SourceSpan>,
 }
 
@@ -65,7 +60,7 @@ pub enum MatchPattern {
     /// WHY: option matching intentionally supports presence checks and capture
     /// patterns without introducing public `Option` constructors.
     OptionNone {
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Value comparison against the inner payload of a compiler-owned option.
@@ -76,7 +71,7 @@ pub enum MatchPattern {
     /// exposing public `Option` constructors in source code.
     OptionValue {
         value: Expression,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Present-value capture for compiler-owned option values.
@@ -89,37 +84,34 @@ pub enum MatchPattern {
         name: StringId,
         binding_path: InternedPath,
         inner_type_id: TypeId,
-        location: SourceLocation,
-        binding_location: SourceLocation,
+        span: Option<SourceSpan>,
         binding_span: Option<SourceSpan>,
     },
 
     Relational {
         op: RelationalPatternOp,
         value: Expression,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     ChoiceVariant {
         nominal_path: InternedPath,
         tag: usize,
         captures: Vec<ChoicePayloadCapture>,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     },
 }
 
 impl MatchPattern {
-    pub fn location(&self) -> &SourceLocation {
+    /// Return the exact authored span that identifies this pattern.
+    pub fn span(&self) -> Option<SourceSpan> {
         match self {
-            MatchPattern::Literal(expression) => &expression.location,
-
-            MatchPattern::OptionNone { location }
-            | MatchPattern::OptionValue { location, .. }
-            | MatchPattern::OptionPresentCapture { location, .. } => location,
-
-            MatchPattern::Relational { location, .. }
-            | MatchPattern::ChoiceVariant { location, .. } => location,
+            MatchPattern::Literal(expression) => expression.span,
+            MatchPattern::OptionNone { span }
+            | MatchPattern::OptionValue { span, .. }
+            | MatchPattern::OptionPresentCapture { span, .. }
+            | MatchPattern::Relational { span, .. }
+            | MatchPattern::ChoiceVariant { span, .. } => *span,
         }
     }
 }
@@ -129,7 +121,6 @@ pub struct ParsedChoicePattern {
     pub variant: StringId,
     pub tag: usize,
     pub captures: Vec<ParsedChoicePayloadCapture>,
-    pub location: SourceLocation,
     pub span: Option<SourceSpan>,
 }
 

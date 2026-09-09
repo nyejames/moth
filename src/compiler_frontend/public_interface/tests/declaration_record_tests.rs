@@ -61,7 +61,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -130,7 +129,6 @@ fn param_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Inferred,
             type_id,
@@ -168,7 +166,6 @@ fn field_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Inferred,
             type_id,
@@ -183,7 +180,6 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -320,7 +316,6 @@ fn unit_variant(name: &str, string_table: &mut StringTable) -> ChoiceVariantDefi
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Unit,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -334,7 +329,6 @@ fn record_variant(
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Record { fields },
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -2240,7 +2234,6 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let field_definitions = Box::new([field_def("x", int_id, &mut string_table)]);
     let default_value = Expression::string_slice(
         string_table.intern("wrong"),
-        SourceLocation::default(),
         None,
         ValueMode::ImmutableOwned,
     );

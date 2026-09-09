@@ -6,7 +6,7 @@
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, display_column_number, display_line_number,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
-    render_payload, resolve_source_file_path,
+    render_payload,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
@@ -18,7 +18,6 @@ pub(crate) fn print_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) {
-    let string_table = context.string_table;
     let descriptor = diagnostic.kind.descriptor();
     let severity_name = severity_display_name(diagnostic.severity);
     let visual = severity_visual(diagnostic.severity);
@@ -39,48 +38,47 @@ pub(crate) fn print_diagnostic_with_context(
     say!(Dark "  [", descriptor.code, "]");
 
     let primary_position = context.primary_position(diagnostic);
-    let relative_dir = relative_display_path_from_root(
-        &resolve_source_file_path(&primary_position.scope, string_table),
-        &std::env::current_dir().unwrap_or_default(),
-    );
-    let display_line =
-        display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
-    let display_column =
-        display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
-
-    if !relative_dir.is_empty() {
-        say!(
-            Blue "\n  --> ",
-            Reset Magenta relative_dir.as_str(),
-            Dark Magenta ":",
-            Reset Bold Blue display_line,
-            Reset Grey ":",
-            Reset Magenta display_column
+    if let Some(position) = primary_position.as_ref() {
+        let relative_dir = relative_display_path_from_root(
+            position.path.as_path(),
+            &std::env::current_dir().unwrap_or_default(),
         );
-    } else {
-        say!(
-            Blue "\n   --> ",
-            Reset Magenta display_line,
-            Dark Magenta ":",
-            Reset Magenta display_column
-        );
-    }
+        let display_line =
+            display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
+        let display_column =
+            display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
 
-    let line = context
-        .retained_source_line_for_primary(&primary_position)
-        .unwrap_or_default();
+        if !relative_dir.is_empty() {
+            say!(
+                Blue "\n  --> ",
+                Reset Magenta relative_dir.as_str(),
+                Dark Magenta ":",
+                Reset Bold Blue display_line,
+                Reset Grey ":",
+                Reset Magenta display_column
+            );
+        } else {
+            say!(
+                Blue "\n   --> ",
+                Reset Magenta display_line,
+                Dark Magenta ":",
+                Reset Magenta display_column
+            );
+        }
 
-    if !line.is_empty() {
-        say!(Blue "    |");
-        let line_label = display_line.to_string();
-        let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-        say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
-        print!("{}", " ".repeat(display_line.to_string().len() + 4));
+        let line = position.line;
+        if !line.is_empty() {
+            say!(Blue "    |");
+            let line_label = display_line.to_string();
+            let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
+            say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
+            print!("{}", " ".repeat(display_line.to_string().len() + 4));
 
-        let underline_start = primary_caret_padding(&primary_position, line);
-        print!("{}", " ".repeat(underline_start));
-        let underline_length = primary_underline_length(&primary_position, line);
-        say!(Red "^".repeat(underline_length));
+            let underline_start = primary_caret_padding(position, line);
+            print!("{}", " ".repeat(underline_start));
+            let underline_length = primary_underline_length(position, line);
+            say!(Red "^".repeat(underline_length));
+        }
     }
 
     for label_message in format_label_messages_with_context(diagnostic, context) {
@@ -89,10 +87,6 @@ pub(crate) fn print_diagnostic_with_context(
 
     for guidance in format_payload_guidance(&diagnostic.payload, context) {
         say!(Bright Blue "  ", guidance);
-    }
-
-    if line.is_empty() && primary_position.scope.as_components().is_empty() {
-        say!(Dark "     No source location available.");
     }
 }
 
@@ -103,19 +97,24 @@ pub(crate) fn format_label_messages_with_context(
     let mut rendered_labels = Vec::new();
 
     for label in &diagnostic.labels {
-        if let Some(message) = &label.message {
-            let label_line = display_line_number(label.location.start_pos.line_number);
-            let label_col = display_column_number(label.location.start_pos.char_column);
-            let style_name = match label.style {
-                DiagnosticLabelStyle::Primary => "note",
-                DiagnosticLabelStyle::Secondary => "info",
-            };
-            let message_text = diagnostic_label_message_text(message, context);
+        let Some(message) = &label.message else {
+            continue;
+        };
+        let Some(position) = context.label_position(label) else {
+            continue;
+        };
+        let label_line =
+            display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
+        let label_col =
+            display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
+        let style_name = match label.style {
+            DiagnosticLabelStyle::Secondary => "info",
+        };
+        let message_text = diagnostic_label_message_text(message, context);
 
-            rendered_labels.push(format!(
-                "{style_name}: {label_line}:{label_col} - {message_text}"
-            ));
-        }
+        rendered_labels.push(format!(
+            "{style_name}: {label_line}:{label_col} - {message_text}"
+        ));
     }
 
     rendered_labels

@@ -24,8 +24,6 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::return_compiler_error;
 
-pub(crate) use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 #[derive(Debug, Clone)]
 pub struct Declaration {
     pub id: InternedPath,
@@ -60,16 +58,14 @@ pub struct MultiBindTarget {
     pub type_id: TypeId,
     pub value_mode: ValueMode,
     pub kind: MultiBindTargetKind,
-    pub location: SourceLocation,
+    /// Exact source span of the authored binding, or `None` for generated targets.
     pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AstNode {
     pub kind: NodeKind,
-    pub location: SourceLocation,
-    /// Exact source span when the owning file has an identity; `None` for identity-free
-    /// materialised nodes until 1F5 remaps them. Location stays for current render until 1H.
+    /// Exact source span of the authored node, or `None` for generated nodes.
     pub span: Option<SourceSpan>,
     pub scope: InternedPath,
 }

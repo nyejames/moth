@@ -13,14 +13,14 @@ impl ScopeContext {
     ///       gate if one is installed, and updates the frame-local name index.
     /// WHY: child scopes inherit ancestor frames by parent link, so additions must
     ///      stay in the current frame and never leak into the parent.
-    pub fn add_var(&mut self, declaration: Declaration, binding_location: SourceLocation) {
+    pub fn add_var(&mut self, declaration: Declaration, binding_span: Option<SourceSpan>) {
         if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
             Arc::make_mut(visible_declarations).insert(declaration.id.clone());
         }
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
-            .add_var(declaration, binding_location);
+            .add_var(declaration, binding_span);
         increment_ast_counter(AstCounter::ScopeLocalDeclarationsInserted);
     }
 
@@ -32,7 +32,7 @@ impl ScopeContext {
     pub(crate) fn add_compile_time_var(
         &mut self,
         declaration: Declaration,
-        binding_location: SourceLocation,
+        binding_span: Option<SourceSpan>,
     ) {
         if let Some(visible_declarations) = self.visible_declaration_ids.as_mut() {
             Arc::make_mut(visible_declarations).insert(declaration.id.clone());
@@ -40,7 +40,7 @@ impl ScopeContext {
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
-            .add_compile_time_var(declaration, binding_location);
+            .add_compile_time_var(declaration, binding_span);
         increment_ast_counter(AstCounter::ScopeLocalDeclarationsInserted);
     }
 

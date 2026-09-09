@@ -10,7 +10,7 @@ use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
 use crate::build_system::utils::{
     file_error_messages, file_error_with_rejection_reason, should_skip_unchanged_write,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
 };
@@ -152,7 +152,6 @@ pub(crate) fn prepare_output_cleanup(
     project_root: Option<&Path>,
     entry_root: Option<&Path>,
     owner: OutputOwner,
-    setting_location: &SourceLocation,
     setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
     string_table: &StringTable,
@@ -177,7 +176,6 @@ pub(crate) fn prepare_output_cleanup(
                     builder,
                     profile,
                     owner,
-                    setting_location,
                     setting_span,
                     string_table,
                 ));
@@ -193,7 +191,6 @@ pub(crate) fn prepare_output_cleanup(
                 existing_builder,
                 existing_profile,
                 owner,
-                setting_location,
                 setting_span,
                 string_table,
             ));
@@ -863,7 +860,6 @@ fn manifest_owner_conflict_messages(
     existing_builder: &str,
     existing_profile: &str,
     active_owner: OutputOwner,
-    setting_location: &SourceLocation,
     setting_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> CompilerMessages {
@@ -875,14 +871,7 @@ fn manifest_owner_conflict_messages(
         active_builder: diagnostic_table.intern(active_owner.builder.manifest_name()),
         active_profile: diagnostic_table.intern(build_profile_manifest_name(active_owner.profile)),
     };
-    let mut diagnostic =
-        CompilerDiagnostic::invalid_config_reason(None, reason, setting_location.clone());
-    diagnostic.primary_span = setting_span;
-    if let Some(span) = setting_span {
-        if let Some(label) = diagnostic.labels.first_mut() {
-            label.span = Some(span);
-        }
-    }
+    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, setting_span);
     CompilerMessages::from_diagnostic(diagnostic, diagnostic_table)
 }
 

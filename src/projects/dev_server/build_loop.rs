@@ -11,7 +11,6 @@ use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -123,10 +122,6 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                     output_root: project_root.join("dev"),
                     project_root: Some(project_root),
                     owner: build_result.output_owner,
-                    setting_location: SourceLocation::from_path(
-                        entry_file,
-                        &mut build_result.string_table,
-                    ),
                     setting_span: None,
                 })
             };
@@ -521,10 +516,8 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
 }
 
 pub fn dev_server_error_messages(path: &Path, msg: impl Into<String>) -> CompilerMessages {
-    let mut string_table = Default::default();
-    let error = CompilerError::file_error(path, msg.into(), &mut string_table)
-        .with_error_type(ErrorType::DevServer);
-    CompilerMessages::from_error(error, string_table)
+    let error = CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer);
+    CompilerMessages::from_error(error, Default::default())
 }
 
 #[cfg(test)]

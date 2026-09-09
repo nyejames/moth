@@ -41,7 +41,7 @@ fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
 
 fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompilerDiagnostic {
     match failure {
-        TokenizeFailure::Diagnosed(diagnostic) => *diagnostic,
+        TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
         TokenizeFailure::Infrastructure(error) => {
             panic!("lexical diagnosis fixture encountered infrastructure failure: {error:?}")
         }
@@ -153,6 +153,23 @@ fn find_token_index(tokens: &[Token], predicate: impl Fn(&TokenKind) -> bool) ->
         .iter()
         .position(|token| predicate(&token.kind))
         .expect("expected token to be present")
+}
+
+fn span_byte_range(span: LocalSpan) -> (u32, u32) {
+    let resolver = ExtendedSpanBuilder::new();
+    let resolved = span.resolve_with(resolver.resolver());
+    (resolved.start(), resolved.end())
+}
+
+fn token_byte_range(token: &Token) -> (u32, u32) {
+    span_byte_range(token.span)
+}
+
+fn diagnostic_byte_range(diagnostic: &CompilerDiagnostic) -> (u32, u32) {
+    let span = diagnostic
+        .primary_span
+        .expect("tokenizer diagnostics should retain an authored source span");
+    span_byte_range(span.local())
 }
 
 fn assert_invalid_number_literal(
@@ -328,16 +345,8 @@ fn assert_invalid_string_escape(source: &str, expected_reason: InvalidStringEsca
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStringEscape)
     );
     assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0034");
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number,
-        diagnostic.primary_location.end_pos.line_number
-    );
-    assert_eq!(
-        diagnostic.primary_location.end_pos.char_column
-            - diagnostic.primary_location.start_pos.char_column
-            + 1,
-        expected_span_width
-    );
+    let (start, end) = diagnostic_byte_range(&diagnostic);
+    assert_eq!(end - start, expected_span_width);
 
     match &diagnostic.payload {
         DiagnosticPayload::InvalidStringEscape { reason } => {
@@ -421,7 +430,8 @@ fn raw_string_preserves_backslashes_and_newlines_without_escape_decoding() {
 
 #[test]
 fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
-    let (diagnostic, string_table) = tokenize_moth_template_error("]");
+    let source = "]";
+    let (diagnostic, string_table) = tokenize_moth_template_error(source);
 
     assert_eq!(
         diagnostic.kind,
@@ -433,12 +443,11 @@ fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
             source_kind: SourceFileKind::MothTemplate
         }
     ));
+    let (start, end) = diagnostic_byte_range(&diagnostic);
     assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&string_table),
-        "test.mtf"
+        source.get(start as usize..end as usize),
+        Some("]"),
+        "unescaped template close should retain its authored byte",
     );
 
     let guidance = format_payload_guidance(
@@ -1609,8 +1618,9 @@ fn rejects_legacy_reset_style_directive_name() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let mut span_builder = ExtendedSpanBuilder::new();
+    let source = "[$reset: body]";
     let Err(diagnostic) = tokenize(
-        "[$reset: body]",
+        source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
@@ -1628,7 +1638,12 @@ fn rejects_legacy_reset_style_directive_name() {
         }
         payload => panic!("expected invalid style directive payload, found {payload:?}"),
     }
-    assert!(error.primary_location.start_pos.char_column > 0);
+    let (start, end) = diagnostic_byte_range(&error);
+    assert_eq!(
+        source.get(start as usize..end as usize),
+        Some("$reset"),
+        "legacy directive diagnostic should cover the authored directive name",
+    );
 }
 
 #[test]
@@ -1777,8 +1792,9 @@ fn unknown_style_directives_fail_under_strict_registry() {
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
     let mut span_builder = ExtendedSpanBuilder::new();
+    let source = "[$unknown: value]";
     let Err(diagnostic) = tokenize(
-        "[$unknown: value]",
+        source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
@@ -1796,7 +1812,12 @@ fn unknown_style_directives_fail_under_strict_registry() {
         }
         payload => panic!("expected invalid style directive payload, found {payload:?}"),
     }
-    assert!(error.primary_location.start_pos.char_column > 0);
+    let (start, end) = diagnostic_byte_range(&error);
+    assert_eq!(
+        source.get(start as usize..end as usize),
+        Some("$unknown"),
+        "unknown directive diagnostic should cover the authored directive name",
+    );
 }
 
 #[test]
@@ -2197,9 +2218,8 @@ fn ordinary_import_identifier_does_not_receive_path_correction() {
 /// paths reach the stream through different helpers, so a table that disagreed with only one of
 /// them would still pass a single-shape fixture.
 ///
-/// Columns are checked on the line index alone: `CharPosition` is captured after a token's first
-/// character is consumed for code tokens and inherited unchanged by re-anchored ones, so column
-/// equality is not a property this slice can assert. Slice 1F4 removes that convention.
+/// Exact token spans are resolved to bytes before line-index checks; columns are intentionally
+/// derived by the line index rather than reconstructed as legacy tokenizer state.
 #[test]
 fn token_start_lines_match_line_index_across_newline_shapes() {
     let source =
@@ -2212,18 +2232,10 @@ fn token_start_lines_match_line_index_across_newline_shapes() {
     let mut columns_checked = 0;
 
     for token in &file_tokens.tokens {
-        let start_byte = token.location.start_byte;
-        let end_byte = token.location.end_byte;
+        let (start_byte, end_byte) = token_byte_range(token);
         let line = line_index
             .line_of_offset(start_byte)
             .expect("every token start, including EOF, must be addressable");
-        assert_eq!(
-            line,
-            u32::try_from(token.location.start_pos.line_number)
-                .expect("tokenizer line numbers should be non-negative"),
-            "{:?}: tokenizer and line index line numbers must agree at byte {start_byte}",
-            token.kind
-        );
         if lines_with_token_starts.last() != Some(&line) {
             lines_with_token_starts.push(line);
         }
@@ -2290,9 +2302,8 @@ fn token_start_lines_match_line_index_across_newline_shapes() {
 
 /// A discarded template body still anchors its closing bracket at the authored byte.
 ///
-/// The lexer skips a discarded body's text, so the close bracket is re-anchored by byte alone and
-/// its inherited `CharPosition` still names the line the body started on. The byte-anchored line
-/// is the correct one, and slice 1F4 makes the renderers use it.
+/// The lexer skips a discarded body's text, so the close span is checked directly against its
+/// authored byte range and then mapped through the lazy line index.
 #[test]
 fn discarded_template_body_close_resolves_to_its_authored_line() {
     let source = "[$note:one\rtwo]x = 1";
@@ -2306,23 +2317,21 @@ fn discarded_template_body_close_resolves_to_its_authored_line() {
         .find(|token| matches!(token.kind, TokenKind::TemplateClose))
         .expect("a discarded body must still emit its closing bracket");
 
+    let (start_byte, end_byte) = token_byte_range(close);
     assert_eq!(
-        source.get(close.location.start_byte as usize..close.location.end_byte as usize),
+        source.get(start_byte as usize..end_byte as usize),
         Some("]")
     );
     assert_eq!(
-        line_index.line_of_offset(close.location.start_byte),
+        line_index.line_of_offset(start_byte),
         Some(1),
         "the closing bracket is authored on the line after the discarded body's carriage return"
     );
 }
 
-/// Every token's byte range must recover exactly the text its author wrote.
+/// Every token's exact span must recover exactly the text its author wrote.
 ///
-/// The expectations are the authored lexemes, not a second derivation from the tokenizer's own
-/// `CharPosition` state: those columns are captured after consumption and so name the wrong start
-/// until slice 1D replaces them. A range that slid by one character would still round-trip
-/// against them.
+/// The expectations are authored lexemes sliced from the byte range carried by each token.
 #[test]
 fn token_byte_ranges_recover_the_authored_text() {
     let source = "name = \"café\"\n[outer: a\r\nb[inner: nested]c\rd]\n";
@@ -2331,7 +2340,10 @@ fn token_byte_ranges_recover_the_authored_text() {
     let authored: Vec<&str> = file_tokens
         .tokens
         .iter()
-        .map(|token| &source[token.location.start_byte as usize..token.location.end_byte as usize])
+        .map(|token| {
+            let (start, end) = token_byte_range(token);
+            &source[start as usize..end as usize]
+        })
         .collect();
 
     assert_eq!(
@@ -2364,8 +2376,7 @@ fn token_byte_ranges_recover_the_authored_text() {
     let source_len = source.len() as u32;
     let mut previous_end = 0u32;
     for token in &file_tokens.tokens {
-        let start_byte = token.location.start_byte;
-        let end_byte = token.location.end_byte;
+        let (start_byte, end_byte) = token_byte_range(token);
 
         assert!(
             start_byte <= end_byte,
@@ -2409,7 +2420,8 @@ fn skipped_trivia_is_excluded_from_the_following_token_range() {
             .tokens
             .iter()
             .map(|token| {
-                &source[token.location.start_byte as usize..token.location.end_byte as usize]
+                let (start, end) = token_byte_range(token);
+                &source[start as usize..end as usize]
             })
             .collect();
         assert_eq!(authored, *expected, "{source:?}: token byte ranges");
@@ -2420,10 +2432,7 @@ fn skipped_trivia_is_excluded_from_the_following_token_range() {
             .last()
             .expect("tokenization always emits Eof");
         assert_eq!(
-            (
-                final_token.location.start_byte,
-                final_token.location.end_byte
-            ),
+            token_byte_range(final_token),
             (end_of_source, end_of_source),
             "{source:?}: Eof is a zero-width insertion point at the end of the source"
         );
@@ -2439,8 +2448,7 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
         string_diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
     );
-    let string_start = string_diagnostic.primary_location.start_byte;
-    let string_end = string_diagnostic.primary_location.end_byte;
+    let (string_start, string_end) = diagnostic_byte_range(&string_diagnostic);
     assert_eq!(
         string_source.get(string_start as usize..string_end as usize),
         Some("\"authored text"),
@@ -2460,8 +2468,7 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
         template_diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
     );
-    let template_start = template_diagnostic.primary_location.start_byte;
-    let template_end = template_diagnostic.primary_location.end_byte;
+    let (template_start, template_end) = diagnostic_byte_range(&template_diagnostic);
     assert_eq!(
         template_source.get(template_start as usize..template_end as usize),
         Some("$"),
@@ -2478,16 +2485,13 @@ fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
     );
 }
 
-/// The interval bridge: a token's legacy byte range and its span agree, and the span names the
-/// authored text.
+/// The token span is resolved against the producer's exact byte table, and the recovered slice is
+/// compared against the lexeme the author wrote.
 ///
-/// The legacy range is derived from the span at construction, so equality alone cannot catch a
-/// wrong span. The recovered slice is the independent oracle: every span is sliced out of the
-/// source and compared against the lexeme the author wrote. Token starts must not run backwards,
-/// but they may leave gaps, which is where the tokenizer skipped trivia or discarded a template
-/// body.
+/// Token starts must not run backwards, but they may leave gaps, which is where the tokenizer
+/// skipped trivia or discarded a template body.
 #[test]
-fn every_token_legacy_byte_range_matches_its_encoded_span() {
+fn every_token_span_matches_authored_bytes() {
     let source = "name = \"café😀\"\r\nvalue = \"quoted\"\rbody = [$md:\nbody\r]\n[$note:\ndiscarded\r]\nlast = 2";
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("span-bridge.moth", &mut string_table);
@@ -2523,12 +2527,6 @@ fn every_token_legacy_byte_range_matches_its_encoded_span() {
         .iter()
         .map(|token| {
             let resolved = token.span.resolve_with(resolver);
-            assert_eq!(
-                (token.location.start_byte, token.location.end_byte),
-                (resolved.start(), resolved.end()),
-                "{:?} must derive its legacy byte range from its span",
-                token.kind
-            );
             assert!(
                 resolved.start() >= previous_end,
                 "{:?} must not start before the previous token ended",
@@ -2606,8 +2604,9 @@ fn extended_token_span_resolves_exactly_through_live_builder() {
         1,
         "the long string is the only token past the inline length limit, so it owns the one row"
     );
-    assert_eq!(resolved.start(), token.location.start_byte);
-    assert_eq!(resolved.end(), token.location.end_byte);
+    let expected_start = source.find('"').expect("quoted token start") as u32;
+    assert_eq!(resolved.start(), expected_start);
+    assert_eq!(resolved.end(), expected_start + quoted.len() as u32 + 2);
     assert_eq!(
         resolved.end() - resolved.start(),
         u32::try_from(quoted.len() + 2).expect("fixture length fits in u32")
@@ -2643,10 +2642,8 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
     };
     let diagnostic = expect_lexical_diagnostic(diagnostic);
 
-    assert_eq!(
-        diagnostic.primary_location.start_byte,
-        (source.len() - 1) as u32
-    );
+    let (diagnostic_start, _diagnostic_end) = diagnostic_byte_range(&diagnostic);
+    assert_eq!(diagnostic_start, (source.len() - 1) as u32);
     assert_eq!(
         span_builder.len(),
         1,
@@ -2665,13 +2662,12 @@ fn lexical_failure_retains_extended_token_span_builder_rows() {
 }
 
 #[test]
-fn diagnostic_location_does_not_append_an_extended_span_row() {
+fn diagnostic_span_allocates_exactly_when_needed() {
     let source = "x".repeat(3000);
-    let source_path = InternedPath::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut stream = TokenStream::new(
         &source,
-        &source_path,
+        SourceId::COMPILATION_ROOT,
         TokenizerEntryMode::SourceFile,
         &mut span_builder,
     );
@@ -2692,15 +2688,20 @@ fn diagnostic_location_does_not_append_an_extended_span_row() {
     for _ in 0..1500 {
         stream.next();
     }
-    let diagnostic_location = stream.new_location();
+    let diagnostic_span = stream
+        .source_span_for_bytes(1500, 3000)
+        .expect("the diagnostic range should be representable");
+    let diagnostic_range = diagnostic_span
+        .local()
+        .resolve_with(stream.extended_span_builder.resolver());
     assert_eq!(
-        (diagnostic_location.start_byte, diagnostic_location.end_byte),
+        (diagnostic_range.start(), diagnostic_range.end()),
         (1500, 3000)
     );
     assert_eq!(
         stream.extended_span_builder.len(),
-        1,
-        "a diagnostic location over another long range must not append an extended row"
+        2,
+        "the authored token and exact diagnostic range each retain their extended row"
     );
 }
 
@@ -2748,17 +2749,15 @@ fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
         .find("\\🦋")
         .expect("fixture should contain the escape") as u32;
     let expected_end = expected_start + "\\🦋".len() as u32;
-    assert_eq!(
-        (
-            diagnostic.primary_location.start_byte,
-            diagnostic.primary_location.end_byte
-        ),
-        (expected_start, expected_end),
-    );
     let span = diagnostic
         .primary_span
         .expect("tokenize must capture its diagnosed range");
     assert_eq!(span.source(), file_id);
+    let resolved = span.local().resolve_with(span_builder.resolver());
+    assert_eq!(
+        (resolved.start(), resolved.end()),
+        (expected_start, expected_end),
+    );
 
     let mut database_builder = SourceDatabaseBuilder::new(sources);
     database_builder

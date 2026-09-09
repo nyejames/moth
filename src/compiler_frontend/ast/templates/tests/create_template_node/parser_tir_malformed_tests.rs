@@ -6,12 +6,12 @@
 //!
 //! WHY: body and head parsing record TIR nodes incrementally. If an
 //! error is raised after some nodes have been recorded, the diagnostic reason
-//! and source location must remain stable. These tests pin the
+//! and source span must remain stable. These tests pin the
 //! expected malformed-surface behavior without relying on internal TIR IDs.
 
 use super::*;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidTemplateStructureReason,
+    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -84,13 +84,13 @@ fn assert_invalid_template_structure(
     }
 }
 
-/// Asserts that the diagnostic points at a meaningful source location rather
-/// than the default zeroed location used for synthetic errors.
-fn assert_location_is_meaningful(diagnostic: &CompilerDiagnostic) {
+/// Asserts that the diagnostic carries a meaningful source span rather
+/// than the absent span used for synthetic errors.
+fn assert_span_is_meaningful(diagnostic: &CompilerDiagnostic) {
     assert!(
-        !is_default_error_location(&diagnostic.primary_location),
-        "diagnostic should carry a meaningful source location, got {:?}",
-        diagnostic.primary_location
+        !is_default_error_span(diagnostic.primary_span),
+        "diagnostic should carry a meaningful source span, got {:?}",
+        diagnostic.primary_span
     );
 }
 
@@ -113,7 +113,7 @@ fn assert_exact_marker_span(
         (marker_start as u32, marker_end as u32)
     );
     assert_eq!(&source[marker_start..marker_end], "else");
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert!(diagnostic.labels.is_empty());
 }
 
 #[test]
@@ -133,9 +133,7 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
     assert_eq!(range.start(), 2);
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert!(diagnostic.labels.is_empty());
 }
 
 #[test]
@@ -157,9 +155,7 @@ fn orphan_template_break_retains_exact_marker_span() {
         &source[range.start() as usize..range.end() as usize],
         "break"
     );
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert!(diagnostic.labels.is_empty());
 }
 
 #[test]
@@ -181,13 +177,11 @@ fn orphan_template_else_retains_exact_multibyte_marker_span() {
         &source[range.start() as usize..range.end() as usize],
         "else"
     );
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert!(diagnostic.labels.is_empty());
 }
 
 #[test]
-fn truncated_nested_template_body_reports_eof_with_meaningful_location() {
+fn truncated_nested_template_body_reports_eof_with_meaningful_span() {
     let diagnostic = parse_template_diagnostic("[: outer [: inner]");
 
     assert!(
@@ -198,7 +192,7 @@ fn truncated_nested_template_body_reports_eof_with_meaningful_location() {
         "expected unexpected-end-of-file for truncated nested body, got {:?}",
         diagnostic.payload
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -209,7 +203,7 @@ fn malformed_loop_control_missing_close_reports_malformed_break() {
         &diagnostic,
         InvalidTemplateStructureReason::MalformedTemplateBreak,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -220,7 +214,7 @@ fn malformed_loop_control_missing_close_reports_malformed_continue() {
         &diagnostic,
         InvalidTemplateStructureReason::MalformedTemplateContinue,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -231,7 +225,7 @@ fn orphan_break_in_normal_body_reports_orphan_break() {
         &diagnostic,
         InvalidTemplateStructureReason::OrphanTemplateBreak,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -242,26 +236,26 @@ fn orphan_continue_in_normal_body_reports_orphan_continue() {
         &diagnostic,
         InvalidTemplateStructureReason::OrphanTemplateContinue,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
-fn children_directive_truncated_argument_template_reports_eof_with_meaningful_location() {
+fn children_directive_truncated_argument_template_reports_eof_with_meaningful_span() {
     let diagnostic = parse_template_diagnostic("[$children([: unclosed): body]");
 
+    let has_expected_payload = match &diagnostic.payload {
+        DiagnosticPayload::UnexpectedEndOfFile { .. } => true,
+        DiagnosticPayload::ExpectedToken { expected, .. } => {
+            *expected == DiagnosticToken::from(TokenKind::CloseParenthesis)
+        }
+        _ => false,
+    };
     assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::UnexpectedEndOfFile { .. }
-                | DiagnosticPayload::ExpectedToken {
-                    expected: TokenKind::CloseParenthesis,
-                    ..
-                }
-        ),
+        has_expected_payload,
         "expected unexpected-end-of-file or missing-close-paren for truncated $children argument template, got {:?}",
         diagnostic.payload
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -276,11 +270,11 @@ fn doc_suppressed_child_template_unclosed_bracket_reports_eof() {
         "expected unexpected-end-of-file for unclosed bracket in $doc body, got {:?}",
         diagnostic.payload
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
-fn insert_with_truncated_body_reports_eof_with_meaningful_location() {
+fn insert_with_truncated_body_reports_eof_with_meaningful_span() {
     let diagnostic = parse_template_diagnostic("[$insert(\"name\"): body");
 
     assert!(
@@ -291,7 +285,7 @@ fn insert_with_truncated_body_reports_eof_with_meaningful_location() {
         "expected unexpected-end-of-file for truncated $insert body, got {:?}",
         diagnostic.payload
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -306,7 +300,7 @@ fn insert_with_truncated_nested_body_in_helper_reports_eof() {
         "expected unexpected-end-of-file for $insert helper with truncated nested body, got {:?}",
         diagnostic.payload
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -314,18 +308,18 @@ fn slot_definition_with_body_is_rejected() {
     let diagnostic = parse_template_diagnostic("[$slot: body]");
 
     assert_invalid_template_structure(&diagnostic, InvalidTemplateStructureReason::SlotInHead);
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
-fn malformed_else_if_missing_condition_keeps_non_default_location() {
+fn malformed_else_if_missing_condition_keeps_non_default_span() {
     let diagnostic = parse_template_diagnostic("[if true:\n    Then\n[else if]\n    Hidden\n]");
 
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]
@@ -377,12 +371,12 @@ fn inline_else_fallback_boundary_retains_exact_multibyte_marker_span() {
 }
 
 #[test]
-fn malformed_else_sentinel_keeps_non_default_location() {
+fn malformed_else_sentinel_keeps_non_default_span() {
     let diagnostic = parse_template_diagnostic("[if true:\nThen\n[else: nope]\n]");
 
     assert_invalid_template_structure(
         &diagnostic,
         InvalidTemplateStructureReason::MalformedTemplateElse,
     );
-    assert_location_is_meaningful(&diagnostic);
+    assert_span_is_meaningful(&diagnostic);
 }

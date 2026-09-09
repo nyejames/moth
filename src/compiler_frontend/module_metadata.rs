@@ -18,13 +18,11 @@
 //!   rendering only.
 //! - `ModuleDocFragment` replaces the former `HirDocFragment`. Resolved documentation metadata is
 //!   not HIR and uses a non-HIR name and owner.
-//! - Documentation-metadata validation lives here, not in HIR validation. Invalid compiler
-//!   metadata is an internal `CompilerError` validated before a successful module is returned.
+//! Documentation metadata carries only optional exact spans; generated fragments remain spanless.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 // -------------------------
 //  Resolved documentation fragments
@@ -39,21 +37,22 @@ pub enum ModuleDocFragmentKind {
     Doc,
 }
 
-/// One resolved documentation fragment extracted from the AST.
-///
-/// WHAT: carries the fully resolved documentation text and its authored source location.
+/// WHAT: carries the fully resolved documentation text and its authored source span, when one
+///       exists. Generated documentation remains spanless rather than inventing provenance.
 /// WHY: builders and documentation tooling consume resolved doc metadata after HIR lowering. This
 ///      is compiler metadata, not executable HIR state.
 #[derive(Debug, Clone)]
 pub struct ModuleDocFragment {
+    #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
     pub kind: ModuleDocFragmentKind,
     /// The resolved documentation text.
     ///
     /// WHY: preserved for builder/documentation-metadata consumers. Currently read only in tests;
     /// retained so the struct carries the full fragment shape.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
     pub rendered_text: String,
-    pub location: SourceLocation,
+    #[allow(dead_code)] // Retained for deferred documentation source diagnostics.
+    pub span: Option<SourceSpan>,
 }
 
 // -------------------------
@@ -72,56 +71,6 @@ pub struct HirLoweringMetadata {
     pub doc_fragments: Vec<ModuleDocFragment>,
 }
 
-impl HirLoweringMetadata {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Validate resolved documentation-metadata locations.
-    ///
-    /// WHAT: checks that each doc fragment has a self-consistent source span (start before end).
-    /// WHY: invalid compiler metadata is an internal `CompilerError` caught at the module
-    ///      compilation boundary before a successful module is returned. This validation moved out
-    ///      of HIR validation because documentation fragments are not executable HIR state.
-    pub fn validate(&self) -> Result<(), CompilerError> {
-        for (index, fragment) in self.doc_fragments.iter().enumerate() {
-            // Only resolved `Doc` fragments carry a location that this boundary validates. The
-            // kind guard reads `kind` so the fragment-shape field stays live for future kinds.
-            if matches!(fragment.kind, ModuleDocFragmentKind::Doc)
-                && fragment
-                    .location
-                    .start_pos
-                    .line_number
-                    .gt(&fragment.location.end_pos.line_number)
-            {
-                return Err(doc_fragment_error(
-                    &fragment.location,
-                    format!(
-                        "Doc fragment #{index} has invalid location: start line {} is after end line {}",
-                        fragment.location.start_pos.line_number,
-                        fragment.location.end_pos.line_number
-                    ),
-                ));
-            }
-
-            if fragment.location.start_pos.line_number == fragment.location.end_pos.line_number
-                && fragment.location.start_pos.char_column > fragment.location.end_pos.char_column
-            {
-                return Err(doc_fragment_error(
-                    &fragment.location,
-                    format!(
-                        "Doc fragment #{index} has invalid location columns: start {} is after end {}",
-                        fragment.location.start_pos.char_column,
-                        fragment.location.end_pos.char_column
-                    ),
-                ));
-            }
-        }
-
-        Ok(())
-    }
-}
-
 /// Typed HIR lowering result boundary.
 ///
 /// WHAT: bundles the validated `HirModule`, its frontend `TypeEnvironment`, and the extracted
@@ -132,10 +81,4 @@ pub struct HirLoweringResult {
     pub hir_module: HirModule,
     pub type_environment: TypeEnvironment,
     pub metadata: HirLoweringMetadata,
-}
-
-fn doc_fragment_error(location: &SourceLocation, message: String) -> CompilerError {
-    // Invalid non-HIR compiler metadata is an internal compiler invariant failure, not an HIR
-    // transformation. Use the general internal compiler error lane.
-    CompilerError::new(message, location.clone(), ErrorType::Compiler)
 }

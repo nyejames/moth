@@ -7,8 +7,6 @@
 use super::span::ExtendedSpanTable;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use std::path::Path;
 
@@ -127,12 +125,11 @@ pub struct SourceRecord {
 /// Reject a snapshot that `u32` byte offsets cannot address.
 ///
 /// WHY: a physical source too large to address is the user's file, so it fails in the file lane
-/// carrying that source's own identity, exactly as a source-read failure does. Every other
-/// provenance is compiler-produced, so its own oversized snapshot is a compiler bug.
+/// carrying its canonical host path when one exists. Every other provenance is compiler-produced,
+/// so its own oversized snapshot is a compiler bug.
 pub(super) fn ensure_source_snapshot_fits(
     byte_length: usize,
     provenance: SourceProvenance,
-    logical_path: &InternedPath,
     canonical_os_path: Option<&Path>,
 ) -> Result<(), CompilerError> {
     let limit = u32::MAX as usize;
@@ -142,22 +139,24 @@ pub(super) fn ensure_source_snapshot_fits(
 
     match provenance {
         SourceProvenance::AuthoredPhysical => {
-            let mut error = CompilerError::compiler_error(format!(
+            let message = format!(
                 "source file {} is {byte_length} bytes; a source must be shorter than {limit} bytes",
-                canonical_os_path.unwrap_or(Path::new("<unknown>")).display(),
-            ))
-            .with_error_type(ErrorType::File);
-            // The caller materializes this legacy view only on the oversized-snapshot failure path.
-            error.location = SourceLocation::new(
-                logical_path.clone(),
-                CharPosition::default(),
-                CharPosition::default(),
+                canonical_os_path
+                    .map_or_else(|| "<unknown>".to_owned(), |path| path.display().to_string(),),
             );
+            let error = match canonical_os_path {
+                Some(path) => CompilerError::file_error(path, message),
+                None => CompilerError::new(message, None, ErrorType::File),
+            };
             Err(error)
         }
-        SourceProvenance::CompilationRoot => Err(CompilerError::compiler_error(format!(
-            "compiler-produced source snapshot is {byte_length} bytes; \
-             a source must be shorter than {limit} bytes",
-        ))),
+        SourceProvenance::CompilationRoot => Err(CompilerError::new(
+            format!(
+                "compiler-produced source snapshot is {byte_length} bytes; \
+                 a source must be shorter than {limit} bytes",
+            ),
+            None,
+            ErrorType::Compiler,
+        )),
     }
 }

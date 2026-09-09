@@ -99,7 +99,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
 
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -132,7 +132,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
                     InvalidReturnShapeReason::TooManyReturnValues {
                         expected_count: *expected_count,
                     },
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -148,7 +148,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: target.result_type_ids.len(),
             },
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -161,7 +161,7 @@ pub fn parse_produced_values_typed<'a, 'b>(
                 expected_count: target.result_type_ids.len(),
                 provided_count: produced_values.len(),
             },
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -210,7 +210,7 @@ fn parse_single_inferred_declaration_value(
     if token_stream.current_token_kind() == &TokenKind::Comma {
         return Err(CompilerDiagnostic::invalid_return_shape(
             InvalidReturnShapeReason::TooManyReturnValues { expected_count: 1 },
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -278,7 +278,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                         expected_count: arity,
                         provided_count: values.len(),
                     },
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -291,7 +291,7 @@ pub(crate) fn parse_fixed_arity_inferred_values(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: arity,
             },
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }

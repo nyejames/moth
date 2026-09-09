@@ -17,7 +17,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionError,
     ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -319,9 +319,9 @@ impl From<CompilerError> for DirectoryPremergeFailure {
 /// WHAT: moves the builder's finished database onto a package-scoped failure. When
 ///       finalization itself fails there is no snapshot to attach, so the original failure
 ///       stays authoritative and the finish failure is surfaced deterministically beside it:
-///       a diagnosed batch keeps its diagnostics and table by move and gains the finish
-///       failure as a trailing infrastructure diagnostic, while an infrastructure error keeps
-///       its location, type and metadata and chains the finish message.
+///       a diagnosed batch keeps its diagnostics and table by move and carries the finish
+///       failure on the mixed outer infrastructure lane, while an infrastructure error keeps
+///       its type and metadata and chains the finish message.
 /// WHY: the builder is consumed by the failed finish, yet the original failure still owns
 ///      diagnostics and tables no later stage can rebuild. Dropping either side would lose
 ///      the user's failure or the freeze failure silently; both stay observable in the one
@@ -333,23 +333,33 @@ fn finalize_package_failure(
     match builder.finish() {
         Ok(source) => DirectoryPremergeFailure::package(failure, source),
         Err(finish_error) => DirectoryPremergeFailure::project(match failure {
-            PremergeFailure::Diagnosed(mut batch) => {
-                // Every freeze failure is a bare `CompilerError::compiler_error` value with a
-                // default location, so its diagnostic form carries no interned ids from a
-                // foreign table domain the batch could misresolve.
-                batch.push(
-                    crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic(
-                        &finish_error,
-                    ),
-                );
-                PremergeFailure::Diagnosed(batch)
-            }
-            PremergeFailure::Infrastructure(mut original) => {
+            PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
+                batch,
+                error: finish_error,
+            },
+            PremergeFailure::Mixed {
+                batch,
+                error: original,
+            } => {
                 // Both sides stay observable: the original render identity wins, and the
                 // finish message chains deterministically behind the original message.
-                if original.location == SourceLocation::default() {
-                    original.location = finish_error.location;
+                let mut chained = original;
+                chained.msg = format!(
+                    "{original_msg}; package source finalization also failed: {finish_msg}",
+                    original_msg = chained.msg,
+                    finish_msg = finish_error.msg,
+                );
+                for (key, value) in finish_error.metadata {
+                    chained.metadata.entry(key).or_insert(value);
                 }
+                PremergeFailure::Mixed {
+                    batch,
+                    error: chained,
+                }
+            }
+            PremergeFailure::Infrastructure(mut original) => {
+                // Both sides stay observable: the original failure remains authoritative, and
+                // the finish message chains deterministically behind the original message.
                 original.msg = format!(
                     "{original_msg}; package source finalization also failed: {finish_msg}",
                     original_msg = original.msg,
@@ -366,9 +376,10 @@ fn finalize_package_failure(
 /// Chain a failed source finalization beside an existing typed failure.
 ///
 /// WHAT: keeps the semantic failure authoritative without cloning any diagnostic batch
-///       or string table: a diagnosed batch gains the finish failure as a trailing
-///       infrastructure diagnostic, while an infrastructure error keeps its location,
-///       type and metadata and chains the finish message behind its own.
+///       or string table: a diagnosed batch keeps its diagnostics by move and carries the
+///       finish failure on the mixed outer infrastructure lane, while an infrastructure
+///       error keeps its type and metadata and chains the finish message behind
+///       its own.
 /// WHY: the builder is consumed by the failed finish, yet the original failure still
 ///      owns diagnostics and tables no later stage can rebuild. Every Stage 0 tail
 ///      shares this so a finish failure never replaces the failure it raced with.
@@ -377,23 +388,33 @@ pub(super) fn append_finish_failure(
     finish_error: CompilerError,
 ) -> PremergeFailure {
     match failure {
-        PremergeFailure::Diagnosed(mut batch) => {
-            // Every freeze failure is a bare `CompilerError::compiler_error` value with a
-            // default location, so its diagnostic form carries no interned ids from a
-            // foreign table domain the batch could misresolve.
-            batch.push(
-                crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic(
-                    &finish_error,
-                ),
-            );
-            PremergeFailure::Diagnosed(batch)
-        }
-        PremergeFailure::Infrastructure(mut original) => {
+        PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
+            batch,
+            error: finish_error,
+        },
+        PremergeFailure::Mixed {
+            batch,
+            error: original,
+        } => {
             // Both sides stay observable: the original render identity wins, and the
             // finish message chains deterministically behind the original message.
-            if original.location == SourceLocation::default() {
-                original.location = finish_error.location;
+            let mut chained = original;
+            chained.msg = format!(
+                "{original_msg}; package source finalization also failed: {finish_msg}",
+                original_msg = chained.msg,
+                finish_msg = finish_error.msg,
+            );
+            for (key, value) in finish_error.metadata {
+                chained.metadata.entry(key).or_insert(value);
             }
+            PremergeFailure::Mixed {
+                batch,
+                error: chained,
+            }
+        }
+        PremergeFailure::Infrastructure(mut original) => {
+            // Both sides stay observable: the original failure remains authoritative, and
+            // the finish message chains deterministically behind the original message.
             original.msg = format!(
                 "{original_msg}; package source finalization also failed: {finish_msg}",
                 original_msg = original.msg,
@@ -829,7 +850,7 @@ fn compile_directory_frontend_in_premerge_lane(
                         return Err(finalize_package_failure(failure, package_sources));
                     }
                 };
-            // Merge canonical contract locations before any transient package job forks its string
+            // Merge canonical contract spans before any transient package job forks its string
             // table. Every later transient fact can then share this boundary prefix safely.
             let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
                 package_waves.waves(),
@@ -900,8 +921,8 @@ fn compile_directory_frontend_in_premerge_lane(
                     return Err(failure.into());
                 }
             };
-        // Merge all canonical project contract locations before transient jobs fork their local
-        // string-table base. Project fixed/direct fields are also materialized now so their locations
+        // Merge all canonical project contract spans before transient jobs fork their local
+        // string-table base. Project fixed/direct fields are also materialized now so their spans
         // belong to the same inherited prefix used by every check-only job.
         let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
             project_schedule.waves(),
@@ -913,7 +934,7 @@ fn compile_directory_frontend_in_premerge_lane(
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts =
             config_boundary::direct_project_contract_facts(&effective_project_fields);
-        let project_fallback = config.setting_location_or_config_file("project", string_table);
+        let project_fallback = config.setting_span("project");
         // All canonical project and source-package inventories are complete now. Prepare transient
         // jobs only after that global provider-discovery barrier so each job forks final canonical
         // external package/cache/resolution state.
@@ -990,7 +1011,7 @@ fn compile_directory_frontend_in_premerge_lane(
             &direct_project_facts,
             &canonical_project_inputs,
             &config_globals,
-            project_fallback.clone(),
+            project_fallback,
             string_table,
         )
         .map_err(DirectoryPremergeFailure::project)?;
@@ -1049,15 +1070,14 @@ fn compile_directory_frontend_in_premerge_lane(
                 schedule.into_parts();
             let result: Result<_, PremergeFailure> = (|| {
                 let package_inputs = BuildConfigInputSet::new();
-                let package_fallback =
-                    SourceLocation::from_path(path_resolver.entry_root(), string_table);
+                let package_fallback_span = None;
                 let build_config_values = config_boundary::resolve_boundary_build_config(
                     &source_facts,
                     &[],
                     &[],
                     &package_inputs,
                     &config_globals,
-                    package_fallback,
+                    package_fallback_span,
                     string_table,
                 )?;
                 let deferred_build_config_values = build_config_values.clone();

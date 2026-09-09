@@ -17,7 +17,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId as HirBlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
@@ -245,7 +245,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 ),
                 EventSource {
                     hir_node: None,
-                    location: local.source_info.clone(),
                     span: local.span,
                 },
             ));
@@ -362,7 +361,6 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<(), CompilerError> {
         let source = EventSource {
             hir_node: Some(statement.id),
-            location: Some(statement.location.clone()),
             span: statement.span,
         };
         match &statement.kind {
@@ -1926,23 +1924,23 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn block_source(&self, block: HirBlockId) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
+            span: self
                 .module
                 .side_table
-                .hir_source_location_for_hir(HirLocation::Block(block))
-                .cloned(),
-            span: None,
+                .hir_source_span_for_hir(
+                    crate::compiler_frontend::hir::hir_side_table::HirLocation::Block(block),
+                )
+                .or_else(|| {
+                    self.module.side_table.ast_span_for_hir(
+                        crate::compiler_frontend::hir::hir_side_table::HirLocation::Block(block),
+                    )
+                }),
         }
     }
 
     fn terminator_source(&self, block: HirBlockId) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
-                .module
-                .side_table
-                .hir_source_location_for_hir(HirLocation::Terminator(block))
-                .cloned(),
             span: self.module.side_table.terminator_span(block).copied(),
         }
     }
@@ -1950,13 +1948,12 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn value_source(&self, expression: &HirExpression, fallback: &EventSource) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
+            span: self
                 .module
                 .side_table
-                .value_source_location(expression.id)
-                .cloned()
-                .or_else(|| fallback.location.clone()),
-            span: expression.span,
+                .value_source_span(expression.id)
+                .or(expression.span)
+                .or(fallback.span),
         }
     }
 

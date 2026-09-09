@@ -109,7 +109,6 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(5, 42, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::AssertFailure {
                 message,
@@ -176,7 +175,6 @@ fn dispatcher_assertion_message_is_lowered_once() {
                         target: HirPlace::Local(LocalId(0)),
                         value: bool_expression(8, true, types.boolean, RegionId(0)),
                     },
-                    1,
                 )],
                 terminator: HirTerminator::If {
                     condition: bool_expression(1, true, types.boolean, RegionId(0)),
@@ -332,7 +330,6 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
                 target: HirPlace::Local(source_local),
                 value: string_expression(5, "reactive message", types.string, region),
             },
-            1,
         )],
         terminator: HirTerminator::AssertFailure {
             message,
@@ -359,7 +356,7 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
         path: source_path,
         kind: HirReactiveSourceKind::Declaration,
         type_id: types.string,
-        location: test_source_location(1),
+        span: None,
     });
     module
         .side_table
@@ -369,11 +366,11 @@ fn reactive_assertion_message_emits_failure_snapshot_helpers() {
             dependencies: vec![HirReactiveTemplateDependency {
                 source: ReactiveSourceId(0),
                 type_id: types.string,
-                location: test_source_location(1),
+                span: None,
             }],
             template_value_parameters: vec![],
             template_backed: false,
-            location: test_source_location(2),
+            span: None,
         });
 
     let source = lower_hir_to_js(

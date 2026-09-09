@@ -21,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -165,13 +164,13 @@ fn error_and_warning_messages() -> CompilerMessages {
     let error_diag = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Error,
-        SourceLocation::default(),
+        None,
         DiagnosticPayload::None,
     );
     let warning_diag = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
         DiagnosticSeverity::Warning,
-        SourceLocation::default(),
+        None,
         DiagnosticPayload::None,
     );
 
@@ -320,7 +319,7 @@ fn terse_build_result_warnings_render_when_show_warnings() {
     let warning = CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
         DiagnosticSeverity::Warning,
-        SourceLocation::default(),
+        None,
         DiagnosticPayload::UnusedName { name },
     );
     let build_result = build_result_with_warning(warning, string_table);

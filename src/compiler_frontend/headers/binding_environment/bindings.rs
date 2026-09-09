@@ -15,9 +15,9 @@ use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, Public
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginDeclarationId, OriginFunctionId,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
@@ -146,14 +146,14 @@ pub(crate) fn lookup_namespace_member<'a>(
 
 /// One receiver method made visible to a source file.
 ///
-/// WHAT: stores the canonical function path plus the dependency/declaration location that made the
+/// WHAT: stores the canonical function path plus the dependency/declaration span that made the
 /// method visible.
 /// WHY: receiver methods live in the receiver-call namespace rather than the ordinary value
 /// namespace, so they need their own visibility entries and diagnostics.
 #[derive(Clone, Debug)]
 pub(crate) struct ReceiverMethodVisibility {
     pub(crate) target: SourceFunctionTarget,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// One source declaration visible in a consumer file.
@@ -259,12 +259,12 @@ pub(crate) struct FileVisibility {
     /// Populated by explicit virtual-package dependencies and prelude symbols.
     pub(crate) visible_external_symbols: FxHashMap<StringId, ExternalSymbolId>,
 
-    /// Authored source locations that made explicit external symbols visible in this file.
+    /// Authored source spans that made explicit external symbols visible in this file.
     ///
-    /// WHY: AST needs the authored local-binding location for duplicate-declaration
-    /// diagnostics so the secondary label can point to the selected name or alias. Prelude
-    /// symbols have no authored location and therefore have no entry in this map.
-    pub(crate) visible_external_symbol_locations: FxHashMap<StringId, SourceLocation>,
+    /// WHY: AST needs the authored local-binding span for duplicate-declaration diagnostics so
+    /// the secondary label can point to the selected name or alias. Prelude symbols have no
+    /// authored span and therefore have no entry in this map.
+    pub(crate) visible_external_symbol_spans: FxHashMap<StringId, SourceSpan>,
 
     /// Namespace namespace binding records visible in this file.
     /// Populated by bare `@path` and `@path as alias` syntax.

@@ -10,9 +10,6 @@ use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
     PublishedBoundary, facts, generated_identity, summary,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 #[test]
 fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_ids() {
@@ -27,12 +24,7 @@ fn registration_sorts_and_deduplicates_stable_identities_before_assigning_dense_
         GeneratedRequestFacts {
             identity: beta,
             display_name: "beta".to_owned(),
-            diagnostic_location: SourceLocation::new(
-                InternedPath::from_single_str("src/@page.moth", &mut StringTable::new()),
-                CharPosition::default(),
-                CharPosition::default(),
-            ),
-            diagnostic_span: None,
+            call_span: None,
         },
     ]);
 
@@ -97,35 +89,18 @@ fn a_transaction_allocates_only_new_records() {
 fn request_records_own_diagnostic_facts() {
     let known = PublishedBoundary::empty();
     let mut transaction = GeneratedFunctionTransaction::new(known.view());
-    let first_location = SourceLocation::new(
-        crate::compiler_frontend::symbols::interned_path::InternedPath::from_single_str(
-            "src/a.moth",
-            &mut StringTable::new(),
-        ),
-        CharPosition {
-            line_number: 3,
-            char_column: 5,
-        },
-        CharPosition {
-            line_number: 3,
-            char_column: 9,
-        },
-    );
     let mut span_builder = ExtendedSpanBuilder::new();
     let local_span = LocalSpan::exact(10, 7, &mut span_builder).unwrap();
-    let diagnostic_span = Some(SourceSpan::new(SourceId::from_index(3), local_span));
+    let call_span = Some(SourceSpan::new(SourceId::from_index(3), local_span));
     let ids = transaction.register_requests([GeneratedRequestFacts {
         identity: generated_identity("make"),
         display_name: "make".to_owned(),
-        diagnostic_location: first_location.clone(),
-        diagnostic_span,
+        call_span,
     }]);
 
-    let (display_name, diagnostic_location, actual_diagnostic_span) =
-        transaction.request_facts(ids[0]).unwrap();
+    let (display_name, actual_call_span) = transaction.request_facts(ids[0]).unwrap();
     assert_eq!(display_name, "make");
-    assert_eq!(diagnostic_location, first_location);
-    assert_eq!(actual_diagnostic_span, diagnostic_span);
+    assert_eq!(actual_call_span, call_span);
 }
 
 #[test]

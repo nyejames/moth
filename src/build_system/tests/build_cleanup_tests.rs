@@ -10,7 +10,6 @@ use crate::build_system::output::manifest::{
 };
 use crate::build_system::output::{BuilderKind, OutputOwner, WriteMode, WriteOptions};
 use crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages;
-use crate::compiler_frontend::compiler_messages::render::resolve_source_file_path;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1560,7 +1559,6 @@ fn builder_owner_conflict_fails_without_mutation() {
         fs::read(output_root.join(BUILD_MANIFEST_FILENAME)).expect("manifest should exist");
 
     let mut string_table = StringTable::new();
-    let setting_location = SourceLocation::from_path(Path::new("config.moth"), &mut string_table);
     let conflicting_options = WriteOptions {
         output_plan: OutputPlan::SingleFile(SingleFileOutputPlan {
             output_root: output_root.clone(),
@@ -1569,7 +1567,6 @@ fn builder_owner_conflict_fails_without_mutation() {
                 builder: BuilderKind::Test,
                 profile: BuildProfile::Dev,
             },
-            setting_location: setting_location.clone(),
             setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
@@ -1592,17 +1589,14 @@ fn builder_owner_conflict_fails_without_mutation() {
         }
     ));
     assert_eq!(
-        diagnostic.primary_location,
-        conflicting_options.output_plan.setting_location().clone()
+        diagnostic.primary_span, None,
+        "single-file output plans carry no authored config span",
     );
-    let resolved_scope =
-        resolve_source_file_path(&diagnostic.primary_location.scope, &messages.string_table);
-    assert_eq!(resolved_scope, Path::new("config.moth"));
     assert!(
         format_terse_compiler_messages(&messages)
             .iter()
-            .any(|line| line.contains("config.moth")),
-        "owner-conflict diagnostics should render their config source scope"
+            .any(|line| line.contains("already owned")),
+        "owner-conflict diagnostics should retain their reason text"
     );
     assert_eq!(
         fs::read(output_root.join("index.html")).expect("output should remain"),

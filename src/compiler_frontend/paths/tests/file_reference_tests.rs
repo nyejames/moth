@@ -4,26 +4,22 @@ use super::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget, classify_prepared_file_references,
 };
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::dependency_resolution::exact_case_mismatch_for_components;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::source::LocalSpan;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn classify_one(spelling: &str) -> PreparedFileReferenceClass {
     let mut strings = StringTable::new();
     let mut table = PathSyntaxTable::new();
-    let location = SourceLocation::default();
     table.push(
         if spelling.is_empty() {
             InternedPath::new()
         } else {
             InternedPath::from_single_str(spelling, &mut strings)
         },
-        location,
-        LocalSpan::source_start(),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let classified =
         classify_prepared_file_references(&table, [], SourceId::COMPILATION_ROOT, &strings);
@@ -75,16 +71,14 @@ fn extensionless_paths_are_left_for_ast() {
 fn dependency_clause_rows_are_not_reclassified_as_file_values() {
     let mut strings = StringTable::new();
     let mut table = PathSyntaxTable::new();
-    let location = SourceLocation::default();
+    let authored_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
     let clause = table.push(
         InternedPath::from_single_str("core/math", &mut strings),
-        location.clone(),
-        LocalSpan::source_start(),
+        authored_span,
     );
     let value = table.push(
         InternedPath::from_single_str("assets/logo.svg", &mut strings),
-        location,
-        LocalSpan::source_start(),
+        authored_span,
     );
 
     let classified =
@@ -113,8 +107,7 @@ fn resolved_references_are_lookupable_by_file_and_path_handle() {
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
         InternedPath::from_single_str("assets/logo.svg", &mut strings),
-        SourceLocation::default(),
-        LocalSpan::source_start(),
+        SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
     let reference = ResolvedFileReference {
@@ -141,8 +134,7 @@ fn resolved_reference_duplicate_composite_keys_are_rejected() {
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
         InternedPath::from_single_str("assets/logo.svg", &mut strings),
-        SourceLocation::default(),
-        LocalSpan::source_start(),
+        SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
     let make_reference = || ResolvedFileReference {
@@ -166,8 +158,7 @@ fn resolved_reference_validation_rejects_class_outcome_mismatch() {
     let mut syntax = PathSyntaxTable::new();
     let path_syntax = syntax.push(
         InternedPath::from_single_str("assets/logo.svg", &mut strings),
-        SourceLocation::default(),
-        LocalSpan::source_start(),
+        SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start()),
     );
     let mut table = ResolvedFileReferenceTable::new();
     table

@@ -24,7 +24,9 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
@@ -309,7 +311,7 @@ pub(crate) fn compile_moth_template_source(
                     ..
                 } = error;
                 let messages = CompilerMessages::from_diagnostic_with_warnings(
-                    *diagnostic,
+                    diagnostic,
                     warnings,
                     string_table,
                 );
@@ -368,15 +370,8 @@ pub(crate) fn compile_moth_template_source(
         string_table,
     ) {
         Ok(sorted) => sorted,
-        Err(bag) => {
-            let mut messages = match bag {
-                HeaderPreparationFailure::Diagnosed(bag) => {
-                    CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-                }
-                HeaderPreparationFailure::Infrastructure(error) => {
-                    CompilerMessages::from_error_ref(error, string_table)
-                }
-            };
+        Err(failure) => {
+            let mut messages = failure.into_messages(string_table);
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
             return Err(attach_finalized_source_database(
                 messages,
@@ -458,14 +453,19 @@ fn order_template_headers(
     path_resolver: &ProjectPathResolver,
     resolved_references: Option<&ResolvedFileReferenceTable>,
     string_table: &mut StringTable,
-) -> Result<SortedHeaders, HeaderPreparationFailure> {
-    let (source_files, mut source_spans) = source_builder.split();
+) -> Result<SortedHeaders, PremergeFailure> {
+    let (source_files, _) = source_builder.split();
     let prepared_syntax =
         prepare_header_syntax(prepared_sources, string_table, &mut |source, diagnostic| {
-            let mut builder = source_spans.take_span_builder(source);
-            let result = diagnostic.capture_preparation_span(source, &mut builder);
-            source_spans.retain_span_builder(source, builder);
-            result
+            diagnostic.capture_preparation_span(source)
+        })
+        .map_err(|failure| match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
+                PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
+            ),
+            HeaderPreparationFailure::Infrastructure(error) => {
+                PremergeFailure::Infrastructure(error)
+            }
         })?;
     let bound_headers = bind_module_headers(
         prepared_syntax,
@@ -475,7 +475,13 @@ fn order_template_headers(
         Some(path_resolver),
         source_files,
         string_table,
-    )?;
+    )
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
+        ),
+        HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+    })?;
 
     // Stage 0 supplies content-source edges for bundles; standalone requests have none.
     let content_source_targets = match resolved_references {
@@ -485,7 +491,6 @@ fn order_template_headers(
         None => ContentSourceTargets::empty(),
     };
     resolve_module_dependencies(bound_headers, &content_source_targets, string_table)
-        .map_err(HeaderPreparationFailure::Diagnosed)
 }
 
 fn fold_template_semantics(

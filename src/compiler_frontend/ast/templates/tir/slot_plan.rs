@@ -19,7 +19,6 @@ use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, Templa
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// TIR side-table entry for a slot-routing plan.
 ///
@@ -32,8 +31,7 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 /// view without re-running AST slot routing.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateSlotPlan {
-    /// Source location for invariant reporting at the AST/HIR handoff.
-    pub(crate) location: SourceLocation,
+    /// Exact source span for invariant reporting at the AST/HIR handoff.
     pub(crate) span: Option<SourceSpan>,
 
     /// TIR-rendered contribution source plans, one per runtime contribution.
@@ -56,7 +54,6 @@ pub(crate) struct TemplateSlotContributionSourcePlan {
     pub(crate) target: SlotKey,
     pub(crate) render_root: TemplateIrNodeId,
     pub(crate) renders_wrapper_unconditionally: bool,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -70,7 +67,6 @@ pub(crate) struct TemplateSlotSitePlan {
     pub(crate) site: RuntimeSlotSiteId,
     pub(crate) key: SlotKey,
     pub(crate) render_root: TemplateIrNodeId,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -128,14 +124,12 @@ pub(super) fn convert_runtime_slot_site(
     site: RuntimeSlotSiteId,
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
-    location: &SourceLocation,
     span: Option<SourceSpan>,
 ) -> TemplateIrNodeId {
     copy_state.record_runtime_slot_site(plan, site);
 
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::RuntimeSlotSite { plan, site },
-        location.clone(),
         span,
     ))
 }
@@ -150,12 +144,10 @@ pub(crate) fn push_runtime_slot_contribution_source(
     store: &mut TemplateIrStore,
     plan: TemplateSlotPlanId,
     source: RuntimeSlotContributionSourceId,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 ) -> TemplateIrNodeId {
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
-        location,
         span,
     ))
 }

@@ -48,13 +48,16 @@ pub(super) fn parse_mutable_receiver_expression(
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
-    let marker_location = token_stream.current_location();
+    let marker_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance();
 
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
         return Err(CompilerDiagnostic::unexpected_token(
             token_stream.current_token_kind().to_owned(),
-            marker_location,
+            marker_span,
         )
         .into());
     };
@@ -65,15 +68,13 @@ pub(super) fn parse_mutable_receiver_expression(
                 symbol_id,
                 NameNamespace::Value,
                 NameNamespace::Type,
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
-        return Err(CompilerDiagnostic::unknown_value_name(
-            symbol_id,
-            token_stream.current_location(),
-        )
-        .into());
+        return Err(
+            CompilerDiagnostic::unknown_value_name(symbol_id, current_span(token_stream)).into(),
+        );
     };
 
     // The mutable marker must be followed by a field-access chain; bare `~name` is not valid.
@@ -91,7 +92,7 @@ pub(super) fn parse_mutable_receiver_expression(
                 None,
                 None,
                 None,
-                marker_location,
+                marker_span,
             )
             .into());
         }
@@ -101,7 +102,7 @@ pub(super) fn parse_mutable_receiver_expression(
             None,
             None,
             None,
-            marker_location,
+            marker_span,
         )
         .into());
     }
@@ -111,7 +112,7 @@ pub(super) fn parse_mutable_receiver_expression(
         token_stream,
         receiver_declaration.as_declaration(),
         context,
-        PostfixChainAccess::mutable_marker(marker_location),
+        PostfixChainAccess::mutable_marker(marker_span),
         type_interner,
         string_table,
     )?;
@@ -146,10 +147,10 @@ fn parse_copy_place_payload(
     string_table: &mut StringTable,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
     match token_stream.current_token_kind() {
-        // Parenthesized places are allowed for grouping; the outer `(` location is preserved
+        // Parenthesized places are allowed for grouping; the outer `(` span is preserved
         // so diagnostics point at the `copy(` call site rather than the inner name.
         TokenKind::OpenParenthesis => {
-            let open_location = token_stream.current_location();
+            let open_span = current_span(token_stream);
             token_stream.advance();
 
             let mut parsed_place =
@@ -159,13 +160,13 @@ fn parse_copy_place_payload(
                 return Err(CompilerDiagnostic::expected_token(
                     TokenKind::CloseParenthesis,
                     Some(token_stream.current_token_kind().to_owned()),
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
 
             token_stream.advance();
-            parsed_place.place.location = open_location;
+            parsed_place.place.span = open_span;
             Ok(parsed_place)
         }
 
@@ -177,13 +178,13 @@ fn parse_copy_place_payload(
                         *symbol_id,
                         NameNamespace::Value,
                         NameNamespace::Type,
-                        token_stream.current_location(),
+                        current_span(token_stream),
                     )
                     .into());
                 }
                 return Err(CompilerDiagnostic::unknown_value_name(
                     *symbol_id,
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             };
@@ -201,22 +202,16 @@ fn parse_copy_place_payload(
                 } else {
                     InvalidCopyTargetReason::FunctionName
                 };
-                Err(CompilerDiagnostic::invalid_copy_target(
-                    reason,
-                    token_stream.current_location(),
+                Err(
+                    CompilerDiagnostic::invalid_copy_target(reason, current_span(token_stream))
+                        .into(),
                 )
-                .into())
             } else {
-                let reference_location = token_stream.current_location();
-                let reference_span = Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                ));
+                let reference_span = current_span(token_stream);
                 let reference_expression = reference_expression_from_declaration(
                     place_declaration.as_declaration(),
                     context,
                     type_interner,
-                    reference_location.clone(),
                     reference_span,
                 );
                 token_stream.advance();
@@ -227,7 +222,6 @@ fn parse_copy_place_payload(
                     parse_postfix_chain_expression(
                         token_stream,
                         reference_expression,
-                        reference_location,
                         reference_span,
                         PostfixChainAccess::shared(),
                         context,
@@ -241,7 +235,7 @@ fn parse_copy_place_payload(
                 let Some(place) = place_expression_from_expression(&copied_expression) else {
                     return Err(CompilerDiagnostic::invalid_copy_target(
                         InvalidCopyTargetReason::NonPlace,
-                        copied_expression.location,
+                        copied_expression.span,
                     )
                     .into());
                 };
@@ -258,12 +252,12 @@ fn parse_copy_place_payload(
         TokenKind::Must | TokenKind::TraitThis => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                current_span(token_stream),
                 "Expression Parsing",
                 "copy-place parsing",
             )?;
 
-            Err(reserved_trait_keyword_error(keyword, token_stream.current_location()).into())
+            Err(reserved_trait_keyword_error(keyword, current_span(token_stream)).into())
         }
 
         // `copy` does not take the `~` mutable-access marker. When `~` precedes
@@ -272,13 +266,13 @@ fn parse_copy_place_payload(
         // the recursive call returns the existing factual diagnostic, since
         // removing `~` would not make it copyable.
         TokenKind::Mutable => {
-            let marker_location = token_stream.current_location();
+            let marker_span = current_span(token_stream);
             token_stream.advance();
 
             match parse_copy_place_payload(token_stream, context, type_interner, string_table) {
                 Ok(_) => Err(CompilerDiagnostic::invalid_copy_target(
                     InvalidCopyTargetReason::MutableMarkerNotAllowed,
-                    marker_location,
+                    marker_span,
                 )
                 .into()),
                 Err(existing_error) => Err(existing_error),
@@ -293,7 +287,7 @@ fn parse_copy_place_payload(
         // unexpected.
         _ => Err(CompilerDiagnostic::invalid_copy_target(
             InvalidCopyTargetReason::NonPlace,
-            token_stream.current_location(),
+            current_span(token_stream),
         )
         .into()),
     }
@@ -306,7 +300,6 @@ pub(crate) fn place_expression_from_expression(expression: &Expression) -> Optio
             type_id: expression.type_id,
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
-            location: expression.location.clone(),
             span: expression.span,
         }),
 
@@ -320,7 +313,6 @@ pub(crate) fn place_expression_from_expression(expression: &Expression) -> Optio
                 type_id: expression.type_id,
                 diagnostic_type: expression.diagnostic_type.clone(),
                 value_mode: expression.value_mode.clone(),
-                location: expression.location.clone(),
                 span: expression.span,
             })
         }
@@ -371,7 +363,6 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
 
     let mut expression = Expression::new(
         kind,
-        place.location.clone(),
         place.span,
         place.type_id,
         place.diagnostic_type.clone(),
@@ -379,4 +370,11 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
     );
     expression.const_record_state = ConstRecordState::RuntimeValue;
     expression
+}
+
+fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
 }

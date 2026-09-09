@@ -52,7 +52,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 id: local_path.clone(),
                 value: Expression::new(
                     ExpressionKind::NoValue,
-                    Default::default(),
                     None,
                     function_type_id,
                     diagnostic_type,
@@ -112,7 +111,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         generic_parameter_list_id,
                         signature,
                         body_tokens: None,
-                        declaration_location: Default::default(),
+                        declaration_span: None,
                     },
                 );
                 continue;
@@ -331,7 +330,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             generic_parameter_list_id,
                             signature,
                             body_tokens: None,
-                            declaration_location: Default::default(),
+                            declaration_span: None,
                         },
                     );
                     continue;
@@ -448,7 +447,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             };
             let mut value = Expression::new(
                 ExpressionKind::NoValue,
-                Default::default(),
                 None,
                 type_id,
                 diagnostic_type,

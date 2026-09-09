@@ -7,11 +7,11 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Active and paused for review reconciliation. Phase 1 implementation is in progress; the attached
-> 2026-09-09 audit has been recorded as gated correction steps below before the next code slice.
-> Phase 1 still pauses for external user review before Phase 2 begins. Phases 2–7 remain pending.
-> Test Suite Hardening was delivered in `03168082d`. Baseline evidence lives in
-> `benchmarks/frontend-optimization-results.md`.
+> Active. The current workspace contains the Phase 1G/1H implementation cutover; final focused
+> validation, independent review and checkpoint/commit recording remain pending. Phase 1 remains
+> paused for that closeout and external user review before Phase 2 begins. Phases 2–7 remain pending.
+> Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
+> in `benchmarks/frontend-optimization-results.md`.
 
 ## Purpose
 
@@ -22,24 +22,21 @@ This is a compiler-wide representation change, not a narrow Clippy patch. It mus
 causes of `clippy::result_large_err`, remove existing boxed-diagnostic workarounds and leave one clear
 extension model for future diagnostics and tooling.
 
-## Temporary validation bridge
+## Historical activation validation bridge
 
-The current implementation retains a 192-byte `CompilerError` across many internal and
-infrastructure `Result` boundaries. Until the layout migration replaces that mixed representation,
-the library crate's `src/lib.rs` carries one documented crate-level `#[allow(clippy::result_large_err)]` for the
-192-byte `CompilerError`. The benchmark execution module at `xtask/src/benchmark_execution.rs`
-carries one documented module-level allowance for its 224-byte `BenchmarkCaseFailure`.
-Together, these temporary allowances keep the native, Linux and Windows Clippy lanes runnable.
-These are validation bridges only. They must not be narrowed into copied local allowances or
-treated as the target error model.
+At plan activation, the implementation still carried a 192-byte `CompilerError` across internal
+and infrastructure `Result` boundaries. The activation record also documented crate-level and
+benchmark-module `result_large_err` allowances for that predecessor state and its 224-byte
+`BenchmarkCaseFailure`.
 
-The migration must remove these allowances after the `CompilerError` sites have been assigned to the
-compact diagnostic, infrastructure-failure or compiler-bug lanes and the benchmark failure record
-has received its own size fix rather than a lint exemption.
-The later migration gate and final validation gate must both prove that the allowances and large-error condition are gone.
+Those allowances and boxed-diagnostic explanations are historical activation evidence, not current
+guidance. The current boundary carries diagnosed failures as plain `CompilerDiagnostic` values and
+keeps typed infrastructure failures in the `CompilerError` lane. Final Phase 1 validation must
+record the removal of the activation bridge; this workspace status does not claim that validation
+or a checkpoint commit.
 
-Test Suite Hardening landed in `03168082d`. Its remaining large-error variants are this plan's
-owned follow-up, not a test-suite regression; do not add another local allowance to mask it.
+Test Suite Hardening landed in `03168082d`. Its activation-era large-error variants are this plan's
+owned follow-up, not a test-suite regression; do not add a local lint workaround.
 
 The implementation must converge on:
 
@@ -70,36 +67,28 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: paused after the 1E2, 1G1 and 1B4/1D4b checkpoints for review reconciliation.
-- Goal: migrate downstream header/order and AST consumers onto the exact preparation spans while
-  retaining the interval bridge for untouched consumers, and remove duplicated diagnostic source
-  facts where labels already own them. Renderers resolve retained primary spans through the source
-  snapshot. The source freeze remains deferred until a real final identity/render owner can consume
-  it without a parallel durable source database.
-- Keep source ownership explicit across dependency and symbol records; do not add a second source
-  table or convert legacy locations into guessed spans.
-- Non-goals: resolved semantic spans, new source owners, diagnostic
-  storage redesign and token-store migration. The private location bridge ends at 1H.
+- Phase: Phase 1G/1H implementation cutover is present in the current workspace; final validation and
+  checkpoint recording are pending.
+- Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
+  deterministic publication while preserving exact authored spans and typed infrastructure failures.
+- Current code evidence: the old source-location identity model and boxed `CompilerDiagnostic`
+  boundaries have been removed from production sources. This note claims no tests, independent
+  review or commit until the parent records those gates.
+- Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
-LAST_GOOD_COMMIT:
-Arrived at `b862ce300`, accepting R5: `SourceSlot::canonical_os_path` is the accepted cold
-  `Option<Box<Path>>` representation, shrinking the registration row from 48 to 40 bytes
-  with zero-copy boundary moves. R1b/R2/R3/R4 stay accepted in
-  `dc9f36532`/`c4eeaf1c9`/`fa5a2e75d`/`472ad7400`. R6 is the next active gate.
+LAST_RECORDED_CHECKPOINT:
+The historical R5 checkpoint is recorded below in the activation history. It is not the current
+workspace state and does not identify an accepted commit for the present cutover.
 
-CURRENT_WORKTREE_STATE:
-- Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Worktree: clean at the R5 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R6 is next; no other implementation slice is active while the review-derived gates are worked.
-- Continuation order: complete the remaining review-derived Phase 1 correction steps (R6-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
-- 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
-- 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
-  after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
-  `b1e7dcb15`. Its worktree was clean after verification. 1D5c4 is implemented, validated and
-  independently reviewed and committed in `8142352cd`. The worktree was clean after verification.
-  Native Codex workers now handle bounded implementation and review slices; plan-orchestrator still
-  owns the workflow. Parsed generic parameters and bounds
-  preserve original anchors. Generic declaration maps retain only kinds. Canonical registered
-  parameters own semantic names and arity across local, imported and materialised nominals.
+CURRENT_WORKSPACE_STATE:
+- Phase 1G/1H source and diagnostic cutover edits are present in the shared workspace.
+- Final focused validation, independent review, worktree/checkpoint inspection and commit recording
+  are owned by the parent closeout; no result is claimed here.
+- Phase 2 remains pending external user review.
+HISTORICAL_ACCEPTED_SLICES:
+The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
+are not current workspace validation or checkpoint claims.
+
 - Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
   copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
   redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
@@ -324,8 +313,7 @@ RELEVANT_CODE:
 - `src/compiler_frontend/headers/header_dispatch.rs::capture_function_body_tokens`: current token-cloning body capture
 - `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
-- `src/lib.rs`: temporary crate-level `result_large_err` allowance used only to keep interim validation runnable
-- `xtask/src/benchmark_execution.rs`: temporary module-level `result_large_err` allowance for the benchmark failure record
+- `src/lib.rs` and `xtask/src/benchmark_execution.rs`: activation-era lint-bridge locations retained only as historical removal records; current workspace status makes no validation claim
 - `src/compiler_frontend/datatypes/display.rs`: current type renderer to preserve as one shared formatting owner
 - `src/projects/html_project/html_project_builder.rs` and `BackendBuilder`: current target/project diagnostic production over a mutable `StringTable`
 - `src/projects/dev_server/build_loop.rs`: current compiler-message boundary, reusable executor and poisoned-lock recovery
@@ -364,7 +352,7 @@ DECISIONS_ALREADY_MADE:
 BLOCKERS / RISKS:
 - earlier queued implementation work has landed; this plan is active
 - source/span migration touches nearly every frontend stage
-- current boxed diagnostic aliases and style-guide advice are already present and must be removed
+- Phase 1G/1H current workspace cutover is present; final validation and checkpoint recording remain pending, and no local diagnostic boxing or lint-workaround guidance may be reintroduced
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
@@ -375,8 +363,7 @@ BLOCKERS / RISKS:
 - Repeated canonical/check-only preparation now shares the original builder. Removing the repeated
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
-VALIDATION_STATE:
-- 1E1a candidate: `cargo fmt --all` and `git diff --check` passed. Focused directory Stage 0
+VALIDATION_STATE (historical, as of each recorded candidate entry):
   tests (7) and file-reference tests (25) passed. `cargo check -p moth` passed in the delegated
   worker. The independent scripted audit was attempted but unavailable because the configured
   auditor provider's HTTPS fallback reported `invalid peer certificate: UnknownIssuer`; no audit
@@ -541,12 +528,13 @@ VALIDATION_STATE:
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
-- other docs stale: current authorities and style rules still describe `CompilerError`, path-backed locations and boxed large-error boundaries
+- current authorities and style rules now describe exact `SourceSpan` ownership and the compact plain
+  diagnosed boundary; remaining documentation edits in this slice are being synchronized.
 - authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: keep implementation paused while the review-derived R1b–R9 correction gates are
-  completed in order, then resume the remaining bounded 1E/1F/1G/1H work and Phase 1 closeout.
-  R10a–R10d are prerequisites for their owning later phases. Do not claim the broad 1F1 checkbox
-  from the rejected unconsumed source-freeze attempt. Phase 2 remains pending external review.
+- next action: complete final focused validation, independent review and checkpoint recording for the
+  present Phase 1G/1H implementation. Do not claim those gates from workspace presence alone.
+  R10a–R10d remain prerequisites for their owning later phases. Phase 2 remains pending external
+  review.
 
 ---
 
@@ -605,14 +593,13 @@ Additional hard rules:
 - exact sizes and alignments use dependency-free const assertions compiled by native and cross-target CI, plus focused semantic/layout tests
 - temporary migration adapters are private, named as migration code and deleted at their recorded boundary
 
-## Repository shape to establish at activation
+## Repository shape recorded at activation (historical)
 
-Phase 0 records the current shape of the source, token and diagnostic owners listed below. Do not
-carry a shape recorded before activation - it will be stale, and the owners move under ordinary
-work. Confirm at that point whether diagnostics implementation is parked or active, and make the
-answer explicit rather than inheriting it.
+Phase 0 recorded the predecessor shape of the source, token and diagnostic owners below. This
+activation inventory is historical, as of plan activation; it is not a current workspace status.
+Do not carry it forward as a current owner map.
 
-Current pressure points:
+Historical activation pressure points:
 
 - Stage 0 synthetic discovery retains complete prepared-file output, while directory inputs retain
   their single lexical token stream for later header preparation; these two state-safe variants
@@ -851,10 +838,11 @@ anticipated cross-phase cases.
 
 ---
 
-## Phase 0 — Activation, current-state audit and evidence baseline
+## Phase 0 — Activation, current-state audit and evidence baseline (historical)
 
-Completed. Evidence: `benchmarks/frontend-optimization-results.md`; searchable inventories:
-`target/data-layout-audit/`. Detailed execution history remains in Git.
+Phase 0 is an activation baseline recorded as of the plan's baseline evidence. It is not a report
+of the current workspace. Evidence: `benchmarks/frontend-optimization-results.md`; searchable
+inventories: `target/data-layout-audit/`. Detailed execution history remains in Git.
 
 - [x] **0A — activation:** hardening prerequisite `03168082d`, branch/worktree inventory,
   authority and owner refresh.
@@ -866,8 +854,9 @@ Completed. Evidence: `benchmarks/frontend-optimization-results.md`; searchable i
   workloads recorded. Added `data_layout` benchmark support using existing machinery.
   Instrumentation has no normal-build cost; the throwaway layout probe was removed.
 - [x] **0E — validation/evidence:** Rust 1.97.1 native/Linux/Windows Clippy, `just validate`,
-  frontend/CLI checks and five-run predecessor evidence passed.
-- [x] **Phase close:** ownership/style review and exit criteria accepted without semantic changes.
+  frontend/CLI checks and five-run predecessor evidence passed at activation.
+- [x] **Phase close:** ownership/style review and exit criteria accepted without semantic changes
+  at activation.
 
 Limits: memory evidence covers bounded capacities and aggregate live/peak allocation proxies,
 not a complete heap partition, nested heaps or path-only remap counts. No profiles were needed.
@@ -881,8 +870,8 @@ Exact span histograms required byte offsets and were delivered in 1C2, not Phase
 
 Source locations are the most pervasive representation problem. This phase moves source ownership to
 Stage 0, introduces exact packed byte spans and migrates every compiler stage and renderer. It also
-removes duplicated location data and existing boxed-diagnostic workarounds so the full CI gate becomes
-green before later layout work proceeds.
+removes duplicated location data and obsolete diagnostic indirection so the final validation gate can
+run before later layout work proceeds.
 
 ### Slice 1A — Add the final path foundation required by source records
 
@@ -995,15 +984,11 @@ Delivered contracts (evidence: layout authority and benchmark report):
 
 Standing facts: `LocalSpan`/option are four bytes; `SourceSpan`/option are eight. The line index
 builds once per snapshot; empty snapshots have no lines; EOF after a final terminator resolves to
-the preceding visible line end. Unicode scalar columns serve rendering, UTF-16 columns are
-reserved for tooling (one narrowly documented allowance until that consumer exists); the byte
-cursor stays authoritative while legacy line/column fields survive. Empty spans overlap nothing;
-containment is the operation for insertion points. 1F4 must consume `LineIndex` in both
-renderers, remove its module-wide dead-code allowance and cover code-token carets plus
-re-anchored tokens such as a discarded template body's closing bracket — old `CharPosition`
-columns or lines can be stale. Frozen-record span APIs exist, but production installation and
-builder retention remain 1D/1F work. Codec operations may keep only narrow allowances naming an
-actual remaining consumer, not blanket suppressions.
+the preceding visible line end. Unicode scalar columns serve rendering and UTF-16 columns serve
+tooling; both are derived lazily from exact byte offsets. Empty spans overlap nothing; containment
+is the operation for insertion points. Renderers consume retained snapshots and `LineIndex`; no
+legacy location or character-position fields are retained. Any remaining allowance must name a
+real unreached consumer rather than suppress an entire module.
 
 
 ### Slice 1D — Migrate tokenization and source preparation
@@ -1030,7 +1015,7 @@ actual remaining consumer, not blanket suppressions.
 - [ ] preserve stable diagnostic codes, source ranges and ordering
 - [ ] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API
 
-#### 1D sub-slices and the interval bridge
+#### 1D sub-slices and ownership history
 
 1D is split at source ownership boundaries:
 
@@ -1102,58 +1087,29 @@ actual remaining consumer, not blanket suppressions.
 - [x] **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
   repeated ad hoc path/location constructors in Rust tests.
 
-**Interval bridge.** A token cannot switch representation and migrate its consumers in the same
-slice: the tokenizer has hundreds of downstream location readers, and 1E exists precisely to move
-them. So from 1D2 until 1H a token carries both its exact span and the legacy `SourceLocation`. The
-span is authoritative for tokenizer-minted tokens, and the legacy range is derived from it.
-1D5a replaces the former `Token::terminator_at` exception with the declaration shell's exact
-local anchor and deletes that constructor. The anchor keeps its existing token-sized meaning;
-it is not widened to the whole declaration. 1H deletes the legacy field after consumers migrate.
+**Historical interval bridge.** Earlier checkpoints temporarily carried both exact spans and a
+line/column location representation while downstream consumers migrated. That bridge is complete in
+the current workspace: authored tokens and diagnostics use source-qualified `SourceSpan` values, and
+the old location representation is not a second production field.
 
-**1D3 prerequisite.** The 1D4 ownership cutover keeps original builders outside preparation results,
-retains them before fallible aggregation and defers installation until all producers have ended.
-Identity-rebind failures also finalize the known original tables before publication. Preparation
-diagnostics can use the live source resolver; later parsers must keep that same source owner when
-they begin producing joined or insertion spans. Shared locks,
-`OnceLock` installation and independent builders for repeated source preparation are prohibited.
+**Current ownership rule.** The original source builder remains owned through the last producer;
+preparation, aggregation and diagnosis publish only final source identities before downstream
+consumers run. Joined and insertion spans use that owner, and no repeated preparation or independent
+builder may create a parallel source table.
 
-*The bounding fact.* `SourceLocation` must not gain a required span field. Outside this lane there
-are hundreds of `CompilerDiagnostic::`/`CompilerError::` construction and adapter sites across AST,
-HIR, backend, project and build code, plus synthetic and path-only diagnostics that have no
-authored span to give. Requiring a span on the shared type pulls all of slice group 1E forward and
-forces those sites to manufacture one. 1D3 adds an exact `SourceSpan` carrier on the preparation
-lane's diagnostics and leaves `SourceLocation` alone until 1H, exactly as the interval bridge says.
-
-*Where the producers are.* Tokenizer: 11 constructor sites in `tokenizer/lexer.rs`, 2 in
-`numeric.rs`, 5 in `text_modes.rs`, and 14 more in `paths/const_paths/` reached through path
-parsing — all of them call `stream.new_location()` while `TokenStream` still owns both the cursor
-and the live builder (`tokenizer/tokens.rs:693-729`), so the span is in scope at every one. The
-three escape sites are the exception: `escape_span` (`text_modes.rs:137-145`) takes only
-`CharPosition` and never retained the escape's byte start, so it needs that start threaded before
-it can be exact. File preparation: `headers/file_parser.rs` 20, `trait_headers.rs` 17,
-`header_dispatch.rs` 7 direct plus 10 `CompilerError` adapters, `dependency_clause_syntax.rs` 5
-(12 branches through one helper), `parse_file_headers.rs` 5, `hash_items.rs` 5,
-`file_dependency_clauses.rs` 3, `dependency_paths.rs` 4; these receive `FileTokens` and
-`SourceLocation` but never the builder, though it is alive in their caller. Stage 0:
-`source_preparation.rs` constructs one file error and otherwise forwards, and
-`source_discovery.rs` has 4 user diagnostics of which 3 synthesise `SourceLocation::from_path` and
-so have no authored span at all. `plain_markdown_prepare.rs` produces no diagnostics and
-`moth_template_prepare.rs` only propagates infrastructure errors.
-
-The existing token bridge to copy is `TokenStream::new_token` (`tokenizer/tokens.rs:854-878`),
-which builds the span first and derives the legacy range from it; its agreement test is
-`every_token_legacy_byte_range_matches_its_encoded_span`
-(`tokenizer/tests/lexer_tests.rs:2450-2505`).
+The old producer inventory below is retained as historical activation evidence only. It described
+the pre-cutover constructors and adapters; it is not a current TODO list or a claim about current
+source code.
 
 
 ### Slice group 1E — Migrate all downstream source spans
 
 Each checked batch below is an independent accepted agent slice. Split a batch by its listed submodule
 before coding when it cannot reach focused green validation in one context. Do not accept a commit with
-a public boundary supporting both location models.
+a public boundary supporting duplicate source representations.
 
-- [x] **1E1 — headers and ordering:** accepted in `fc867c9fb`. Header/dependency/declaration-shell record span coverage audited with zero gaps (the only span-less preparation records were the semantic `ChoiceVariant` and `BuildConfigQualifierSyntax`, owned by 1E2); ordering hints are path-spelling-based with no location ordering; the module-symbol span map exists and header diagnostics are span-captured by the file-output batch pass. Delivered `InitializerReference.span` end to end (token-scan and capacity producers, `primary_span` on the four constant-dependency diagnostics, one span-plumbing regression test). Header parse-time location stores stay until 1F: their duplicate/bind diagnostics need first-locations with no resolver in scope.
-- [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests. Owns the semantic location-only state found in reconciliation: semantic `ChoiceVariant`/`ChoiceVariantPayload` locations and `BuildConfigQualifierSyntax.qualifier_location` (consumed via declaration shells into AST nodes).
+- [x] **1E1 — headers and ordering:** accepted in `fc867c9fb`. Header/dependency/declaration-shell record span coverage audited with zero gaps; ordering hints are path-spelling-based with no location ordering; the module-symbol span map exists and header diagnostics are span-captured by the file-output batch pass. Delivered `InitializerReference.span` end to end. This is a historical checkpoint record; current span ownership is described by the source-span rule above.
+- [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests. Verify every semantic record uses its exact `SourceSpan` or an explicit absence for generated data.
 - [ ] **1E3 — templates:** template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata
 - [ ] **1E4 — backend-facing frontend:** HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation
 - [ ] **1E5 — orchestration and support:** project config, Stage 0, build-system diagnostics, source adapters, compiler test helpers and direct location constructors
@@ -1164,31 +1120,38 @@ a public boundary supporting both location models.
 - [ ] **1F1 — frozen lookup foundation:** add consuming string/source/minimal-path freeze operations that move or share current allocations and create the final lookup-only `FrozenIdentityContext`
 - [ ] **1F2 — pre-merge boundary cleanup:** make file stages return `SourcePreparationDelta` with a move-only diagnostic bag and make module stages return a move-only legacy diagnostic batch plus their local identity deltas; create a boundary message set only after the final canonical build/package merge instead of cloning `StringTable` through `from_*_ref` helpers
 - [ ] **1F3 — transitional message ownership:** only at the final build/package render boundary, make current `CompilerMessages` temporarily own diagnostics, existing type context and `Arc<FrozenIdentityContext>` rather than a mutable/deep-cloned string table; make it move-only and use an outer `Arc` only where a host genuinely shares it; module outcomes must not freeze or clone a context before their deltas merge; name this bridge and delete it in Slice 4I
-- [ ] **1F4 — renderer migration:** resolve paths, excerpts and line/column positions through retained source snapshots and remove filesystem rereads used only for excerpts. Both renderers must derive source line and scalar position from `SourceLocation`'s exact byte offsets through `LineIndex`, which fixes the `char_column` caret that currently points one scalar past the offending text and the stale line an inherited position can carry; terminal/HTML caret padding then uses the retained line's display width under the tab-stop and Unicode policy in R8. Add caret-alignment regressions covering a captured code-token column, a re-anchored token such as a discarded template body's closing bracket, a preceding tab, a wide CJK character and a combining sequence. Consuming `line_of_offset`, `position` and `LinePosition` retires 1C4's module-wide `allow(dead_code)`; `utf16_column` keeps a narrowly scoped documented allowance until the LSP consumer the architecture document defers actually arrives
+- [ ] **1F4 — renderer migration:** resolve paths, excerpts and line/scalar positions through retained source snapshots and exact `SourceSpan` byte offsets via `LineIndex`; terminal/HTML caret padding uses retained-line display geometry. Add caret-alignment regressions for captured code tokens, re-anchored tokens, tabs, wide CJK characters and combining sequences. Final validation remains pending.
 - [ ] **1F5 — frozen generic source ownership:** preserve each retained generic body's real source identity with its owning frozen identity context, or canonically remap its exact source spans into the consuming context before publication. Materialised tokens, generated artefacts and their diagnostics must never expose detached donor IDs. Delete the identity-free frozen constructor and optional identity carrier introduced by the 1D interval correction, restoring required `SourceId` throughout the token/scope chain. Cover cross-module and independently compiled package materialisation, including extended spans after the donor's mutable builders have dropped.
 - [ ] preserve terminal, terse and dev-server code/span identity
 - [ ] define synthetic/compilation-root display and provenance explicitly
 - [ ] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
 - [ ] add rendering tests for changed-on-disk files, Unicode, CRLF, long lines, config/bootstrap sources and synthetic sources
-- [ ] convert header parse-time location stores (`PublicExportCollector.seen_names`, `HeaderFileParseState.encountered_symbols`/`seen_export_block`) once renderers resolve spans; their duplicate diagnostics need first-locations with no resolver in scope until then
+- [ ] verify header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit spanless contract before renderer publication; no path/line reconstruction is permitted.
 
-### Slice group 1G — Remove immediate diagnostic bloat and recover green CI
+### Slice group 1G — Compact plain diagnostics
 
-- [ ] **1G1 — remove duplicated source facts:** make the primary span canonical, keep only secondary labels in the transitional vector and remove payload/reason spans already represented by labels; cover generic inference, borrow conflicts, duplicate/shadow/dependency sites and assignment declarations first
-- [ ] **1G2 — remove infrastructure widening:** stop converting `CompilerError` into `DiagnosticPayload::InfrastructureError`, carry the legacy outer failure separately until Phase 5 and delete the infrastructure payload plus its cloned `String`/`HashMap`
-- [ ] **1G3 — enforce a non-throwaway size fix:** measure the transitional diagnostic; do not build a temporary old-payload cold-store system; when simplification is insufficient, pull forward only final schema/projection components retained by later phases
-- [ ] **1G4 — token projection gate:** if the predecessor still exceeds 128 bytes, pull forward only final `TokenTag`, `TokenDescriptor` and 8-byte `DiagnosticToken` foundations from Phase 3; do not create another wide or temporary diagnostic-token enum
-- [ ] **1G5 — remove workarounds:** require `size_of::<CompilerDiagnostic>() <= 128`, delete every `Box<CompilerDiagnostic>` alias/conversion and remove style-guide advice recommending local boxing; run native/Linux/Windows Clippy and confirm `result_large_err` is gone
-- [ ] remove both temporary `result_large_err` allowances from `src/lib.rs` and `xtask/src/benchmark_execution.rs` rather than relocating either one
+Workspace evidence shows the Phase 1G implementation cutover is present. The acceptance checkboxes
+remain open for the parent's final validation, review and checkpoint recording; this status claims no
+test, audit or commit result.
 
-### Slice 1H — Delete the old location and source identity model
+- [ ] **1G1 — remove duplicated source facts:** verify the primary span is canonical, secondary labels retain related sites, and payload/reason facts do not duplicate label-owned source data
+- [ ] **1G2 — keep infrastructure typed:** verify infrastructure failures remain in the typed `CompilerError` lane rather than a user-diagnostic payload
+- [ ] **1G3 — retain the compact boundary:** record the measured common diagnostic size and ensure no temporary replacement payload architecture was introduced
+- [ ] **1G4 — retain compact token projection:** verify any diagnostic token projection remains the final fixed-width form rather than a second wide token enum
+- [ ] **1G5 — final boundary gate:** verify plain `CompilerDiagnostic` values, no common diagnostic boxing and no lint-specific local workaround; record the platform validation when it is run
+- [ ] verify the activation-era lint allowances are absent rather than relocating them
 
-- [ ] delete `SourceLocation`, `CharPosition`, their constructors, path replacement and remap methods
-- [ ] delete `SourceFileTable`, `FileId` and fallback path-based identity comparison
-- [ ] delete line/column mutation in tokenization
-- [ ] delete location filesystem fallback helpers and obsolete tests
+### Slice 1H — Remove the old location and source identity model
+
+Workspace evidence shows the old location/source-identity cutover is present in production
+sources. The acceptance checkboxes remain open for the parent's final search, validation, review and
+checkpoint recording; this status claims no test, audit or commit result.
+
+- [ ] verify `SourceLocation`, `CharPosition`, their constructors, path replacement and remap methods are absent
+- [ ] verify `SourceFileTable`, `FileId` and fallback path-based identity comparison are absent
+- [ ] verify line/column mutation and location filesystem fallback helpers are absent
 - [ ] search the repository for old type names and construction patterns
-- [ ] update compiler/build authorities and source-location style rules
+- [ ] update compiler/build authorities and source-span style rules
 
 ### Phase 1 — Audit / style-guide review / validation
 
@@ -1210,16 +1173,18 @@ Complete the common phase close, plus:
 - [ ] one build-lifetime source database is canonical and its mutable/frozen source lifecycle is explicit
 - [ ] all compiler source positions are exact compact byte spans
 - [ ] retained snapshots render diagnostics
-- [ ] old location/file identity types are gone
-- [ ] current boxed-diagnostic workarounds are gone
+- [ ] old location/file identity types are absent from production sources
+- [ ] the compact plain diagnostic boundary has no common diagnostic boxing or lint-specific workaround
 - [ ] full CI is green before Phase 2 begins
-
 ### Review-derived corrections before Phase 1 closeout
 
+The following checkpoint notes are historical, as of their recorded review/commit entries. They
+preserve prior evidence but do not claim current workspace validation. The current Phase 1G/1H
+workspace status and pending gates are stated above.
+
 The attached source and diagnostic data-layout audit was reconciled against checkpoints through
-`1501330d7` on 2026-09-09. The source-text move, original builder retention, private discovery
-finalization and missing-source sibling/failure handling are already delivered; the remaining
-findings below are explicit Phase 1 gates rather than an invitation to create parallel owners.
+`1501330d7` on 2026-09-09; its implementation findings remain represented as Phase 1 gates rather
+than an invitation to create parallel owners.
 
 - [x] **R1a — authored snapshot capacity lane:** `f308f91e5` records an oversized authored
   snapshot in its source slot before publishing the existing source/file failure, while
@@ -1254,16 +1219,14 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   path interner are retained: frozen consumers still resolve canonical paths, so the drop waits
   for 1F1's `FrozenIdentityContext` decision. A `should_panic` test pins freeze rejection of an
   outstanding transient share; `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full
-  library suite (5,017) pass. R7 is the next active gate.
+  library suite (5,017) pass. At that historical checkpoint, R7 was recorded as the next gate.
 - [x] **R7 — cross-context related diagnostic sites:** accepted in `f98b7c42f`. Related sites stay
-  portable `SourceLocation`s with an optional explicit `SourceSpan` naming its own table; span
+  portable coordinate records with an optional explicit `SourceSpan` naming their own table; span
   identity governs rebinding and renderers use portable secondary coordinates, so a foreign-table
-  span is never interpreted in another table. Production never creates cross-table secondaries
-  (both explicit-span sites use the current file's source); same-domain labels stay compact. The
-  new test pins a foreign-span secondary rendering from its portable location. Independent audit
-  was unavailable (subagent provider quota exhausted); the additive-test-only change passed
-  `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full library suite (5,018).
-  R8 is the next active gate.
+  span is never interpreted in another table. Production never creates cross-table secondaries;
+  same-domain labels stay compact. The historical checkpoint's test and validation record remain
+  as-of that entry and are not current workspace evidence.
+  At that historical checkpoint, R8 was recorded as the next gate.
 - [x] **R8 — renderer display-cell coordinates:** accepted in `a7283c9c6`. Scalar source offsets
   (`LineIndex::position`), UTF-16 tooling columns (`utf16_column`) and terminal/HTML display cells
   are three separate units: caret padding and underline length now derive from the retained line
@@ -1271,8 +1234,8 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   width, combining 0, wide CJK 2), shared by the terminal and dev-server renderers. Regressions
   cover a preceding tab, a wide CJK scalar and a combining mark. Independent audit was
   unavailable (subagent provider quota exhausted); the change passed `cargo fmt`,
-  `git diff --check`, `cargo check -p moth` and the full library suite (5,021). R9 is the next
-  active gate.
+  `git diff --check`, `cargo check -p moth` and the full library suite (5,021). At that historical
+  checkpoint, R9 was recorded as the next gate.
 - [x] **R9 — migration-debt cleanup:** accepted in `1e209c3b5`. Impl-wide dead-code allowances
   are narrowed to per-method `#[allow(dead_code)]` on deferred-consumer span, table and line-index
   APIs (first callers land in slices 1D3/1D4/1E/1F; each allowance names its unreached callers),
@@ -1282,7 +1245,7 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   helper. Test parity holds (63 = 63) and the change passed `cargo fmt`, `git diff --check`,
   `cargo check -p moth --tests` with zero warnings and the full library suite (5,021).
   Independent audit was unavailable (subagent provider quota exhausted). The R10 prerequisites are
-  the next active gates before the remaining 1D/1E/1F/1G/1H completion slices.
+  the next gates before the remaining 1D/1E/1F/1G/1H completion slices at that historical checkpoint.
 - [ ] **R10a — diagnostic identity ownership (Phase 4 prerequisite):** make stable reason keys part
   of the final diagnostic schema rather than an interim compiler-owned payload convention.
 - [ ] **R10b — draft/durable type separation (Phase 4 prerequisite):** define distinct draft and

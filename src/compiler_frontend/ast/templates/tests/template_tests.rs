@@ -30,11 +30,9 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::FxHashMap;
@@ -44,7 +42,6 @@ use std::rc::Rc;
 fn start_function_node(
     entry_dir: &InternedPath,
     body: Vec<AstNode>,
-    location: SourceLocation,
     string_table: &mut StringTable,
 ) -> AstNode {
     AstNode {
@@ -56,23 +53,17 @@ fn start_function_node(
             },
             body,
         ),
-        location,
         span: None,
         scope: entry_dir.to_owned(),
     }
 }
 
-fn push_start_runtime_fragment_node(
-    template: Template,
-    location: SourceLocation,
-    scope: InternedPath,
-) -> AstNode {
+fn push_start_runtime_fragment_node(template: Template, scope: InternedPath) -> AstNode {
     AstNode {
         kind: NodeKind::PushStartRuntimeFragment(Expression::template(
             template,
             ValueMode::ImmutableOwned,
         )),
-        location,
         span: None,
         scope,
     }
@@ -213,7 +204,6 @@ fn formatted_doc_template_with_direct_tir(
     text: &str,
     string_table: &mut StringTable,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let location = test_source_location(2);
     let text_id = string_table.intern(text);
     let byte_len = text.len();
 
@@ -234,19 +224,15 @@ fn formatted_doc_template_with_direct_tir(
     let mut store = TemplateIrStore::new();
     let parsed_template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let text_node = builder.push_text_node(
-            text_id,
-            byte_len,
-            TemplateSegmentOrigin::Body,
-            location.clone(),
-        );
+        let text_node =
+            builder.push_text_node(text_id, byte_len, TemplateSegmentOrigin::Body, None);
 
         builder.finish_template(
             text_node,
             style.clone(),
             TemplateType::Comment(CommentDirectiveKind::Doc),
             parsed_summary.clone(),
-            location.clone(),
+            None,
         )
     };
 
@@ -268,7 +254,6 @@ fn formatted_doc_template_with_direct_tir(
         style.clone(),
         TemplateType::Comment(CommentDirectiveKind::Doc),
         parsed_summary,
-        location.clone(),
         None,
     ));
 
@@ -278,7 +263,6 @@ fn formatted_doc_template_with_direct_tir(
             phase: TemplateTirPhase::Formatted,
             context,
         },
-        location,
         span: None,
     };
 
@@ -296,12 +280,7 @@ fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
 
     let mut ast_nodes = vec![start_function_node(
         &entry_dir,
-        vec![push_start_runtime_fragment_node(
-            doc_template,
-            test_source_location(2),
-            entry_scope,
-        )],
-        test_source_location(1),
+        vec![push_start_runtime_fragment_node(doc_template, entry_scope)],
         &mut string_table,
     )];
 
@@ -357,7 +336,6 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,
-        location: test_source_location(2),
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
@@ -384,7 +362,6 @@ fn collects_const_top_level_fragments_from_folded_value() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 2,
         header_path: path,
-        location: test_source_location(4),
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 
@@ -419,13 +396,11 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
         TopLevelConstFragment {
             runtime_insertion_index: 1,
             header_path: first_path,
-            location: test_source_location(2),
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 3,
             header_path: second_path,
-            location: test_source_location(5),
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
     ];
@@ -453,7 +428,7 @@ fn fixture_resource_id() -> ResourceId {
     );
 
     let mut resources = ModuleResourceTable::new();
-    resources.intern_origin(origin, SourceLocation::default())
+    resources.intern_origin(origin, None)
 }
 
 #[test]
@@ -501,19 +476,16 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
         TopLevelConstFragment {
             runtime_insertion_index: 1,
             header_path: piece_path,
-            location: test_source_location(2),
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 2,
             header_path: all_text_path,
-            location: test_source_location(3),
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
         TopLevelConstFragment {
             runtime_insertion_index: 3,
             header_path: text_path,
-            location: test_source_location(4),
             span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         },
     ];
@@ -546,7 +518,6 @@ fn missing_const_top_level_fragment_result_returns_compiler_error() {
     let fragments = vec![TopLevelConstFragment {
         runtime_insertion_index: 0,
         header_path: path,
-        location: test_source_location(2),
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     }];
 

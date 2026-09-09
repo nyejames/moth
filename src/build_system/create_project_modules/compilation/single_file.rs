@@ -17,7 +17,7 @@ use crate::compiler_frontend::module_compilation::{
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
 };
@@ -189,7 +189,6 @@ fn compile_single_file_frontend_with_target(
             return Err(CompilerError::file_error(
                 &config.entry_dir,
                 "Entry file extension is not valid UTF-8".to_owned(),
-                string_table,
             )
             .into());
         }
@@ -204,17 +203,12 @@ fn compile_single_file_frontend_with_target(
                         return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
                             &non_utf8.path,
                             "single-file entry path",
-                            string_table,
                         )));
                     }
                 };
             let extension = string_table.intern(extension_text);
-            let location = SourceLocation {
-                scope: interned_path.clone(),
-                ..Default::default()
-            };
             let diagnostic =
-                CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, location);
+                CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
 
             // Move the local table into the batch; this diagnosed path aborts discovery,
             // so no clone is needed to carry the diagnostic.
@@ -229,7 +223,6 @@ fn compile_single_file_frontend_with_target(
             format!(
                 "Unsupported file extension for compilation. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
             ),
-            string_table,
         )
         .into());
     }
@@ -246,7 +239,6 @@ fn compile_single_file_frontend_with_target(
             return Err(CompilerError::file_error(
                 &config.entry_dir,
                 format!("Failed to resolve entry file path: {error}"),
-                string_table,
             )
             .into());
         }
@@ -273,7 +265,6 @@ fn compile_single_file_frontend_with_target(
             return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
                 &entry_path,
                 "single-file entry name",
-                string_table,
             )));
         }
     };
@@ -437,14 +428,14 @@ fn compile_single_file_frontend_with_target(
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts =
             config_boundary::direct_project_contract_facts(&effective_project_fields);
-        let fallback_location = SourceLocation::from_path(&config.entry_dir, string_table);
+        let fallback_span = None;
         let build_config_values = config_boundary::resolve_boundary_build_config(
             &source_facts,
             &fixed_project_facts,
             &direct_project_facts,
             build_config_inputs,
             builder_surface.config_globals(),
-            fallback_location,
+            fallback_span,
             string_table,
         )?;
         // Semantic compilation is one compiler service call. A synthetic single-file module has no

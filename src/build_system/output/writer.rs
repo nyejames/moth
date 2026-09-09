@@ -664,7 +664,7 @@ pub(crate) fn emit_prepared_output_files(
                 let source_id = project.deferred_resources[*deferred_resource_index].source_id;
                 let bytes = project
                     .resource_inputs
-                    .read_source(source_id, string_table)
+                    .read_source(source_id)
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 write_bytes_output(destination, bytes, write_mode, string_table)?
             }

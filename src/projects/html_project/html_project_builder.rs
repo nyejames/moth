@@ -21,7 +21,7 @@ use crate::builder_surface::config_schema::{
 };
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -134,7 +134,6 @@ impl BackendBuilder for HtmlProjectBuilder {
             let logical_html_output_path = html_output_path(
                 &module.metadata.entry_point,
                 entry_paths.resolved_entry_root.as_deref(),
-                string_table,
             )
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
             let wasm_route_plan = if wasm_enabled {
@@ -155,15 +154,31 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .hir
                 .require_start_function("HTML page metadata extraction")
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-            let page_metadata_plan = extract_html_page_metadata(
+            let page_metadata_plan = match extract_html_page_metadata(
                 &module.executable.hir,
                 start_function,
                 &module.executable.resource_table,
                 string_table,
-            )
-            .map_err(|diagnostic| {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
-            })?;
+            ) {
+                Ok(plan) => plan,
+                Err(
+                    crate::projects::html_project::page_metadata::PageMetadataError::Diagnostic(
+                        diagnostic,
+                    ),
+                ) => {
+                    return Err(CompilerMessages::from_diagnostic_ref(
+                        diagnostic,
+                        string_table,
+                    ));
+                }
+                Err(
+                    crate::projects::html_project::page_metadata::PageMetadataError::Infrastructure(
+                        error,
+                    ),
+                ) => {
+                    return Err(CompilerMessages::from_error_ref(error, string_table));
+                }
+            };
             resource_output_plan.plan_entry(
                 &entry,
                 planned_html_output_path,
@@ -263,8 +278,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         for asset in runtime_emission_plan.js_assets().values() {
             resource_output_plan.plan_provider_runtime_asset(
                 asset.origin.clone(),
-                asset.authored_import_location.clone(),
-                asset.authored_import_span,
+                asset.source_span,
                 string_table,
             )?;
         }
@@ -480,7 +494,7 @@ impl HtmlProjectBuilder {
             backend_target,
             string_table,
         )
-        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
+        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(diagnostic, string_table))?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -493,7 +507,7 @@ impl HtmlProjectBuilder {
         )
         .map_err(|error| match error {
             BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
                     .with_type_context_for_all_diagnostics(
                         module.executable.type_environment.clone(),
                     )
@@ -511,7 +525,7 @@ impl HtmlProjectBuilder {
                 string_table,
             )
             .map_err(|diagnostic| {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
             })?;
             validate_hir_backend_feature_support(
                 BackendFeatureValidationInput {
@@ -524,7 +538,7 @@ impl HtmlProjectBuilder {
             )
             .map_err(|error| match error {
                 BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                    CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                    CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
                         .with_type_context_for_all_diagnostics(
                             linked.module.executable.type_environment.clone(),
                         )
@@ -608,15 +622,10 @@ fn emit_planned_resource_outputs(
                 "module-owned"
             };
 
-            let error = CompilerError::new(
-                format!(
-                    "planned {owner_kind} resource origin {:?} has no registered source \
-                     attachment",
-                    record.origin
-                ),
-                record.first_authored_location.clone(),
-                ErrorType::Compiler,
-            );
+            let error = CompilerError::compiler_error(format!(
+                "planned {owner_kind} resource origin {:?} has no registered source attachment",
+                record.origin
+            ));
             return Err(CompilerMessages::from_error_ref(error, string_table));
         };
         if output_paths.contains(&record.output_path)
@@ -636,7 +645,6 @@ fn emit_planned_resource_outputs(
                 &record.output_path,
                 &display_origin(&record.origin),
                 artefact_kind,
-                &record.first_authored_location,
                 record.first_authored_span,
                 string_table,
             ));

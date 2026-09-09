@@ -84,7 +84,6 @@ pub(super) fn prepare_discovery_source_text(
                 format!(
                     "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
-                string_table,
             )));
         }
     };
@@ -119,9 +118,7 @@ pub(super) fn prepare_discovery_source_text(
                 prepared_output: SourcePreparationDelta {
                     file_id: source_id,
                     span_builder,
-                    result: Err(FileFrontendPrepareFailure::from_tokenization(
-                        failure, source_id,
-                    )),
+                    result: Err(FileFrontendPrepareFailure::from_tokenization(failure)),
                 },
                 source_byte_len: source.len(),
                 source_code: source,
@@ -241,8 +238,7 @@ fn prepare_discovery_output(
             Err(FileFrontendPrepareFailure::Diagnosed(error))
         }
 
-        Err(FileFrontendPrepareFailure::Infrastructure(mut error)) => {
-            error.remap_string_ids(&remap);
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
             Err(FileFrontendPrepareFailure::Infrastructure(error))
         }
     };

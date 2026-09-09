@@ -12,7 +12,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionIndex,
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
     PremergeFailure,
@@ -32,7 +32,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -240,15 +240,11 @@ fn facade_project_globals_dependency(
                 &clause.dependency.path,
                 &prepared.semantic.string_table,
             ) {
-                let mut diagnostic = CompilerDiagnostic::invalid_dependency_clause(
+                let diagnostic = CompilerDiagnostic::invalid_dependency_clause(
                     clause.binding.clause_kind(),
                     InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    clause.dependency.location.clone(),
+                    Some(clause.dependency.span),
                 );
-                diagnostic.primary_span = Some(SourceSpan::new(
-                    clause.dependency.dependency_shell_id.source,
-                    clause.dependency.span,
-                ));
                 return Ok(Some(diagnostic));
             }
         }
@@ -753,15 +749,12 @@ fn compile_check_only_job(
         ) {
         Ok(values) => values,
         Err(error) => {
-            let fallback_location = error
-                .contract_location()
-                .cloned()
-                .unwrap_or_else(SourceLocation::default);
+            let fallback_span = None;
             // The typed config failure already carries the moved local table; classify
             // the batch into the module outcome without a vessel round-trip.
             let outcome = match config_boundary::build_config_resolution_failure(
                 error,
-                fallback_location,
+                fallback_span,
                 &mut prepared.semantic.string_table,
             ) {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
@@ -769,6 +762,11 @@ fn compile_check_only_job(
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
                 },
                 PremergeFailure::Infrastructure(error) => {
+                    DirectoryModuleTaskOutcome::Infrastructure(error)
+                }
+                // Mixed double-failures only arise at source-finalization tails and never
+                // reach module tasks; abort through the typed lane if one ever does.
+                PremergeFailure::Mixed { error, .. } => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
                 }
             };

@@ -357,12 +357,9 @@ pub(super) fn prepare_file_value_bundle(
                 return Err(finish_source_owner(messages, source_builder, string_table));
             }
         };
-        let owner_logical_path = source_builder
-            .sources()
-            .legacy_logical_path(owner_source_file);
         let path_syntax = resolved.path_syntax;
         let class = resolved.class;
-        let mut outcome = match resolved_outcome_from_physical(
+        let outcome = match resolved_outcome_from_physical(
             resolved,
             source_builder.sources(),
             string_table,
@@ -372,9 +369,6 @@ pub(super) fn prepare_file_value_bundle(
                 return Err(finish_source_owner(messages, source_builder, string_table));
             }
         };
-        if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
-            diagnostic.rebind_source_identity(None, owner_source_file, &owner_logical_path);
-        }
         if let Err(error) = resolved_file_references.push(ResolvedFileReference {
             source_file: owner_source_file,
             path_syntax,
@@ -478,9 +472,7 @@ fn finalize_known_sources(
                     transfer_error.get_or_insert(error);
                 }
             }
-            Err(mut error) => {
-                let logical_path = source_builder.sources().legacy_logical_path(source_id);
-                error.location.rebind_source_identity(&logical_path);
+            Err(error) => {
                 if let Err(install_error) = source_builder
                     .sources_mut()
                     .record_source_load_error(source_id, error)
@@ -550,17 +542,7 @@ fn finalize_known_sources(
         let mut prepared_entry = None;
         let mut prepared_content_sources = Vec::new();
         for (path, mut prepared, _) in prepared {
-            let source_id = source_builder
-                .sources()
-                .get_by_canonical_path(&path)
-                .expect("transferred source must remain registered")
-                .id;
             let is_entry = path == entry_file_path;
-            prepared.rebind_source_identity(
-                source_id,
-                source_builder.sources().legacy_logical_path(source_id),
-                path,
-            )?;
             prepared.freeze_path_syntax(string_table)?;
             if is_entry {
                 prepared_entry = Some(prepared);
@@ -645,40 +627,17 @@ fn finalize_discovery_failure(
     for prepared in &mut prepared_content_sources {
         prior_warnings.append(&mut prepared.warnings);
     }
-    let source_id = match source_id_for_path(
-        source_builder.sources(),
-        &failed_path,
-        string_table,
-        "has no finalized identity for its preparation failure",
-    ) {
-        Ok(source_id) => source_id,
-        Err(mut messages) => {
-            messages.prepend_diagnostics_preserving_context(prior_warnings);
-            return finish_source_owner(messages, source_builder, string_table);
-        }
-    };
-    let logical_path = source_builder.sources().legacy_logical_path(source_id);
-
-    // Rebind the failure before final installation so its warnings use the final source domain.
     match &mut failure {
         FileFrontendPrepareFailure::Diagnosed(error) => {
-            for warning in &mut error.warnings {
-                warning.rebind_source_identity(Some(error.file_id), source_id, &logical_path);
-            }
-            error
-                .diagnostic
-                .rebind_source_identity(Some(error.file_id), source_id, &logical_path);
             prior_warnings.append(&mut error.warnings);
         }
-        FileFrontendPrepareFailure::Infrastructure(error) => {
-            error.location.rebind_source_identity(&logical_path);
-        }
+        FileFrontendPrepareFailure::Infrastructure(_) => {}
     }
 
     let messages = match failure {
         FileFrontendPrepareFailure::Diagnosed(error) => {
             CompilerMessages::from_diagnostic_with_warnings(
-                *error.diagnostic,
+                error.diagnostic,
                 prior_warnings,
                 string_table,
             )

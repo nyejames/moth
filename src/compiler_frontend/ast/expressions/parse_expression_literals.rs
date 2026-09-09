@@ -23,7 +23,6 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -72,7 +71,7 @@ pub(super) fn parse_literal_expression(
 ) -> Result<(), ExpressionParseError> {
     match token_stream.current_token_kind().to_owned() {
         TokenKind::NumericLiteral(token) => {
-            let location = token_stream.current_location();
+            let span = Some(token_stream.current_span());
 
             let expression = if token.kind == NumericLiteralKind::WholeNumber {
                 let effective_sign =
@@ -86,30 +85,14 @@ pub(super) fn parse_literal_expression(
                 let value_i32 = materialize_i32_with_sign(&token, effective_sign, string_table)
                     .map_err(|reason| {
                         // Use authored source text so diagnostics report the original literal.
-                        CompilerDiagnostic::invalid_number_literal(
-                            token.source_text,
-                            reason,
-                            location.clone(),
-                        )
+                        CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                Expression::int(
-                    value_i32,
-                    location.to_owned(),
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
-                    state.value_mode.to_owned(),
-                )
+                Expression::int(value_i32, span, state.value_mode.to_owned())
             } else {
                 let mut value = materialize_f64(&token, string_table).map_err(|reason| {
                     // Use authored source text so diagnostics report the original literal.
-                    CompilerDiagnostic::invalid_number_literal(
-                        token.source_text,
-                        reason,
-                        location.clone(),
-                    )
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                 })?;
 
                 if *state.next_number_negative {
@@ -119,15 +102,7 @@ pub(super) fn parse_literal_expression(
                     }
                 }
 
-                Expression::float(
-                    value,
-                    location.to_owned(),
-                    Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
-                    state.value_mode.to_owned(),
-                )
+                Expression::float(value, span, state.value_mode.to_owned())
             };
 
             token_stream.advance();
@@ -144,16 +119,8 @@ pub(super) fn parse_literal_expression(
         }
 
         TokenKind::StringSliceLiteral(string) => {
-            let location = token_stream.current_location();
-            let string_expr = Expression::string_slice(
-                string,
-                location.to_owned(),
-                Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                )),
-                state.value_mode.to_owned(),
-            );
+            let span = Some(token_stream.current_span());
+            let string_expr = Expression::string_slice(string, span, state.value_mode.to_owned());
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -168,16 +135,8 @@ pub(super) fn parse_literal_expression(
         }
 
         TokenKind::BoolLiteral(value) => {
-            let location = token_stream.current_location();
-            let bool_expr = Expression::bool(
-                value,
-                location.to_owned(),
-                Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                )),
-                state.value_mode.to_owned(),
-            );
+            let span = Some(token_stream.current_span());
+            let bool_expr = Expression::bool(value, span, state.value_mode.to_owned());
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -192,16 +151,8 @@ pub(super) fn parse_literal_expression(
         }
 
         TokenKind::CharLiteral(value) => {
-            let location = token_stream.current_location();
-            let char_expr = Expression::char(
-                value,
-                location.to_owned(),
-                Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                )),
-                state.value_mode.to_owned(),
-            );
+            let span = Some(token_stream.current_span());
+            let char_expr = Expression::char(value, span, state.value_mode.to_owned());
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -216,6 +167,7 @@ pub(super) fn parse_literal_expression(
         }
 
         TokenKind::NoneLiteral => {
+            let span = Some(token_stream.current_span());
             let (inner_type_id, inner_diagnostic_type) =
                 if let ExpectedType::Known(expected_type_id) = state.expected_type {
                     let type_environment = type_interner.environment();
@@ -224,7 +176,7 @@ pub(super) fn parse_literal_expression(
                         return Err(CompilerDiagnostic::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
-                        token_stream.current_location(),
+                        span,
                     )
                     .into());
                     };
@@ -241,21 +193,15 @@ pub(super) fn parse_literal_expression(
                     return Err(CompilerDiagnostic::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
-                        token_stream.current_location(),
+                        span,
                     )
                     .into());
                 };
 
-            let location = token_stream.current_location();
-            let span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
             let mut none_expr = Expression::option_none_with_type_id(
                 inner_type_id,
                 inner_diagnostic_type,
                 type_interner.environment_mut_for_derived_types(),
-                location.clone(),
                 span,
             );
             none_expr.value_mode = state.value_mode.to_owned();

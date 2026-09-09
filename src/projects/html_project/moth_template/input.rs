@@ -7,13 +7,12 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::scope::{
     MothTemplatePathScope, MothTemplateScopeConstant,
 };
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -278,15 +277,10 @@ fn no_common_ancestor_messages(
             return CompilerMessages::from_error_ref(failure, string_table);
         }
     };
-    let location = SourceLocation::new(
-        second_interned.clone(),
-        CharPosition::default(),
-        CharPosition::default(),
-    );
     let diagnostic = CompilerDiagnostic::moth_template_inputs_share_no_common_ancestor(
         first_interned,
         second_interned,
-        location,
+        None,
     );
 
     CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
@@ -306,7 +300,6 @@ fn intern_filesystem_path_identity(
                     "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth \
                  identity requires UTF-8 paths."
                 ),
-                string_table,
             )
         },
     )
@@ -410,14 +403,13 @@ fn reject_duplicate_source_paths(
     units: &[MothTemplateSourceUnit],
     string_table: &mut StringTable,
 ) -> Result<(), CompilerMessages> {
-    let mut first_locations: HashMap<PathBuf, SourceLocation> = HashMap::new();
+    let mut seen_paths = HashSet::new();
     let mut diagnostics = Vec::new();
 
     for unit in units {
         let normalized = normalize_path_for_identity(&unit.source_path);
-        let location = SourceLocation::from_path(&unit.source_path, string_table);
 
-        if let Some(first_location) = first_locations.get(&normalized) {
+        if !seen_paths.insert(normalized.clone()) {
             let path = match InternedPath::try_from_filesystem_path(&normalized, string_table) {
                 Ok(interned) => interned,
                 Err(NonUtf8PathComponent { path: bad_path }) => {
@@ -427,19 +419,14 @@ fn reject_duplicate_source_paths(
                             format!(
                                 "Moth template source path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                             ),
-                            string_table,
                         ),
                         string_table,
                     ));
                 }
             };
             diagnostics.push(CompilerDiagnostic::duplicate_moth_template_input_path(
-                path,
-                first_location.clone(),
-                location,
+                path, None, None,
             ));
-        } else {
-            first_locations.insert(normalized, location);
         }
     }
 
@@ -466,18 +453,12 @@ fn unsupported_scope_constant_messages(
                     format!(
                         "Moth template scope path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                     ),
-                    string_table,
                 ),
                 string_table,
             );
         }
     };
-    let location = SourceLocation::new(
-        path.clone(),
-        CharPosition::default(),
-        CharPosition::default(),
-    );
-    let diagnostic = CompilerDiagnostic::invalid_moth_template_api_scope_item(path, location);
+    let diagnostic = CompilerDiagnostic::invalid_moth_template_api_scope_item(path, None);
 
     CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
 }

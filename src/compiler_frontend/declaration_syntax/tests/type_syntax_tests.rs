@@ -14,9 +14,9 @@ use crate::compiler_frontend::ast::type_resolution::{
     resolve_parsed_type_annotation, resolve_type,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, GenericApplicationErrorReason,
+    CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, GenericApplicationErrorReason,
     InvalidCollectionTypeReason, InvalidGenericInstantiationReason, InvalidMapTypeReason,
-    InvalidTypeAnnotationReason, NameNamespace,
+    InvalidTypeAnnotationReason, NameNamespace, TokenTag,
 };
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -28,17 +28,18 @@ use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation,
 };
+use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
 fn numeric_token(value: &str, string_table: &mut StringTable) -> Token {
     Token::new(
         TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        SourceLocation::default(),
+        LocalSpan::source_start(),
     )
 }
 
@@ -55,7 +56,7 @@ fn stream_from_tokens(tokens: Vec<Token>, string_table: &mut StringTable) -> Fil
 }
 
 fn token(kind: TokenKind) -> Token {
-    Token::new(kind, SourceLocation::default())
+    Token::new(kind, LocalSpan::source_start())
 }
 
 fn assert_diagnostic_payload(
@@ -70,6 +71,21 @@ fn assert_diagnostic_payload(
         "expected {expected_description}, got {:?}",
         diagnostic.payload
     );
+}
+
+/// Unwrap a type-syntax parse failure into its authored-source diagnostic.
+///
+/// WHAT: matches the typed `HeaderParseFailure` lane so tests pin the user diagnostic
+///       instead of dereferencing an obsolete boxed value.
+/// WHY: infrastructure failures must abort the test explicitly rather than being mistaken
+///      for a source diagnostic.
+fn unwrap_type_parse_diagnostic(failure: HeaderParseFailure) -> CompilerDiagnostic {
+    match failure {
+        HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
+        HeaderParseFailure::Infrastructure(error) => {
+            panic!("type syntax infrastructure failure is not a source diagnostic: {error:?}")
+        }
+    }
 }
 
 fn register_single_parameter_struct(
@@ -101,16 +117,8 @@ fn resolve_type_annotation_error(
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    resolve_parsed_type_annotation(
-        parsed,
-        &SourceLocation::default(),
-        &mut resolution_context,
-        string_table,
-        None,
-    )
-    .expect_err(expected_failure)
-    .as_ref()
-    .to_owned()
+    resolve_parsed_type_annotation(parsed, None, &mut resolution_context, string_table, None)
+        .expect_err(expected_failure)
 }
 
 #[test]
@@ -139,13 +147,9 @@ fn resolved_type_annotation_carries_canonical_type_id() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
     let resolved = resolve_parsed_type_annotation(
-        ParsedTypeRef::BuiltinInt {
-            location: location.to_owned(),
-            span: LocalSpan::source_start(),
-        },
-        &location,
+        ParsedTypeRef::BuiltinInt { span: None },
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -166,7 +170,7 @@ fn resolved_inferred_annotation_has_no_type_id() {
 
     let resolved = resolve_parsed_type_annotation(
         ParsedTypeRef::Inferred,
-        &SourceLocation::default(),
+        None,
         &mut resolution_context,
         &mut string_table,
         None,
@@ -198,18 +202,19 @@ fn declaration_context_parses_named_optional_type() {
     )
     .expect("named optional declaration type annotation should parse");
 
-    assert_eq!(
+    assert!(matches!(
         parsed,
         ParsedTypeRef::Optional {
-            inner: Box::new(ParsedTypeRef::Named {
-                name: point,
-                location: SourceLocation::default(),
-                span: LocalSpan::source_start(),
-            }),
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
-        }
-    );
+            inner,
+            span: Some(_),
+        } if matches!(
+            *inner,
+            ParsedTypeRef::Named {
+                name,
+                span: Some(_),
+            } if name == point
+        )
+    ));
 }
 
 #[test]
@@ -220,12 +225,14 @@ fn signature_parameter_rejects_none_type() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("none parameter type should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("none parameter type should fail"),
+    );
 
     assert!(matches!(
         error.payload,
@@ -244,12 +251,14 @@ fn signature_parameter_rejects_reserved_trait_this_type() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("reserved trait keyword type should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("reserved trait keyword type should fail"),
+    );
 
     assert!(matches!(
         error.payload,
@@ -268,21 +277,21 @@ fn declaration_target_rejects_type_keyword_inside_type_annotation() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("type keyword should be reserved");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("type keyword should be reserved"),
+    );
 
     assert!(matches!(
         error.payload,
         DiagnosticPayload::InvalidTypeAnnotation {
             context: TypeAnnotationContext::DeclarationTarget,
-            reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: TokenKind::Type,
-            },
-        }
+            reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
+        } if found == DiagnosticToken::from(TokenKind::Type)
     ));
 }
 
@@ -294,18 +303,19 @@ fn signature_return_rejects_bare_of_keyword_with_structured_syntax_error() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureReturn,
-        &string_table,
-    )
-    .expect_err("of keyword should fail in type position");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureReturn,
+            &string_table,
+        )
+        .expect_err("of keyword should fail in type position"),
+    );
 
     assert!(matches!(
         error.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Of
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from(TokenKind::Of)
     ));
 }
 
@@ -331,22 +341,23 @@ fn parses_generic_type_application() {
     )
     .expect("generic type application should parse");
 
-    assert_eq!(
+    assert!(matches!(
         parsed,
         ParsedTypeRef::Applied {
-            base: Box::new(ParsedTypeRef::Named {
-                name: box_name,
-                location: SourceLocation::default(),
-                span: LocalSpan::source_start(),
-            }),
-            arguments: vec![ParsedTypeRef::BuiltinString {
-                location: SourceLocation::default(),
-                span: LocalSpan::source_start(),
-            }],
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
-        }
-    );
+            base,
+            arguments,
+            span: Some(_),
+        } if matches!(
+            *base,
+            ParsedTypeRef::Named {
+                name,
+                span: Some(_),
+            } if name == box_name
+        ) && matches!(
+            arguments.as_slice(),
+            [ParsedTypeRef::BuiltinString { span: Some(_) }]
+        )
+    ));
 }
 
 #[test]
@@ -461,27 +472,30 @@ fn parses_collection_of_generic_type_application() {
     )
     .expect("collection element generic type application should parse");
 
-    assert_eq!(
-        parsed,
+    assert!(matches!(
+        &parsed,
         ParsedTypeRef::Collection {
-            element: Box::new(ParsedTypeRef::Applied {
-                base: Box::new(ParsedTypeRef::Named {
-                    name: box_name,
-                    location: SourceLocation::default(),
-                    span: LocalSpan::source_start(),
-                }),
-                arguments: vec![ParsedTypeRef::BuiltinString {
-                    location: SourceLocation::default(),
-                    span: LocalSpan::source_start(),
-                }],
-                location: SourceLocation::default(),
-                span: LocalSpan::source_start(),
-            }),
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
+            element,
+            span: Some(_),
             fixed_capacity: None,
-        }
-    );
+        } if matches!(
+            element.as_ref(),
+            ParsedTypeRef::Applied {
+                base,
+                arguments,
+                span: Some(_),
+            } if matches!(
+                base.as_ref(),
+                ParsedTypeRef::Named {
+                    name,
+                    span: Some(_),
+                } if *name == box_name
+            ) && matches!(
+                arguments.as_slice(),
+                [ParsedTypeRef::BuiltinString { span: Some(_) }]
+            )
+        )
+    ));
 }
 
 #[test]
@@ -504,12 +518,14 @@ fn rejects_nested_generic_type_application() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("nested generic type application should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("nested generic type application should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -538,12 +554,14 @@ fn duplicate_optional_marker_is_rejected() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureReturn,
-        &string_table,
-    )
-    .expect_err("duplicate optional marker should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureReturn,
+            &string_table,
+        )
+        .expect_err("duplicate optional marker should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -583,7 +601,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         ResolvedTypeAlias {
             diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
             target_type_id: type_environment.intern_option(type_environment.builtins().string),
-            declaration_location: SourceLocation::default(),
+            declaration_span: None,
         },
     );
 
@@ -606,13 +624,8 @@ fn alias_expanded_nested_optional_type_is_rejected() {
         visible_trait_names: None,
     };
 
-    let error = resolve_type(
-        &unresolved,
-        &SourceLocation::default(),
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect_err("alias-expanded nested option should fail");
+    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect_err("alias-expanded nested option should fail");
 
     assert_diagnostic_payload(
         error,
@@ -640,12 +653,7 @@ fn resolves_named_types_recursively_in_composite_types() {
     let point_path = InternedPath::from_single_str("Point", &mut string_table);
     let declarations = vec![Declaration {
         id: point_path,
-        value: Expression::no_value(
-            SourceLocation::default(),
-            None,
-            DataType::Int,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::no_value(None, DataType::Int, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -655,14 +663,8 @@ fn resolves_named_types_recursively_in_composite_types() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let location = SourceLocation::default();
-    let resolved = resolve_type(
-        &unresolved,
-        &location,
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect("named type resolution should succeed");
+    let resolved = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect("named type resolution should succeed");
 
     assert_eq!(
         resolved,
@@ -686,7 +688,6 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
-            SourceLocation::default(),
             None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
@@ -717,14 +718,8 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         visible_trait_names: None,
     };
 
-    let location = SourceLocation::default();
-    let resolved = resolve_type(
-        &unresolved,
-        &location,
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect("generic base should resolve");
+    let resolved = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect("generic base should resolve");
 
     assert_eq!(
         resolved,
@@ -751,7 +746,6 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
-            SourceLocation::default(),
             None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
@@ -782,14 +776,8 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         visible_trait_names: None,
     };
 
-    let location = SourceLocation::default();
-    let error = resolve_type(
-        &unresolved,
-        &location,
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect_err("wrong generic arity should fail");
+    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect_err("wrong generic arity should fail");
 
     assert_diagnostic_payload(
         error,
@@ -822,7 +810,6 @@ fn bare_generic_type_name_requires_type_arguments() {
     let declarations = vec![Declaration {
         id: box_path.to_owned(),
         value: Expression::no_value(
-            SourceLocation::default(),
             None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
@@ -853,14 +840,8 @@ fn bare_generic_type_name_requires_type_arguments() {
         visible_trait_names: None,
     };
 
-    let location = SourceLocation::default();
-    let error = resolve_type(
-        &unresolved,
-        &location,
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect_err("bare generic type name should fail");
+    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect_err("bare generic type name should fail");
 
     assert_diagnostic_payload(
         error,
@@ -883,19 +864,13 @@ fn unknown_named_type_reports_consistent_error() {
     let missing = string_table.intern("Missing");
 
     let unresolved = DataType::NamedType(missing);
-    let location = SourceLocation::default();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![]));
     let mut type_environment = TypeEnvironment::new();
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    let error = resolve_type(
-        &unresolved,
-        &location,
-        &mut resolution_context,
-        &string_table,
-    )
-    .expect_err("unknown type should fail");
+    let error = resolve_type(&unresolved, None, &mut resolution_context, &string_table)
+        .expect_err("unknown type should fail");
 
     assert_diagnostic_payload(
         error,
@@ -974,12 +949,10 @@ fn checked_type_id_conversion_rejects_unresolved_named_type() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();
     let missing = string_table.intern("Missing");
-    let location = SourceLocation::default();
-
     let error = resolve_diagnostic_type_to_type_id_checked(
         &DataType::NamedType(missing),
         &mut type_environment,
-        &location,
+        None,
     )
     .expect_err("checked conversion should reject unresolved type names");
 
@@ -1027,11 +1000,10 @@ fn parses_collection_with_capacity() {
             ..
         }
     ));
-    assert!(matches!(&parsed, ParsedTypeRef::Collection { element, .. }
-        if **element == ParsedTypeRef::BuiltinInt {
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start()
-        }
+    assert!(matches!(
+        &parsed,
+        ParsedTypeRef::Collection { element, .. }
+            if matches!(**element, ParsedTypeRef::BuiltinInt { span: Some(_) })
     ));
 }
 
@@ -1055,18 +1027,17 @@ fn parses_collection_without_capacity() {
     )
     .expect("collection without capacity should parse");
 
-    assert_eq!(
+    assert!(matches!(
         parsed,
         ParsedTypeRef::Collection {
-            element: Box::new(ParsedTypeRef::BuiltinInt {
-                location: SourceLocation::default(),
-                span: LocalSpan::source_start(),
-            }),
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
+            element,
+            span: Some(_),
             fixed_capacity: None,
-        }
-    );
+        } if matches!(
+            *element,
+            ParsedTypeRef::BuiltinInt { span: Some(_) }
+        )
+    ));
 }
 
 #[test]
@@ -1083,12 +1054,14 @@ fn rejects_old_post_element_collection_capacity_syntax() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("old post-element capacity syntax should not parse");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("old post-element capacity syntax should not parse"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1096,9 +1069,10 @@ fn rejects_old_post_element_collection_capacity_syntax() {
             matches!(
                 payload,
                 DiagnosticPayload::ExpectedToken {
-                    expected: TokenKind::CloseCurly,
-                    found: Some(TokenKind::NumericLiteral(_)),
-                }
+                    expected,
+                    found: Some(found),
+                } if *expected == DiagnosticToken::from(TokenKind::CloseCurly)
+                    && found.tag() == TokenTag::NUMERIC_LITERAL
             )
         },
         "ExpectedToken(CloseCurly, NumericLiteral(64))",
@@ -1160,12 +1134,14 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("arithmetic in capacity position should be rejected");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("arithmetic in capacity position should be rejected"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1231,13 +1207,10 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
     assert!(
         matches!(cols_capacity, ParsedCollectionCapacity::BareConstant { name, .. } if name == cols_name)
     );
-    assert_eq!(
+    assert!(matches!(
         *inner_element,
-        ParsedTypeRef::BuiltinInt {
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
-        }
-    );
+        ParsedTypeRef::BuiltinInt { span: Some(_) }
+    ));
 }
 
 #[test]
@@ -1287,12 +1260,14 @@ fn rejects_capacity_only_shorthand_in_signature_context() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("capacity-only shorthand should be rejected in signature context");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("capacity-only shorthand should be rejected in signature context"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1322,12 +1297,14 @@ fn rejects_lower_snake_capacity_only_shorthand_in_signature_context() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("lower-snake capacity-only shorthand should be rejected in signatures");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("lower-snake capacity-only shorthand should be rejected in signatures"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1388,12 +1365,14 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("missing collection close delimiter should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("missing collection close delimiter should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1401,9 +1380,10 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
             matches!(
                 payload,
                 DiagnosticPayload::ExpectedToken {
-                    expected: TokenKind::CloseCurly,
-                    found: Some(TokenKind::Eof),
-                }
+                    expected,
+                    found: Some(found),
+                } if *expected == DiagnosticToken::from(TokenKind::CloseCurly)
+                    && *found == DiagnosticToken::from(TokenKind::Eof)
             )
         },
         "ExpectedToken(CloseCurly)",
@@ -1554,12 +1534,14 @@ fn rejects_map_type_with_empty_key() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("empty map key should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("empty map key should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1589,12 +1571,14 @@ fn rejects_map_type_with_empty_value() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("empty map value should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("empty map value should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1627,12 +1611,14 @@ fn rejects_map_type_with_multiple_separators() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::DeclarationTarget,
-        &string_table,
-    )
-    .expect_err("multiple map separators should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::DeclarationTarget,
+            &string_table,
+        )
+        .expect_err("multiple map separators should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1664,12 +1650,14 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("fixed capacity on key side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("fixed capacity on key side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1701,12 +1689,14 @@ fn rejects_fixed_capacity_map_syntax_on_value_side() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("fixed capacity on value side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("fixed capacity on value side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1739,12 +1729,14 @@ fn rejects_named_capacity_map_syntax() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("named capacity on map key side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("named capacity on map key side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1777,12 +1769,14 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("postfix capacity with colon on map value side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("postfix capacity with colon on map value side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1814,12 +1808,14 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("postfix capacity with number on map value side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("postfix capacity with number on map value side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1852,12 +1848,14 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("postfix capacity with colon on map key side should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("postfix capacity with colon on map key side should fail"),
+    );
 
     assert_diagnostic_payload(
         error,
@@ -1917,16 +1915,13 @@ fn map_type_walker_visits_named_types_in_key_and_value() {
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::Named {
             name: key_name,
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
         value: Box::new(ParsedTypeRef::Named {
             name: value_name,
-            location: SourceLocation::default(),
-            span: LocalSpan::source_start(),
+            span: None,
         }),
-        location: SourceLocation::default(),
-        span: LocalSpan::source_start(),
+        span: None,
     };
 
     let mut found = Vec::new();
@@ -1951,8 +1946,7 @@ fn named_type_walker_preserves_qualified_path() {
     let member = string_table.intern("Names");
     let parsed = ParsedTypeRef::Qualified {
         path: vec![root, member],
-        location: SourceLocation::default(),
-        span: LocalSpan::source_start(),
+        span: None,
     };
 
     let mut found = Vec::new();
@@ -2017,12 +2011,14 @@ fn rejects_generic_application_on_qualified_base() {
         &mut string_table,
     );
 
-    let error = parse_type_annotation(
-        &mut stream,
-        TypeAnnotationContext::SignatureParameter,
-        &string_table,
-    )
-    .expect_err("generic application on qualified base should fail");
+    let error = unwrap_type_parse_diagnostic(
+        parse_type_annotation(
+            &mut stream,
+            TypeAnnotationContext::SignatureParameter,
+            &string_table,
+        )
+        .expect_err("generic application on qualified base should fail"),
+    );
 
     assert!(
         matches!(

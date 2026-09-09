@@ -24,10 +24,9 @@ use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -165,7 +164,7 @@ impl<'a> TypeResolutionContext<'a> {
 
 /// A completed top-level type alias after semantic resolution.
 ///
-/// WHAT: carries the diagnostic spelling, canonical target identity and declaration location
+/// WHAT: carries the diagnostic spelling, canonical target identity and declaration span
 /// for one alias.
 /// WHY: a completed alias cannot represent an unresolved target. Keeping the required `TypeId`
 /// separate from the general annotation result prevents later consumers from mistaking an
@@ -174,7 +173,7 @@ impl<'a> TypeResolutionContext<'a> {
 pub(crate) struct ResolvedTypeAlias {
     pub(crate) diagnostic_type: DataType,
     pub(crate) target_type_id: TypeId,
-    pub(crate) declaration_location: SourceLocation,
+    pub(crate) declaration_span: Option<SourceSpan>,
 }
 
 /// A parsed type annotation after semantic resolution.

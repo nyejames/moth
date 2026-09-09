@@ -26,14 +26,12 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
@@ -42,8 +40,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 #[derive(Debug, Clone)]
 struct ParsedBindingName {
     id: StringId,
-    location: SourceLocation,
-    span: LocalSpan,
+    span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +80,7 @@ enum BareLoopBindingKind {
 #[derive(Debug, Clone)]
 struct BareLoopBindingSuffix {
     core_tokens: Vec<Token>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     kind: BareLoopBindingKind,
 }
 
@@ -100,9 +97,9 @@ type LoopHeaderResult<T> = Result<T, ExpressionParseError>;
 
 fn loop_header_error<T>(
     reason: InvalidLoopHeaderReason,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> LoopHeaderResult<T> {
-    Err(CompilerDiagnostic::invalid_loop_header(reason, location).into())
+    Err(CompilerDiagnostic::invalid_loop_header(reason, span).into())
 }
 
 pub(crate) fn parse_loop_header_tokens(
@@ -113,10 +110,10 @@ pub(crate) fn parse_loop_header_tokens(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> LoopHeaderResult<(ParsedLoopHeader, ScopeContext)> {
+    let source_id = context.shared.declaring_file_id;
     let mut header_tokens = header_tokens.to_vec();
     trim_edge_newlines(&mut header_tokens);
-    reject_removed_in_loop_syntax(&header_tokens, string_table)?;
-
+    reject_removed_in_loop_syntax(&header_tokens, string_table, source_id)?;
     let loop_header = {
         let mut parser = LoopHeaderParser {
             scope_context: &mut context,
@@ -144,8 +141,11 @@ fn parse_range_loop_header(
 ) -> LoopHeaderResult<ParsedLoopHeader> {
     // Parse explicit `|...|` bindings first, then reject bare binding tails with a targeted
     // diagnostic before falling back to no-binding range parsing.
-    if let Some(pipe_binding_split) = parse_pipe_binding_suffix(header_tokens, parser.string_table)?
-    {
+    if let Some(pipe_binding_split) = parse_pipe_binding_suffix(
+        header_tokens,
+        parser.string_table,
+        parser.scope_context.shared.declaring_file_id,
+    )? {
         let range = parse_range_loop_spec_from_tokens(
             &pipe_binding_split.core_tokens,
             path_syntax,
@@ -160,15 +160,17 @@ fn parse_range_loop_header(
         return Ok(ParsedLoopHeader::Range { bindings, range });
     }
 
-    if let Some(bare_binding_suffix) = detect_bare_loop_binding_suffix(header_tokens)
-        && parse_range_loop_spec_from_tokens(
-            &bare_binding_suffix.core_tokens,
-            path_syntax,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-        )
-        .is_ok()
+    if let Some(bare_binding_suffix) = detect_bare_loop_binding_suffix(
+        header_tokens,
+        parser.scope_context.shared.declaring_file_id,
+    ) && parse_range_loop_spec_from_tokens(
+        &bare_binding_suffix.core_tokens,
+        path_syntax,
+        parser.scope_context,
+        parser.type_interner,
+        parser.string_table,
+    )
+    .is_ok()
     {
         return bare_loop_binding_syntax_error(&bare_binding_suffix);
     }
@@ -193,8 +195,11 @@ fn parse_non_range_loop_header(
     // Conditional loops are distinguished by a full-header boolean expression with no binding
     // suffix. Parse explicit `|...|` bindings first, then reject bare binding tails with a
     // targeted diagnostic before evaluating conditional/collection fallback.
-    if let Some(pipe_binding_split) = parse_pipe_binding_suffix(header_tokens, parser.string_table)?
-    {
+    if let Some(pipe_binding_split) = parse_pipe_binding_suffix(
+        header_tokens,
+        parser.string_table,
+        parser.scope_context.shared.declaring_file_id,
+    )? {
         let (iterable, item_type) = parse_collection_iterable_from_tokens(
             &pipe_binding_split.core_tokens,
             path_syntax,
@@ -207,15 +212,16 @@ fn parse_non_range_loop_header(
         return Ok(ParsedLoopHeader::Collection { bindings, iterable });
     }
 
-    if let Some(bare_binding_suffix) = detect_bare_loop_binding_suffix(header_tokens)
-        && parses_as_collection_iterable(
-            &bare_binding_suffix.core_tokens,
-            path_syntax,
-            parser.scope_context,
-            parser.type_interner,
-            parser.string_table,
-        )
-    {
+    if let Some(bare_binding_suffix) = detect_bare_loop_binding_suffix(
+        header_tokens,
+        parser.scope_context.shared.declaring_file_id,
+    ) && parses_as_collection_iterable(
+        &bare_binding_suffix.core_tokens,
+        path_syntax,
+        parser.scope_context,
+        parser.type_interner,
+        parser.string_table,
+    ) {
         return bare_loop_binding_syntax_error(&bare_binding_suffix);
     }
 
@@ -251,6 +257,7 @@ fn parse_non_range_loop_header(
 fn reject_removed_in_loop_syntax(
     header_tokens: &[Token],
     string_table: &StringTable,
+    source_id: SourceId,
 ) -> LoopHeaderResult<()> {
     if header_tokens.len() < 3 {
         return Ok(());
@@ -270,13 +277,14 @@ fn reject_removed_in_loop_syntax(
 
     loop_header_error(
         InvalidLoopHeaderReason::RemovedInSyntax,
-        header_tokens[1].location.clone(),
+        Some(SourceSpan::new(source_id, header_tokens[1].span)),
     )
 }
 
 fn parse_pipe_binding_suffix(
     header_tokens: &[Token],
     string_table: &StringTable,
+    source_id: SourceId,
 ) -> LoopHeaderResult<Option<BindingSuffixSplit>> {
     let pipe_indices = collect_top_level_token_indexes(header_tokens, |token| {
         matches!(token, TokenKind::TypeParameterBracket)
@@ -292,14 +300,20 @@ fn parse_pipe_binding_suffix(
     {
         return loop_header_error(
             InvalidLoopHeaderReason::MissingClosingPipe,
-            header_tokens[header_tokens.len() - 1].location.clone(),
+            Some(SourceSpan::new(
+                source_id,
+                header_tokens[header_tokens.len() - 1].span,
+            )),
         );
     }
 
     if pipe_indices.len() != 2 {
         return loop_header_error(
             InvalidLoopHeaderReason::MalformedBindingPipes,
-            header_tokens[pipe_indices[0]].location.clone(),
+            Some(SourceSpan::new(
+                source_id,
+                header_tokens[pipe_indices[0]].span,
+            )),
         );
     }
 
@@ -309,7 +323,10 @@ fn parse_pipe_binding_suffix(
     if close_pipe_index <= open_pipe_index {
         return loop_header_error(
             InvalidLoopHeaderReason::MalformedBindingPipes,
-            header_tokens[open_pipe_index].location.clone(),
+            Some(SourceSpan::new(
+                source_id,
+                header_tokens[open_pipe_index].span,
+            )),
         );
     }
 
@@ -319,11 +336,14 @@ fn parse_pipe_binding_suffix(
     if core_tokens.is_empty() {
         return loop_header_error(
             InvalidLoopHeaderReason::MissingSourceBeforeBindings,
-            header_tokens[open_pipe_index].location.clone(),
+            Some(SourceSpan::new(
+                source_id,
+                header_tokens[open_pipe_index].span,
+            )),
         );
     }
 
-    let bindings = parse_binding_tokens(&binding_tokens, string_table)?;
+    let bindings = parse_binding_tokens(&binding_tokens, string_table, source_id)?;
 
     Ok(Some(BindingSuffixSplit {
         core_tokens,
@@ -334,20 +354,19 @@ fn parse_pipe_binding_suffix(
 fn parse_binding_tokens(
     binding_tokens: &[Token],
     _string_table: &StringTable,
+    source_id: SourceId,
 ) -> LoopHeaderResult<ParsedBindingNames> {
     let filtered_tokens = binding_tokens
         .iter()
         .filter(|token| !matches!(token.kind, TokenKind::Newline))
         .cloned()
         .collect::<Vec<_>>();
-
     if filtered_tokens.is_empty() {
         return loop_header_error(
             InvalidLoopHeaderReason::EmptyBindingList,
             binding_tokens
                 .first()
-                .map(|token| token.location.clone())
-                .unwrap_or_default(),
+                .map(|token| SourceSpan::new(source_id, token.span)),
         );
     }
 
@@ -357,19 +376,21 @@ fn parse_binding_tokens(
     while position < filtered_tokens.len() {
         let token = &filtered_tokens[position];
         if token.kind == TokenKind::This {
-            return loop_header_error(InvalidLoopHeaderReason::ThisBinding, token.location.clone());
+            return loop_header_error(
+                InvalidLoopHeaderReason::ThisBinding,
+                Some(SourceSpan::new(source_id, token.span)),
+            );
         }
         let TokenKind::Symbol(symbol_id) = token.kind else {
             return loop_header_error(
                 InvalidLoopHeaderReason::BindingMustBeSymbol,
-                token.location.clone(),
+                Some(SourceSpan::new(source_id, token.span)),
             );
         };
 
         binding_names.push(ParsedBindingName {
             id: symbol_id,
-            location: token.location.clone(),
-            span: token.span,
+            span: Some(SourceSpan::new(source_id, token.span)),
         });
         position += 1;
 
@@ -380,7 +401,7 @@ fn parse_binding_tokens(
         if !matches!(filtered_tokens[position].kind, TokenKind::Comma) {
             return loop_header_error(
                 InvalidLoopHeaderReason::MissingBindingComma,
-                filtered_tokens[position].location.clone(),
+                Some(SourceSpan::new(source_id, filtered_tokens[position].span)),
             );
         }
 
@@ -388,7 +409,10 @@ fn parse_binding_tokens(
         if position >= filtered_tokens.len() {
             return loop_header_error(
                 InvalidLoopHeaderReason::TrailingBindingComma,
-                filtered_tokens[position - 1].location.clone(),
+                Some(SourceSpan::new(
+                    source_id,
+                    filtered_tokens[position - 1].span,
+                )),
             );
         }
     }
@@ -396,7 +420,10 @@ fn parse_binding_tokens(
     build_binding_name_pair(binding_names)
 }
 
-fn detect_bare_loop_binding_suffix(header_tokens: &[Token]) -> Option<BareLoopBindingSuffix> {
+fn detect_bare_loop_binding_suffix(
+    header_tokens: &[Token],
+    source_id: SourceId,
+) -> Option<BareLoopBindingSuffix> {
     let non_newline_indices = collect_top_level_token_indexes(header_tokens, |token| {
         !matches!(token, TokenKind::Newline)
     });
@@ -417,7 +444,7 @@ fn detect_bare_loop_binding_suffix(header_tokens: &[Token]) -> Option<BareLoopBi
         {
             return Some(BareLoopBindingSuffix {
                 core_tokens: header_tokens[..first_index].to_vec(),
-                location: header_tokens[first_index].location.clone(),
+                span: Some(SourceSpan::new(source_id, header_tokens[first_index].span)),
                 kind: BareLoopBindingKind::Dual,
             });
         }
@@ -429,7 +456,10 @@ fn detect_bare_loop_binding_suffix(header_tokens: &[Token]) -> Option<BareLoopBi
         {
             return Some(BareLoopBindingSuffix {
                 core_tokens: header_tokens[..separator_index].to_vec(),
-                location: header_tokens[separator_index].location.clone(),
+                span: Some(SourceSpan::new(
+                    source_id,
+                    header_tokens[separator_index].span,
+                )),
                 kind: BareLoopBindingKind::Dual,
             });
         }
@@ -444,7 +474,10 @@ fn detect_bare_loop_binding_suffix(header_tokens: &[Token]) -> Option<BareLoopBi
     {
         return Some(BareLoopBindingSuffix {
             core_tokens: header_tokens[..binding_index].to_vec(),
-            location: header_tokens[binding_index].location.clone(),
+            span: Some(SourceSpan::new(
+                source_id,
+                header_tokens[binding_index].span,
+            )),
             kind: BareLoopBindingKind::Single,
         });
     }
@@ -482,11 +515,11 @@ fn bare_loop_binding_syntax_error<T>(
     match binding_suffix.kind {
         BareLoopBindingKind::Single => loop_header_error(
             InvalidLoopHeaderReason::BareSingleBinding,
-            binding_suffix.location.clone(),
+            binding_suffix.span,
         ),
         BareLoopBindingKind::Dual => loop_header_error(
             InvalidLoopHeaderReason::BareDualBinding,
-            binding_suffix.location.clone(),
+            binding_suffix.span,
         ),
     }
 }
@@ -497,14 +530,14 @@ fn build_binding_name_pair(
     if binding_names.len() > 2 {
         return loop_header_error(
             InvalidLoopHeaderReason::TooManyBindings,
-            binding_names[2].location.clone(),
+            binding_names[2].span,
         );
     }
 
     let Some(item_binding) = binding_names.first().cloned() else {
         return loop_header_error(
             InvalidLoopHeaderReason::EmptyBindingList,
-            SourceLocation::default(),
+            Option::<SourceSpan>::default(),
         );
     };
 
@@ -513,10 +546,7 @@ fn build_binding_name_pair(
     if let Some(index) = &index_binding
         && index.id == item_binding.id
     {
-        return loop_header_error(
-            InvalidLoopHeaderReason::DuplicateBindingName,
-            index.location.clone(),
-        );
+        return loop_header_error(InvalidLoopHeaderReason::DuplicateBindingName, index.span);
     }
 
     Ok(ParsedBindingNames {
@@ -549,7 +579,7 @@ fn parse_collection_iterable_from_tokens(
             InvalidLoopHeaderReason::CollectionSourceNotCollection {
                 found_type: collection_expression.type_id,
             },
-            collection_expression.location.clone(),
+            collection_expression.span,
         );
     };
     Ok((collection_expression, item_type_id))
@@ -566,11 +596,10 @@ fn parse_range_loop_spec_from_tokens(
 
     // Omitted-start sugar: `loop to 5:` desugars to `loop 0 to 5:`.
     let start = if matches!(stream.current_token_kind(), TokenKind::ExclusiveRange) {
-        let location = stream.current_location();
+        let span = Some(stream.current_span());
         Expression::new(
             ExpressionKind::Int(0),
-            location,
-            None,
+            span,
             builtin_type_ids::INT,
             DataType::Int,
             ValueMode::ImmutableOwned,
@@ -609,24 +638,18 @@ fn parse_range_loop_spec_from_tokens(
             }
         }
         TokenKind::Eof => {
-            return loop_header_error(
-                InvalidLoopHeaderReason::MissingRangeSeparator,
-                start.location.clone(),
-            );
+            return loop_header_error(InvalidLoopHeaderReason::MissingRangeSeparator, start.span);
         }
         _ => {
             return loop_header_error(
                 InvalidLoopHeaderReason::MissingRangeSeparator,
-                stream.current_location(),
+                Some(stream.current_span()),
             );
         }
     };
 
     if matches!(stream.current_token_kind(), TokenKind::Eof) {
-        return loop_header_error(
-            InvalidLoopHeaderReason::MissingRangeEndBound,
-            start.location.clone(),
-        );
+        return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start.span);
     }
 
     let mut end_type = ExpectedType::Infer;
@@ -650,11 +673,11 @@ fn parse_range_loop_spec_from_tokens(
     // ------------------------
 
     let step = if matches!(stream.current_token_kind(), TokenKind::By) {
-        let by_location = stream.current_location();
+        let by_span = Some(stream.current_span());
         stream.advance();
 
         if matches!(stream.current_token_kind(), TokenKind::Eof) {
-            return loop_header_error(InvalidLoopHeaderReason::MissingRangeStep, by_location);
+            return loop_header_error(InvalidLoopHeaderReason::MissingRangeStep, by_span);
         }
 
         let mut step_type = ExpectedType::Infer;
@@ -691,7 +714,7 @@ fn parse_range_loop_spec_from_tokens(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::Start,
             start.type_id,
-            start.location.clone(),
+            start.span,
         )
         .into());
     }
@@ -699,7 +722,7 @@ fn parse_range_loop_spec_from_tokens(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::End,
             end.type_id,
-            end.location.clone(),
+            end.span,
         )
         .into());
     }
@@ -707,7 +730,7 @@ fn parse_range_loop_spec_from_tokens(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::Step,
             step_expression.type_id,
-            step_expression.location.clone(),
+            step_expression.span,
         )
         .into());
     }
@@ -724,19 +747,13 @@ fn parse_range_loop_spec_from_tokens(
             .is_some_and(|s| s.type_id == type_environment.builtins().float);
 
     if uses_float && step.is_none() {
-        return loop_header_error(
-            InvalidLoopHeaderReason::FloatRangeMissingStep,
-            end.location.clone(),
-        );
+        return loop_header_error(InvalidLoopHeaderReason::FloatRangeMissingStep, end.span);
     }
 
     if let Some(step_expression) = &step
         && is_zero_numeric_literal(step_expression)
     {
-        return loop_header_error(
-            InvalidLoopHeaderReason::ZeroRangeStep,
-            step_expression.location.clone(),
-        );
+        return loop_header_error(InvalidLoopHeaderReason::ZeroRangeStep, step_expression.span);
     }
 
     Ok(RangeLoopSpec {
@@ -762,7 +779,7 @@ fn range_binding_type(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::Start,
             range.start.type_id,
-            range.start.location.clone(),
+            range.start.span,
         )
         .into());
     }
@@ -770,7 +787,7 @@ fn range_binding_type(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::End,
             range.end.type_id,
-            range.end.location.clone(),
+            range.end.span,
         )
         .into());
     }
@@ -782,7 +799,7 @@ fn range_binding_type(
         return Err(CompilerDiagnostic::invalid_range_operand(
             RangeOperandKind::Step,
             step_expression.type_id,
-            step_expression.location.clone(),
+            step_expression.span,
         )
         .into());
     }
@@ -837,11 +854,7 @@ fn declare_loop_binding(
     type_id: TypeId,
     parser: &mut LoopHeaderParser<'_, '_>,
 ) -> LoopHeaderResult<Declaration> {
-    ensure_not_keyword_shadow_identifier(
-        binding_name.id,
-        binding_name.location.clone(),
-        parser.string_table,
-    )?;
+    ensure_not_keyword_shadow_identifier(binding_name.id, binding_name.span, parser.string_table)?;
 
     if parser
         .scope_context
@@ -849,13 +862,13 @@ fn declare_loop_binding(
     {
         return loop_header_error(
             InvalidLoopHeaderReason::BindingAlreadyDeclared,
-            binding_name.location.clone(),
+            binding_name.span,
         );
     }
 
     if let Some(warning) = naming_warning_for_identifier(
         binding_name.id,
-        binding_name.location.clone(),
+        binding_name.span,
         IdentifierNamingKind::ValueLike,
         parser.string_table,
     ) {
@@ -863,15 +876,15 @@ fn declare_loop_binding(
     }
 
     let data_type = diagnostic_type_spelling(type_id, parser.type_interner.environment());
-    let binding_span = Some(SourceSpan::new(
-        parser.scope_context.shared.declaring_file_id,
-        binding_name.span,
-    ));
+    let binding_span = binding_name.span;
     let declaration = Declaration {
-        id: parser.scope_context.scope.append(binding_name.id),
+        id: parser
+            .scope_context
+            .scope
+            .to_owned()
+            .append(binding_name.id),
         value: Expression::new(
             ExpressionKind::NoValue,
-            binding_name.location.clone(),
             binding_span,
             type_id,
             data_type,
@@ -881,10 +894,10 @@ fn declare_loop_binding(
         config_qualifier: None,
     };
 
-    let binding_location = declaration.value.location.clone();
+    let binding_span = declaration.value.span;
     parser
         .scope_context
-        .add_var(declaration.to_owned(), binding_location);
+        .add_var(declaration.to_owned(), binding_span);
 
     Ok(declaration)
 }
@@ -923,20 +936,13 @@ fn token_stream_with_eof(
     context: &ScopeContext,
 ) -> LoopHeaderResult<FileTokens> {
     if tokens.is_empty() {
-        return loop_header_error(
-            InvalidLoopHeaderReason::ExpectedHeaderExpression,
-            SourceLocation::default(),
-        );
+        return loop_header_error(InvalidLoopHeaderReason::ExpectedHeaderExpression, None);
     }
 
     let mut tokens_with_eof = tokens.to_vec();
     let eof_anchor = &tokens[tokens.len() - 1];
-    let src_path = tokens[0].location.scope.clone();
-    tokens_with_eof.push(Token::with_span(
-        TokenKind::Eof,
-        eof_anchor.location.clone(),
-        eof_anchor.span,
-    ));
+    let src_path = context.scope.clone();
+    tokens_with_eof.push(Token::with_span(TokenKind::Eof, eof_anchor.span));
 
     FileTokens::new_from_slice(
         src_path,

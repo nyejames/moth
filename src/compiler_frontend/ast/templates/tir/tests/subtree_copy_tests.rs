@@ -25,16 +25,10 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrBranch;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(
-        value,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
+    Expression::bool(value, None, ValueMode::ImmutableOwned)
 }
 
 fn text_node(
@@ -45,12 +39,7 @@ fn text_node(
     let text_id = string_table.intern(text);
     let byte_len = string_table.resolve(text_id).len();
     let mut builder = TemplateIrBuilder::new(store);
-    builder.push_text_node(
-        text_id,
-        byte_len,
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    )
+    builder.push_text_node(text_id, byte_len, TemplateSegmentOrigin::Body, None)
 }
 
 #[test]
@@ -66,13 +55,12 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
         vec![TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(true)),
             branch_body,
-            SourceLocation::default(),
             None,
             selector_site,
         )],
         None,
         None,
-        SourceLocation::default(),
+        None,
     );
     let loop_root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
@@ -80,16 +68,15 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
         },
         loop_body,
         None,
-        SourceLocation::default(),
+        None,
     );
-    let source_root =
-        builder.push_sequence_node(vec![branch_root, loop_root], SourceLocation::default());
+    let source_root = builder.push_sequence_node(vec![branch_root, loop_root], None);
     let _template = builder.finish_template(
         source_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
 
     let source_selector = match &store
@@ -175,18 +162,14 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
     let source_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text = string_table.intern("source");
-        let text_node = builder.push_text_node(
-            text,
-            "source".len(),
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let text_node =
+            builder.push_text_node(text, "source".len(), TemplateSegmentOrigin::Body, None);
         builder.finish_template(
             text_node,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -202,11 +185,10 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                     reactive_subscription: None,
                     site_id: expression_site,
                 },
-                SourceLocation::default(),
                 None,
             ));
-        let slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
-        let root = builder.push_sequence_node(vec![expression, slot], SourceLocation::default());
+        let slot = builder.push_slot_node(SlotKey::Default, None);
+        let root = builder.push_sequence_node(vec![expression, slot], None);
         let slot_occurrence = match &builder.store.get_node(slot).expect("slot exists").kind {
             TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
             other => panic!("expected slot node, got {other:?}"),
@@ -216,7 +198,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
         (child_template, expression_site, slot_occurrence)
     };
@@ -226,12 +208,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             .allocate_expression_overlay(TirExpressionOverlay {
                 overrides: vec![(
                     source_expression_site,
-                    Box::new(Expression::bool(
-                        false,
-                        SourceLocation::default(),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
+                    Box::new(Expression::bool(false, None, ValueMode::ImmutableOwned)),
                 )],
             })
             .expect("expression overlay should allocate");
@@ -260,7 +237,6 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             ),
             occurrence_id: child_occurrence,
         },
-        SourceLocation::default(),
         None,
     ));
 

@@ -18,14 +18,12 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TemplateBodyMode, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
@@ -38,22 +36,8 @@ fn html_project_test_style_directives() -> StyleDirectiveRegistry {
         .expect("html project style directives should merge with core directives")
 }
 
-fn token(kind: TokenKind, line: i32) -> Token {
-    Token::new(
-        kind,
-        SourceLocation {
-            scope: InternedPath::new(),
-            start_pos: CharPosition {
-                line_number: line,
-                char_column: 0,
-            },
-            end_pos: CharPosition {
-                line_number: line,
-                char_column: 120, // Arbitrary number
-            },
-            ..Default::default()
-        },
-    )
+fn token(kind: TokenKind, _line: i32) -> Token {
+    Token::new(kind, LocalSpan::source_start())
 }
 
 fn numeric_token(value: &str, line: i32, string_table: &mut StringTable) -> Token {
@@ -257,18 +241,6 @@ fn runtime_template_context_with_style_directives(
         id: scope.append(value_name),
         value: Expression::string_slice(
             string_table.intern("dynamic"),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120, // Arbitrary number
-                },
-                ..Default::default()
-            },
             None,
             ValueMode::ImmutableOwned,
         ),
@@ -399,7 +371,7 @@ fn expect_template_diagnostic(
     error: TemplateError,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     match error {
-        TemplateError::Diagnostic(diagnostic) => *diagnostic,
+        TemplateError::Diagnostic(diagnostic) => diagnostic,
         TemplateError::Infrastructure(error) => {
             panic!("expected a template source diagnostic, got infrastructure failure: {error:?}")
         }
@@ -534,16 +506,8 @@ fn tir_root_has_head_dynamic_expression(
     }
 }
 
-fn is_default_text_location(location: &SourceLocation) -> bool {
-    location.scope == InternedPath::new()
-        && location.start_pos == CharPosition::default()
-        && location.end_pos == CharPosition::default()
-}
-
-fn is_default_error_location(location: &SourceLocation) -> bool {
-    location.scope == InternedPath::new()
-        && location.start_pos == CharPosition::default()
-        && location.end_pos == CharPosition::default()
+fn is_default_error_span(span: Option<crate::compiler_frontend::source::SourceSpan>) -> bool {
+    span.is_none()
 }
 
 mod builder_tests;

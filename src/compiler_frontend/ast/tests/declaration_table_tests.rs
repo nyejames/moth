@@ -19,11 +19,10 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -334,13 +333,12 @@ fn declaration_lanes_reject_missing_semantic_records() {
         },
         HeaderKind::Constant {
             declaration: DeclarationSyntax {
-                span: LocalSpan::source_start(),
+                span: None,
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
                 config_qualifier: None,
                 initializer_tokens: Vec::new(),
                 initializer_references: Vec::new(),
-                location: SourceLocation::default(),
             },
         },
         HeaderKind::Struct {
@@ -799,12 +797,7 @@ fn assert_counter(
 fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
     Declaration {
         id: path.to_owned(),
-        value: Expression::no_value(
-            SourceLocation::default(),
-            None,
-            data_type,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }
@@ -839,8 +832,7 @@ fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut Stri
         file_role: FileRole::Normal,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints: Default::default(),
-        name_location: SourceLocation::default(),
-        name_span: LocalSpan::source_start(),
+        name_span: None,
         tokens: FileTokens::new(path, SourceId::COMPILATION_ROOT, Vec::new()),
         source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),

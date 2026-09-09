@@ -29,7 +29,7 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, NominalOriginResolver,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, DiagnosticKind, InvalidConfigReason, RuleDiagnosticKind,
 };
@@ -103,22 +103,17 @@ pub(crate) struct ConfigCompilationOutcome {
     pub(crate) span_builder: ExtendedSpanBuilder,
 }
 
-/// One authored top-level config constant projected to the owned folded-value vocabulary.
-///
-/// WHAT: carries the authored key name, its owned folded value, the declaration and key-name
-///       spans config diagnostics underline, and location/span tables aligned with direct record
-///       fields. Public folded values stay location-free; the parallel tables retain the exact
-///       initializer provenance needed after folding.
+/// WHAT: carries the authored key name, its owned folded value, and exact optional spans for the
+///       declaration and key name. Direct record-field initializer spans remain aligned with the
+///       folded fields. Public folded values stay location-free; provenance is retained only in
+///       these exact span fields.
 /// WHY: build-side validation consumes owned values with no donor-local AST identity, so the
 ///       compiler service resolves every donor-local handle while the module is still in scope.
 pub(crate) struct FoldedConfigDeclaration {
     pub(crate) name: StringId,
     pub(crate) value: PublicFoldedValue,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) name_location: SourceLocation,
     pub(crate) name_span: Option<SourceSpan>,
-    pub(crate) direct_field_locations: Vec<SourceLocation>,
     pub(crate) direct_field_spans: Vec<Option<SourceSpan>>,
 }
 
@@ -147,7 +142,6 @@ pub(crate) fn compile_config_source(
                             "Config path {:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths.",
                             non_utf8.path
                         ),
-                        string_table,
                     ),
                     string_table.clone(),
                 )),
@@ -160,13 +154,8 @@ pub(crate) fn compile_config_source(
     let mut span_builder = ExtendedSpanBuilder::new();
     match prepare_config_file(&request, &authored_scope, string_table, &mut span_builder) {
         Ok(mut file) => {
-            let result = compile_prepared_config_source(
-                &request,
-                &authored_scope,
-                &mut file,
-                string_table,
-                &mut span_builder,
-            );
+            let result =
+                compile_prepared_config_source(&request, &authored_scope, &mut file, string_table);
             ConfigCompilationOutcome {
                 result,
                 file_id,
@@ -199,7 +188,6 @@ fn compile_prepared_config_source(
     authored_scope: &InternedPath,
     prepared_file: &mut FileFrontendPrepareOutput,
     string_table: &mut StringTable,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<CompiledConfigSource, CompilerMessages> {
     let prepared = prepare_header_syntax(
         std::slice::from_mut(prepared_file),
@@ -210,12 +198,12 @@ fn compile_prepared_config_source(
                     "config aggregation used a different source owner".to_owned(),
                 ));
             }
-            diagnostic.capture_preparation_span(source, span_builder)
+            diagnostic.capture_preparation_span(source)
         },
     )
     .map_err(|failure| match failure {
         HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
-            classify_header_diagnostics(bag, authored_scope),
+            classify_header_diagnostics(bag, request.file_id),
             string_table.clone(),
         ),
         HeaderPreparationFailure::Infrastructure(error) => {
@@ -231,19 +219,20 @@ fn compile_prepared_config_source(
         &SourceDatabase::empty(),
         string_table,
     )
-    .map_err(|bag| {
-        CompilerMessages::from_diagnostics(
-            classify_header_diagnostics(bag, authored_scope),
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
+            classify_header_diagnostics(bag, request.file_id),
             string_table.clone(),
-        )
+        ),
+        HeaderPreparationFailure::Infrastructure(error) => {
+            CompilerMessages::from_error_ref(error, string_table)
+        }
     })?;
 
     // Order local declarations.
     let sorted =
         resolve_module_dependencies(bound_headers, &ContentSourceTargets::empty(), string_table)
-            .map_err(|bag| {
-                CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-            })?;
+            .map_err(|failure| failure.into_messages(string_table))?;
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
@@ -367,18 +356,18 @@ fn reject_authored_config_start_body(
                     rejections.push(config_diagnostic(
                         Some(string_table.intern(&key)),
                         InvalidConfigReason::PlainBindingUnsupported,
-                        declaration.value.location.clone(),
+                        declaration.value.span,
                     ));
                 }
                 NodeKind::PushStartRuntimeFragment(_) => rejections.push(config_diagnostic(
                     None,
                     InvalidConfigReason::StandaloneTemplateUnsupported,
-                    body_node.location.clone(),
+                    body_node.span,
                 )),
                 _ => rejections.push(config_diagnostic(
                     None,
                     InvalidConfigReason::UnsupportedStatement,
-                    body_node.location.clone(),
+                    body_node.span,
                 )),
             }
         }
@@ -404,7 +393,7 @@ fn reject_mutable_config_bindings(
             rejections.push(config_diagnostic(
                 path.name(),
                 InvalidConfigReason::MutableBindingUnsupported,
-                metadata.location.clone(),
+                metadata.span,
             ));
         }
     }
@@ -416,18 +405,16 @@ fn reject_mutable_config_bindings(
 //  Folded Declaration Projection
 // -------------------------
 
-/// Project every authored top-level folded constant to the owned folded-value vocabulary.
-///
 /// WHAT: iterates the module store's declaration-table rows, keeps the authored-scope constants
 ///       and converts each one through the shared folded-value converter, resolving donor-local
 ///       string and type identities while the module is still in scope. Record values also
-///       project initializer locations in the same order as the folded fields.
+///       project initializer spans in the same order as the folded fields.
 /// WHY:  the owned folded-value vocabulary is the one boundary shape build-side validation
 ///       consumes; no donor-local AST, const-store or type identity may cross it.
 fn project_authored_config_declarations(
     ast: &Ast,
     authored_scope: &InternedPath,
-    authored_key_name_provenance: &HashMap<InternedPath, (SourceLocation, Option<SourceSpan>)>,
+    authored_key_name_provenance: &HashMap<InternedPath, Option<SourceSpan>>,
     binding_packages: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<Vec<FoldedConfigDeclaration>, CompilerMessages> {
@@ -465,14 +452,10 @@ fn project_authored_config_declarations(
         let value =
             convert_const_value_to_folded_value(&ast.const_values, value_id, &folded_value_context)
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-        let direct_field_locations = project_direct_field_locations(&ast.const_values, value_id)
-            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
         let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
         if let PublicFoldedValue::Record(fields) = &value {
-            if fields.len() != direct_field_locations.len()
-                || fields.len() != direct_field_spans.len()
-            {
+            if fields.len() != direct_field_spans.len() {
                 return Err(CompilerMessages::from_error(
                     CompilerError::compiler_error(
                         "config field provenance must align with folded record fields",
@@ -480,7 +463,7 @@ fn project_authored_config_declarations(
                     string_table.clone(),
                 ));
             }
-        } else if !direct_field_locations.is_empty() || !direct_field_spans.is_empty() {
+        } else if !direct_field_spans.is_empty() {
             return Err(CompilerMessages::from_error(
                 CompilerError::compiler_error(
                     "config field provenance was projected for a non-record value",
@@ -489,19 +472,17 @@ fn project_authored_config_declarations(
             ));
         }
 
-        let (name_location, name_span) = authored_key_name_provenance
+        let name_span = authored_key_name_provenance
             .get(path)
-            .cloned()
-            .unwrap_or_else(|| (metadata.location.clone(), None));
+            .copied()
+            .flatten()
+            .or(metadata.span);
 
         declarations.push(FoldedConfigDeclaration {
             name,
             value,
-            location: metadata.location.clone(),
             span: metadata.span,
-            name_location,
             name_span,
-            direct_field_locations,
             direct_field_spans,
         });
     }
@@ -532,30 +513,6 @@ fn project_direct_field_spans(
 
         ConstValuePayload::OptionSome(inner) | ConstValuePayload::Coerced(inner) => {
             project_direct_field_spans(const_values, *inner)
-        }
-
-        _ => Ok(Vec::new()),
-    }
-}
-
-/// Project direct record-field initializer locations in folded-field order.
-fn project_direct_field_locations(
-    const_values: &ConstValueStore,
-    value_id: ConstValueId,
-) -> Result<Vec<SourceLocation>, CompilerError> {
-    let Some(payload) = const_values.payload(value_id) else {
-        return Err(CompilerError::compiler_error(
-            "config field-location projection: missing const-store value",
-        ));
-    };
-
-    match payload {
-        ConstValuePayload::Record(fields) => {
-            Ok(fields.iter().map(|field| field.location.clone()).collect())
-        }
-
-        ConstValuePayload::OptionSome(inner) | ConstValuePayload::Coerced(inner) => {
-            project_direct_field_locations(const_values, *inner)
         }
 
         _ => Ok(Vec::new()),
@@ -633,7 +590,7 @@ fn prepare_config_file(
     ) {
         Ok(output) => output,
         Err(TokenizeFailure::Diagnosed(diagnostic)) => {
-            diagnostics.push(*diagnostic);
+            diagnostics.push(diagnostic);
             return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
         }
         Err(TokenizeFailure::Infrastructure(error)) => {
@@ -660,9 +617,9 @@ fn prepare_config_file(
             } = error;
             diagnostics.extend(warnings);
             if is_duplicate_config_header_error(&diagnostic) {
-                diagnostics.push(config_duplicate_diagnostic(*diagnostic));
+                diagnostics.push(config_duplicate_diagnostic(diagnostic));
             } else {
-                diagnostics.push(*diagnostic);
+                diagnostics.push(diagnostic);
             }
             return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
         }
@@ -675,20 +632,20 @@ fn prepare_config_file(
         diagnostics.push(config_diagnostic(
             None,
             InvalidConfigReason::ConfigImportUnsupported,
-            dependency_clause.dependency.location.clone(),
+            Some(dependency_clause.dependency.span),
         ));
     }
     for file_reference in output.structural_file_references.iter() {
         diagnostics.push(config_diagnostic(
             None,
             InvalidConfigReason::FileValuePathUnsupported,
-            file_reference.location.clone(),
+            Some(file_reference.span),
         ));
     }
     diagnostics.extend(validate_authored_config_surface(&output.headers));
     for diagnostic in &mut diagnostics {
         diagnostic
-            .capture_preparation_span(request.file_id, span_builder)
+            .capture_preparation_span(request.file_id)
             .map_err(ConfigPreparationFailure::Infrastructure)?;
     }
 
@@ -703,13 +660,13 @@ fn prepare_config_file(
 //  Authored Key-Name Spans
 // -------------------------
 
-/// Collect the authored key-name locations and exact spans for config key-identity diagnostics.
+/// Collect authored key-name spans for config key-identity diagnostics.
 ///
 /// Imported support declarations are excluded because they are not config entries.
 fn collect_authored_config_key_name_provenance(
     headers: &[Header],
     authored_scope: &InternedPath,
-) -> HashMap<InternedPath, (SourceLocation, Option<SourceSpan>)> {
+) -> HashMap<InternedPath, Option<SourceSpan>> {
     let mut key_name_provenance = HashMap::new();
     for header in headers {
         let HeaderKind::Constant { .. } = &header.kind else {
@@ -718,13 +675,7 @@ fn collect_authored_config_key_name_provenance(
         if header.source_file != *authored_scope {
             continue;
         }
-        key_name_provenance.insert(
-            header.tokens.src_path.to_owned(),
-            (
-                header.name_location.clone(),
-                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
-            ),
-        );
+        key_name_provenance.insert(header.tokens.src_path.to_owned(), header.name_span);
     }
     key_name_provenance
 }
@@ -773,7 +724,7 @@ fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnosti
             errors.push(config_diagnostic(
                 header.tokens.src_path.name(),
                 reason,
-                header.name_location.clone(),
+                header.name_span,
             ));
         }
     }
@@ -788,12 +739,12 @@ fn validate_authored_config_surface(headers: &[Header]) -> Vec<CompilerDiagnosti
 /// Re-route an authored duplicate declaration to the config key vocabulary.
 fn classify_header_diagnostics(
     bag: DiagnosticBag,
-    authored_scope: &InternedPath,
+    authored_file_id: SourceId,
 ) -> Vec<CompilerDiagnostic> {
     bag.into_diagnostics()
         .into_iter()
         .map(|diagnostic| {
-            if is_authored_config_duplicate(&diagnostic, authored_scope) {
+            if is_authored_config_duplicate(&diagnostic, authored_file_id) {
                 config_duplicate_diagnostic(diagnostic)
             } else {
                 diagnostic
@@ -802,18 +753,13 @@ fn classify_header_diagnostics(
         .collect()
 }
 
-/// Config displays one key label for duplicates, retaining its captured authored range.
+/// Config displays one key label for duplicates, retaining its captured authored span.
 fn config_duplicate_diagnostic(diagnostic: CompilerDiagnostic) -> CompilerDiagnostic {
-    let mut replacement = config_diagnostic(
+    config_diagnostic(
         None,
         InvalidConfigReason::DuplicateKey,
-        diagnostic.primary_location,
-    );
-    replacement.primary_span = diagnostic.primary_span;
-    for label in &mut replacement.labels {
-        label.span = diagnostic.primary_span;
-    }
-    replacement
+        diagnostic.primary_span,
+    )
 }
 
 fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
@@ -825,23 +771,20 @@ fn is_duplicate_config_header_error(diagnostic: &CompilerDiagnostic) -> bool {
 
 fn is_authored_config_duplicate(
     diagnostic: &CompilerDiagnostic,
-    authored_scope: &InternedPath,
+    authored_file_id: SourceId,
 ) -> bool {
-    // Classify authored duplicate declarations by direct interned scope equality.
-    // WHY: the authored config file was tokenized with this exact interned identity, so a
-    // duplicate declaration whose primary location shares that scope is an authored duplicate.
-    // Comparing interned identity avoids converting paths back to `PathBuf` or canonicalizing
-    // during diagnostic handling.
     is_duplicate_config_header_error(diagnostic)
-        && diagnostic.primary_location.scope == *authored_scope
+        && diagnostic
+            .primary_span
+            .is_some_and(|span| span.source() == authored_file_id)
 }
 
 fn config_diagnostic(
     key: Option<StringId>,
     reason: InvalidConfigReason,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(key, reason, location)
+    CompilerDiagnostic::invalid_config_reason(key, reason, span)
 }
 
 #[cfg(test)]

@@ -32,12 +32,12 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 #[test]
 fn wasm_feature_validation_rejects_reachable_format_float() {
-    let location = location_at(30, 2);
+    let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -48,7 +48,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
             vec![float_statement(
                 10,
                 ReachableFloatStatementKind::FormatFloat,
-                location,
+                span,
             )],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -70,7 +70,7 @@ fn wasm_feature_validation_rejects_reachable_format_float() {
 
 #[test]
 fn wasm_feature_validation_rejects_reachable_validate_float() {
-    let location = location_at(30, 2);
+    let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -81,7 +81,7 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
             vec![float_statement(
                 10,
                 ReachableFloatStatementKind::ValidateFloat,
-                location,
+                span,
             )],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -103,7 +103,7 @@ fn wasm_feature_validation_rejects_reachable_validate_float() {
 
 #[test]
 fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
-    let location = location_at(30, 2);
+    let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -111,7 +111,7 @@ fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(10, HirNumericOp::IntAdd, location)],
+            vec![numeric_op_statement(10, HirNumericOp::IntAdd, span)],
             HirTerminator::Return(unit_expression(0)),
         )],
     );
@@ -132,7 +132,7 @@ fn wasm_feature_validation_rejects_reachable_checked_numeric_op() {
 
 #[test]
 fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
-    let location = location_at(50, 4);
+    let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -149,7 +149,7 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
             ),
             block(
                 BlockId(1),
-                vec![numeric_op_statement(10, HirNumericOp::IntMul, location)],
+                vec![numeric_op_statement(10, HirNumericOp::IntMul, span)],
                 HirTerminator::Return(unit_expression(1)),
             ),
         ],
@@ -174,7 +174,7 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
 
 #[test]
 fn wasm_feature_validation_ignores_unreachable_float_statements() {
-    let location = location_at(50, 4);
+    let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let module = hir_module(
@@ -194,7 +194,7 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
                 vec![float_statement(
                     10,
                     ReachableFloatStatementKind::FormatFloat,
-                    location,
+                    span,
                 )],
                 HirTerminator::Return(unit_expression(1)),
             ),
@@ -264,7 +264,7 @@ fn wasm_gate_rejects_reachable_runtime_assertion_messages() {
         },
         &mut string_table,
     ) {
-        Err(BackendFeatureValidationError::Diagnostic(diagnostic)) => *diagnostic,
+        Err(BackendFeatureValidationError::Diagnostic(diagnostic)) => diagnostic,
         Err(BackendFeatureValidationError::Infrastructure(error)) => {
             panic!("expected a target diagnostic, got infrastructure error: {error:?}")
         }
@@ -373,7 +373,7 @@ fn wasm_feature_validation_diagnostic(
     .expect_err(expectation);
 
     match error {
-        BackendFeatureValidationError::Diagnostic(diagnostic) => *diagnostic,
+        BackendFeatureValidationError::Diagnostic(diagnostic) => diagnostic,
         BackendFeatureValidationError::Infrastructure(_) => {
             panic!("expected a user-facing Rule diagnostic, not an infrastructure error")
         }
@@ -530,7 +530,7 @@ fn block(id: BlockId, statements: Vec<HirStatement>, terminator: HirTerminator) 
     }
 }
 
-fn numeric_op_statement(id: u32, op: HirNumericOp, location: SourceLocation) -> HirStatement {
+fn numeric_op_statement(id: u32, op: HirNumericOp, span: Option<SourceSpan>) -> HirStatement {
     let failure_mode = NumericFailureMode::Trap;
     let left = HirExpression {
         id: HirValueId(id + 100),
@@ -558,15 +558,14 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, location: SourceLocation) -> 
             operands: HirNumericOperands::Binary { left, right },
             result,
         },
-        location,
-        span: None,
+        span,
     }
 }
 
 fn float_statement(
     id: u32,
     kind: ReachableFloatStatementKind,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> HirStatement {
     let failure_mode = NumericFailureMode::Trap;
     let source = HirExpression {
@@ -593,8 +592,7 @@ fn float_statement(
                 result,
             },
         },
-        location,
-        span: None,
+        span,
     }
 }
 
@@ -606,19 +604,5 @@ fn unit_expression(id: u32) -> HirExpression {
         value_kind: ValueKind::RValue,
         region: RegionId(0),
         span: None,
-    }
-}
-
-fn location_at(line_number: i32, char_column: i32) -> SourceLocation {
-    SourceLocation {
-        start_pos: CharPosition {
-            line_number,
-            char_column,
-        },
-        end_pos: CharPosition {
-            line_number,
-            char_column: char_column + 1,
-        },
-        ..SourceLocation::default()
     }
 }

@@ -59,7 +59,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -170,7 +170,6 @@ fn field_declaration_no_default(
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Inferred,
             type_id,
@@ -185,7 +184,6 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -274,12 +272,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     let max_size_constant = Declaration {
         id: InternedPath::from_single_str("MaxSize", &mut string_table),
-        value: Expression::int(
-            256,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::int(256, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -491,7 +484,6 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let receiver = Declaration {
         id: path("this", &mut string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Inferred,
             struct_type_id,
@@ -560,7 +552,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
             SourceId::COMPILATION_ROOT,
             vec![],
         ))),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
     };
     let template_map: FxHashMap<InternedPath, GenericFunctionTemplate> =
         [(method_fn_path.clone(), template)].into_iter().collect();
@@ -722,7 +714,6 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
             string_id,
             Expression::string_slice(
                 string_table.intern("default-prefix"),
-                SourceLocation::default(),
                 None,
                 ValueMode::ImmutableOwned,
             )
@@ -734,12 +725,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(
-                42,
-                SourceLocation::default(),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::int(42, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("subject", string_id, &mut string_table),
@@ -841,23 +827,13 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_declaration_with_default(
             "x",
             int_id,
-            Expression::int(
-                10,
-                SourceLocation::default(),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::int(10, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_with_default(
             "flag",
             bool_id,
-            Expression::bool(
-                true,
-                SourceLocation::default(),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("label", string_id, &mut string_table),
@@ -943,11 +919,9 @@ fn choice_payload_fields_remain_default_free() {
             fields: Box::new([FieldDefinition {
                 name: path("value", &mut string_table),
                 type_id: int_id,
-                location: SourceLocation::default(),
                 span: None,
             }]),
         },
-        location: SourceLocation::default(),
         span: None,
     };
 
@@ -1040,7 +1014,6 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 string_id,
                 Expression::string_slice(
                     string_table.intern("fallback"),
-                    SourceLocation::default(),
                     None,
                     ValueMode::ImmutableOwned,
                 ),

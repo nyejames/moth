@@ -24,7 +24,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::validation::{
@@ -42,11 +42,10 @@ pub(crate) struct CatchFallibleHandlerSite<'a> {
     pub(crate) error_return_type_id: TypeId,
     pub(crate) value_required: bool,
     pub(crate) compilation_stage: &'a str,
-    pub(crate) value_required_location: SourceLocation,
+    pub(crate) value_required_span: Option<SourceSpan>,
 }
 struct ParsedCatchErrorBinding {
     binding: CatchErrorBinding,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 }
 
@@ -129,7 +128,7 @@ fn parse_catch_error_binding(
     if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -139,7 +138,7 @@ fn parse_catch_error_binding(
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::EmptyCatchHandlerBinding,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -147,36 +146,28 @@ fn parse_catch_error_binding(
     let TokenKind::Symbol(handler_name) = token_stream.current_token_kind().to_owned() else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
 
-    let handler_name_location = token_stream.current_location();
-    let handler_name_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let handler_name_span = Some(token_stream.current_span());
     validate_catch_fallible_handler_binding(
         handler_name,
-        handler_name_location.to_owned(),
+        handler_name_span,
         site.compilation_stage,
         warnings,
         string_table,
     )?;
 
-    validate_catch_fallible_handler_conflict(
-        context,
-        handler_name,
-        handler_name_location.to_owned(),
-    )?;
+    validate_catch_fallible_handler_conflict(context, handler_name, handler_name_span)?;
 
     token_stream.advance();
 
     if token_stream.current_token_kind() == &TokenKind::Comma {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::MultipleCatchHandlerBindings,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -184,7 +175,7 @@ fn parse_catch_error_binding(
     if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerClosingPipe,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -195,7 +186,6 @@ fn parse_catch_error_binding(
         binding: CatchErrorBinding {
             error_binding: context.scope.append(handler_name),
         },
-        location: handler_name_location,
         span: handler_name_span,
     })
 }
@@ -217,7 +207,7 @@ fn parse_catch_fallible_handler_body(
     if token_stream.current_token_kind() != &TokenKind::Colon {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerColon,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -234,21 +224,20 @@ fn parse_catch_fallible_handler_body(
     if let Some(error_binding) = &error {
         let error_data_type =
             diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_location = error_binding.location.clone();
+        let error_binding_span = error_binding.span;
         handler_context.add_var(
             Declaration {
                 id: error_binding.binding.error_binding.to_owned(),
                 value: Expression::no_value_with_type_id(
-                    error_binding_location.clone(),
-                    error_binding.span,
+                    error_binding_span,
                     error_data_type,
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
-                binding_span: error_binding.span,
+                binding_span: error_binding_span,
                 config_qualifier: None,
             },
-            error_binding_location,
+            error_binding_span,
         );
     }
 
@@ -266,7 +255,7 @@ fn parse_catch_fallible_handler_body(
         site.value_required,
         site.success_result_type_ids,
         &handler_body,
-        site.value_required_location,
+        site.value_required_span,
     )?;
 
     Ok(CatchFallibleHandler {
@@ -339,7 +328,7 @@ fn parse_inline_catch_handler_body(
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -347,7 +336,7 @@ fn parse_inline_catch_handler_body(
     if token_stream.current_token_kind() != &TokenKind::Then {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -355,16 +344,12 @@ fn parse_inline_catch_handler_body(
     if !site.value_required || site.success_result_type_ids.is_empty() {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
-    let then_location = token_stream.current_location();
-    let then_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let then_span = Some(token_stream.current_span());
     token_stream.advance();
 
     // A retained newline proves a multiline form. Other empty boundaries use the
@@ -372,7 +357,7 @@ fn parse_inline_catch_handler_body(
     if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -380,11 +365,11 @@ fn parse_inline_catch_handler_body(
     if is_missing_produced_value_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ThenRequiresValues,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
-    reject_invalid_inline_catch_value_window(token_stream, then_location.clone())?;
+    reject_invalid_inline_catch_value_window(token_stream)?;
 
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table);
@@ -397,21 +382,20 @@ fn parse_inline_catch_handler_body(
     if let Some(error_binding) = &error {
         let error_data_type =
             diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_location = error_binding.location.clone();
+        let error_binding_span = error_binding.span;
         handler_context.add_var(
             Declaration {
                 id: error_binding.binding.error_binding.to_owned(),
                 value: Expression::no_value_with_type_id(
-                    error_binding_location.clone(),
-                    error_binding.span,
+                    error_binding_span,
                     error_data_type,
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
-                binding_span: error_binding.span,
+                binding_span: error_binding_span,
                 config_qualifier: None,
             },
-            error_binding_location,
+            error_binding_span,
         );
     }
 
@@ -427,26 +411,22 @@ fn parse_inline_catch_handler_body(
     if token_stream.current_token_kind() == &TokenKind::Catch {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
-    if produced_values
-        .iter()
-        .any(|value| value.location.start_pos.line_number != then_location.start_pos.line_number)
-    {
+    if token_stream.current_token_kind() == &TokenKind::Newline {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::InlineCatchMultiline,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
     let body = vec![AstNode {
         kind: NodeKind::ThenValue(ProducedValues {
             expressions: produced_values,
-            location: then_location.clone(),
+            span: then_span,
         }),
-        location: then_location,
         span: then_span,
         scope: handler_context.scope.clone(),
     }];
@@ -459,17 +439,16 @@ fn parse_inline_catch_handler_body(
 
 fn reject_invalid_inline_catch_value_window(
     token_stream: &FileTokens,
-    then_location: SourceLocation,
 ) -> Result<(), ExpressionParseError> {
     let mut index = token_stream.index;
 
     while index < token_stream.length {
         let token = &token_stream.tokens[index];
 
-        if token.location.start_pos.line_number != then_location.start_pos.line_number {
+        if token.kind == TokenKind::Newline {
             return Err(CompilerDiagnostic::invalid_fallible_handling(
                 InvalidFallibleHandlingReason::InlineCatchMultiline,
-                token.location.clone(),
+                Some(SourceSpan::new(token_stream.file_id, token.span)),
             )
             .into());
         }
@@ -479,7 +458,7 @@ fn reject_invalid_inline_catch_value_window(
             TokenKind::Catch => {
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-                    token.location.clone(),
+                    Some(SourceSpan::new(token_stream.file_id, token.span)),
                 )
                 .into());
             }

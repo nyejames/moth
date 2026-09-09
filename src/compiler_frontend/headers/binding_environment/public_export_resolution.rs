@@ -13,18 +13,17 @@ use crate::compiler_frontend::headers::binding_environment::target_resolution::s
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Boxed diagnostic result for public export boundary checks.
+/// Result for public export boundary checks.
 ///
-/// WHAT: gives source-backed package and module privacy checks one small error boundary.
-/// WHY: both callers already propagate boxed diagnostics, so the checks can preserve
-///      structured errors without unboxing and reboxing them.
-type BoundaryCheckResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Public-export checks use the same plain `CompilerDiagnostic` boundary as
+/// their callers.
+type BoundaryCheckResult<T> = Result<T, CompilerDiagnostic>;
 
 /// Result of looking up a dependency path against a module public export.
 pub(crate) enum PublicExportLookupResult {
@@ -346,7 +345,7 @@ pub(crate) struct SourcePackageBoundaryCheckInput<'a> {
     pub(crate) consumer_file: &'a InternedPath,
     pub(crate) target_file: &'a InternedPath,
     pub(crate) requested_path: &'a InternedPath,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) file_package_membership: &'a FxHashMap<InternedPath, String>,
     pub(crate) source_package_root_files: &'a FxHashMap<String, InternedPath>,
     pub(crate) string_table: &'a mut StringTable,
@@ -378,13 +377,11 @@ pub(crate) fn check_source_package_boundary(
     }
 
     let public_surface_name_id = input.string_table.intern(target_package);
-    Err(Box::new(
-        CompilerDiagnostic::not_exported_by_public_surface(
-            input.requested_path.clone(),
-            public_surface_name_id,
-            ImportPublicSurfaceType::SourcePackage,
-            input.location,
-        ),
+    Err(CompilerDiagnostic::not_exported_by_public_surface(
+        input.requested_path.clone(),
+        public_surface_name_id,
+        ImportPublicSurfaceType::SourcePackage,
+        input.span,
     ))
 }
 
@@ -396,7 +393,7 @@ pub(crate) struct ModuleBoundaryCheckInput<'a> {
     pub(crate) consumer_file: &'a InternedPath,
     pub(crate) target_file: &'a InternedPath,
     pub(crate) symbol_path: &'a InternedPath,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) file_module_membership: &'a FxHashMap<InternedPath, InternedPath>,
     pub(crate) module_root_public_exports:
         &'a FxHashMap<InternedPath, FxHashSet<PublicExportEntry>>,
@@ -424,20 +421,18 @@ pub(crate) fn check_module_boundary(
         return Ok(());
     }
 
-    // Different module roots: direct-selection public dependencies should already have resolved through the
-    // target public surface. Direct source-path resolution here is therefore a boundary violation.
     if input.module_root_public_exports.contains_key(target_root) {
-        return Err(Box::new(diagnostics::cross_module_dependency_not_exported(
+        return Err(diagnostics::cross_module_dependency_not_exported(
             input.symbol_path,
-            input.location,
-        )));
+            input.span,
+        ));
     }
 
     // Target module has no public root surface.
-    Err(Box::new(diagnostics::missing_module_root_public_surface(
+    Err(diagnostics::missing_module_root_public_surface(
         input.symbol_path,
-        input.location,
-    )))
+        input.span,
+    ))
 }
 
 #[cfg(test)]

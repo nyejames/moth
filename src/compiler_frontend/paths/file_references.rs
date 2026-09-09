@@ -6,15 +6,14 @@
 //! an expression parse. Preparation owns classification; Stage 0 owns filesystem resolution;
 //! AST interprets an already-resolved target and is given no filesystem resolver.
 //!
-//! Path syntax rows stay spelling and location only. This table does not store resource identity,
-//! output placement, hashes or byte contents.
+//! Path syntax rows retain their exact source-qualified span. This table does not store resource
+//! identity, output placement, hashes or byte contents.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -38,8 +37,7 @@ pub(crate) enum PreparedFileReferenceClass {
 pub(crate) struct PreparedFileReference {
     pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
-    pub(crate) location: SourceLocation,
-    pub(crate) span: LocalSpan,
+    pub(crate) span: SourceSpan,
     pub(crate) class: PreparedFileReferenceClass,
 }
 
@@ -58,20 +56,19 @@ impl PreparedFileReferenceTable {
         self.references.iter()
     }
 
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for reference in &mut self.references {
-            reference.location.remap_string_ids(remap);
-        }
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {
+        // Prepared references carry only source-qualified spans and dense IDs; neither contains
+        // interned strings.
     }
 
     pub(crate) fn rebind_source_identity(
         &mut self,
         file_id: SourceId,
-        logical_path: &InternedPath,
+        _logical_path: &InternedPath,
     ) {
         for reference in &mut self.references {
             reference.source_file = file_id;
-            reference.location.rebind_source_identity(logical_path);
+            reference.span = SourceSpan::new(file_id, reference.span.local());
         }
     }
 }
@@ -102,7 +99,6 @@ pub(crate) fn classify_prepared_file_references(
         references.push(PreparedFileReference {
             source_file,
             path_syntax: path_id,
-            location: row.location.clone(),
             span: row.span,
             class: classify_authored_path(&row.root, string_table),
         });
@@ -186,7 +182,7 @@ pub(crate) enum ResolvedFileReferenceOutcome {
     /// extensionless path retained for AST's typed diagnostic).
     NoPhysicalTarget,
     Target(ResolvedFileReferenceTarget),
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
 }
 
 /// Module-compilation table pairing prepared path rows with Stage 0 resolved targets.

@@ -11,7 +11,6 @@ use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeLoopSpec};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 /// Supported template branch selectors.
 #[derive(Clone, Debug)]
 pub(crate) enum TemplateBranchSelector {
@@ -55,17 +54,14 @@ pub(crate) enum TemplateBodyEmission {
 
 /// Authored `[else]` marker provenance for a branch-chain fallback.
 ///
-/// WHAT: records the exact source location and span of the `[else]` sentinel
-///       that introduced a branch chain's fallback body.
+/// WHAT: records the exact source span of the `[else]` sentinel that
+///       introduced a branch chain's fallback body.
 /// WHY: the marker is authored metadata independent of the fallback body and of
 ///      the enclosing `if` opening. Substituting either would misattribute
 ///      diagnostics, so the marker travels beside them through TIR, copies,
 ///      and the runtime handoff. `None` on chains without a fallback body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TemplateElseMarker {
-    /// Legacy source location of the `[else]` token.
-    pub(crate) location: SourceLocation,
-
     /// Exact authored byte range of the `[else]` token in its source.
     pub(crate) span: Option<SourceSpan>,
 }
@@ -101,7 +97,6 @@ pub(crate) struct TemplateIfBodyParseInput {
     pub(crate) selector: TemplateBranchSelector,
     pub(crate) then_context: ScopeContext,
     pub(crate) else_context: ScopeContext,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -110,6 +105,5 @@ pub(crate) struct TemplateIfBodyParseInput {
 pub(crate) struct TemplateLoopBodyParseInput {
     pub(crate) header: TemplateLoopHeader,
     pub(crate) body_context: ScopeContext,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }

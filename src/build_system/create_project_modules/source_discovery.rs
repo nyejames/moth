@@ -4,10 +4,10 @@
 //! build the complete set of source files for one single-file module. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
-//! Stage 0 returns move-only typed failures in `SourceDiscoveryError` (a boxed user diagnostic
-//! or a typed infrastructure error) plus a finalized form pairing a `PremergeFailure` with its
-//! finished `SourceDatabase`. Production discovery never constructs `CompilerMessages`; the
-//! parent single-file/test tail owns that single conversion.
+//! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
+//! for diagnosed input and a typed `CompilerError` for infrastructure failures, plus a finalized
+//! form pairing a `PremergeFailure` with its finished `SourceDatabase`. Production discovery never
+//! constructs `CompilerMessages`; the parent single-file/test tail owns that single conversion.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
@@ -20,7 +20,6 @@ use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 #[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
     PremergeDiagnosticBatch, PremergeFailure,
@@ -45,7 +44,7 @@ use crate::compiler_frontend::project_globals::{
     is_project_globals_dependency, is_project_globals_namespace,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
     SourceRegistrationIndex, SourceSpan, SourceSpanBuilders,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -130,9 +129,7 @@ pub(super) fn resolve_structural_provider_reference(
     match handle_provider_capable_dependency(
         ProviderCapableDependencyInput {
             dependency_path: &provider.path,
-            dependency_location: &provider.location,
-            dependency_span: provider.span,
-            dependency_source: provider.dependency_shell_id.source,
+            dependency_span: Some(provider.span),
             clause_kind,
             target: &provider.target,
             canonical_file,
@@ -161,7 +158,6 @@ struct ReachableSourceInventory {
     local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     traversal_source_files: SourceDatabase,
     resolved_file_references: Vec<SingleFileResolvedReference>,
-    active_source: Option<SourceId>,
 }
 
 struct DiscoveryWalkContext<'a> {
@@ -178,7 +174,6 @@ enum DiscoveryWalkOutcome {
 
 struct TraversalFailure {
     error: SourceDiscoveryError,
-    source_path: Option<PathBuf>,
 }
 
 /// Collected reachable inputs for one entry plus the live final source owner.
@@ -216,17 +211,17 @@ impl CollectReachableInputsError {
 /// WHAT: records that an authored structural provider reference resolved through the
 ///       boundary-aware namespace from a consumer project module to a provider project
 ///       module, carrying both `ModuleId` values and the exact authored dependency-clause
-///       location.
+///       span.
 /// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts a
 ///      provider-before-consumer edge without a path-to-ID mapping step. The authored source
-///      location is retained in the graph side table so a later
-///      diagnostic owner can attribute the edge to the exact dependency clause without reparsing.
+///      span is retained in the graph side table so a later diagnostic owner can attribute the
+///      edge to the exact dependency clause without reparsing.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
-    pub(super) graph_location: SourceLocation,
+    pub(super) graph_span: Option<SourceSpan>,
 }
 
 /// One authored dependency from a module to a separately compiled source-package facade.
@@ -568,22 +563,186 @@ fn remap_source_discovery_error(
         SourceDiscoveryError::Premerge(mut failure) => {
             match &mut failure {
                 PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
-                PremergeFailure::Infrastructure(error) => error.remap_string_ids(remap),
+                PremergeFailure::Infrastructure(_) => {}
+                PremergeFailure::Mixed { batch, .. } => batch.remap_string_ids(remap),
             }
             SourceDiscoveryError::Premerge(failure)
         }
         SourceDiscoveryError::Finalized(mut boxed) => {
             match &mut boxed.failure {
                 PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
-                PremergeFailure::Infrastructure(error) => error.remap_string_ids(remap),
+                PremergeFailure::Infrastructure(_) => {}
+                PremergeFailure::Mixed { batch, .. } => batch.remap_string_ids(remap),
             }
             SourceDiscoveryError::Finalized(boxed)
         }
-        SourceDiscoveryError::Infrastructure(mut error) => {
-            error.remap_string_ids(remap);
-            SourceDiscoveryError::Infrastructure(error)
+        SourceDiscoveryError::Infrastructure(error) => SourceDiscoveryError::Infrastructure(error),
+    }
+}
+type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
+
+/// Join traversal-local preparation identities to the final source registrations.
+///
+/// Synthetic preparation mints source IDs before the complete closure can be canonically sorted.
+/// The cached delta is the only owner that remembers each provisional ID, while the finalized
+/// source database supplies the corresponding canonical registration.
+fn build_source_identity_map(
+    source_cache: &FxHashMap<PathBuf, PreparedDiscoverySource>,
+    source_files: &SourceDatabase,
+) -> Result<SourceIdentityMap, CompilerError> {
+    let mut source_ids = FxHashMap::default();
+    source_ids.insert(SourceId::COMPILATION_ROOT, SourceId::COMPILATION_ROOT);
+
+    for (canonical_path, prepared) in source_cache {
+        let final_source_id = source_files
+            .get_by_canonical_path(canonical_path)
+            .map(|source| source.id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "cached discovery source {} has no final registration",
+                    canonical_path.display()
+                ))
+            })?;
+        let provisional_source_id = prepared.prepared_output.file_id;
+        if let Some(previous_source_id) = source_ids.insert(provisional_source_id, final_source_id)
+            && previous_source_id != final_source_id
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "provisional source identity {} maps to final identities {} and {}",
+                provisional_source_id.index(),
+                previous_source_id.index(),
+                final_source_id.index()
+            )));
         }
     }
+
+    Ok(source_ids)
+}
+
+fn final_source_id(
+    provisional_source_id: SourceId,
+    source_ids: &SourceIdentityMap,
+) -> Result<SourceId, CompilerError> {
+    if provisional_source_id == SourceId::COMPILATION_ROOT {
+        return Ok(SourceId::COMPILATION_ROOT);
+    }
+
+    source_ids
+        .get(&provisional_source_id)
+        .copied()
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "synthetic discovery diagnostic references unknown provisional source identity {}",
+                provisional_source_id.index()
+            ))
+        })
+}
+
+fn rebind_discovery_span(
+    span: &mut Option<SourceSpan>,
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    if let Some(span) = span {
+        let source_id = final_source_id(span.source(), source_ids)?;
+        *span = SourceSpan::new(source_id, span.local());
+    }
+    Ok(())
+}
+
+fn rebind_discovery_diagnostic(
+    diagnostic: &mut CompilerDiagnostic,
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    rebind_discovery_span(&mut diagnostic.primary_span, source_ids)?;
+    for label in &mut diagnostic.labels {
+        rebind_discovery_span(&mut label.span, source_ids)?;
+    }
+    Ok(())
+}
+
+fn rebind_discovery_diagnostics(
+    diagnostics: &mut [CompilerDiagnostic],
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    for diagnostic in diagnostics {
+        rebind_discovery_diagnostic(diagnostic, source_ids)?;
+    }
+    Ok(())
+}
+
+fn rebind_discovery_compiler_error(
+    error: &mut CompilerError,
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    rebind_discovery_span(&mut error.source_span, source_ids)
+}
+
+fn rebind_discovery_batch(
+    batch: PremergeDiagnosticBatch,
+    source_ids: &SourceIdentityMap,
+) -> Result<PremergeDiagnosticBatch, CompilerError> {
+    let (bag, string_table, render_type_contexts) = batch.into_parts();
+    let mut diagnostics = bag.into_diagnostics();
+    rebind_discovery_diagnostics(&mut diagnostics, source_ids)?;
+    Ok(PremergeDiagnosticBatch::from_parts(
+        diagnostics,
+        string_table,
+        render_type_contexts,
+    ))
+}
+
+fn rebind_discovery_failure(
+    failure: PremergeFailure,
+    source_ids: &SourceIdentityMap,
+) -> Result<PremergeFailure, CompilerError> {
+    match failure {
+        PremergeFailure::Diagnosed(batch) => Ok(PremergeFailure::Diagnosed(
+            rebind_discovery_batch(batch, source_ids)?,
+        )),
+        PremergeFailure::Infrastructure(mut error) => {
+            rebind_discovery_compiler_error(&mut error, source_ids)?;
+            Ok(PremergeFailure::Infrastructure(error))
+        }
+        PremergeFailure::Mixed { batch, mut error } => {
+            let batch = rebind_discovery_batch(batch, source_ids)?;
+            rebind_discovery_compiler_error(&mut error, source_ids)?;
+            Ok(PremergeFailure::Mixed { batch, error })
+        }
+    }
+}
+
+fn rebind_source_discovery_failure(
+    error: SourceDiscoveryError,
+    source_ids: &SourceIdentityMap,
+) -> Result<SourceDiscoveryError, CompilerError> {
+    match error {
+        SourceDiscoveryError::Diagnostic(mut diagnostic) => {
+            rebind_discovery_diagnostic(&mut diagnostic, source_ids)?;
+            Ok(SourceDiscoveryError::Diagnostic(diagnostic))
+        }
+        SourceDiscoveryError::Premerge(failure) => Ok(SourceDiscoveryError::Premerge(
+            rebind_discovery_failure(failure, source_ids)?,
+        )),
+        SourceDiscoveryError::Finalized(_) => {
+            unreachable!("traversal failure cannot already carry a finalized source owner")
+        }
+        SourceDiscoveryError::Infrastructure(mut error) => {
+            rebind_discovery_compiler_error(&mut error, source_ids)?;
+            Ok(SourceDiscoveryError::Infrastructure(error))
+        }
+    }
+}
+
+fn rebind_resolved_file_reference_diagnostics(
+    references: &mut [SingleFileResolvedReference],
+    source_ids: &SourceIdentityMap,
+) -> Result<(), CompilerError> {
+    for reference in references {
+        if let SingleFileReferenceOutcome::Diagnostic(diagnostic) = &mut reference.outcome {
+            rebind_discovery_diagnostic(diagnostic, source_ids)?;
+        }
+    }
+    Ok(())
 }
 
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
@@ -602,6 +761,7 @@ fn finalize_failed_discovery(
     mut files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     source_builder: SourceDatabaseBuilder,
+    source_ids: &SourceIdentityMap,
     failure: Option<TraversalFailure>,
     string_table: &mut StringTable,
 ) -> SourceDiscoveryError {
@@ -619,70 +779,28 @@ fn finalize_failed_discovery(
         let Some(prepared) = source_cache.remove(&file.path) else {
             continue;
         };
-        let source_id = match source_builder
+        if source_builder
             .sources()
             .get_by_canonical_path(&file.path)
-            .map(|source| source.id)
+            .is_none()
         {
-            Some(source_id) => source_id,
-            None => {
-                let error = CompilerError::compiler_error(format!(
-                    "retained discovery source {} has no final registration",
-                    file.path.display()
-                ));
-                return finish_discovery_source_owner(
-                    PremergeFailure::Infrastructure(error),
-                    source_builder,
-                );
-            }
-        };
-        let logical_path = source_builder.sources().legacy_logical_path(source_id);
+            let error = CompilerError::compiler_error(format!(
+                "retained discovery source {} has no final registration",
+                file.path.display()
+            ));
+            return finish_discovery_source_owner(
+                PremergeFailure::Infrastructure(error),
+                source_builder,
+            );
+        }
         let SourcePreparationDelta {
-            file_id: provisional_file_id,
+            file_id: _,
             span_builder: _,
             result,
         } = prepared.prepared_output;
         match result {
             Ok(mut output) => {
-                let canonical_os_path = match source_builder
-                    .sources()
-                    .get_by_canonical_path(&file.path)
-                    .and_then(|record| record.canonical_os_path.clone())
-                {
-                    Some(canonical_os_path) => canonical_os_path,
-                    None => {
-                        for warning in &mut output.warnings {
-                            warning.rebind_source_identity(
-                                Some(provisional_file_id),
-                                source_id,
-                                &logical_path,
-                            );
-                        }
-                        warnings.append(&mut output.warnings);
-                        let error = CompilerError::compiler_error(format!(
-                            "final source identity {} has no canonical path",
-                            source_id.index()
-                        ));
-                        return finish_discovery_source_owner(
-                            PremergeFailure::Infrastructure(error),
-                            source_builder,
-                        );
-                    }
-                };
-
-                if let Err(error) = output.rebind_source_identity(
-                    source_id,
-                    logical_path.clone(),
-                    canonical_os_path.into_path_buf(),
-                ) {
-                    for warning in &mut output.warnings {
-                        warning.rebind_source_identity(
-                            Some(provisional_file_id),
-                            source_id,
-                            &logical_path,
-                        );
-                    }
-                    warnings.append(&mut output.warnings);
+                if let Err(error) = rebind_discovery_diagnostics(&mut output.warnings, source_ids) {
                     return finish_discovery_source_owner(
                         PremergeFailure::Infrastructure(error),
                         source_builder,
@@ -692,94 +810,60 @@ fn finalize_failed_discovery(
             }
 
             Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
-                for warning in &mut error.warnings {
-                    warning.rebind_source_identity(
-                        Some(provisional_file_id),
-                        source_id,
-                        &logical_path,
+                if let Err(remap_error) =
+                    rebind_discovery_diagnostics(&mut error.warnings, source_ids)
+                {
+                    return finish_discovery_source_owner(
+                        PremergeFailure::Infrastructure(remap_error),
+                        source_builder,
                     );
                 }
-                error.diagnostic.rebind_source_identity(
-                    Some(provisional_file_id),
-                    source_id,
-                    &logical_path,
-                );
-                warnings.append(&mut error.warnings);
+                warnings.extend(error.warnings);
                 preparation_failure = Some(SourceDiscoveryError::Diagnostic(error.diagnostic));
             }
 
-            Err(FileFrontendPrepareFailure::Infrastructure(mut error)) => {
-                error.location.rebind_source_identity(&logical_path);
+            Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 preparation_failure = Some(SourceDiscoveryError::Infrastructure(error));
             }
         }
     }
 
-    let terminal_failure = if let Some(failure) = failure {
-        match failure.error {
-            SourceDiscoveryError::Diagnostic(mut diagnostic) => {
-                if let Some(source_id) = failure
-                    .source_path
-                    .as_ref()
-                    .and_then(|path| source_builder.sources().get_by_canonical_path(path))
-                    .map(|source| source.id)
-                {
-                    let logical_path = source_builder.sources().legacy_logical_path(source_id);
-                    diagnostic.rebind_source_identity(None, source_id, &logical_path);
-                }
-                let table = std::mem::take(string_table);
-                let mut diagnostics = warnings;
-                diagnostics.push(*diagnostic);
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
-                    diagnostics,
-                    table,
-                ))
-            }
-            SourceDiscoveryError::Premerge(mut failure) => {
-                if let PremergeFailure::Diagnosed(batch) = &mut failure {
-                    batch.prepend_diagnostics(warnings);
-                }
-                failure
-            }
-            SourceDiscoveryError::Infrastructure(mut error) => {
-                if let Some(source_id) = failure
-                    .source_path
-                    .as_ref()
-                    .and_then(|path| source_builder.sources().get_by_canonical_path(path))
-                    .map(|source| source.id)
-                {
-                    let logical_path = source_builder.sources().legacy_logical_path(source_id);
-                    error.location.rebind_source_identity(&logical_path);
-                }
-                PremergeFailure::Infrastructure(error)
-            }
-            SourceDiscoveryError::Finalized(_) => {
-                unreachable!("traversal failure cannot already carry a finalized source owner")
-            }
-        }
+    let terminal_error = if let Some(failure) = failure {
+        failure.error
     } else {
-        match preparation_failure
-            .expect("an aborted discovery owns its terminal preparation failure")
-        {
-            SourceDiscoveryError::Diagnostic(diagnostic) => {
-                let table = std::mem::take(string_table);
-                let mut diagnostics = warnings;
-                diagnostics.push(*diagnostic);
-                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
-                    diagnostics,
-                    table,
-                ))
-            }
-            SourceDiscoveryError::Premerge(mut failure) => {
-                if let PremergeFailure::Diagnosed(batch) = &mut failure {
+        preparation_failure.expect("an aborted discovery owns its terminal preparation failure")
+    };
+    let terminal_error = match rebind_source_discovery_failure(terminal_error, source_ids) {
+        Ok(error) => error,
+        Err(error) => {
+            return finish_discovery_source_owner(
+                PremergeFailure::Infrastructure(error),
+                source_builder,
+            );
+        }
+    };
+    let terminal_failure = match terminal_error {
+        SourceDiscoveryError::Diagnostic(diagnostic) => {
+            let table = std::mem::take(string_table);
+            let mut diagnostics = warnings;
+            diagnostics.push(diagnostic);
+            PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
+                diagnostics,
+                table,
+            ))
+        }
+        SourceDiscoveryError::Premerge(mut failure) => {
+            match &mut failure {
+                PremergeFailure::Diagnosed(batch) | PremergeFailure::Mixed { batch, .. } => {
                     batch.prepend_diagnostics(warnings);
                 }
-                failure
+                PremergeFailure::Infrastructure(_) => {}
             }
-            SourceDiscoveryError::Infrastructure(error) => PremergeFailure::Infrastructure(error),
-            SourceDiscoveryError::Finalized(_) => {
-                unreachable!("preparation failure cannot already carry a finalized source owner")
-            }
+            failure
+        }
+        SourceDiscoveryError::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+        SourceDiscoveryError::Finalized(_) => {
+            unreachable!("discovery failure cannot already carry a finalized source owner")
         }
     };
     finish_discovery_source_owner(terminal_failure, source_builder)
@@ -883,7 +967,6 @@ fn finalize_missing_source_loads(
     files: &[ReachableSourceFile],
     load_results: Vec<MissingSourceLoadResult>,
     source_builder: &mut SourceDatabaseBuilder,
-    string_table: &mut StringTable,
 ) -> Result<(), CompilerError> {
     let mut first_error = None;
 
@@ -929,7 +1012,7 @@ fn finalize_missing_source_loads(
                 }
             }
             MissingSourceLoadResult::Failed(failure) => {
-                let error = source_read_error(&failure.path, failure.error, string_table);
+                let error = source_read_error(&failure.path, failure.error);
                 let record_result = source_builder
                     .sources_mut()
                     .record_source_load_error(source_id, error.clone());
@@ -966,6 +1049,7 @@ fn finalize_reachable_files(
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     failure: Option<TraversalFailure>,
+    resolved_file_references: &mut [SingleFileResolvedReference],
 ) -> Result<(SourceDatabaseBuilder, Vec<PreparedSourceInput>), SourceDiscoveryError> {
     let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
         (
@@ -985,7 +1069,12 @@ fn finalize_reachable_files(
     {
         return Err(discovery_finalization_error(error, source_files));
     }
+    let source_ids = match build_source_identity_map(&source_cache, source_files.sources()) {
+        Ok(source_ids) => source_ids,
+        Err(error) => return Err(discovery_finalization_error(error, source_files)),
+    };
 
+    // Every cached preparation delta now has a final source identity, including the root sentinel.
     if failure.is_some()
         || source_cache
             .values()
@@ -995,6 +1084,7 @@ fn finalize_reachable_files(
             files,
             source_cache,
             source_files,
+            &source_ids,
             failure,
             string_table,
         ));
@@ -1025,24 +1115,27 @@ fn finalize_reachable_files(
         }
     }
     let load_results = load_missing_sources(missing_sources);
-    if let Err(error) =
-        finalize_missing_source_loads(&files, load_results, &mut source_files, string_table)
-    {
+    if let Err(error) = finalize_missing_source_loads(&files, load_results, &mut source_files) {
         let failure = TraversalFailure {
             error: SourceDiscoveryError::Infrastructure(error),
-            source_path: None,
         };
         return Err(finalize_failed_discovery(
             files,
             source_cache,
             source_files,
+            &source_ids,
             Some(failure),
             string_table,
         ));
     };
+    if let Err(error) =
+        rebind_resolved_file_reference_diagnostics(resolved_file_references, &source_ids)
+    {
+        return Err(discovery_finalization_error(error, source_files));
+    }
 
-    // All original tables are owned before this fallible identity transformation. The closure
-    // borrows the owner so every error reaches the same consuming finalization boundary.
+    // All original tables are owned before the final source-kind/input assembly.
+    // Cached prepared outputs are rebound to their final source identity immediately before freeze.
     let normalized: Result<_, CompilerError> = (|| {
         let mut input_files = Vec::with_capacity(files.len());
         for source_file in files {
@@ -1064,6 +1157,25 @@ fn finalize_reachable_files(
             })?;
 
             let source = if let Some(scanned_source) = source_cache.remove(&source_file.path) {
+                let provisional_source_id = scanned_source.prepared_output.file_id;
+                let mapped_source_id =
+                    source_ids
+                        .get(&provisional_source_id)
+                        .copied()
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(format!(
+                                "cached discovery source identity {} has no final mapping",
+                                provisional_source_id.index()
+                            ))
+                        })?;
+                if mapped_source_id != final_source_id {
+                    return Err(CompilerError::compiler_error(format!(
+                        "cached discovery source identity {} maps to final identity {}, expected {}",
+                        provisional_source_id.index(),
+                        mapped_source_id.index(),
+                        final_source_id.index()
+                    )));
+                }
                 let mut output = scanned_source
                     .prepared_output
                     .result
@@ -1071,7 +1183,7 @@ fn finalize_reachable_files(
                 output.rebind_source_identity(
                     final_source_id,
                     source_files.sources().legacy_logical_path(final_source_id),
-                    source_file.path,
+                    source_file.path.clone(),
                 )?;
                 output.freeze_path_syntax(string_table)?;
                 match source_kind {
@@ -1174,9 +1286,7 @@ enum DependencyPolicy<'a, 'b> {
 
 struct ProviderCapableDependencyInput<'a> {
     dependency_path: &'a InternedPath,
-    dependency_location: &'a SourceLocation,
-    dependency_span: LocalSpan,
-    dependency_source: SourceId,
+    dependency_span: Option<SourceSpan>,
     clause_kind: DependencyClauseKind,
     target: &'a DependencyTargetKind,
     canonical_file: &'a Path,
@@ -1305,7 +1415,6 @@ fn traverse_reachable_source_files(
         CompilerError::file_error(
             &entry_paths[0],
             format!("Failed to canonicalize entry file path: {error}"),
-            string_table,
         )
     })?;
     let root_directory = canonical_entry_path.parent().ok_or_else(|| {
@@ -1336,7 +1445,6 @@ fn traverse_reachable_source_files(
         local_source_cache: FxHashMap::default(),
         traversal_source_files: SourceDatabase::empty(),
         resolved_file_references: Vec::new(),
-        active_source: None,
     };
 
     // The walk only borrows source ownership, so every terminal path reaches this barrier.
@@ -1349,25 +1457,14 @@ fn traverse_reachable_source_files(
     );
     let failure = match outcome {
         Ok(DiscoveryWalkOutcome::Complete | DiscoveryWalkOutcome::PreparationFailed) => None,
-        Err(error) => Some(TraversalFailure {
-            error,
-            source_path: inventory
-                .active_source
-                .and_then(|id| inventory.traversal_source_files.get(id))
-                .and_then(|source| {
-                    source
-                        .canonical_os_path
-                        .clone()
-                        .map(|canonical| canonical.into_path_buf())
-                }),
-        }),
+        Err(error) => Some(TraversalFailure { error }),
     };
     let ReachableSourceInventory {
         mut reachable,
         queue,
         local_source_cache,
         traversal_source_files,
-        resolved_file_references,
+        mut resolved_file_references,
         ..
     } = inventory;
     reachable.extend(queue);
@@ -1379,6 +1476,7 @@ fn traverse_reachable_source_files(
         project_path_resolver,
         string_table,
         failure,
+        &mut resolved_file_references,
     )?;
     Ok(ReachableTraversalOutcome {
         source_files,
@@ -1400,7 +1498,6 @@ fn walk_reachable_sources(
         local_source_cache,
         traversal_source_files,
         resolved_file_references,
-        active_source,
     } = inventory;
     let DiscoveryWalkContext {
         canonical_entry_path,
@@ -1411,12 +1508,10 @@ fn walk_reachable_sources(
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let mut dependency_clauses_scanned: usize = 0;
     while let Some(next_file) = queue.pop_front() {
-        *active_source = None;
         let canonical_file = fs::canonicalize(&next_file.path).map_err(|error| {
             CompilerError::file_error(
                 &next_file.path,
                 format!("Failed to canonicalize module file path: {error}"),
-                string_table,
             )
         })?;
         let reachable_file = ReachableSourceFile {
@@ -1480,9 +1575,6 @@ fn walk_reachable_sources(
             );
         }
 
-        *active_source = traversal_source_files
-            .get_by_canonical_path(&canonical_file)
-            .map(|source| source.id);
         let prepared = &local_source_cache
             .get(&canonical_file)
             .expect("scanned source remains owned by traversal")
@@ -1505,9 +1597,7 @@ fn walk_reachable_sources(
             let dependency_path = &provider.path;
             let action = policy.handle_dependency(ProviderCapableDependencyInput {
                 dependency_path,
-                dependency_location: &provider.location,
-                dependency_span: provider.span,
-                dependency_source: provider.dependency_shell_id.source,
+                dependency_span: Some(provider.span),
                 clause_kind: clause.binding.clause_kind(),
                 target: &provider.target,
                 canonical_file: &canonical_file,
@@ -1736,7 +1826,6 @@ fn resolve_module_root_bare_dependency(
                 format!(
                     "Owning module path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
-                string_table,
             ))
         })?;
     let mut module_local_components = module_prefix.as_components().to_vec();
@@ -1755,9 +1844,7 @@ fn handle_provider_capable_dependency(
 ) -> Result<DependencyPolicyAction, SourceDiscoveryError> {
     let ProviderCapableDependencyInput {
         dependency_path,
-        dependency_location,
         dependency_span,
-        dependency_source,
         clause_kind,
         target,
         canonical_file,
@@ -1774,13 +1861,9 @@ fn handle_provider_capable_dependency(
         if is_project_globals_dependency(dependency_path, string_table) && is_owning_project_root {
             return Ok(DependencyPolicyAction::Skip);
         }
-        return Err(with_provider_dependency_span(
-            CompilerDiagnostic::invalid_dependency_clause(
-                clause_kind,
-                InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
-                dependency_location.clone(),
-            ),
-            dependency_source,
+        return Err(CompilerDiagnostic::invalid_dependency_clause(
+            clause_kind,
+            InvalidDependencyClauseReason::ProjectGlobalsPathReserved,
             dependency_span,
         )
         .into());
@@ -1806,11 +1889,9 @@ fn handle_provider_capable_dependency(
         .external_packages
         .unsupported_known_package_dependency(dependency_path, string_table)
     {
-        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
-            unsupported_builder_package_error(canonical_file, package_path, string_table),
-            dependency_source,
-            dependency_span,
-        )));
+        return Err(SourceDiscoveryError::from(
+            unsupported_builder_package_error(package_path, dependency_span, string_table),
+        ));
     }
 
     // Consume the retained provider classification. Header syntax already identified the
@@ -1826,10 +1907,7 @@ fn handle_provider_capable_dependency(
                 ProviderBackedImportRequest {
                     consumer_canonical_path: canonical_file,
                     import_path: dependency_path,
-                    import_location: dependency_location,
-                    dependency_source,
-                    dependency_span,
-                    import_span: Some(SourceSpan::new(dependency_source, dependency_span)),
+                    source_span: dependency_span,
                     prefix_path: &prefix_path,
                     raw_prefix: &prefix_str,
                     provider,
@@ -1840,11 +1918,7 @@ fn handle_provider_capable_dependency(
                 string_table,
             );
             if let Err(error) = result {
-                return Err(with_provider_dependency_error(
-                    error,
-                    dependency_source,
-                    dependency_span,
-                ));
+                return Err(with_provider_dependency_error(error, dependency_span));
             }
             counter_observation!("stage0.reachable_discovery.provider_imports", 1.0);
             // Explicit-extension registered-provider clauses bind through the provider registry.
@@ -1853,16 +1927,14 @@ fn handle_provider_capable_dependency(
         }
 
         // No provider registered for this extension — report unsupported extension.
-        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
+        return Err(SourceDiscoveryError::from(
             unsupported_external_extension_error(
-                canonical_file,
                 dependency_path,
                 &extension,
+                dependency_span,
                 string_table,
             ),
-            dependency_source,
-            dependency_span,
-        )));
+        ));
     }
 
     Ok(DependencyPolicyAction::QueueLocal)
@@ -1875,21 +1947,19 @@ fn handle_provider_capable_dependency(
 /// direct diagnostic produced at this dependency boundary is attributed to the clause span.
 fn with_provider_dependency_span(
     mut diagnostic: CompilerDiagnostic,
-    source: SourceId,
-    span: LocalSpan,
+    source_span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    diagnostic.primary_span = source_span;
     diagnostic
 }
 
 fn with_provider_dependency_error(
     error: SourceDiscoveryError,
-    source: SourceId,
-    span: LocalSpan,
+    source_span: Option<SourceSpan>,
 ) -> SourceDiscoveryError {
     match error {
         SourceDiscoveryError::Diagnostic(mut diagnostic) => {
-            *diagnostic = with_provider_dependency_span(*diagnostic, source, span);
+            diagnostic = with_provider_dependency_span(diagnostic, source_span);
             SourceDiscoveryError::Diagnostic(diagnostic)
         }
         other => other,
@@ -1982,7 +2052,7 @@ pub(super) fn load_missing_source_path_for_test(
     match load_results.into_iter().next() {
         Some(MissingSourceLoadResult::Loaded(_)) => Ok(()),
         Some(MissingSourceLoadResult::Failed(failure)) => {
-            let error = source_read_error(&failure.path, failure.error, string_table);
+            let error = source_read_error(&failure.path, failure.error);
             Err(CompilerMessages::from_error_ref(error, string_table))
         }
         None => Err(CompilerMessages::from_error_ref(
@@ -2006,7 +2076,6 @@ pub(super) fn load_missing_source_paths_for_test(
                     CompilerError::file_error(
                         &path,
                         format!("failed to canonicalize test source path: {error}"),
-                        string_table,
                     ),
                     string_table,
                 )
@@ -2067,12 +2136,7 @@ pub(super) fn load_missing_source_paths_with_registered_paths_for_test(
         .collect();
     let load_results = load_missing_sources(missing_sources);
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
-    match finalize_missing_source_loads(
-        &source_files_for_load,
-        load_results,
-        &mut source_owner,
-        string_table,
-    ) {
+    match finalize_missing_source_loads(&source_files_for_load, load_results, &mut source_owner) {
         Ok(()) => {}
         Err(error) => {
             let mut messages = CompilerMessages::from_error_ref(error, string_table);
@@ -2171,10 +2235,7 @@ fn queue_same_directory_root_for_moth_template(
 struct ProviderBackedImportRequest<'a> {
     consumer_canonical_path: &'a Path,
     import_path: &'a InternedPath,
-    import_location: &'a SourceLocation,
-    dependency_source: SourceId,
-    dependency_span: LocalSpan,
-    import_span: Option<SourceSpan>,
+    source_span: Option<SourceSpan>,
     prefix_path: &'a InternedPath,
     raw_prefix: &'a str,
     provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
@@ -2197,9 +2258,7 @@ fn resolve_provider_backed_import(
             .resolve_provider_target(
                 request.prefix_path,
                 request.consumer_canonical_path,
-                request.import_location,
-                request.dependency_source,
-                request.dependency_span,
+                request.source_span,
                 string_table,
             )
             .map_err(SourceDiscoveryError::from)?,
@@ -2235,10 +2294,8 @@ fn resolve_provider_target_via_filesystem(
         request.consumer_canonical_path,
         &canonical_source_path,
         request.import_path,
-        request.dependency_source,
-        request.dependency_span,
+        request.source_span,
         request.project_path_resolver,
-        string_table,
     )?;
 
     Ok(canonical_source_path)
@@ -2265,7 +2322,6 @@ fn invoke_provider_and_record_resolution(
         let source_file_logical = source_file_logical_path(
             request.consumer_canonical_path,
             request.project_path_resolver,
-            string_table,
         )?;
         external_imports.resolution_table.insert(
             source_file_logical,
@@ -2279,7 +2335,7 @@ fn invoke_provider_and_record_resolution(
     // identity never keys on this machine's checkout path.
     let logical_source = request
         .project_path_resolver
-        .logical_path_for_canonical_file(&canonical_source_path, string_table)
+        .logical_path_for_canonical_file(&canonical_source_path)
         .map_err(SourceDiscoveryError::from)?;
     let logical_source_path = PortableResourcePath::from_relative_logical_path(&logical_source)
         .map_err(SourceDiscoveryError::from)?;
@@ -2288,8 +2344,7 @@ fn invoke_provider_and_record_resolution(
         import_path: request.import_path.to_portable_string(string_table),
         logical_source_path,
         canonical_source_path: canonical_source_path.clone(),
-        source_location: SourceLocation::from_path(request.consumer_canonical_path, string_table),
-        source_span: request.import_span,
+        source_span: request.source_span,
     };
 
     let result = {
@@ -2311,7 +2366,6 @@ fn invoke_provider_and_record_resolution(
         let source_file_logical = source_file_logical_path(
             request.consumer_canonical_path,
             request.project_path_resolver,
-            string_table,
         )?;
         external_imports
             .resolution_table
@@ -2362,7 +2416,6 @@ fn resolve_provider_prefix_to_canonical_path(
                     "Failed to canonicalize external import prefix '{}': {error}",
                     normalized.display()
                 ),
-                string_table,
             )
         })
         .map_err(SourceDiscoveryError::from)?;
@@ -2372,8 +2425,6 @@ fn resolve_provider_prefix_to_canonical_path(
         &base_kind,
         &filesystem_base,
         prefix_path,
-        declaring_file,
-        string_table,
     )
     .map_err(SourceDiscoveryError::from)?;
 
@@ -2384,10 +2435,9 @@ fn resolve_provider_prefix_to_canonical_path(
 fn source_file_logical_path(
     canonical_file: &Path,
     project_path_resolver: &ProjectPathResolver,
-    string_table: &mut StringTable,
 ) -> Result<String, SourceDiscoveryError> {
     let logical = project_path_resolver
-        .logical_path_for_canonical_file(canonical_file, string_table)
+        .logical_path_for_canonical_file(canonical_file)
         .map_err(SourceDiscoveryError::from)?;
     let logical_text = logical.to_str().ok_or_else(|| {
         SourceDiscoveryError::from(CompilerError::file_error(
@@ -2395,7 +2445,6 @@ fn source_file_logical_path(
             format!(
                 "Source file logical path {logical:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
             ),
-            string_table,
         ))
     })?;
     Ok(logical_text.replace('\\', "/"))
@@ -2414,21 +2463,19 @@ fn check_provider_dependency_module_boundary(
     declaring_file: &Path,
     target_file: &Path,
     dependency_path: &InternedPath,
-    dependency_source: SourceId,
-    dependency_span: LocalSpan,
+    source_span: Option<SourceSpan>,
     project_path_resolver: &ProjectPathResolver,
-    string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
     let consumer_container = provider_dependency_container(project_path_resolver, declaring_file);
     let target_container = provider_dependency_container(project_path_resolver, target_file);
 
     if consumer_container != target_container {
-        let location = SourceLocation::from_path(declaring_file, string_table);
-        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
-            CompilerDiagnostic::cross_module_import_not_exported(dependency_path.clone(), location),
-            dependency_source,
-            dependency_span,
-        )));
+        return Err(SourceDiscoveryError::from(
+            CompilerDiagnostic::cross_module_import_not_exported(
+                dependency_path.clone(),
+                source_span,
+            ),
+        ));
     }
 
     Ok(())
@@ -2466,30 +2513,24 @@ fn provider_dependency_container(
 // -------------------------
 
 fn unsupported_builder_package_error(
-    consumer_file: &Path,
     package_path: &str,
+    source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let package_path_id = string_table.intern(package_path);
-    let location =
-        crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-            consumer_file,
-            string_table,
-        );
-    CompilerDiagnostic::unsupported_builder_package(package_path_id, location)
+    CompilerDiagnostic::unsupported_builder_package(package_path_id, source_span)
 }
 
 fn unsupported_external_extension_error(
-    consumer_file: &Path,
     import_path: &InternedPath,
     extension: &str,
+    source_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let extension_id = string_table.intern(extension);
-    let location =
-        crate::compiler_frontend::compiler_messages::source_location::SourceLocation::from_path(
-            consumer_file,
-            string_table,
-        );
-    CompilerDiagnostic::unsupported_external_extension(import_path.clone(), extension_id, location)
+    CompilerDiagnostic::unsupported_external_extension(
+        import_path.clone(),
+        extension_id,
+        source_span,
+    )
 }

@@ -19,7 +19,6 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::fallible::EmittedFallibleCarrier;
 
@@ -37,17 +36,16 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         operands: HirNumericOperands,
         success_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(location)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
 
         match failure_mode {
             NumericFailureMode::Trap => {
-                self.emit_trapping_numeric_value(op, operands, success_type, location, span)
+                self.emit_trapping_numeric_value(op, operands, success_type, span)
             }
             NumericFailureMode::ReturnError => {
-                self.emit_recoverable_numeric_value(op, operands, success_type, location, span)
+                self.emit_recoverable_numeric_value(op, operands, success_type, span)
             }
         }
     }
@@ -58,21 +56,14 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         operands: HirNumericOperands,
         success_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let result_local = self.allocate_temp_local(success_type, Some(location.to_owned()))?;
-        self.emit_numeric_op_statement(
-            op,
-            NumericFailureMode::Trap,
-            operands,
-            result_local,
-            location,
-            span,
-        )?;
+        let result_local = self.allocate_temp_local(success_type, None)?;
+        self.emit_numeric_op_statement(op, NumericFailureMode::Trap, operands, result_local, span)?;
 
-        let region = self.current_region_or_error(location)?;
-        Ok(self.make_local_load_expression(result_local, success_type, location, region))
+        let region = self.current_region_or_error(span)?;
+        let no_span = None;
+        Ok(self.make_local_load_expression(result_local, success_type, &no_span, region))
     }
 
     /// Emits a recoverable numeric operation and returns the unwrapped success value.
@@ -87,21 +78,19 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         operands: HirNumericOperands,
         success_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let builtin_error_type = self.builtin_error_type_id(location)?;
+        let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
             .intern_fallible_carrier(success_type, builtin_error_type);
-        let result_local = self.allocate_temp_local(carrier_type, Some(location.to_owned()))?;
+        let result_local = self.allocate_temp_local(carrier_type, None)?;
 
         self.emit_numeric_op_statement(
             op,
             NumericFailureMode::ReturnError,
             operands,
             result_local,
-            location,
             span,
         )?;
 
@@ -112,7 +101,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, location, span)
+        self.lower_fallible_carrier_to_success_value(carrier, span)
     }
 
     /// Emits the `NumericOp` statement itself.
@@ -122,8 +111,7 @@ impl<'a> HirBuilder<'a> {
         failure_mode: NumericFailureMode,
         operands: HirNumericOperands,
         result: LocalId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
@@ -133,11 +121,10 @@ impl<'a> HirBuilder<'a> {
                 operands,
                 result,
             },
-            location: location.to_owned(),
-            span,
+            span: *span,
         };
-        self.side_table.map_statement(location, &statement);
-        self.emit_statement_to_current_block(statement, location)
+        self.side_table.map_statement(*span, &statement);
+        self.emit_statement_to_current_block(statement, span)
     }
 
     /// Formats a `Float` expression into a `String` using Moth's formatting contract.
@@ -151,18 +138,17 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn emit_formatted_float_value(
         &mut self,
         source: HirExpression,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(location)?;
-        let string_type = self.lower_type_id(self.type_environment.builtins().string, location)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
         match failure_mode {
             NumericFailureMode::Trap => {
-                self.emit_trapping_formatted_float_value(source, string_type, location, span)
+                self.emit_trapping_formatted_float_value(source, string_type, span)
             }
             NumericFailureMode::ReturnError => {
-                self.emit_recoverable_formatted_float_value(source, string_type, location, span)
+                self.emit_recoverable_formatted_float_value(source, string_type, span)
             }
         }
     }
@@ -172,20 +158,14 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source: HirExpression,
         string_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let result_local = self.allocate_temp_local(string_type, Some(location.to_owned()))?;
-        self.emit_format_float_statement(
-            source,
-            NumericFailureMode::Trap,
-            result_local,
-            location,
-            span,
-        )?;
+        let result_local = self.allocate_temp_local(string_type, None)?;
+        self.emit_format_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
-        let region = self.current_region_or_error(location)?;
-        Ok(self.make_local_load_expression(result_local, string_type, location, region))
+        let region = self.current_region_or_error(span)?;
+        let no_span = None;
+        Ok(self.make_local_load_expression(result_local, string_type, &no_span, region))
     }
 
     /// Emits a recoverable `FormatFloat` and returns the unwrapped formatted string.
@@ -199,20 +179,18 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source: HirExpression,
         string_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let builtin_error_type = self.builtin_error_type_id(location)?;
+        let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
             .intern_fallible_carrier(string_type, builtin_error_type);
-        let result_local = self.allocate_temp_local(carrier_type, Some(location.to_owned()))?;
+        let result_local = self.allocate_temp_local(carrier_type, None)?;
 
         self.emit_format_float_statement(
             source,
             NumericFailureMode::ReturnError,
             result_local,
-            location,
             span,
         )?;
 
@@ -223,7 +201,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, location, span)
+        self.lower_fallible_carrier_to_success_value(carrier, span)
     }
 
     /// Validates a `Float` value from an external/backend boundary before exposing it as an
@@ -238,18 +216,17 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn emit_validated_float_value(
         &mut self,
         source: HirExpression,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let failure_mode = self.select_numeric_failure_mode(location)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, location)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
         match failure_mode {
             NumericFailureMode::Trap => {
-                self.emit_trapping_validated_float_value(source, float_type, location, span)
+                self.emit_trapping_validated_float_value(source, float_type, span)
             }
             NumericFailureMode::ReturnError => {
-                self.emit_recoverable_validated_float_value(source, float_type, location, span)
+                self.emit_recoverable_validated_float_value(source, float_type, span)
             }
         }
     }
@@ -259,20 +236,14 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source: HirExpression,
         float_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let result_local = self.allocate_temp_local(float_type, Some(location.to_owned()))?;
-        self.emit_validate_float_statement(
-            source,
-            NumericFailureMode::Trap,
-            result_local,
-            location,
-            span,
-        )?;
+        let result_local = self.allocate_temp_local(float_type, None)?;
+        self.emit_validate_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
-        let region = self.current_region_or_error(location)?;
-        Ok(self.make_local_load_expression(result_local, float_type, location, region))
+        let region = self.current_region_or_error(span)?;
+        let no_span = None;
+        Ok(self.make_local_load_expression(result_local, float_type, &no_span, region))
     }
 
     /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite `Float`.
@@ -286,20 +257,18 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source: HirExpression,
         float_type: TypeId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let builtin_error_type = self.builtin_error_type_id(location)?;
+        let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
             .intern_fallible_carrier(float_type, builtin_error_type);
-        let result_local = self.allocate_temp_local(carrier_type, Some(location.to_owned()))?;
+        let result_local = self.allocate_temp_local(carrier_type, None)?;
 
         self.emit_validate_float_statement(
             source,
             NumericFailureMode::ReturnError,
             result_local,
-            location,
             span,
         )?;
 
@@ -310,7 +279,7 @@ impl<'a> HirBuilder<'a> {
             err_type: builtin_error_type,
             validate_float_success: false,
         };
-        self.lower_fallible_carrier_to_success_value(carrier, location, span)
+        self.lower_fallible_carrier_to_success_value(carrier, span)
     }
 
     /// Emits the `ValidateFloat` statement itself.
@@ -319,8 +288,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         failure_mode: NumericFailureMode,
         result: LocalId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
@@ -329,11 +297,10 @@ impl<'a> HirBuilder<'a> {
                 failure_mode,
                 result,
             },
-            location: location.to_owned(),
-            span,
+            span: *span,
         };
-        self.side_table.map_statement(location, &statement);
-        self.emit_statement_to_current_block(statement, location)
+        self.side_table.map_statement(*span, &statement);
+        self.emit_statement_to_current_block(statement, span)
     }
 
     /// Emits the `FormatFloat` statement itself.
@@ -342,8 +309,7 @@ impl<'a> HirBuilder<'a> {
         source: HirExpression,
         failure_mode: NumericFailureMode,
         result: LocalId,
-        location: &SourceLocation,
-        span: Option<SourceSpan>,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
@@ -352,11 +318,10 @@ impl<'a> HirBuilder<'a> {
                 failure_mode,
                 result,
             },
-            location: location.to_owned(),
-            span,
+            span: *span,
         };
-        self.side_table.map_statement(location, &statement);
-        self.emit_statement_to_current_block(statement, location)
+        self.side_table.map_statement(*span, &statement);
+        self.emit_statement_to_current_block(statement, span)
     }
 
     /// Emits a checked numeric operation and assigns its success value into `target`.
@@ -372,39 +337,31 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         left: HirExpression,
         right: HirExpression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let (left, right) =
-            self.lower_checked_numeric_binary_operands(op, left, right, location)?;
+        let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right)?;
         let operands = HirNumericOperands::Binary { left, right };
-        let failure_mode = self.select_numeric_failure_mode(location)?;
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        let no_span = None;
 
         if matches!(failure_mode, NumericFailureMode::Trap) {
-            return self.emit_numeric_op_statement(
-                op,
-                failure_mode,
-                operands,
-                target,
-                location,
-                None,
-            );
+            return self.emit_numeric_op_statement(op, failure_mode, operands, target, &no_span);
         }
 
-        let success_type = self.checked_numeric_result_type(op, location)?;
+        let success_type = self.checked_numeric_result_type(op, span)?;
         let success_value =
-            self.emit_recoverable_numeric_value(op, operands, success_type, location, None)?;
-        self.emit_assign_local_statement(target, success_value, location)
+            self.emit_recoverable_numeric_value(op, operands, success_type, &no_span)?;
+        self.emit_assign_local_statement(target, success_value, span)
     }
 
     /// Returns the scalar success type for a checked numeric operation.
     pub(crate) fn checked_numeric_result_type(
         &mut self,
         op: HirNumericOp,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
-        let int_type = self.lower_type_id(self.type_environment.builtins().int, location)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, location)?;
-
+        let int_type = self.lower_type_id(self.type_environment.builtins().int, span)?;
+        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
         Ok(match op {
             HirNumericOp::IntAdd
             | HirNumericOp::IntSub
@@ -433,16 +390,15 @@ impl<'a> HirBuilder<'a> {
     ///      contexts have no channel for the failure.
     fn select_numeric_failure_mode(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<NumericFailureMode, CompilerError> {
-        let current_function_id = self.current_function_id_or_error(location)?;
-
+        let current_function_id = self.current_function_id_or_error(span)?;
         // Entry `start()` is implicitly non-fallible regardless of its carrier shape.
         if Some(current_function_id) == self.module.start_function {
             return Ok(NumericFailureMode::Trap);
         }
 
-        let function = self.function_by_id_or_error(current_function_id, location)?;
+        let function = self.function_by_id_or_error(current_function_id, span)?;
         let Some((_, error_type)) = self
             .type_environment
             .fallible_carrier_slots(function.return_type)
@@ -544,7 +500,6 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         left: HirExpression,
         right: HirExpression,
-        location: &SourceLocation,
     ) -> Result<(HirExpression, HirExpression), CompilerError> {
         let float_type = self.type_environment.builtins().float;
 
@@ -562,8 +517,8 @@ impl<'a> HirBuilder<'a> {
             return Ok((left, right));
         }
 
-        let left = self.convert_int_to_float_if_needed(left, float_type, location)?;
-        let right = self.convert_int_to_float_if_needed(right, float_type, location)?;
+        let left = self.convert_int_to_float_if_needed(left, float_type)?;
+        let right = self.convert_int_to_float_if_needed(right, float_type)?;
         Ok((left, right))
     }
 
@@ -597,7 +552,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: HirExpression,
         float_type: TypeId,
-        location: &SourceLocation,
     ) -> Result<HirExpression, CompilerError> {
         let int_type = self.type_environment.builtins().int;
         if value.ty != int_type {
@@ -605,8 +559,9 @@ impl<'a> HirBuilder<'a> {
         }
 
         let region = value.region;
+        let no_span = None;
         Ok(self.make_expression(
-            location,
+            &no_span,
             HirExpressionKind::Cast {
                 source: Box::new(value),
                 policy: BuiltinCastPolicyId::IntToFloat,

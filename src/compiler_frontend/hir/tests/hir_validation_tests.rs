@@ -3,10 +3,9 @@
 //! WHAT: exercises the post-lowering HIR validator against valid and intentionally broken modules.
 //! WHY: validator coverage needs focused tests that isolate invariants from the rest of lowering.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -21,7 +20,7 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
-    lower_ast_with_metadata, validate_module_for_tests,
+    validate_module_for_tests,
 };
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{
@@ -40,18 +39,17 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
+fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
     AstNode {
         kind,
-        location,
-        span: None,
+        span,
         scope: InternedPath::new(),
     }
 }
@@ -69,10 +67,10 @@ fn param(
     name: InternedPath,
     type_id: TypeId,
     mutable: bool,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Declaration {
     crate::compiler_frontend::tests::type_id_fixture_support::param_declaration(
-        name, type_id, mutable, location,
+        name, type_id, mutable, span,
     )
 }
 
@@ -80,9 +78,9 @@ fn function_node(
     name: InternedPath,
     signature: FunctionSignature,
     body: Vec<AstNode>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> AstNode {
-    node(NodeKind::Function(name, signature, body), location)
+    node(NodeKind::Function(name, signature, body), span)
 }
 
 // Shared builders for the validation regressions below.
@@ -104,8 +102,8 @@ fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -137,7 +135,6 @@ fn validation_error_for_injected_local_type(
         ty: local_type_id,
         mutable: false,
         region: entry_block.region,
-        source_info: Some(test_source_location(20)),
         span: None,
     });
 
@@ -148,7 +145,7 @@ fn validation_error_for_injected_local_type(
 fn inject_collection_expression_statement(
     module: &mut HirModule,
     collection_type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) {
     let entry_block_index = start_entry_block_index(module);
     let entry_block = &mut module.blocks[entry_block_index];
@@ -166,12 +163,11 @@ fn inject_collection_expression_statement(
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, value_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, value_id, span);
     entry_block.statements.push(statement);
 }
 
@@ -180,10 +176,10 @@ fn int_expression(
     value: i32,
     type_id: TypeId,
     region: RegionId,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     module: &mut HirModule,
 ) -> HirExpression {
-    module.side_table.map_value(location, id, location);
+    module.side_table.map_value(*span, id, *span);
 
     HirExpression {
         id,
@@ -200,10 +196,10 @@ fn float_expression(
     value: f64,
     type_id: TypeId,
     region: RegionId,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     module: &mut HirModule,
 ) -> HirExpression {
-    module.side_table.map_value(location, id, location);
+    module.side_table.map_value(*span, id, *span);
 
     HirExpression {
         id,
@@ -226,8 +222,8 @@ fn valid_module_passes_explicit_validation() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -242,7 +238,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let entry_block_index = start_entry_block_index(&module);
     let entry_block = &mut module.blocks[entry_block_index];
-    let message_location = test_source_location(10);
+    let message_span = None;
     let option_string = type_environment.intern_option(builtin_type_ids::STRING);
     let message_id = HirValueId(9000);
     let message = HirExpression {
@@ -260,7 +256,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
 
     module
         .side_table
-        .map_value(&message_location, message_id, &message_location);
+        .map_value(message_span, message_id, message_span);
     entry_block.terminator = HirTerminator::AssertFailure {
         message,
         message_evaluation: HirAssertionMessageEvaluation::Folded,
@@ -279,7 +275,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
 #[test]
 fn validator_rejects_numeric_op_operand_shape_mismatch() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(50);
+    let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -290,7 +286,6 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         ty: int_type,
         mutable: false,
         region: entry_region,
-        source_info: Some(location.clone()),
         span: None,
     });
 
@@ -299,7 +294,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         1,
         int_type,
         entry_region,
-        &location,
+        &span,
         &mut module,
     );
     let right = int_expression(
@@ -307,7 +302,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         2,
         int_type,
         entry_region,
-        &location,
+        &span,
         &mut module,
     );
 
@@ -319,11 +314,10 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
             operands: HirNumericOperands::Binary { left, right },
             result: result_local,
         },
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -340,7 +334,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
 #[test]
 fn validator_rejects_plain_numeric_binop() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(51);
+    let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -350,7 +344,7 @@ fn validator_rejects_plain_numeric_binop() {
         1,
         int_type,
         entry_region,
-        &location,
+        &span,
         &mut module,
     );
     let right = int_expression(
@@ -358,7 +352,7 @@ fn validator_rejects_plain_numeric_binop() {
         2,
         int_type,
         entry_region,
-        &location,
+        &span,
         &mut module,
     );
 
@@ -374,17 +368,14 @@ fn validator_rejects_plain_numeric_binop() {
         region: entry_region,
         span: None,
     };
-    module
-        .side_table
-        .map_value(&location, expression.id, &location);
+    module.side_table.map_value(span, expression.id, span);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -398,7 +389,7 @@ fn validator_rejects_plain_numeric_binop() {
 
 fn append_expression_for_validation(
     module: &mut HirModule,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     left_type: TypeId,
     result_type: TypeId,
     int_type: TypeId,
@@ -413,16 +404,9 @@ fn append_expression_for_validation(
         region: entry_region,
         span: None,
     };
-    module.side_table.map_value(location, left.id, location);
+    module.side_table.map_value(*span, left.id, *span);
 
-    let right = int_expression(
-        HirValueId(9011),
-        7,
-        int_type,
-        entry_region,
-        location,
-        module,
-    );
+    let right = int_expression(HirValueId(9011), 7, int_type, entry_region, span, module);
     let expression = HirExpression {
         id: HirValueId(9012),
         kind: HirExpressionKind::BinOp {
@@ -435,20 +419,18 @@ fn append_expression_for_validation(
         region: entry_region,
         span: None,
     };
-    module
-        .side_table
-        .map_value(location, expression.id, location);
+    module.side_table.map_value(*span, expression.id, *span);
     expression
 }
 
 #[test]
 fn validator_accepts_internal_string_append_with_scalar_chunk() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(53);
+    let span = None;
     let string_type = type_environment.builtins().string;
     let expression = append_expression_for_validation(
         &mut module,
-        &location,
+        &span,
         string_type,
         string_type,
         type_environment.builtins().int,
@@ -456,10 +438,9 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
     let statement = HirStatement {
         id: HirNodeId(9013),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -470,11 +451,11 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
 #[test]
 fn validator_rejects_string_append_with_non_string_result() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(54);
+    let span = None;
     let string_type = type_environment.builtins().string;
     let expression = append_expression_for_validation(
         &mut module,
-        &location,
+        &span,
         string_type,
         type_environment.builtins().int,
         type_environment.builtins().int,
@@ -482,10 +463,9 @@ fn validator_rejects_string_append_with_non_string_result() {
     let statement = HirStatement {
         id: HirNodeId(9014),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -501,10 +481,10 @@ fn validator_rejects_string_append_with_non_string_result() {
 #[test]
 fn validator_rejects_string_append_with_non_string_accumulator() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(55);
+    let span = None;
     let expression = append_expression_for_validation(
         &mut module,
-        &location,
+        &span,
         type_environment.builtins().int,
         type_environment.builtins().string,
         type_environment.builtins().int,
@@ -512,10 +492,9 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
     let statement = HirStatement {
         id: HirNodeId(9015),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -531,7 +510,7 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
 #[test]
 fn validator_rejects_plain_numeric_unary_op() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(52);
+    let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let int_type = type_environment.builtins().int;
@@ -541,7 +520,7 @@ fn validator_rejects_plain_numeric_unary_op() {
         1,
         int_type,
         entry_region,
-        &location,
+        &span,
         &mut module,
     );
 
@@ -556,17 +535,14 @@ fn validator_rejects_plain_numeric_unary_op() {
         region: entry_region,
         span: None,
     };
-    module
-        .side_table
-        .map_value(&location, expression.id, &location);
+    module.side_table.map_value(span, expression.id, span);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -583,7 +559,7 @@ fn validator_rejects_plain_numeric_unary_op() {
 #[test]
 fn validator_rejects_plain_string_concatenation_binop() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(53);
+    let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
     let string_type = type_environment.builtins().string;
@@ -596,7 +572,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         region: entry_region,
         span: None,
     };
-    module.side_table.map_value(&location, left.id, &location);
+    module.side_table.map_value(span, left.id, span);
     let right = HirExpression {
         id: HirValueId(9001),
         kind: HirExpressionKind::StringLiteral("b".to_owned()),
@@ -605,7 +581,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         region: entry_region,
         span: None,
     };
-    module.side_table.map_value(&location, right.id, &location);
+    module.side_table.map_value(span, right.id, span);
 
     let expression = HirExpression {
         id: HirValueId(9002),
@@ -619,17 +595,14 @@ fn validator_rejects_plain_string_concatenation_binop() {
         region: entry_region,
         span: None,
     };
-    module
-        .side_table
-        .map_value(&location, expression.id, &location);
+    module.side_table.map_value(span, expression.id, span);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
-    module.side_table.map_statement(&location, &statement);
+    module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -644,7 +617,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
 fn inject_float_statement(
     module: &mut HirModule,
     type_environment: &TypeEnvironment,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
     kind: HirStatementKind,
     result_type: TypeId,
 ) {
@@ -657,7 +630,7 @@ fn inject_float_statement(
         1.5,
         type_environment.builtins().float,
         entry_region,
-        location,
+        span,
         module,
     );
 
@@ -668,7 +641,6 @@ fn inject_float_statement(
             ty: result_type,
             mutable: false,
             region: entry_region,
-            source_info: Some(location.clone()),
             span: None,
         });
     }
@@ -690,24 +662,23 @@ fn inject_float_statement(
             }
             _ => panic!("inject_float_statement only supports FormatFloat and ValidateFloat"),
         },
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(location, &statement);
+    module.side_table.map_statement(*span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 }
 
 #[test]
 fn validator_accepts_format_float_trap() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(54);
+    let span = None;
     let string_type = type_environment.builtins().string;
 
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::FormatFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -730,13 +701,13 @@ fn validator_accepts_format_float_trap() {
 #[test]
 fn validator_accepts_validate_float_trap() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(55);
+    let span = None;
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::ValidateFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -759,13 +730,13 @@ fn validator_accepts_validate_float_trap() {
 #[test]
 fn validator_rejects_format_float_trap_with_non_string_result() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(56);
+    let span = None;
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::FormatFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -795,7 +766,7 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
 #[test]
 fn validator_accepts_format_float_return_error_with_carrier() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(57);
+    let span = None;
     let string_type = type_environment.builtins().string;
     let int_type = type_environment.builtins().int;
     let carrier_type = type_environment.intern_fallible_carrier(string_type, int_type);
@@ -803,7 +774,7 @@ fn validator_accepts_format_float_return_error_with_carrier() {
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::FormatFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -826,13 +797,13 @@ fn validator_accepts_format_float_return_error_with_carrier() {
 #[test]
 fn validator_rejects_format_float_return_error_without_carrier() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(58);
+    let span = None;
     let string_type = type_environment.builtins().string;
 
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::FormatFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -861,13 +832,13 @@ fn validator_rejects_format_float_return_error_without_carrier() {
 #[test]
 fn validator_rejects_validate_float_return_error_without_carrier() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let location = test_source_location(59);
+    let span = None;
     let float_type = type_environment.builtins().float;
 
     inject_float_statement(
         &mut module,
         &type_environment,
-        &location,
+        &span,
         HirStatementKind::ValidateFloat {
             source: HirExpression {
                 id: HirValueId(0),
@@ -904,8 +875,8 @@ fn validator_rejects_invalid_jump_target() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -936,16 +907,11 @@ fn validator_rejects_non_literal_match_pattern() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(
-                x.clone(),
-                builtin_type_ids::INT,
-                false,
-                test_source_location(2),
-            )],
+            parameters: vec![param(x.clone(), builtin_type_ids::INT, false, None)],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
-        test_source_location(2),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -962,13 +928,13 @@ fn validator_rejects_non_literal_match_pattern() {
     let scrutinee_id = HirValueId(9000);
     let pattern_id = HirValueId(9001);
 
-    let value_location = test_source_location(20);
+    let value_span = None;
     module
         .side_table
-        .map_value(&value_location, scrutinee_id, &value_location);
+        .map_value(value_span, scrutinee_id, value_span);
     module
         .side_table
-        .map_value(&value_location, pattern_id, &value_location);
+        .map_value(value_span, pattern_id, value_span);
 
     entry_block.terminator = HirTerminator::Match {
         scrutinee: HirExpression {
@@ -1015,13 +981,13 @@ fn validator_rejects_missing_side_table_mappings() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(4), None, ValueMode::ImmutableOwned),
+                    Expression::int(1, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(4),
+                None,
             ),
-            node(NodeKind::Return(vec![]), test_source_location(5)),
+            node(NodeKind::Return(vec![]), None),
         ],
-        test_source_location(3),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1046,8 +1012,8 @@ fn validator_rejects_unresolved_generic_parameter_types() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1068,7 +1034,6 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         ty: generic_type_id,
         mutable: false,
         region: entry_block.region,
-        source_info: Some(test_source_location(20)),
         span: None,
     });
 
@@ -1165,8 +1130,8 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1221,16 +1186,11 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(
-                value_name,
-                builtin_type_ids::INT,
-                false,
-                test_source_location(1),
-            )],
+            parameters: vec![param(value_name, builtin_type_ids::INT, false, None)],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(2))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1285,7 +1245,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     let entry_block = &mut module.blocks[entry_block_index];
     let value_id = HirValueId(9000);
     let statement_id = HirNodeId(9000);
-    let location = test_source_location(20);
+    let span = None;
     let expression = HirExpression {
         id: value_id,
         kind: HirExpressionKind::Int(1),
@@ -1297,12 +1257,11 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, value_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, value_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1334,7 +1293,7 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     let entry_block = &mut module.blocks[entry_block_index];
     let value_id = HirValueId(9000);
     let statement_id = HirNodeId(9000);
-    let location = test_source_location(20);
+    let span = None;
     let expression = HirExpression {
         id: value_id,
         kind: HirExpressionKind::Int(1),
@@ -1346,12 +1305,11 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, value_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, value_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1399,40 +1357,6 @@ fn classify_hir_type_rejects_anonymous_const_record_marker() {
 }
 
 #[test]
-fn module_metadata_validation_rejects_invalid_doc_fragment_location() {
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
-    );
-
-    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let mut invalid_location = test_source_location(10);
-    invalid_location.end_pos.line_number = 9;
-    ast.doc_fragments.push(AstDocFragment {
-        kind: AstDocFragmentKind::Doc,
-        value: string_table.intern("broken"),
-        location: invalid_location,
-    });
-
-    let lowering =
-        lower_ast_with_metadata(ast, &mut string_table).expect("HIR lowering should succeed");
-    let error = lowering
-        .metadata
-        .validate()
-        .expect_err("metadata validation should reject invalid doc fragment locations");
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(error.msg.contains("Doc fragment"));
-}
-
-#[test]
 fn validator_rejects_placeholder_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
@@ -1443,8 +1367,8 @@ fn validator_rejects_placeholder_terminator() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1474,8 +1398,8 @@ fn validator_rejects_region_cycle() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1501,8 +1425,8 @@ fn validator_rejects_missing_region_parent() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1529,8 +1453,8 @@ fn validator_rejects_cross_function_cfg_edges() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(2))],
-        test_source_location(2),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
     let start = function_node(
         start_name,
@@ -1538,8 +1462,8 @@ fn validator_rejects_cross_function_cfg_edges() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![helper, start], entry_path);
@@ -1576,8 +1500,7 @@ fn lowering_errors_preserve_string_table_context() {
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let missing_function = super::symbol("missing_fn", &mut string_table);
 
-    let mut call_location = test_source_location(2);
-    call_location.scope = entry_path.clone();
+    let call_span = None;
 
     let start_fn = function_node(
         start_name,
@@ -1591,13 +1514,13 @@ fn lowering_errors_preserve_string_table_context() {
                     missing_function,
                     Vec::new(),
                     Vec::new(),
-                    call_location.clone(),
+                    call_span.clone(),
                 )),
-                call_location.clone(),
+                call_span.clone(),
             ),
-            node(NodeKind::Return(vec![]), test_source_location(3)),
+            node(NodeKind::Return(vec![]), None),
         ],
-        test_source_location(1),
+        None,
     );
 
     let messages = lower_ast(
@@ -1606,18 +1529,10 @@ fn lowering_errors_preserve_string_table_context() {
     )
     .expect_err("unknown function call should fail HIR lowering");
 
-    let resolved_scope = messages
-        .first_error()
-        .expect("expected HIR lowering error")
-        .primary_location
-        .scope
-        .to_portable_string(&messages.string_table);
-    assert!(
-        resolved_scope.ends_with("main.moth"),
-        "HIR lowering errors should preserve the source path in the returned StringTable, got '{resolved_scope}'",
-    );
+    let _error = messages
+        .infrastructure_error()
+        .expect("expected HIR lowering error");
 }
-
 // ---------------------------------------------------------------------------
 // VariantConstruct validation
 // ---------------------------------------------------------------------------
@@ -1633,8 +1548,8 @@ fn hir_variant_construct_option_invalid_index_rejected() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1659,7 +1574,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_source_location(10);
+    let span = None;
 
     let expression = HirExpression {
         id: expr_id,
@@ -1677,12 +1592,11 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, expr_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_env)
@@ -1706,8 +1620,8 @@ fn hir_variant_construct_result_invalid_index_rejected() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -1732,7 +1646,7 @@ fn hir_variant_construct_result_invalid_index_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_source_location(10);
+    let span = None;
 
     let expression = HirExpression {
         id: expr_id,
@@ -1750,12 +1664,11 @@ fn hir_variant_construct_result_invalid_index_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, expr_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_env)
@@ -1783,22 +1696,16 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
             payload: ChoiceVariantPayload::Record {
                 fields: vec![Declaration {
                     id: InternedPath::from_single_str("message", &mut string_table),
-                    value: no_value_expr(
-                        builtin_type_ids::STRING,
-                        test_source_location(2),
-                        ValueMode::ImmutableOwned,
-                    ),
+                    value: no_value_expr(builtin_type_ids::STRING, None, ValueMode::ImmutableOwned),
                     binding_span: None,
                     config_qualifier: None,
                 }],
             },
-            location: test_source_location(2),
             span: None,
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_source_location(2),
             span: None,
         },
     ];
@@ -1806,16 +1713,11 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(
-                response_param,
-                builtin_type_ids::NONE,
-                false,
-                test_source_location(2),
-            )],
+            parameters: vec![param(response_param, builtin_type_ids::NONE, false, None)],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_choices(
@@ -1840,7 +1742,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_source_location(10);
+    let span = None;
 
     let expression = HirExpression {
         id: expr_id,
@@ -1870,12 +1772,11 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, expr_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1903,22 +1804,16 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
             payload: ChoiceVariantPayload::Record {
                 fields: vec![Declaration {
                     id: InternedPath::from_single_str("message", &mut string_table),
-                    value: no_value_expr(
-                        builtin_type_ids::STRING,
-                        test_source_location(2),
-                        ValueMode::ImmutableOwned,
-                    ),
+                    value: no_value_expr(builtin_type_ids::STRING, None, ValueMode::ImmutableOwned),
                     binding_span: None,
                     config_qualifier: None,
                 }],
             },
-            location: test_source_location(2),
             span: None,
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
-            location: test_source_location(2),
             span: None,
         },
     ];
@@ -1926,16 +1821,11 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(
-                response_param,
-                builtin_type_ids::NONE,
-                false,
-                test_source_location(2),
-            )],
+            parameters: vec![param(response_param, builtin_type_ids::NONE, false, None)],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(3))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let ast = build_ast_with_choices(
@@ -1961,7 +1851,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 
     let expr_id = HirValueId(9000);
     let stmt_id = HirNodeId(9000);
-    let location = test_source_location(10);
+    let span = None;
 
     let expression = HirExpression {
         id: expr_id,
@@ -1991,12 +1881,11 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(&location, &statement);
-    module.side_table.map_value(&location, expr_id, &location);
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id, span);
     entry_block.statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -2013,7 +1902,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 fn validator_rejects_collection_expression_with_non_collection_type() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
-    inject_collection_expression_statement(&mut module, int_type, test_source_location(20));
+    inject_collection_expression_statement(&mut module, int_type, None);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
         .expect_err("validator should reject Collection expression with non-collection type");
@@ -2030,11 +1919,7 @@ fn validator_accepts_collection_expression_with_growable_collection_type() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
     let growable_collection = type_environment.intern_collection(int_type, None);
-    inject_collection_expression_statement(
-        &mut module,
-        growable_collection,
-        test_source_location(20),
-    );
+    inject_collection_expression_statement(&mut module, growable_collection, None);
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept Collection expression with growable collection type");
@@ -2045,7 +1930,7 @@ fn validator_accepts_collection_expression_with_fixed_collection_type() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = type_environment.builtins().int;
     let fixed_collection = type_environment.intern_collection(int_type, Some(64));
-    inject_collection_expression_statement(&mut module, fixed_collection, test_source_location(20));
+    inject_collection_expression_statement(&mut module, fixed_collection, None);
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept Collection expression with fixed collection type");
@@ -2063,7 +1948,7 @@ fn inject_nonfinite_float_expression(
     module: &mut HirModule,
     float_type: TypeId,
     value: f64,
-    location: &SourceLocation,
+    span: &Option<SourceSpan>,
 ) {
     let entry_block_index = start_entry_block_index(module);
     let entry_region = module.blocks[entry_block_index].region;
@@ -2072,18 +1957,17 @@ fn inject_nonfinite_float_expression(
         value,
         float_type,
         entry_region,
-        location,
+        span,
         module,
     );
 
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        location: location.clone(),
-        span: None,
+        span: span.clone(),
     };
 
-    module.side_table.map_statement(location, &statement);
+    module.side_table.map_statement(*span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 }
 
@@ -2091,9 +1975,9 @@ fn inject_nonfinite_float_expression(
 fn validator_rejects_nonfinite_float_literal_infinity() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let float_type = type_environment.builtins().float;
-    let location = test_source_location(60);
+    let span = None;
 
-    inject_nonfinite_float_expression(&mut module, float_type, f64::INFINITY, &location);
+    inject_nonfinite_float_expression(&mut module, float_type, f64::INFINITY, &span);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
         .expect_err("validator should reject HIR Float literal with INFINITY");
@@ -2110,9 +1994,9 @@ fn validator_rejects_nonfinite_float_literal_infinity() {
 fn validator_rejects_nonfinite_float_literal_nan() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let float_type = type_environment.builtins().float;
-    let location = test_source_location(61);
+    let span = None;
 
-    inject_nonfinite_float_expression(&mut module, float_type, f64::NAN, &location);
+    inject_nonfinite_float_expression(&mut module, float_type, f64::NAN, &span);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
         .expect_err("validator should reject HIR Float literal with NaN");

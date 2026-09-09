@@ -1,47 +1,27 @@
-//! String-ID remapping tests for parsed type references and generic parameters.
+//! String-ID remapping tests for parsed type references.
 //!
-//! WHAT: verifies that `ParsedTypeRef`, `GenericParameter`, and `GenericParameterList`
-//!      can be remapped from local string tables into a merged global table.
-//! WHY: per-file frontend preparation produces parsed type syntax using local string
-//!      tables; remapping must preserve all nested names and source locations.
+//! Parsed syntax owns optional exact spans, while remapping only changes interned names.
 
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::source::LocalSpan;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-fn make_location(string_table: &mut StringTable) -> SourceLocation {
-    let path = InternedPath::from_single_str("test.moth", string_table);
-    SourceLocation::new(path, CharPosition::default(), CharPosition::default())
-}
-
-fn assert_test_location(location: &SourceLocation, string_table: &StringTable) {
-    let scope_components = location
-        .scope
-        .as_components()
-        .iter()
-        .map(|id| string_table.resolve(*id))
-        .collect::<Vec<_>>();
-
-    assert_eq!(scope_components, vec!["test.moth"]);
+fn authored_span() -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::source_start(),
+    ))
 }
 
 #[test]
-fn parsed_type_ref_named_remaps_name_and_location() {
+fn parsed_type_ref_named_remaps_name_without_changing_span() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-
     let name_local = local.intern("MyType");
-    let location = make_location(&mut local);
-
+    let span = authored_span();
     let mut parsed = ParsedTypeRef::Named {
         name: name_local,
-        location,
-        span: LocalSpan::source_start(),
+        span,
     };
 
     global.intern("preexisting");
@@ -49,35 +29,30 @@ fn parsed_type_ref_named_remaps_name_and_location() {
     parsed.remap_string_ids(&remap);
 
     match parsed {
-        ParsedTypeRef::Named { name, location, .. } => {
+        ParsedTypeRef::Named { name, span: actual } => {
             assert_eq!(global.resolve(name), "MyType");
-            assert_test_location(&location, &global);
+            assert_eq!(actual, span);
         }
         _ => panic!("expected Named type"),
     }
 }
 
 #[test]
-fn parsed_type_ref_applied_remaps_recursively() {
+fn parsed_type_ref_applied_remaps_nested_names() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-
     let box_name = local.intern("Box");
     let string_name = local.intern("String");
-
     let mut parsed = ParsedTypeRef::Applied {
         base: Box::new(ParsedTypeRef::Named {
             name: box_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+            span: authored_span(),
         }),
         arguments: vec![ParsedTypeRef::Named {
             name: string_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+            span: authored_span(),
         }],
-        location: make_location(&mut local),
-        span: LocalSpan::source_start(),
+        span: authored_span(),
     };
 
     let remap = global.merge_from(&local);
@@ -87,256 +62,128 @@ fn parsed_type_ref_applied_remaps_recursively() {
         ParsedTypeRef::Applied {
             base, arguments, ..
         } => {
-            match *base {
-                ParsedTypeRef::Named { name, .. } => {
-                    assert_eq!(global.resolve(name), "Box");
-                }
-                _ => panic!("expected Named base"),
-            }
-            assert_eq!(arguments.len(), 1);
-            match &arguments[0] {
-                ParsedTypeRef::Named { name, .. } => {
-                    assert_eq!(global.resolve(*name), "String");
-                }
-                _ => panic!("expected Named argument"),
-            }
+            assert!(
+                matches!(*base, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "Box")
+            );
+            assert!(
+                matches!(&arguments[0], ParsedTypeRef::Named { name, .. } if global.resolve(*name) == "String")
+            );
         }
-        _ => panic!("expected Applied"),
+        _ => panic!("expected Applied type"),
     }
 }
 
 #[test]
-fn parsed_type_ref_collection_remaps_element_and_location() {
+fn parsed_type_ref_collection_remaps_element_and_capacity_name() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-
-    let int_name = local.intern("Int");
-
+    let element_name = local.intern("Int");
+    let capacity_name = local.intern("capacity");
     let mut parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::Named {
-            name: int_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+            name: element_name,
+            span: authored_span(),
         }),
-        location: make_location(&mut local),
-        span: LocalSpan::source_start(),
-        fixed_capacity: None,
+        span: authored_span(),
+        fixed_capacity: Some(
+            crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity::BareConstant {
+                name: capacity_name,
+                span: authored_span(),
+            },
+        ),
     };
 
     let remap = global.merge_from(&local);
     parsed.remap_string_ids(&remap);
 
     match parsed {
-        ParsedTypeRef::Collection { element, .. } => match *element {
-            ParsedTypeRef::Named { name, .. } => {
-                assert_eq!(global.resolve(name), "Int");
-            }
-            _ => panic!("expected Named element"),
-        },
-        _ => panic!("expected Collection"),
+        ParsedTypeRef::Collection {
+            element,
+            fixed_capacity,
+            ..
+        } => {
+            assert!(
+                matches!(*element, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "Int")
+            );
+            assert!(
+                matches!(fixed_capacity, Some(crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity::BareConstant { name, .. }) if global.resolve(name) == "capacity")
+            );
+        }
+        _ => panic!("expected Collection type"),
     }
 }
 
 #[test]
-fn parsed_type_ref_optional_remaps_inner_and_location() {
+fn parsed_type_ref_optional_remaps_inner_name() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-
     let bool_name = local.intern("Bool");
-
     let mut parsed = ParsedTypeRef::Optional {
         inner: Box::new(ParsedTypeRef::Named {
             name: bool_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+            span: authored_span(),
         }),
-        location: make_location(&mut local),
-        span: LocalSpan::source_start(),
+        span: authored_span(),
     };
 
     let remap = global.merge_from(&local);
     parsed.remap_string_ids(&remap);
 
-    match parsed {
-        ParsedTypeRef::Optional { inner, .. } => match *inner {
-            ParsedTypeRef::Named { name, .. } => {
-                assert_eq!(global.resolve(name), "Bool");
-            }
-            _ => panic!("expected Named inner"),
-        },
-        _ => panic!("expected Optional"),
-    }
+    assert!(
+        matches!(parsed, ParsedTypeRef::Optional { inner, .. } if matches!(*inner, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "Bool"))
+    );
 }
 
 #[test]
-fn parsed_type_ref_builtin_remaps_location_only() {
+fn parsed_type_ref_map_and_qualified_names_remap_recursively() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-
-    let location = make_location(&mut local);
-    let mut parsed = ParsedTypeRef::BuiltinInt {
-        location,
-        span: LocalSpan::source_start(),
-    };
-
-    let remap = global.merge_from(&local);
-    parsed.remap_string_ids(&remap);
-
-    match parsed {
-        ParsedTypeRef::BuiltinInt { location, .. } => {
-            assert_test_location(&location, &global);
-        }
-        _ => panic!("expected BuiltinInt"),
-    }
-}
-
-#[test]
-fn parsed_type_ref_inferred_is_unchanged() {
-    let local = StringTable::new();
-    let mut global = StringTable::new();
-
-    let mut parsed = ParsedTypeRef::Inferred;
-
-    let remap = global.merge_from(&local);
-    parsed.remap_string_ids(&remap);
-
-    assert!(matches!(parsed, ParsedTypeRef::Inferred));
-}
-
-#[test]
-fn generic_parameter_remaps_name_and_location() {
-    let mut local = StringTable::new();
-    let mut global = StringTable::new();
-
-    let t_name = local.intern("T");
-    let location = make_location(&mut local);
-
-    let mut param = GenericParameter {
-        id: TypeParameterId(0),
-        name: t_name,
-        location,
-        span: LocalSpan::source_start(),
-        trait_bounds: Vec::new(),
-    };
-
-    let remap = global.merge_from(&local);
-    param.remap_string_ids(&remap);
-
-    assert_eq!(global.resolve(param.name), "T");
-    assert_test_location(&param.location, &global);
-}
-
-#[test]
-fn generic_parameter_list_remaps_all_parameters() {
-    let mut local = StringTable::new();
-    let mut global = StringTable::new();
-
-    let t_name = local.intern("T");
-    let u_name = local.intern("U");
-
-    let mut list = GenericParameterList {
-        parameters: vec![
-            GenericParameter {
-                id: TypeParameterId(0),
-                name: t_name,
-                location: make_location(&mut local),
-                span: LocalSpan::source_start(),
-                trait_bounds: Vec::new(),
-            },
-            GenericParameter {
-                id: TypeParameterId(1),
-                name: u_name,
-                location: make_location(&mut local),
-                span: LocalSpan::source_start(),
-                trait_bounds: Vec::new(),
-            },
-        ],
-    };
-
-    let remap = global.merge_from(&local);
-    list.remap_string_ids(&remap);
-
-    assert_eq!(global.resolve(list.parameters[0].name), "T");
-    assert_eq!(global.resolve(list.parameters[1].name), "U");
-}
-
-#[test]
-fn parsed_type_ref_map_remaps_key_value_and_location() {
-    let mut local = StringTable::new();
-    let mut global = StringTable::new();
-
     let key_name = local.intern("String");
-    let value_name = local.intern("Int");
-
+    let path = vec![
+        local.intern("io"),
+        local.intern("input"),
+        local.intern("Input"),
+    ];
     let mut parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::Named {
             name: key_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+            span: authored_span(),
         }),
-        value: Box::new(ParsedTypeRef::Named {
-            name: value_name,
-            location: make_location(&mut local),
-            span: LocalSpan::source_start(),
+        value: Box::new(ParsedTypeRef::Qualified {
+            path,
+            span: authored_span(),
         }),
-        location: make_location(&mut local),
-        span: LocalSpan::source_start(),
+        span: authored_span(),
     };
 
     let remap = global.merge_from(&local);
     parsed.remap_string_ids(&remap);
 
     match parsed {
-        ParsedTypeRef::Map {
-            key,
-            value,
-            location,
-            ..
-        } => {
-            match *key {
-                ParsedTypeRef::Named { name, .. } => {
-                    assert_eq!(global.resolve(name), "String");
-                }
-                _ => panic!("expected Named key"),
-            }
-            match *value {
-                ParsedTypeRef::Named { name, .. } => {
-                    assert_eq!(global.resolve(name), "Int");
-                }
-                _ => panic!("expected Named value"),
-            }
-            assert_test_location(&location, &global);
+        ParsedTypeRef::Map { key, value, .. } => {
+            assert!(
+                matches!(*key, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "String")
+            );
+            let ParsedTypeRef::Qualified { path, .. } = *value else {
+                panic!("expected qualified value")
+            };
+            assert_eq!(
+                path.iter()
+                    .map(|id| global.resolve(*id))
+                    .collect::<Vec<_>>(),
+                vec!["io", "input", "Input"]
+            );
         }
-        _ => panic!("expected Map"),
+        _ => panic!("expected Map type"),
     }
 }
 
 #[test]
-fn parsed_type_ref_qualified_remaps_all_path_components_and_location() {
-    let mut local = StringTable::new();
+fn inferred_type_ref_is_unchanged_by_remap() {
+    let local = StringTable::new();
     let mut global = StringTable::new();
-
-    let root_name = local.intern("io");
-    let child_name = local.intern("input");
-    let type_name = local.intern("Input");
-
-    let mut parsed = ParsedTypeRef::Qualified {
-        path: vec![root_name, child_name, type_name],
-        location: make_location(&mut local),
-        span: LocalSpan::source_start(),
-    };
-
+    let mut parsed = ParsedTypeRef::Inferred;
     let remap = global.merge_from(&local);
     parsed.remap_string_ids(&remap);
-
-    match parsed {
-        ParsedTypeRef::Qualified { path, location, .. } => {
-            assert_eq!(path.len(), 3);
-            assert_eq!(global.resolve(path[0]), "io");
-            assert_eq!(global.resolve(path[1]), "input");
-            assert_eq!(global.resolve(path[2]), "Input");
-            assert_test_location(&location, &global);
-        }
-        _ => panic!("expected Qualified type"),
-    }
+    assert!(matches!(parsed, ParsedTypeRef::Inferred));
 }

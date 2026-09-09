@@ -6,11 +6,12 @@
 //! through the HIR side table whenever possible.
 
 use super::HirValidator;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FieldId, LocalId, RegionId, StructId};
+use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashSet;
 
@@ -220,31 +221,19 @@ impl<'a> HirValidator<'a> {
 
     // HIR validation reports compiler invariants only. Source-authored failures
     // must be rejected before this point by header, AST, or borrow validation.
-    pub(super) fn error_with_text_location(
-        &self,
-        message: impl Into<String>,
-        location: &SourceLocation,
-    ) -> CompilerError {
-        CompilerError::new(message, location.clone(), ErrorType::HirTransformation)
-    }
-
     pub(super) fn error_with_hir(
         &self,
         message: impl Into<String>,
         anchor: Option<HirLocation>,
     ) -> CompilerError {
-        let location = anchor
-            .and_then(|hir_location| self.hir_error_location(hir_location))
-            .unwrap_or_default();
-
-        CompilerError::new(message, location, ErrorType::HirTransformation)
+        let span = anchor.and_then(|hir_location| self.hir_error_span(hir_location));
+        CompilerError::new(message, span, ErrorType::HirTransformation)
     }
 
-    pub(super) fn hir_error_location(&self, location: HirLocation) -> Option<SourceLocation> {
+    pub(super) fn hir_error_span(&self, location: HirLocation) -> Option<SourceSpan> {
         self.module
             .side_table
-            .hir_source_location_for_hir(location)
-            .or_else(|| self.module.side_table.ast_location_for_hir(location))
-            .cloned()
+            .hir_source_span_for_hir(location)
+            .or_else(|| self.module.side_table.ast_span_for_hir(location))
     }
 }

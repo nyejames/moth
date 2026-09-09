@@ -23,44 +23,28 @@ fn int_return(line: i32) -> AstNode {
         NodeKind::Return(vec![Expression::int(
             line,
             test_source_location(line),
-            None,
             ValueMode::ImmutableOwned,
         )]),
-        test_source_location(line),
+        None,
     )
 }
 
-fn assert_bool(condition: bool, line: i32) -> AstNode {
+fn assert_bool(condition: bool, _line: i32) -> AstNode {
     node(
         NodeKind::Assert {
-            condition: Expression::bool(
-                condition,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            condition: Expression::bool(condition, None, ValueMode::ImmutableOwned),
             // Terminality only inspects the condition; this fixture keeps a typed expression
             // placeholder because parsed assertions always carry the canonical optional value.
-            message: Expression::bool(
-                true,
-                test_source_location(line),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            message: Expression::bool(true, None, ValueMode::ImmutableOwned),
         },
-        test_source_location(line),
+        None,
     )
 }
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(
-            line,
-            test_source_location(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
-        test_source_location(line),
+        NodeKind::ExpressionStatement(Expression::int(line, None, ValueMode::ImmutableOwned)),
+        None,
     )
 }
 
@@ -77,7 +61,7 @@ fn allow_implicit_unit_ignores_terminality() {
     let diagnostic = validate_function_body_terminality(
         &empty_body,
         FunctionTerminalityPolicy::AllowImplicitUnit,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -92,7 +76,7 @@ fn entry_start_implicit_return_ignores_terminality() {
     let diagnostic = validate_function_body_terminality(
         &empty_body,
         FunctionTerminalityPolicy::EntryStartImplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -107,7 +91,7 @@ fn require_explicit_return_rejects_empty_body() {
     let diagnostic = validate_function_body_terminality(
         &empty_body,
         FunctionTerminalityPolicy::RequireExplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -129,7 +113,7 @@ fn direct_return_terminates() {
     let diagnostic = validate_function_body_terminality(
         &body,
         FunctionTerminalityPolicy::RequireExplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(diagnostic.is_none());
@@ -141,7 +125,7 @@ fn assert_false_terminates_non_unit_function() {
     let diagnostic = validate_function_body_terminality(
         &body,
         FunctionTerminalityPolicy::RequireExplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -156,7 +140,7 @@ fn assert_dynamic_does_not_terminate() {
     let diagnostic = validate_function_body_terminality(
         &body,
         FunctionTerminalityPolicy::RequireExplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -171,7 +155,7 @@ fn terminal_statement_after_fallthrough_statement_is_terminal() {
     let diagnostic = validate_function_body_terminality(
         &body,
         FunctionTerminalityPolicy::RequireExplicitReturn,
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -184,47 +168,32 @@ fn terminal_statement_after_fallthrough_statement_is_terminal() {
 fn if_requires_both_branches_to_terminate() {
     let terminal_both = node(
         NodeKind::If(
-            Expression::bool(
-                true,
-                test_source_location(1),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             vec![int_return(2)],
             Some(vec![int_return(3)]),
             test_if_branch_metadata(true),
         ),
-        test_source_location(1),
+        None,
     );
 
     let terminal_then_only = node(
         NodeKind::If(
-            Expression::bool(
-                true,
-                test_source_location(4),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             vec![int_return(5)],
             Some(vec![expression_statement(6)]),
             test_if_branch_metadata(true),
         ),
-        test_source_location(4),
+        None,
     );
 
     let no_else = node(
         NodeKind::If(
-            Expression::bool(
-                true,
-                test_source_location(7),
-                None,
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             vec![int_return(8)],
             None,
             test_if_branch_metadata(false),
         ),
-        test_source_location(7),
+        None,
     );
 
     assert!(
@@ -259,12 +228,11 @@ fn if_requires_both_branches_to_terminate() {
 fn match_requires_all_arms_and_default_to_terminate() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
-                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -273,17 +241,16 @@ fn match_requires_all_arms_and_default_to_terminate() {
             default: Some(vec![int_return(4)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_source_location(1),
+        None,
     );
 
     let non_terminal_default = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(5), None, ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(6),
-                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -292,7 +259,7 @@ fn match_requires_all_arms_and_default_to_terminate() {
             default: Some(vec![expression_statement(8)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_source_location(5),
+        None,
     );
 
     assert!(
@@ -318,12 +285,11 @@ fn match_requires_all_arms_and_default_to_terminate() {
 fn exhaustive_choice_match_does_not_require_default() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
-                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -332,7 +298,7 @@ fn exhaustive_choice_match_does_not_require_default() {
             default: None,
             exhaustiveness: MatchExhaustiveness::ExhaustiveChoice,
         },
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -349,12 +315,11 @@ fn exhaustive_choice_match_does_not_require_default() {
 fn match_marked_has_default_without_default_body_is_not_terminal() {
     let malformed_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
-                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -363,7 +328,7 @@ fn match_marked_has_default_without_default_body_is_not_terminal() {
             default: None,
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
-        test_source_location(1),
+        None,
     );
 
     assert!(
@@ -382,13 +347,13 @@ fn lexical_scope_terminates_when_body_terminates() {
         NodeKind::LexicalScope {
             body: vec![int_return(2)],
         },
-        test_source_location(1),
+        None,
     );
     let fallthrough_block = node(
         NodeKind::LexicalScope {
             body: vec![expression_statement(2)],
         },
-        test_source_location(1),
+        None,
     );
 
     assert!(

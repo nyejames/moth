@@ -110,11 +110,8 @@ pub(crate) fn build_source_package_boundary_indexes(
             .next()
             .is_some_and(|component| component == PROJECT_GLOBALS_DEPENDENCY_NAME)
         {
-            let diagnostic = project_structure_diagnostic(
-                path,
-                InvalidConfigReason::ProjectGlobalsNameReserved,
-                string_table,
-            );
+            let diagnostic =
+                project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
             let table = std::mem::take(string_table);
             return Err(PremergeFailure::Diagnosed(
                 PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
@@ -128,7 +125,6 @@ pub(crate) fn build_source_package_boundary_indexes(
             CompilerError::file_error(
                 path,
                 format!("Failed to canonicalize source-backed package root: {error}"),
-                string_table,
             )
         })?;
 

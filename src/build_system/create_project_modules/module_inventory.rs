@@ -138,7 +138,7 @@ pub(crate) struct CheckOnlyModuleCompilationJob {
 /// One transient authored provider clause bound to a canonical module interface.
 ///
 /// This is intentionally not a `ResolvedDependencyEdge`: check-only resolution must not carry
-/// graph insertion locations or be mistaken for a canonical graph edge.
+/// graph insertion spans or be mistaken for a canonical graph edge.
 #[derive(Clone, Debug)]
 pub(crate) struct CheckOnlyProviderBinding {
     pub(crate) dependency_shell_id: DependencyShellId,
@@ -883,7 +883,7 @@ fn prepare_check_only_module(
 
     // `finish` already returns the premerge lane; propagate directly. The final boundary
     // owns the single vessel conversion.
-    let prepared = syntax.finish(source_spans)?;
+    let prepared = syntax.finish()?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
         string_table_base_len,
@@ -898,11 +898,11 @@ fn prepare_check_only_module(
 /// Insert resolved dependency edges directly by `ModuleId` into the project module graph.
 ///
 /// WHAT: the namespace already resolved each edge to boundary-local `ModuleId` pairs, so this
-///       function inserts provider-before-consumer edges with authored locations without a
+///       function inserts provider-before-consumer edges with authored spans without a
 ///       path-to-ID mapping step. Edges are sorted by (provider, consumer) `ModuleId` pair before
-///       insertion so the retained location and insertion order are deterministic and independent
+///       insertion so the retained span and insertion order are deterministic and independent
 ///       of Rayon completion order.
-/// WHY: the graph owns edge adjacency and the retained location side table, while the namespace
+/// WHY: the graph owns edge adjacency and the retained span side table, while the namespace
 ///      resolves structural references to `ModuleId`s before they reach this insertion boundary.
 fn insert_resolved_dependency_edges(
     project_module_graph: &mut ProjectModuleGraph,
@@ -928,7 +928,7 @@ fn insert_resolved_dependency_edges(
         project_module_graph.add_resolved_dependency_edge(
             edge.provider_module_id,
             edge.consumer_module_id,
-            edge.graph_location,
+            edge.graph_span,
         )?;
     }
 
@@ -1073,7 +1073,6 @@ fn discover_modules_serial_provider_capable(
     };
     let source_tree_index = directory_dependency_resolution.source_tree_index();
     for seed in seeds {
-        let module_edge_start = resolved_edges.len();
         let candidate_source_indices = source_tree_index
             .owned_source_indices(seed.module_id)
             .iter()
@@ -1252,7 +1251,7 @@ fn discover_modules_serial_provider_capable(
                             provider_module_id,
                             consumer_module_id,
                             dependency_shell_id: provider.dependency_shell_id,
-                            graph_location: provider.location.clone(),
+                            graph_span: Some(provider.span),
                         });
                     }
                     ResolvedDependency::SourcePackageSurface {
@@ -1310,7 +1309,7 @@ fn discover_modules_serial_provider_capable(
         };
         // `finish` already returns the premerge lane; propagate directly. The final boundary
         // owns the single vessel conversion.
-        let prepared = syntax.finish(source_spans)?;
+        let prepared = syntax.finish()?;
         add_frontend_counter(FrontendCounter::ModuleCount, 1);
         add_frontend_counter(
             FrontendCounter::SourceFileCount,
@@ -1326,11 +1325,6 @@ fn discover_modules_serial_provider_capable(
             prepared.semantic.source_file_count as u64,
             prepared.semantic.source_byte_count as u64,
         );
-        let graph_location_remap =
-            string_table.merge_delta_from(&prepared.semantic.string_table, string_table_base_len);
-        for edge in &mut resolved_edges[module_edge_start..] {
-            edge.graph_location.remap_string_ids(&graph_location_remap);
-        }
         for check_only_source_index in check_only_source_indices {
             check_only_specs.push(CheckOnlyModuleSpec {
                 owner_module_id: seed.module_id,

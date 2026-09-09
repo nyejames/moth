@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::templates::template_head_parser::directive_ar
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, SyntaxDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceId;
@@ -20,9 +20,9 @@ use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use std::sync::Arc;
 
-type DirectiveStyleTestResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type DirectiveStyleTestResult<T> = Result<T, CompilerDiagnostic>;
 
-fn directive_diagnostic(error: TemplateError) -> Box<CompilerDiagnostic> {
+fn directive_diagnostic(error: TemplateError) -> CompilerDiagnostic {
     match error {
         TemplateError::Diagnostic(diagnostic) => diagnostic,
         TemplateError::Infrastructure(error) => {
@@ -211,9 +211,7 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (7, 9));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert!(diagnostic.labels.is_empty());
 }
 
 #[test]
@@ -253,10 +251,8 @@ fn optional_slot_target_missing_close_paren_errors() {
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
-        DiagnosticPayload::ExpectedToken {
-            expected: TokenKind::CloseParenthesis,
-            ..
-        }
+        DiagnosticPayload::ExpectedToken { expected, .. }
+            if expected == DiagnosticToken::from(TokenKind::CloseParenthesis)
     ));
 }
 
@@ -274,10 +270,8 @@ fn required_slot_name_missing_parens_errors() {
     assert!(result.is_err());
     assert!(matches!(
         directive_diagnostic(result.unwrap_err()).payload,
-        DiagnosticPayload::ExpectedToken {
-            expected: TokenKind::OpenParenthesis,
-            ..
-        }
+        DiagnosticPayload::ExpectedToken { expected, .. }
+            if expected == DiagnosticToken::from(TokenKind::OpenParenthesis)
     ));
 }
 
@@ -382,7 +376,7 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     let context = test_context(tokens.src_path.to_owned());
     let result =
         parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table);
-    let diagnostic = *result.expect_err("whitespace-only directive argument should error");
+    let diagnostic = result.expect_err("whitespace-only directive argument should error");
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::InvalidTemplateDirective {
@@ -405,12 +399,11 @@ fn optional_expression_extra_comma_errors() {
     let result =
         parse_optional_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table);
     assert!(result.is_err());
-    let diagnostic = *result.unwrap_err();
+    let diagnostic = result.unwrap_err();
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Comma,
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from(TokenKind::Comma)
     ));
 }
 
@@ -427,13 +420,11 @@ fn required_expression_missing_parens_errors() {
     let result =
         parse_required_parenthesized_expression_for_test(&mut tokens, &context, &mut string_table);
     assert!(result.is_err());
-    let diagnostic = *result.unwrap_err();
+    let diagnostic = result.unwrap_err();
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::ExpectedToken {
-            expected: TokenKind::OpenParenthesis,
-            ..
-        }
+        DiagnosticPayload::ExpectedToken { expected, .. }
+            if expected == DiagnosticToken::from(TokenKind::OpenParenthesis)
     ));
 }
 
@@ -727,7 +718,7 @@ fn const_css_template_emits_malformed_css_warnings() {
 }
 
 #[test]
-fn css_validation_warnings_keep_non_default_locations() {
+fn css_validation_warnings_keep_authored_spans() {
     let style_directives = html_project_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[$css:\n.button { color red; }\n.button { color blue }\n]",
@@ -739,8 +730,8 @@ fn css_validation_warnings_keep_non_default_locations() {
     assert!(
         warnings
             .iter()
-            .all(|warning| !is_default_error_location(&warning.primary_location)),
-        "css warnings should keep meaningful source locations"
+            .all(|warning| warning.primary_span.is_some()),
+        "css warnings should keep authored source spans"
     );
 }
 

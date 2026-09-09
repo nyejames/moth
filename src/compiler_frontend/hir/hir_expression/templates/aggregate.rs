@@ -14,7 +14,7 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 use super::append_context::RuntimeTemplateAppendContext;
 
@@ -28,25 +28,23 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn append_runtime_template_aggregate_when_emitted(
         &mut self,
         append: RuntimeTemplateAggregateAppend,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         append_aggregate: impl FnOnce(
             &mut Self,
             RuntimeTemplateAggregateAppend,
-            &SourceLocation,
+            &Option<SourceSpan>,
         ) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
-        let condition_block = self.current_block_id_or_error(fallback_location)?;
-        let parent_region = self.current_region_or_error(fallback_location)?;
+        let condition_block = self.current_block_id_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error(span_ref)?;
         let then_region = self.create_child_region(parent_region);
         let else_region = self.create_child_region(parent_region);
-        let then_block =
-            self.create_block(then_region, fallback_location, "template-aggregate-emitted")?;
-        let else_block =
-            self.create_block(else_region, fallback_location, "template-aggregate-skipped")?;
+        let then_block = self.create_block(then_region, span_ref, "template-aggregate-emitted")?;
+        let else_block = self.create_block(else_region, span_ref, "template-aggregate-skipped")?;
         let condition = self.make_local_load_expression(
             append.emitted_output,
             builtin_type_ids::BOOL,
-            fallback_location,
+            span_ref,
             parent_region,
         );
 
@@ -57,51 +55,49 @@ impl<'a> HirBuilder<'a> {
                 then_block,
                 else_block,
             },
-            fallback_location,
+            span_ref,
         )?;
-        self.set_current_block(then_block, fallback_location)?;
+        self.set_current_block(then_block, span_ref)?;
         if let Some(parent_flag) = append.append_context.emitted_output() {
-            self.mark_runtime_template_output_emitted(parent_flag, fallback_location)?;
+            self.mark_runtime_template_output_emitted(parent_flag, span_ref)?;
         }
-        append_aggregate(self, append, fallback_location)?;
+        append_aggregate(self, append, span_ref)?;
 
-        let then_tail_block = self.current_block_id_or_error(fallback_location)?;
-        let then_terminated =
-            self.block_has_explicit_terminator(then_tail_block, fallback_location)?;
+        let then_tail_block = self.current_block_id_or_error(span_ref)?;
+        let then_terminated = self.block_has_explicit_terminator(then_tail_block, span_ref)?;
 
-        self.set_current_block(else_block, fallback_location)?;
-        let else_tail_block = self.current_block_id_or_error(fallback_location)?;
+        self.set_current_block(else_block, span_ref)?;
+        let else_tail_block = self.current_block_id_or_error(span_ref)?;
 
         if then_terminated {
-            return self.set_current_block(else_tail_block, fallback_location);
+            return self.set_current_block(else_tail_block, span_ref);
         }
 
-        let merge_block =
-            self.create_block(parent_region, fallback_location, "template-aggregate-merge")?;
+        let merge_block = self.create_block(parent_region, span_ref, "template-aggregate-merge")?;
         self.emit_jump_to(
             then_tail_block,
             merge_block,
-            fallback_location,
+            span_ref,
             "template-aggregate.emitted.merge",
         )?;
         self.emit_jump_to(
             else_tail_block,
             merge_block,
-            fallback_location,
+            span_ref,
             "template-aggregate.skipped.merge",
         )?;
 
-        self.set_current_block(merge_block, fallback_location)
+        self.set_current_block(merge_block, span_ref)
     }
 
     pub(super) fn initialize_runtime_template_emitted_flag(
         &mut self,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
-        let flag = self.allocate_temp_local(builtin_type_ids::BOOL, Some(location.clone()))?;
-        let region = self.current_region_or_error(location)?;
+        let flag = self.allocate_temp_local(builtin_type_ids::BOOL, None)?;
+        let region = self.current_region_or_error(span_ref)?;
         let false_value = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Bool(false),
             builtin_type_ids::BOOL,
             ValueKind::Const,
@@ -113,7 +109,7 @@ impl<'a> HirBuilder<'a> {
                 target: HirPlace::Local(flag),
                 value: false_value,
             },
-            location,
+            span_ref,
         )?;
 
         Ok(flag)
@@ -122,11 +118,11 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn mark_runtime_template_output_emitted(
         &mut self,
         emitted_output: LocalId,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let true_value = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Bool(true),
             builtin_type_ids::BOOL,
             ValueKind::Const,
@@ -138,7 +134,7 @@ impl<'a> HirBuilder<'a> {
                 target: HirPlace::Local(emitted_output),
                 value: true_value,
             },
-            location,
+            span_ref,
         )
     }
 }

@@ -11,7 +11,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 use super::append_context::RuntimeTemplateAppendContext;
 
@@ -22,19 +22,19 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_linear_template_expression(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let accumulator = self.initialize_runtime_template_accumulator(location)?;
+        let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         self.append_owned_runtime_template_node_to_accumulator(
             node,
             RuntimeTemplateAppendContext::new(accumulator),
             None,
-            location,
+            span_ref,
         )?;
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let value = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Copy(HirPlace::Local(accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,
@@ -57,19 +57,19 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_linear_template_expression_from_owned_node(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let accumulator = self.initialize_runtime_template_accumulator(location)?;
+        let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         self.append_owned_runtime_template_node_to_accumulator(
             node,
             RuntimeTemplateAppendContext::new(accumulator),
             None,
-            location,
+            span_ref,
         )?;
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         Ok(self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Copy(HirPlace::Local(accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,

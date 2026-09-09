@@ -541,14 +541,13 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     )
     .expect_err("capture must abort terminally when the source's span table is exhausted");
     // The unterminated literal is diagnosed before token construction; capture then hits the
-    // exhausted table and aborts terminally. The diagnosis is not published spanless: the
-    // infrastructure failure carries the offending exact range instead.
+    // exhausted table. No source span may be fabricated after local-span allocation fails.
     let FileFrontendPrepareFailure::Infrastructure(error) = failure else {
         panic!("capture exhaustion must surface the terminal capacity failure");
     };
     assert_eq!(error.error_type, ErrorType::File);
-    assert_eq!(error.location.start_byte, 0);
-    assert_eq!(error.location.end_byte, malformed_source.len() as u32);
+    assert_eq!(error.source_span, None);
+    assert_eq!(error.host_path, None);
     assert_eq!(malformed_builder.len(), last_usable_index as usize + 1);
 }
 

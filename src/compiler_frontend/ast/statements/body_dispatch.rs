@@ -38,7 +38,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings;
 
@@ -55,9 +55,9 @@ fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseEr
 
 fn reserved_keyword_as_name_error(
     keyword: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::reserved_name_collision(keyword, ReservedNameOwner::Keyword, location)
+    CompilerDiagnostic::reserved_name_collision(keyword, ReservedNameOwner::Keyword, span)
 }
 
 /// Produce a diagnostic for a deferred block keyword (`checked`, `async`).
@@ -70,16 +70,16 @@ fn deferred_block_error(
     keyword: &str,
     reason: DeferredFeatureReason,
 ) -> CompilerDiagnostic {
-    let location = token_stream.current_location();
+    let span = Some(token_stream.current_span());
     if matches!(
         token_stream.peek_next_token(),
         Some(token) if token.is_assignment_operator()
     ) {
         let keyword_id = string_table.intern(keyword);
-        return reserved_keyword_as_name_error(keyword_id, location);
+        return reserved_keyword_as_name_error(keyword_id, span);
     }
 
-    CompilerDiagnostic::deferred_feature_reason(reason, location)
+    CompilerDiagnostic::deferred_feature_reason(reason, span)
 }
 
 pub(crate) fn parse_function_body_statements(
@@ -112,7 +112,7 @@ pub(crate) fn parse_function_body_statements(
                 return Err(statement_dispatch_error(
                     CompilerDiagnostic::invalid_match_arm(
                         InvalidMatchArmReason::ArmMustStartNewLine,
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     ),
                 ));
             }
@@ -197,7 +197,7 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ElseOutsideIfOrMatch,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
@@ -234,18 +234,14 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::BreakOutsideLoop,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
 
                 body_nodes.push(AstNode {
                     kind: NodeKind::Break,
-                    location: token_stream.current_location(),
-                    span: Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
+                    span: Some(token_stream.current_span()),
                     scope: context.scope.clone(),
                 });
                 token_stream.advance();
@@ -256,26 +252,21 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_control_flow_statement(
                             InvalidControlFlowStatementReason::ContinueOutsideLoop,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
 
                 body_nodes.push(AstNode {
                     kind: NodeKind::Continue,
-                    location: token_stream.current_location(),
-                    span: Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    )),
+                    span: Some(token_stream.current_span()),
                     scope: context.scope.clone(),
                 });
                 token_stream.advance();
             }
 
             TokenKind::Then => {
-                let then_location = token_stream.current_location();
-                let then_span = token_stream.current_token().span;
+                let then_span = Some(token_stream.current_span());
                 token_stream.advance();
 
                 let Some(active_target) = &context.active_value_target else {
@@ -289,7 +280,7 @@ pub(crate) fn parse_function_body_statements(
                     };
 
                     return Err(statement_dispatch_error(
-                        CompilerDiagnostic::invalid_fallible_handling(reason, then_location),
+                        CompilerDiagnostic::invalid_fallible_handling(reason, then_span),
                     ));
                 };
 
@@ -299,7 +290,7 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::ThenRequiresValues,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
@@ -311,7 +302,7 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_fallible_handling(
                             InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-                            then_location,
+                            then_span,
                         ),
                     ));
                 }
@@ -328,10 +319,9 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::ThenValue(ProducedValues {
                         expressions: produced_values,
-                        location: then_location.clone(),
+                        span: then_span,
                     }),
-                    location: then_location.clone(),
-                    span: Some(SourceSpan::new(token_stream.file_id, then_span)),
+                    span: then_span,
                     scope: context.scope.clone(),
                 });
             }
@@ -369,13 +359,12 @@ pub(crate) fn parse_function_body_statements(
                     return Err(statement_dispatch_error(
                         CompilerDiagnostic::invalid_standalone_statement(
                             InvalidStandaloneStatementReason::StandaloneTemplate,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         ),
                     ));
                 }
 
-                let fragment_location = token_stream.current_location();
-                let fragment_span = token_stream.current_token().span;
+                let fragment_span = Some(token_stream.current_span());
                 let template = Template::new_with_type_interner(
                     token_stream,
                     &context,
@@ -387,8 +376,7 @@ pub(crate) fn parse_function_body_statements(
 
                 body_nodes.push(AstNode {
                     kind: NodeKind::PushStartRuntimeFragment(expression),
-                    location: fragment_location,
-                    span: Some(SourceSpan::new(token_stream.file_id, fragment_span)),
+                    span: fragment_span,
                     scope: context.scope.clone(),
                 })
             }
@@ -413,11 +401,9 @@ pub(crate) fn parse_function_body_statements(
                     string_table,
                 )?;
 
-                let location = expression.location.clone();
                 let span = expression.span;
                 body_nodes.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
-                    location,
                     span,
                     scope: context.scope.clone(),
                 });

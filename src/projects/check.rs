@@ -142,12 +142,11 @@ fn run_check_for_tests(
 fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(normalized_path, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(normalized_path) {
         Ok(path) => path,
         Err(error) => {
             return CheckOutcome {
-                messages: CompilerMessages::from_error(error, path_string_table),
+                messages: CompilerMessages::from_error(error, StringTable::new()),
                 status: CommandStatus::Failure,
             };
         }

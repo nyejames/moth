@@ -3,7 +3,7 @@
 //! WHAT: exposes extra builder utilities needed only by HIR unit tests.
 //! WHY: tests need direct access to internal builder state without widening the production API.
 
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::templates::{
@@ -38,7 +38,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
@@ -152,7 +152,6 @@ impl<'a> HirBuilder<'a> {
             FieldDefinition, StructTypeDefinition,
         };
         use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-        use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
         if let Some(existing) = self.test_builtin_error_type_id() {
             return existing;
@@ -171,13 +170,11 @@ impl<'a> HirBuilder<'a> {
                 FieldDefinition {
                     name: message_path,
                     type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
-                    location: SourceLocation::default(),
                     span: None,
                 },
                 FieldDefinition {
                     name: code_path,
                     type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::INT,
-                    location: SourceLocation::default(),
                     span: None,
                 },
             ]
@@ -196,8 +193,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(crate) fn test_register_local_in_block(&mut self, local: HirLocal, name: InternedPath) {
         let current_block = self.current_block_id().unwrap_or(BlockId(0));
-        let _ =
-            self.register_local_in_block(current_block, local.clone(), &SourceLocation::default());
+        let _ = self.register_local_in_block(current_block, local.clone(), &None);
 
         self.locals_by_name.insert(name.clone(), local.id);
         self.side_table.bind_local_name(local.id, name);
@@ -284,16 +280,19 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn test_register_nominal_struct_type(
         &mut self,
         path: InternedPath,
-        fields: Vec<(InternedPath, FrontendTypeId, SourceLocation)>,
+        fields: Vec<(
+            InternedPath,
+            FrontendTypeId,
+            Option<crate::compiler_frontend::source::SourceSpan>,
+        )>,
         const_record: bool,
     ) -> FrontendTypeId {
         let field_definitions = fields
             .into_iter()
-            .map(|(name, type_id, location)| FieldDefinition {
+            .map(|(name, type_id, span)| FieldDefinition {
                 name,
                 type_id,
-                location,
-                span: None,
+                span,
             })
             .collect::<Vec<_>>();
 
@@ -328,7 +327,6 @@ impl<'a> HirBuilder<'a> {
                             .map(|field| FieldDefinition {
                                 name: field.id.clone(),
                                 type_id: field.value.type_id,
-                                location: field.value.location.clone(),
                                 span: field.value.span,
                             })
                             .collect::<Vec<_>>();
@@ -337,7 +335,6 @@ impl<'a> HirBuilder<'a> {
                         }
                     }
                 },
-                location: variant.location.clone(),
                 span: variant.span,
             })
             .collect::<Vec<_>>();
@@ -394,7 +391,7 @@ pub(crate) fn register_local(
     name: InternedPath,
     local_id: LocalId,
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) {
     let ty = type_id;
     builder.test_register_local_in_block(
@@ -403,8 +400,7 @@ pub(crate) fn register_local(
             ty,
             mutable: true,
             region: RegionId(0),
-            source_info: Some(location),
-            span: None,
+            span,
         },
         name,
     );
@@ -447,7 +443,6 @@ pub(crate) fn expressions_to_owned_render_node_with_resources(
 
     OwnedRuntimeTemplateNode::Sequence {
         children,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -461,7 +456,6 @@ fn expression_to_owned_node(
         ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
             text: OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
             reactive_subscription: None,
-            location: expression.location.to_owned(),
             span: expression.span,
         },
 
@@ -478,7 +472,6 @@ fn expression_to_owned_node(
             OwnedRuntimeTemplateNode::Text {
                 text,
                 reactive_subscription: None,
-                location: expression.location.to_owned(),
                 span: expression.span,
             }
         }
@@ -486,22 +479,20 @@ fn expression_to_owned_node(
         _ => OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression.clone()),
             reactive_subscription: None,
-            location: expression.location.to_owned(),
             span: expression.span,
         },
     }
 }
 
 pub(crate) fn runtime_template_expression(
-    location: SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
     content: Vec<Expression>,
     string_table: &StringTable,
 ) -> Expression {
     let body = expressions_to_owned_render_node(&content, string_table);
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(body),
-        location: location.clone(),
-        span: None,
+        span,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -528,10 +519,7 @@ pub(crate) fn fixture_resource(
             .expect("fixture resource path should be portable"),
     );
 
-    let resource_id = resources.intern_origin(
-        origin.clone(),
-        crate::compiler_frontend::tokenizer::tokens::SourceLocation::default(),
-    );
+    let resource_id = resources.intern_origin(origin.clone(), None);
 
     (resource_id, origin)
 }
@@ -544,7 +532,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
 
     let before = string_table.intern("before");
     let after = string_table.intern("after");
-    let location = test_source_location(7);
+    let location = None;
     let structural = Expression::structural_string(
         vec![
             ConstStringPiece::Text(before),
@@ -567,7 +555,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
     let OwnedRuntimeTemplateNode::Text {
         text,
         reactive_subscription: None,
-        location: node_location,
+        span: node_span,
         ..
     } = single
     else {
@@ -583,7 +571,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
             OwnedFoldedStringPiece::Text("after".to_owned()),
         ])
     );
-    assert_eq!(node_location, &location);
+    assert_eq!(node_span, &None);
 }
 
 #[test]
@@ -592,7 +580,7 @@ fn all_text_structural_fixture_keeps_pieces_without_a_resource_table() {
     let head = string_table.intern("docs/");
     let structural = Expression::structural_string(
         vec![ConstStringPiece::Text(head), ConstStringPiece::SiteRoot],
-        test_source_location(8),
+        None,
     );
 
     let node = expressions_to_owned_render_node(&[structural], &string_table);
@@ -634,7 +622,7 @@ fn resource_piece_without_its_table_fails_instead_of_rerouting() {
             ConstStringPiece::Text(head),
             ConstStringPiece::Resource(phantom_resource),
         ],
-        test_source_location(9),
+        None,
     );
 
     // The mapper receives a table that issued none of the expression's handles, so the exact

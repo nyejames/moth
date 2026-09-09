@@ -21,12 +21,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -849,18 +848,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let source_name = string_table.intern("source");
     let source_path = scope.append(source_name);
-    let source_location = SourceLocation {
-        scope: scope.clone(),
-        start_pos: CharPosition {
-            line_number: 1,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: 1,
-            char_column: 120,
-        },
-        ..Default::default()
-    };
+    let source_span = None;
     let source = ReactiveSource {
         path: source_path.clone(),
         kind: ReactiveSourceKind::Declaration,
@@ -869,8 +857,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         source_path.clone(),
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        source_location.clone(),
-        None,
+        source_span,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
@@ -992,18 +979,6 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
         id: scope.append(value_name),
         value: Expression::string_slice(
             string_table.intern("ANCHOR"),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120,
-                },
-                ..Default::default()
-            },
             None,
             ValueMode::ImmutableOwned,
         ),
@@ -1205,7 +1180,7 @@ fn build_template_with_direct_tir_root(
     context: &ScopeContext,
     kind: TemplateType,
     style: Style,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     build_root: impl FnOnce(
         &mut TemplateIrStore,
         &mut StringTable,
@@ -1217,17 +1192,16 @@ fn build_template_with_direct_tir_root(
         let mut store = store.borrow_mut();
         let (root, summary) = build_root(&mut store, string_table);
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.finish_template(root, style.clone(), kind.clone(), summary, location.clone())
+        builder.finish_template(root, style.clone(), kind.clone(), summary, span.clone())
     };
     let context = TemplateViewContext::default();
     Template {
-        location,
         tir_reference: TemplateTirReference {
             root: template_id,
             phase: TemplateTirPhase::Parsed,
             context,
         },
-        span: None,
+        span,
     }
 }
 
@@ -1243,25 +1217,26 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
+    };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span.clone(),
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
-                Expression::int(42, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(42, span.clone(), ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                location.clone(),
+                span.clone(),
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span.clone());
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1272,7 +1247,6 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -1304,7 +1278,7 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
 
     let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
@@ -1315,37 +1289,36 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     let subscription = ReactiveSubscription {
         source: source.clone(),
         type_id: builtin_type_ids::STRING,
-        location: location.clone(),
         span: None,
     };
     let expression = Expression::reference_with_type_id(
         source_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        location.clone(),
-        None,
+        span.clone(),
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
     .with_reactive_source(source);
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
+    };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span.clone(),
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
                 expression,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                location.clone(),
+                span.clone(),
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span.clone());
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1357,7 +1330,6 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -1414,7 +1386,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
 
     let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
@@ -1424,18 +1396,18 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
             kind: ReactiveSourceKind::Declaration,
         },
         type_id: builtin_type_ids::STRING,
-        location: location.clone(),
         span: None,
+    };
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
     };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span.clone(),
         move |store, string_table| {
             let text = string_table.intern("reactive body");
             let byte_len = "reactive body".len();
@@ -1445,9 +1417,9 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
                 byte_len,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                location.clone(),
+                span.clone(),
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span.clone());
             let summary = TemplateIrSummary {
                 estimated_output_bytes: byte_len,
                 text_node_count: 1,
@@ -1461,7 +1433,6 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -2113,26 +2084,39 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
         "<p>fallback</p>"
     );
 
-    assert_ne!(
-        branches[0].location,
-        SourceLocation::default(),
-        "prepared branch should retain a concrete parser source location"
+    let branch_span = branches[0]
+        .span
+        .expect("prepared branch should retain an authored source span");
+    assert_eq!(branch_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        branch_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > branch_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared branch span should cover authored bytes"
     );
-    assert_ne!(
-        store
-            .get_node(branches[0].body)
-            .expect("prepared branch body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared branch body root should retain a concrete parser source location"
-    );
-    assert_ne!(
-        store
-            .get_node(fallback_body)
-            .expect("prepared fallback body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared fallback body root should retain a concrete parser source location"
+    let branch_body_span = store
+        .get_node(branches[0].body)
+        .expect("prepared branch body root should exist")
+        .span
+        .expect("prepared branch body root should retain an authored source span");
+    assert_eq!(branch_body_span.source(), SourceId::COMPILATION_ROOT);
+    let fallback_span = store
+        .get_node(fallback_body)
+        .expect("prepared fallback body root should exist")
+        .span
+        .expect("prepared fallback body root should retain an authored source span");
+    assert_eq!(fallback_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        fallback_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > fallback_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared fallback body span should cover authored bytes"
     );
 }
 
@@ -2177,13 +2161,20 @@ fn formatted_tir_reference_installs_formatted_loop_body() {
     );
 
     assert_eq!(body_text(*body, &store, &string_table), "<p> body</p>");
-    assert_ne!(
-        store
-            .get_node(*body)
-            .expect("prepared loop body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared loop body root should retain a concrete parser source location"
+    let body_span = store
+        .get_node(*body)
+        .expect("prepared loop body root should exist")
+        .span
+        .expect("prepared loop body root should retain an authored source span");
+    assert_eq!(body_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        body_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > body_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared loop body span should cover authored bytes"
     );
 }
 
@@ -2398,8 +2389,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut build_state = TemplateBuildState::new();
     let mut construction_context = TemplateConstructionContext::new(
         Rc::clone(&shared_store),
-        parent_tokens.current_location(),
-        None,
+        Some(parent_tokens.current_span()),
     );
 
     let _parsed_head = parse_template_head(

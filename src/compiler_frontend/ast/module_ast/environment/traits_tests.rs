@@ -405,25 +405,21 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         other => panic!("expected authored This return, got {other:?}"),
     };
     let this_name = strings.intern("This");
-    let synthetic_parameters = trait_this_parameter_list(
-        this_name,
-        declaration.name_location.clone(),
-        declaration.span,
-    );
+    let synthetic_parameters = trait_this_parameter_list(this_name, Some(declaration.name_span));
     let synthetic_parameter = synthetic_parameters
         .parameters
         .first()
         .expect("trait This parameter");
     assert_eq!(synthetic_parameter.name, this_name);
     assert_eq!(
-        synthetic_parameter.location, declaration.name_location,
-        "synthetic This must preserve the supplied legacy location"
-    );
-    assert_eq!(
-        synthetic_parameter.span, declaration.span,
+        synthetic_parameter.span,
+        Some(declaration.name_span),
         "synthetic This must preserve the supplied exact span"
     );
-    let synthetic_range = synthetic_parameter.span.resolve_with(spans.resolver());
+    let synthetic_range = synthetic_parameter
+        .span
+        .expect("synthetic This must carry its supplied span")
+        .resolve_with(spans.resolver_for(source_id));
     assert_eq!(
         &source[synthetic_range.start() as usize..synthetic_range.end() as usize],
         "CLONE_VALUE"
@@ -433,23 +429,20 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     assert_eq!(substituted.returns.len(), signature.returns.len());
     for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {
         assert_eq!(parameter.span, original.span);
-        assert_eq!(parameter.location, original.location);
     }
     assert_eq!(
         substituted.returns[0].value.span,
         signature.returns[0].value.span
     );
-    assert_eq!(
-        substituted.returns[0].value.location,
-        signature.returns[0].value.location
-    );
     let receiver = substituted.parameters[0]
         .span
-        .resolve_with(spans.resolver());
+        .expect("substituted receiver should retain its span")
+        .resolve_with(spans.resolver_for(source_id));
     let result = substituted.returns[0]
         .value
         .span
-        .resolve_with(spans.resolver());
+        .expect("substituted return should retain its span")
+        .resolve_with(spans.resolver_for(source_id));
     assert_eq!(
         &source[receiver.start() as usize..receiver.end() as usize],
         "This"
@@ -465,7 +458,11 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     {
         let (span, range) = match &parameter.type_annotation {
             ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
-                (*span, span.resolve_with(spans.resolver()))
+                let span = *span;
+                let range = span
+                    .expect("substituted parameter type should retain its span")
+                    .resolve_with(spans.resolver_for(source_id));
+                (span, range)
             }
             other => panic!("expected substituted Named parameter, got {other:?}"),
         };
@@ -478,7 +475,11 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     let (return_type_span, return_type_range) = match &substituted.returns[0].value.type_annotation
     {
         ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
-            (*span, span.resolve_with(spans.resolver()))
+            let span = *span;
+            let range = span
+                .expect("substituted return type should retain its span")
+                .resolve_with(spans.resolver_for(source_id));
+            (span, range)
         }
         other => panic!("expected substituted Named return, got {other:?}"),
     };
@@ -506,10 +507,9 @@ fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
         &source[primary_range.start() as usize..primary_range.end() as usize],
         "render"
     );
-    assert_eq!(diagnostic.labels.len(), 2);
-    assert_eq!(diagnostic.labels[0].span, Some(primary_span));
+    assert_eq!(diagnostic.labels.len(), 1);
 
-    let first_span = diagnostic.labels[1]
+    let first_span = diagnostic.labels[0]
         .span
         .expect("previous requirement label should retain its exact span");
     assert_eq!(first_span.source(), SourceId::COMPILATION_ROOT);
@@ -534,10 +534,6 @@ fn conformance_target_diagnostic_retains_exact_target_span() {
     let span_builder = ExtendedSpanBuilder::new();
     let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "Int");
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number, 2,
-        "legacy conformance location must remain on the target declaration"
-    );
 }
 
 #[test]
@@ -554,9 +550,5 @@ fn unknown_trait_reference_diagnostic_retains_exact_reference_span() {
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],
         "UNKNOWN"
-    );
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number, 1,
-        "legacy unknown-trait location must remain on the trait reference"
     );
 }

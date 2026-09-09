@@ -101,7 +101,6 @@ pub(super) fn parse_choice_construct(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    let variant_location = token_stream.current_location();
     let variant_span = Some(SourceSpan::new(
         token_stream.file_id,
         token_stream.current_token().span,
@@ -112,20 +111,20 @@ pub(super) fn parse_choice_construct(
         TokenKind::Must | TokenKind::TraitThis => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
                 "Expression Parsing",
                 "choice variant expression parsing",
             )?;
 
             return Err(
-                reserved_trait_keyword_error(keyword, token_stream.current_location()).into(),
+                reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into(),
             );
         }
 
         found => {
             return Err(CompilerDiagnostic::unexpected_token(
                 found.clone(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -142,7 +141,7 @@ pub(super) fn parse_choice_construct(
             choice_declaration.id.name(),
             Some(variant_name),
             available_variant_ids,
-            variant_location,
+            variant_span,
         )
         .into());
     };
@@ -150,7 +149,7 @@ pub(super) fn parse_choice_construct(
     let variant = &variant_definitions[variant_index];
     let has_parens = token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis);
     let mut parsed_payload_arguments = None;
-    let mut constructor_location = variant_location.clone();
+    let mut constructor_span = variant_span;
 
     // Pre-parse call arguments for record variants so generic inference can
     // inspect the raw argument expressions before type instantiation. Field
@@ -161,7 +160,7 @@ pub(super) fn parse_choice_construct(
         && has_parens
     {
         token_stream.advance(); // past variant name to '('
-        constructor_location = token_stream.current_location();
+        constructor_span = Some(token_stream.current_span());
 
         let payload_field_views = ConstructorField::from_choice_payload_fields(fields);
         let field_expectations = expectations_from_constructor_fields(&payload_field_views);
@@ -203,8 +202,7 @@ pub(super) fn parse_choice_construct(
                     template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
-                    location: constructor_location.clone(),
-                    span: variant_span,
+                    span: constructor_span,
                 },
                 context,
                 type_interner,
@@ -246,7 +244,7 @@ pub(super) fn parse_choice_construct(
                         choice_declaration.id.name(),
                         Some(variant_name),
                         vec![],
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 }
@@ -256,7 +254,7 @@ pub(super) fn parse_choice_construct(
                     choice_declaration.id.name(),
                     Some(variant_name),
                     vec![],
-                    variant_location,
+                    variant_span,
                 )
                 .into());
             }
@@ -273,7 +271,6 @@ pub(super) fn parse_choice_construct(
                 fields: vec![],
                 diagnostic_type,
                 type_id: choice_type_id,
-                location: variant_location,
                 span: variant_span,
                 value_mode: ValueMode::ImmutableOwned,
             });
@@ -288,7 +285,7 @@ pub(super) fn parse_choice_construct(
                     choice_declaration.id.name(),
                     Some(variant_name),
                     vec![],
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -313,7 +310,7 @@ pub(super) fn parse_choice_construct(
                 )),
                 raw_args,
                 &expectations,
-                constructor_location.clone(),
+                constructor_span,
                 CallArgumentResolutionContext {
                     string_table,
                     type_environment: type_check_context.type_environment,
@@ -364,7 +361,7 @@ pub(super) fn parse_choice_construct(
                         return Err(CompilerDiagnostic::compile_time_evaluation_error(
                             CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                             Some(field_name),
-                            value.location,
+                            value.span,
                         )
                         .into());
                     }
@@ -402,7 +399,6 @@ pub(super) fn parse_choice_construct(
                 fields: choice_fields,
                 diagnostic_type,
                 type_id: choice_type_id,
-                location: variant_location,
                 span: variant_span,
                 value_mode,
             });
@@ -436,7 +432,6 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                         .map(|field| FieldDefinition {
                             name: field.id.clone(),
                             type_id: field.value.type_id,
-                            location: field.value.location.clone(),
                             span: field.value.span,
                         })
                         .collect();
@@ -446,7 +441,6 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                     }
                 }
             },
-            location: variant.location.clone(),
             span: variant.span,
         })
         .collect()

@@ -11,9 +11,9 @@ use crate::compiler_frontend::headers::types::{
     Header, HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseFailure,
     LocalDeclarationOrderingHint,
 };
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan, SpanJoinError};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, NestingDepth, collect_symbol_references,
 };
@@ -39,8 +39,10 @@ pub(super) fn create_top_level_const_template(
     let mut body = Vec::with_capacity(10);
     body.push(opening_template_token);
 
-    let start_location = token_stream.current_location();
-    let start_span = token_stream.tokens[token_stream.index].span;
+    let start_span = SourceSpan::new(
+        token_stream.file_id,
+        token_stream.tokens[token_stream.index].span,
+    );
 
     let closing_bracket = context.string_table.intern("]");
     crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
@@ -65,12 +67,7 @@ pub(super) fn create_top_level_const_template(
             }
             body.push(token);
         },
-        |location| {
-            Box::new(CompilerDiagnostic::unexpected_end_of_file(
-                Some(closing_bracket),
-                location,
-            ))
-        },
+        |span| CompilerDiagnostic::unexpected_end_of_file(Some(closing_bracket), Some(span)),
     )?;
 
     if let Some(error) = selection_error {
@@ -78,29 +75,25 @@ pub(super) fn create_top_level_const_template(
     }
 
     let eof_anchor = token_stream.current_token();
-    let end_span = eof_anchor.span;
-    body.push(Token::with_span(
-        TokenKind::Eof,
-        eof_anchor.location,
-        eof_anchor.span,
-    ));
-    let condition_references = collect_template_if_condition_references(&body);
+    let end_span = SourceSpan::new(token_stream.file_id, eof_anchor.span);
+    body.push(Token::with_span(TokenKind::Eof, eof_anchor.span));
+    let condition_references =
+        collect_template_if_condition_references(&body, token_stream.file_id);
 
     let full_name = scope.append(const_template_name);
-    let end_location = token_stream.current_location();
-    let name_location = SourceLocation {
-        scope,
-        start_pos: start_location.start_pos,
-        end_pos: end_location.end_pos,
-        start_byte: start_location.start_byte,
-        end_byte: end_location.end_byte,
-    };
 
     // Placement metadata retains the same range as the header: first interior token through
     // the post-close token. A long join appends to this source's original extended table.
     let name_span = start_span
         .join(end_span, span_builder)
-        .map_err(|error| CompilerError::source_span_capacity(error, name_location.clone()))?;
+        .map_err(|error| match error {
+            SpanJoinError::Capacity(error) => {
+                CompilerError::source_span_capacity(error, Some(start_span))
+            }
+            SpanJoinError::DifferentSources { .. } => {
+                CompilerError::compiler_error("const-template span join crossed source identities")
+            }
+        })?;
 
     let template_tokens =
         FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
@@ -112,15 +105,17 @@ pub(super) fn create_top_level_const_template(
         file_role: context.file_role,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints,
-        name_location,
-        name_span,
+        name_span: Some(name_span),
         tokens: template_tokens,
         source_file: context.source_file.to_owned(),
         capacity_references: Vec::new(),
     })
 }
 
-fn collect_template_if_condition_references(tokens: &[Token]) -> Vec<InitializerReference> {
+fn collect_template_if_condition_references(
+    tokens: &[Token],
+    source_id: SourceId,
+) -> Vec<InitializerReference> {
     let mut references = Vec::new();
     let mut index = 0;
 
@@ -130,6 +125,7 @@ fn collect_template_if_condition_references(tokens: &[Token]) -> Vec<Initializer
             let condition_end = find_template_if_condition_end(tokens, condition_start);
             references.extend(collect_symbol_references(
                 &tokens[condition_start..condition_end],
+                source_id,
             ));
             index = condition_end;
             continue;

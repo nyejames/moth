@@ -22,10 +22,10 @@ use crate::compiler_frontend::hir::hir_builder::lower_module;
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use std::cell::RefCell;
@@ -49,7 +49,7 @@ pub(crate) fn lower_hir(ast: Ast, string_table: &mut StringTable) -> HirModule {
 /// returned shared store keeps the deliberately unnormalized template's TIR identity valid.
 pub(crate) fn raw_template_expression_for_hir_invariant(
     kind: TemplateType,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> (Expression, Rc<RefCell<TemplateIrStore>>) {
     let store_handle = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -57,13 +57,13 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
     let template_id = {
         let mut store = store_handle.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = builder.push_sequence_node(vec![], location.clone());
+        let root = builder.push_sequence_node(vec![], span);
         builder.finish_template(
             root,
             Style::default(),
             kind.clone(),
             TemplateIrSummary::empty(),
-            location.clone(),
+            span,
         )
     };
     let template = Template {
@@ -72,8 +72,7 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
             phase: TemplateTirPhase::Parsed,
             context,
         },
-        location,
-        span: None,
+        span,
     };
 
     (Expression::template(template, value_mode), store_handle)
@@ -153,8 +152,7 @@ pub(crate) fn statement(id: u32, kind: HirStatementKind, line: i32) -> HirStatem
     HirStatement {
         id: HirNodeId(id),
         kind,
-        location: test_source_location(line),
-        span: None,
+        span: test_source_location(line),
     }
 }
 
@@ -164,7 +162,6 @@ pub(crate) fn local(local_id: u32, ty: TypeId, region: RegionId) -> HirLocal {
         ty,
         mutable: true,
         region,
-        source_info: Some(test_source_location(1)),
-        span: None,
+        span: test_source_location(1),
     }
 }

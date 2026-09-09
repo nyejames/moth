@@ -1,7 +1,5 @@
 use super::*;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation as MessageSourceLocation;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -74,7 +72,6 @@ fn plan_origin_for(
 ) {
     plan.plan_origin(
         resource_origin,
-        MessageSourceLocation::default(),
         None,
         context,
         string_table,
@@ -287,7 +284,7 @@ fn a_degenerate_origin_still_renders_the_bare_site_root() {
 fn hir_resource_id_renders_through_its_module_table() {
     let resource_origin = origin("docs", "assets/logo.svg");
     let mut resources = ModuleResourceTable::new();
-    let resource_id = resources.intern_origin(resource_origin.clone(), SourceLocation::default());
+    let resource_id = resources.intern_origin(resource_origin.clone(), None);
     let mut plan = HtmlResourceOutputPlan::new("renderer-tests");
     let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
     let mut string_table = StringTable::new();

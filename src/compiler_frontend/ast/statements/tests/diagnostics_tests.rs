@@ -1,9 +1,7 @@
-//! Statement-position diagnostic span tests.
+//! Statement-position diagnostics retain exact source-owned byte spans.
 //!
-//! WHAT: verifies statement dispatch diagnostics retain the authored token span alongside the
-//!       existing source location.
-//! WHY: the legacy line/column interval remains a migration bridge, while exact UTF-8 byte spans
-//!      must follow the token that owns each statement-position error.
+//! WHY: the plain diagnostic lane must preserve the token's authored span,
+//! including multibyte source, rather than reconstructing line/column data.
 
 use super::{UnexpectedScopeCloseContext, unexpected_scope_close, unexpected_statement_token};
 use crate::compiler_frontend::compiler_messages::{

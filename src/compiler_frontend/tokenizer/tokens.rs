@@ -6,16 +6,14 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-pub use crate::compiler_frontend::compiler_messages::source_location::{
-    CharPosition, SourceLocation,
-};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceId, SpanCapacityError,
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+
 use crate::token_log;
 use std::iter::Peekable;
 use std::ops::Deref;
@@ -101,33 +99,18 @@ impl TemplateBodyMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub location: SourceLocation,
     pub span: LocalSpan,
 }
 
 impl Token {
-    /// Construct a synthetic token that has no authored source text.
-    ///
-    /// WHY: the empty span at offset zero is the only span nameable without the source's builder,
-    /// so the location must carry no authored byte range for the two to agree. Authored tokens
-    /// come from [`TokenStream::new_token`], and a synthetic token standing in for an authored
-    /// position copies that position's span through [`Self::with_span`].
-    pub fn new(kind: TokenKind, location: SourceLocation) -> Self {
-        debug_assert_eq!(
-            (location.start_byte, location.end_byte),
-            (0, 0),
-            "a synthetic token's location must have no authored byte range"
-        );
-        Self::with_span(kind, location, LocalSpan::source_start())
+    /// Construct a token from its source-local exact span.
+    pub fn new(kind: TokenKind, span: LocalSpan) -> Self {
+        Self { kind, span }
     }
 
-    /// Construct a token from a span and the location derived from it.
-    pub fn with_span(kind: TokenKind, location: SourceLocation, span: LocalSpan) -> Self {
-        Self {
-            kind,
-            location,
-            span,
-        }
+    /// Construct a token from a source-local exact span.
+    pub fn with_span(kind: TokenKind, span: LocalSpan) -> Self {
+        Self { kind, span }
     }
 }
 
@@ -506,29 +489,17 @@ impl FileTokens {
         }
         self.tokens.get(self.index + 1).map(|token| &token.kind)
     }
-
-    pub fn current_location(&self) -> SourceLocation {
-        self.tokens[self.index].location.clone()
+    /// Return the exact global span of the current token.
+    pub fn current_span(&self) -> SourceSpan {
+        SourceSpan::new(self.file_id, self.tokens[self.index].span)
     }
 
-    /// Return the authored span for a one-character postfix operator at the cursor.
+    /// Return the exact global span of the current postfix operator token.
     ///
-    /// WHAT: converts the cursor-based token location used for standalone `!` and `?` tokens
-    ///       into the authored character span consumed by semantic suffix parsing.
-    /// WHY: suffix diagnostics must retain the operator the user wrote even after parsing has
-    ///       advanced to the following delimiter. This keeps source context in the resolved
-    ///       handling fact without rescanning source text.
-    ///
-    /// Only the character positions need rewinding. They are captured after the operator was
-    /// consumed and so collapse onto each other, whereas the byte range already denotes the
-    /// operator exactly.
-    pub fn current_postfix_operator_location(&self) -> SourceLocation {
-        let mut location = self.current_location();
-        if location.start_pos == location.end_pos {
-            location.start_pos.char_column = location.start_pos.char_column.saturating_sub(1);
-            location.end_pos.char_column = location.end_pos.char_column.saturating_sub(1);
-        }
-        location
+    /// Postfix operators are already represented by one-byte token spans. Unlike the removed
+    /// character-position location bridge, this operation does not rewind or infer columns.
+    pub fn current_postfix_operator_span(&self) -> SourceSpan {
+        self.current_span()
     }
 
     pub fn advance(&mut self) {
@@ -558,9 +529,7 @@ impl FileTokens {
         }
     }
 
-    /// Remap all interned string IDs in this token stream into a merged string table.
-    ///
-    /// WHAT: updates `src_path` and every token's kind and location after a string-table merge.
+    /// WHAT: updates `src_path` and every token's kind after a string-table merge.
     /// WHY: tokenization produces per-file local string IDs that must be rewritten before
     ///      module-wide stages consume the token stream.
     ///
@@ -600,81 +569,51 @@ impl FileTokens {
 
     /// Rebind this token stream to a new module source identity.
     ///
-    /// WHAT: replaces `src_path`, `file_id`, `canonical_os_path`, every top-level token
-    ///       location scope, and every path-syntax table row location scope with the
-    ///       supplied logical path and file identity.
-    /// WHY: Stage 0 tokenizes each `.moth` file once against a filesystem identity. After the
-    ///      `SourceDatabase` assigns the module logical path, deterministic `SourceId`, and
-    ///      canonical OS path. Retained tokens must adopt
-    ///      that identity so downstream header parsing, diagnostics, and dependency shells see
-    ///      the same logical source scope as freshly tokenized files.
-    ///
-    /// This method does not change path roots or source spans (`start_pos`/`end_pos`). Only
-    /// the source-scope identity is rebound, once through the owned path syntax table.
+    /// Source-local token spans remain unchanged. Only the owning `SourceId` and path-table rows
+    /// are restamped, so every global path span continues to name the same byte range.
     pub fn rebind_source_identity(
         &mut self,
         logical_path: InternedPath,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) -> Result<(), CompilerError> {
-        // Acquire the unique mutable owner before changing any identity field so an invalid
-        // lifecycle state cannot leave a partially rebound source stream behind.
         self.path_syntax.preparing_table_mut()?;
-        self.src_path = logical_path.clone();
-        self.rebind_file_identity(logical_path, file_id, canonical_os_path);
+        self.src_path = logical_path;
+        self.rebind_file_identity(self.src_path.clone(), file_id, canonical_os_path);
         self.path_syntax
             .preparing_table_mut()?
-            .rebind_source_identity(&self.src_path);
+            .rebind_source_identity(file_id);
         Ok(())
     }
 
     /// Rebind file-owned identity while preserving this stream's semantic path.
     ///
-    /// Header and detached syntax substreams use `src_path` for declaration paths such as
-    /// `module/function`, not only for the owning file. Synthetic discovery therefore needs to
-    /// update their locations and file identity without erasing that semantic suffix.
+    /// Token spans are source-local and therefore remain unchanged. The owner identity is stored
+    /// once on `FileTokens`; path rows are restamped by `rebind_source_identity` before publication.
     pub fn rebind_file_identity(
         &mut self,
-        logical_path: InternedPath,
+        _logical_path: InternedPath,
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) {
         self.file_id = file_id;
         self.canonical_os_path = canonical_os_path;
-
-        for token in &mut self.tokens {
-            token.location.scope = logical_path.clone();
-        }
-
-        // The prepared-file owner rebinds the shared path table once after all retained
-        // substreams have been assembled. Header streams only update their own token locations.
     }
 }
 
 pub struct TokenStream<'a> {
-    pub file_path: &'a InternedPath,
+    pub file_id: SourceId,
     pub chars: Peekable<Chars<'a>>,
-    pub position: CharPosition,
-    pub start_position: CharPosition,
     /// Byte offset of the next character to consume.
     pub byte_offset: u32,
     /// Byte offset where the current token's authored text begins.
     pub start_byte_offset: u32,
     /// Byte offset of the character most recently consumed.
     ///
-    /// WHY: the lexer reads a token's first character before deciding the token starts here, so
-    /// the start of that character is the only correct byte start. Character columns are
-    /// captured after consumption and keep their existing off-by-one convention until slice 1D
-    /// replaces them.
+    /// The lexer reads a token's first character before deciding the token starts here, so the
+    /// start of that character is the only correct byte start.
     pub last_char_start: u32,
     pub mode: TokenizeMode,
-    // WHAT: Stack of per-template parsing frames.
-    //
-    // WHY: `]` must restore the exact parent mode for nested templates opened by
-    // `[`, and template-body behaviour must stay local to the template that
-    // declared its head directives.
-    //
-    // A single global mode (for example, `TokenizeMode::Codeblock`) is not enough:
     // nested template heads can appear while parsing another template head/body,
     // and parent/child templates can have different style directives. We therefore
     // keep code-specific state on the current template frame and pop it naturally
@@ -730,7 +669,7 @@ impl TemplateModeFrame {
 impl<'a> TokenStream<'a> {
     pub fn new(
         source_code: &'a str,
-        file_path: &'a InternedPath,
+        file_id: SourceId,
         entry_mode: TokenizerEntryMode,
         extended_span_builder: &'a mut ExtendedSpanBuilder,
     ) -> Self {
@@ -743,10 +682,8 @@ impl<'a> TokenStream<'a> {
         };
 
         Self {
-            file_path,
+            file_id,
             chars: source_code.chars().peekable(),
-            position: CharPosition::default(),
-            start_position: Default::default(),
             byte_offset: 0,
             start_byte_offset: 0,
             last_char_start: 0,
@@ -757,33 +694,11 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    /// Consume the next character, advancing the byte cursor and the authored position.
-    ///
-    /// WHY this owns the line counter: a `\n`, a bare `\r` and a `\r\n` pair each end one
-    /// authored line, and the tokenizer reaches them from whitespace runs, comments, string and
-    /// template bodies, discarded bodies and character literals. Counting here means every one
-    /// of those paths agrees with the source line table by construction, instead of each caller
-    /// remembering to normalize. A pair is counted once, at its `\n`, which is why the `\r`
-    /// looks ahead after consuming itself.
+    /// Consume the next character and advance the exact UTF-8 byte cursor.
     pub fn next(&mut self) -> Option<char> {
         let consumed = self.chars.next()?;
         self.last_char_start = self.byte_offset;
         self.byte_offset += consumed.len_utf8() as u32;
-
-        match consumed {
-            '\n' => {
-                self.position.line_number += 1;
-                self.position.char_column = 0;
-            }
-            '\r' => {
-                self.position.char_column = 0;
-                if self.chars.peek() != Some(&'\n') {
-                    self.position.line_number += 1;
-                }
-            }
-            _ => self.position.char_column += 1,
-        }
-
         Some(consumed)
     }
 
@@ -799,67 +714,44 @@ impl<'a> TokenStream<'a> {
         self.next().expect(invariant_message)
     }
 
-    pub fn new_location(&mut self) -> SourceLocation {
-        let start_pos = self.start_position;
-        let start_byte = self.start_byte_offset;
-        self.start_position = self.position;
-        self.start_byte_offset = self.byte_offset;
-        SourceLocation::with_byte_range(
-            self.file_path.to_owned(),
-            start_pos,
-            self.position,
-            start_byte,
-            self.byte_offset,
-        )
+    /// Encode the current anchored token range as a source-local span.
+    pub fn current_local_span(&mut self) -> Result<LocalSpan, SpanCapacityError> {
+        self.local_span_for_bytes(self.start_byte_offset, self.byte_offset)
     }
-    /// Mint one authored token and encode its exact byte interval.
-    ///
-    /// The span is encoded first and then resolved to fill the legacy byte range. Diagnostic
-    /// locations continue to use [`Self::new_location`] and therefore never append a row.
-    pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
-        let start_pos = self.start_position;
-        let start_byte = self.start_byte_offset;
-        let length = self
-            .byte_offset
-            .checked_sub(start_byte)
+
+    /// Encode the current anchored token range as a source-qualified span.
+    pub fn current_source_span(&mut self) -> Result<SourceSpan, SpanCapacityError> {
+        Ok(SourceSpan::new(self.file_id, self.current_local_span()?))
+    }
+
+    /// Encode an exact source-qualified byte range.
+    pub fn source_span_for_bytes(
+        &mut self,
+        start: u32,
+        end: u32,
+    ) -> Result<SourceSpan, SpanCapacityError> {
+        Ok(SourceSpan::new(
+            self.file_id,
+            self.local_span_for_bytes(start, end)?,
+        ))
+    }
+
+    fn local_span_for_bytes(
+        &mut self,
+        start: u32,
+        end: u32,
+    ) -> Result<LocalSpan, SpanCapacityError> {
+        let length = end
+            .checked_sub(start)
             .expect("token byte cursor moved before its anchored start");
-        let span = LocalSpan::exact(start_byte, length, &mut *self.extended_span_builder)?;
-        let resolved = span.resolve_with(self.extended_span_builder.resolver());
+        LocalSpan::exact(start, length, &mut *self.extended_span_builder)
+    }
 
-        self.start_position = self.position;
+    /// Mint one authored token and encode its exact byte interval.
+    pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
+        let span = self.current_local_span()?;
         self.start_byte_offset = self.byte_offset;
-
-        let location = SourceLocation::with_byte_range(
-            self.file_path.to_owned(),
-            start_pos,
-            self.position,
-            resolved.start(),
-            resolved.end(),
-        );
-        Ok(Token::with_span(kind, location, span))
-    }
-
-    /// The known-source start anchor for diagnostics that cannot name their authored range.
-    ///
-    /// A capacity failure aborts tokenization before any authored interval survives, so the
-    /// error anchors at this stream's own file start (`0..0`) instead of a guessed range. The
-    /// exact interval is named in the message text.
-    pub fn file_start_anchor(&self) -> SourceLocation {
-        SourceLocation::new(
-            self.file_path.clone(),
-            CharPosition::default(),
-            CharPosition::default(),
-        )
-    }
-
-    /// Anchor the next token's character columns at the cursor.
-    ///
-    /// Columns are captured after the token's first character was consumed, so they name the
-    /// position one character past the authored start. That off-by-one is a property of
-    /// `CharPosition` itself and is removed with it; byte offsets are anchored separately and
-    /// are exact today.
-    pub fn update_start_position(&mut self) {
-        self.start_position = self.position;
+        Ok(Token::with_span(kind, span))
     }
 
     /// Anchor the token's byte range at the character already consumed.
@@ -1155,7 +1047,6 @@ pub enum TokenKind {
 impl Token {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     /// Remap every interned payload in place through one fallible string-ID walker.
@@ -1163,8 +1054,7 @@ impl Token {
         &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
     ) -> Result<(), E> {
-        self.kind.try_remap_string_ids(map)?;
-        self.location.try_remap_string_ids(map)
+        self.kind.try_remap_string_ids(map)
     }
 }
 

@@ -9,10 +9,10 @@ use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
-    DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason, InvalidConfigReason,
-    InvalidDeclarationReason, InvalidDependencyClauseReason, InvalidFunctionSignatureReason,
-    InvalidSignatureMemberReason, InvalidThisUsageReason, InvalidTypeAnnotationReason,
-    ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticToken, InvalidChoiceVariantReason,
+    InvalidConfigReason, InvalidDeclarationReason, InvalidDependencyClauseReason,
+    InvalidFunctionSignatureReason, InvalidSignatureMemberReason, InvalidThisUsageReason,
+    InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
@@ -43,9 +43,23 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind, TokenizerEntryMode,
+    FilePathSyntax, FileTokens, Token, TokenKind, TokenizerEntryMode,
 };
 use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
+
+fn source_span_for(source: &str, needle: &str, occurrence: usize) -> SourceSpan {
+    let (start, matched) = source
+        .match_indices(needle)
+        .nth(occurrence)
+        .unwrap_or_else(|| panic!("expected occurrence {occurrence} of {needle:?}"));
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(start as u32, matched.len() as u32, &mut span_builder)
+            .expect("test source span should fit"),
+    )
+}
+
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -118,7 +132,7 @@ fn prepare_test_source_file(
         context.source_id,
         span_builder,
     )
-    .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure, context.source_id))?;
+    .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure))?;
 
     prepare_file_from_tokens(
         file_tokens,
@@ -167,7 +181,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let prepared = prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax should aggregate");
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
@@ -233,7 +247,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let diagnostics = match prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     ) {
         Err(failure) => expect_aggregation_diagnostics(failure),
         Ok(_) => panic!("a nested config qualifier should fail aggregation"),
@@ -314,9 +328,7 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
     let failure = prepare_header_syntax(
         &mut outputs,
         &mut string_table,
-        &mut |source, diagnostic| {
-            diagnostic.capture_preparation_span(source, &mut builders[source.index() - 1])
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .err()
     .expect("nested qualifiers fail aggregation");
@@ -355,18 +367,24 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("expected source diagnostic");
     };
-    assert_eq!(error.diagnostic.labels.len(), 2);
-    for (label, expected) in error.diagnostic.labels.iter().zip(["value", ","]) {
-        let span = label
-            .span
-            .expect("per-file preparation captures related labels");
-        assert_eq!(span.source(), context.source_id);
-        let range = span.resolve_with(spans.resolver_for(span.source()));
-        assert_eq!(
-            &source[range.start() as usize..range.end() as usize],
-            expected
-        );
-    }
+    let primary_span = error
+        .diagnostic
+        .primary_span
+        .expect("per-file preparation captures the primary name span");
+    assert_eq!(primary_span.source(), context.source_id);
+    let primary_range = primary_span.resolve_with(spans.resolver_for(primary_span.source()));
+    assert_eq!(
+        &source[primary_range.start() as usize..primary_range.end() as usize],
+        "value"
+    );
+    assert_eq!(error.diagnostic.labels.len(), 1);
+    let comma_label = &error.diagnostic.labels[0];
+    let span = comma_label
+        .span
+        .expect("per-file preparation captures related labels");
+    assert_eq!(span.source(), context.source_id);
+    let range = span.resolve_with(spans.resolver_for(span.source()));
+    assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
 }
 
 #[test]
@@ -384,7 +402,7 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
         options: &options,
         style_directives: &styles,
     };
-    let failure = prepare_test_source_file(
+    let failure = match prepare_test_source_file(
         &source,
         path,
         &HeaderTestPrepareContext {
@@ -395,9 +413,10 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
         0,
         0,
         &mut spans,
-    )
-    .err()
-    .expect("legacy joined clause is diagnosed");
+    ) {
+        Ok(_) => panic!("legacy joined clause should be diagnosed"),
+        Err(failure) => failure,
+    };
     let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
         panic!("expected source diagnostic");
     };
@@ -410,7 +429,6 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
     assert_eq!(range.start() as usize, source.find("import").unwrap());
     assert_eq!(range.end() as usize, source.find('}').unwrap() + 1);
     assert!(range.end() - range.start() > 1022);
-    assert_eq!(error.diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -458,7 +476,22 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         }
     };
 
-    assert_eq!(error.file_id, source_id);
+    assert!(
+        error.warnings.is_empty(),
+        "empty export block should not emit preparation warnings"
+    );
+    let diagnostic_span = error
+        .diagnostic
+        .primary_span
+        .expect("empty export block should retain its source span");
+    assert_eq!(diagnostic_span.source(), source_id);
+    let diagnostic_range =
+        diagnostic_span.resolve_with(span_builder.resolver_for(diagnostic_span.source()));
+    assert_eq!(
+        source.get(diagnostic_range.start() as usize..diagnostic_range.end() as usize),
+        Some("export"),
+        "the empty export diagnostic should cover the authored export keyword"
+    );
     let retained_range = long_span.resolve_with(span_builder.resolver_for(source_id));
     assert_eq!(retained_range, expected_range);
     assert_eq!(
@@ -677,7 +710,7 @@ fn expect_aggregation_diagnostics(failure: HeaderPreparationFailure) -> Diagnost
 /// Test helper: run both header preparation and binding, returning the raw result.
 fn prepare_and_bind_headers_result(
     mut prepared_outputs: Vec<FileFrontendPrepareOutput>,
-    span_builders: &mut [ExtendedSpanBuilder],
+    _span_builders: &mut [ExtendedSpanBuilder],
     external_package_registry: &ExternalPackageRegistry,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     project_path_resolver: Option<&ProjectPathResolver>,
@@ -686,9 +719,7 @@ fn prepare_and_bind_headers_result(
     let prepared = prepare_header_syntax(
         &mut prepared_outputs,
         string_table,
-        &mut |source, diagnostic| {
-            diagnostic.capture_preparation_span(source, &mut span_builders[source.index()])
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .map_err(expect_aggregation_diagnostics)?;
     bind_module_headers(
@@ -700,6 +731,7 @@ fn prepare_and_bind_headers_result(
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         string_table,
     )
+    .map_err(expect_aggregation_diagnostics)
 }
 
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
@@ -806,7 +838,7 @@ fn parse_single_file_headers_with_entry(
             diagnostic, ..
         })) => {
             return Err(HeaderTestDiagnostics {
-                diagnostics: vec![*diagnostic],
+                diagnostics: vec![diagnostic],
                 string_table,
             });
         }
@@ -915,12 +947,11 @@ fn compile_time_constant_headers_are_parsed() {
 fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let (output, mut span_builder) =
-        prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    let (output, _) = prepare_single_file(source, &file_path, &file_path, &mut string_table);
     prepare_header_syntax(
         &mut [output],
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .map_err(expect_aggregation_diagnostics)
 }
@@ -1204,20 +1235,30 @@ fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error()
 #[test]
 fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
     let cases = [
-        ("import @core/math\n", "@core/math"),
-        ("import @core/math as maths\n", "@core/math as maths"),
-        ("import @core/math { sin, cos }\n", "@core/math sin, cos"),
+        ("import @core/math\n", "@core/math", "import @core/math"),
+        (
+            "import @core/math as maths\n",
+            "@core/math as maths",
+            "import @core/math as maths",
+        ),
+        (
+            "import @core/math { sin, cos }\n",
+            "@core/math sin, cos",
+            "import @core/math { sin, cos }",
+        ),
         (
             "import @core/math { sin as sine }\n",
             "@core/math sin as sine",
+            "import @core/math { sin as sine }",
         ),
         (
             "export:\n    import @core/math { sin }\n;\n",
             "@core/math sin",
+            "import @core/math { sin }",
         ),
     ];
 
-    for (source, expected_replacement) in cases {
+    for (source, expected_replacement, expected_clause) in cases {
         let result =
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors = expect_header_error(result, "legacy import syntax should be diagnosed");
@@ -1237,11 +1278,10 @@ fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
             errors.string_table.resolve(replacement),
             expected_replacement
         );
-        assert!(
-            diagnostic.primary_location.end_pos.char_column
-                > diagnostic.primary_location.start_pos.char_column
-                || diagnostic.primary_location.end_pos.line_number
-                    > diagnostic.primary_location.start_pos.line_number
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(source_span_for(source, expected_clause, 0)),
+            "legacy dependency diagnostic should cover the authored clause",
         );
     }
 }
@@ -1331,12 +1371,9 @@ fn legacy_multiline_import_clause_reports_migration_with_flat_replacement() {
 
 #[test]
 fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
+    let source = "import -- keep the old clause visible\n    @core/math { sin }\n";
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(
-            "import -- keep the old clause visible\n    @core/math { sin }\n",
-            "src/@page.moth",
-            "src/@page.moth",
-        ),
+        parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
         "a comment between import and the path must still be a legacy clause",
     );
     let DiagnosticPayload::LegacyDependencyClause {
@@ -1347,6 +1384,11 @@ fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
         panic!("expected a replacement after comment trivia");
     };
     assert_eq!(errors.string_table.resolve(replacement), "@core/math sin");
+    assert_eq!(
+        errors.diagnostics[0].primary_span,
+        Some(source_span_for(source, source.trim_end(), 0)),
+        "comment-separated legacy clause should cover the authored clause",
+    );
 }
 
 #[test]
@@ -1356,15 +1398,19 @@ fn legacy_dependency_span_covers_import_through_closing_brace() {
         parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
         "legacy import syntax should be diagnosed",
     );
-    let location = &errors.diagnostics[0].primary_location;
     let close_brace = source
         .find('}')
         .expect("the fixture must include a closing brace");
-    assert_eq!(location.start_pos.char_column, 1);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let expected_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(0, (close_brace + 1) as u32, &mut span_builder)
+            .expect("legacy clause span should fit"),
+    );
     assert_eq!(
-        location.end_pos.char_column as usize,
-        close_brace + 1,
-        "the primary span must end at the closing brace, got {location:?}"
+        errors.diagnostics[0].primary_span,
+        Some(expected_span),
+        "the primary span must end at the closing brace"
     );
 }
 
@@ -1638,16 +1684,6 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
         range.end() - range.start() > 1023,
         "the multibyte bound should exercise the extended span table"
     );
-    assert_eq!(
-        error.diagnostic.primary_location.start_byte,
-        range.start(),
-        "the exact span must preserve the legacy byte start"
-    );
-    assert_eq!(
-        error.diagnostic.primary_location.end_byte,
-        range.end(),
-        "the exact span must preserve the legacy byte end"
-    );
 }
 
 #[test]
@@ -1755,12 +1791,14 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
         let mut outputs = [output];
         let prepared =
             prepare_header_syntax(&mut outputs, string_table, &mut |source, diagnostic| {
-                diagnostic.capture_preparation_span(source, span_builder)
+                diagnostic.capture_preparation_span(source)
             })
             .expect("header syntax should aggregate");
 
         let resolver = span_builder.resolver_for(source_id);
-        let header_range = header_name_span.resolve_with(resolver);
+        let header_range = header_name_span
+            .expect("source config header must retain its declaration-name span")
+            .resolve_with(resolver);
         assert_eq!(
             source.get(header_range.start() as usize..header_range.end() as usize),
             Some("value"),
@@ -3052,11 +3090,8 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
     // `MissingTraitRequirementReturnType`, which never tells a bodyless requirement to add
     // the function-body `:` terminator. The diagnostic points at the first missing-type
     // boundary after the arrow, not at the requirement name or `This` receiver.
-    let result = parse_single_file_headers_with_entry(
-        "DISPLAYABLE must:\n    display |This| -> :\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "DISPLAYABLE must:\n    display |This| -> :\n;\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "a trait requirement arrow followed by ':' must fail"
@@ -3076,8 +3111,11 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
         })
         .expect("expected MissingTraitRequirementReturnType");
 
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 23);
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, ":", 1)),
+        "missing return type should point at the authored boundary after `->`",
+    );
 }
 
 #[test]
@@ -3085,23 +3123,31 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
     // A newline after `->` is also a missing-return-type boundary for a trait requirement.
     // The requirement-specific reason is used so the guidance never suggests the function
     // body `:` terminator.
-    let result = parse_single_file_headers_with_entry(
-        "DISPLAYABLE must:\n    display |This| ->\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "DISPLAYABLE must:\n    display |This| ->\n;\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "a trait requirement arrow followed by a newline must fail"
     );
     let errors = result.err().expect("expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
-        }
-    )));
+    let diagnostic = errors
+        .diagnostics
+        .iter()
+        .find(|diagnostic| {
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidFunctionSignature {
+                    reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
+                }
+            )
+        })
+        .expect("expected MissingTraitRequirementReturnType");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "\n", 1)),
+        "missing return type should point at the authored newline boundary",
+    );
 }
 
 #[test]
@@ -3139,18 +3185,18 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
-    let location = SourceLocation::default();
+    let span = LocalSpan::source_start();
 
     let mut token_stream = FileTokens::new(
         source_file,
         SourceId::COMPILATION_ROOT,
         vec![
-            Token::new(TokenKind::Symbol(status), location.clone()),
-            Token::new(TokenKind::DoubleColon, location.clone()),
-            Token::new(TokenKind::Symbol(ready), location.clone()),
-            Token::new(TokenKind::FatArrow, location.clone()),
-            Token::new(TokenKind::Symbol(write), location.clone()),
-            Token::new(TokenKind::Eof, location),
+            Token::new(TokenKind::Symbol(status), span),
+            Token::new(TokenKind::DoubleColon, span),
+            Token::new(TokenKind::Symbol(ready), span),
+            Token::new(TokenKind::FatArrow, span),
+            Token::new(TokenKind::Symbol(write), span),
+            Token::new(TokenKind::Eof, span),
         ],
     );
     token_stream.index = 1;
@@ -3765,7 +3811,7 @@ fn parse_multi_file_headers_with_result(
                 ..
             })) => {
                 warnings.extend(file_warnings);
-                diagnostic_bag.push(*diagnostic);
+                diagnostic_bag.push(diagnostic);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 panic!("multi-file header test hit infrastructure failure: {error:?}")
@@ -3979,7 +4025,7 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let (helper_output, mut helper_spans) = prepare_single_file(
+    let (helper_output, _) = prepare_single_file(
         "@core/math\n",
         &file_path,
         &entry_file_path,
@@ -4010,14 +4056,7 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let module_symbols = build_module_symbols(
         &mut prepared_files,
         &mut string_table,
-        &mut |source, diagnostic| {
-            let builder = if source.index() == 0 {
-                &mut helper_spans
-            } else {
-                &mut page_spans
-            };
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("module symbols should build");
 
@@ -4253,8 +4292,8 @@ fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape
         "one/a"
     );
     assert_ne!(
-        direct_selection.dependency.location, bare.dependency.location,
-        "each authored occurrence keeps its own source location"
+        direct_selection.dependency.span, bare.dependency.span,
+        "each authored occurrence keeps its own source span"
     );
 }
 
@@ -4436,10 +4475,8 @@ fn export_alone_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -4479,10 +4516,8 @@ fn legacy_inline_export_declaration_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -4572,10 +4607,8 @@ fn legacy_export_path_syntax_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -4592,10 +4625,8 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -4980,22 +5011,22 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
     // any expression token begins, so the shared member-default owner reports
     // `MissingDefaultValue` (MOTH-RULE-0028) pointing at that boundary, not a generic
     // unexpected-token or end-of-file failure.
-    let cases: &[(&str, i32, i32)] = &[
+    let cases: &[(&str, Option<(&str, usize)>)] = &[
         // function parameter ending at the closing pipe
-        ("label |prefix String =| -> String:\n;\n", 0, 23),
+        ("label |prefix String =| -> String:\n;\n", Some(("|", 1))),
         // struct field ending at a comma
-        ("Options = |\n    width Int =,\n|\n", 1, 16),
+        ("Options = |\n    width Int =,\n|\n", Some((",", 0))),
         // struct field ending at the closing pipe
-        ("Options = |\n    width Int =|\n", 1, 16),
+        ("Options = |\n    width Int =|\n", Some(("|", 1))),
         // newline immediately after the authored `=`
-        ("label |prefix String =\n| -> String:\n;\n", 0, 22),
+        ("label |prefix String =\n| -> String:\n;\n", Some(("\n", 0))),
         // block end (`;`) immediately after the authored `=`
-        ("label |prefix String =;\n", 0, 23),
+        ("label |prefix String =;\n", Some((";", 0))),
         // end of file immediately after the authored `=`
-        ("label |prefix String =", 0, 22),
+        ("label |prefix String =", None),
     ];
 
-    for (source, expected_line, expected_column) in cases {
+    for (source, boundary) in cases {
         let result =
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors =
@@ -5017,13 +5048,17 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
             "MOTH-RULE-0028",
             "MissingDefaultValue must keep the stable signature-member code"
         );
-        assert_eq!(
-            diagnostic.primary_location.start_pos.line_number, *expected_line,
-            "MissingDefaultValue should point at the boundary line for: {source}"
+        let expected_span = boundary.map_or_else(
+            || {
+                // The final empty match is the exact zero-width span at EOF.
+                source_span_for(source, "", source.len())
+            },
+            |(needle, occurrence)| source_span_for(source, needle, occurrence),
         );
         assert_eq!(
-            diagnostic.primary_location.start_pos.char_column, *expected_column,
-            "MissingDefaultValue should point at the boundary column for: {source}"
+            diagnostic.primary_span,
+            Some(expected_span),
+            "MissingDefaultValue should point at the authored boundary for: {source}",
         );
     }
 }
@@ -5201,13 +5236,13 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
             .any(|header| matches!(header.kind, HeaderKind::Function { .. })),
         "provider-independent preparation should retain the prelude-named declaration shell"
     );
-    let expected_location = output
+    let expected_span = output
         .headers
         .iter()
         .find(|header| matches!(header.kind, HeaderKind::Function { .. }))
         .expect("expected retained prelude-named function shell")
-        .name_location
-        .to_owned();
+        .name_span
+        .expect("retained declaration should keep its authored name span");
 
     let registry = registry_with_prelude_function_symbol("prelude_fn");
     let result = prepare_and_bind_headers_result(
@@ -5233,7 +5268,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
         })
         .expect("binding should preserve the reserved builtin-name diagnostic");
     assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0027");
-    assert_eq!(diagnostic.primary_location, expected_location);
+    assert_eq!(diagnostic.primary_span, Some(expected_span));
 }
 
 #[test]
@@ -5436,11 +5471,8 @@ fn one_dependency_shell_and_selection_list_per_authored_clause() {
 
 #[test]
 fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/math sin\nsin #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/math sin\nsin #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected name must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -5453,27 +5485,22 @@ fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let first_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the selected name to be the first location")
-        .location;
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 12);
-    assert_eq!(first_location.end_pos.char_column, 14);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 3);
+        .and_then(|label| label.span)
+        .expect("expected the selected name's previous span");
+    assert_eq!(previous_span, source_span_for(source, "sin", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "sin", 1))
+    );
 }
-
 #[test]
 fn selected_alias_duplicate_declaration_uses_the_alias_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/math sin as local\nlocal #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/math sin as local\nlocal #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected alias must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -5486,27 +5513,23 @@ fn selected_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let first_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the selected alias to be the first location")
-        .location;
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 19);
-    assert_eq!(first_location.end_pos.char_column, 23);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 5);
+        .and_then(|label| label.span)
+        .expect("expected the selected alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "local", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "local", 1))
+    );
 }
 
 #[test]
 fn declaration_followed_by_selection_preserves_declaration_and_selection_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "line #= 1\n@core/io line\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "line #= 1\n@core/io line\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selection must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -5524,27 +5547,23 @@ fn declaration_followed_by_selection_preserves_declaration_and_selection_spans()
             )
         });
 
-    let previous_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the declaration to be the previous location")
-        .location;
-    assert_eq!(previous_location.start_pos.line_number, 0);
-    assert_eq!(previous_location.start_pos.char_column, 1);
-    assert_eq!(previous_location.end_pos.char_column, 4);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 10);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 13);
+        .and_then(|label| label.span)
+        .expect("expected the declaration's previous span");
+    assert_eq!(previous_span, source_span_for(source, "line", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "line", 1))
+    );
 }
 
 #[test]
 fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io line as value\n@core/io debug as value\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io line as value\n@core/io debug as value\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "duplicate selected aliases must conflict");
     let diagnostic = errors
         .diagnostics
@@ -5562,18 +5581,17 @@ fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
             )
         });
 
-    let previous_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the first selected alias to be the previous location")
-        .location;
-    assert_eq!(previous_location.start_pos.line_number, 0);
-    assert_eq!(previous_location.start_pos.char_column, 18);
-    assert_eq!(previous_location.end_pos.char_column, 22);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 19);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 23);
+        .and_then(|label| label.span)
+        .expect("expected the first selected alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "value", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "value", 1))
+    );
 }
 
 #[test]
@@ -5605,12 +5623,11 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
 
 fn malformed_direct_selection_clause(range: DependencySelectionRange) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
-        span: LocalSpan::source_start(),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path: InternedPath::new(),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        location: SourceLocation::default(),
-        dependency_shell_id: DependencyShellId::new(SourceId::from_index(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 0),
     };
     RetainedDependencyClause {
         dependency: provider,
@@ -5622,11 +5639,8 @@ fn malformed_direct_selection_clause(range: DependencySelectionRange) -> Retaine
 
 #[test]
 fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io as io\nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io as io\nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a namespace alias must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -5639,27 +5653,23 @@ fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let first_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the namespace alias to be the first location")
-        .location;
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 13);
-    assert_eq!(first_location.end_pos.char_column, 14);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 2);
+        .and_then(|label| label.span)
+        .expect("expected the namespace alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "io", 1));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "io", 2))
+    );
 }
 
 #[test]
 fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io\nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io\nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "an inferred namespace name must conflict with a declaration",
@@ -5675,27 +5685,23 @@ fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let first_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the provider path to be the first location")
-        .location;
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 1);
-    assert_eq!(first_location.end_pos.char_column, 8);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 2);
+        .and_then(|label| label.span)
+        .expect("expected the provider path's previous span");
+    assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "io", 1))
+    );
 }
 
 #[test]
 fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io   \nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io   \nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "trailing whitespace must not enter the inferred namespace path span",
@@ -5711,15 +5717,13 @@ fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let first_location = &diagnostic
+    let previous_span = diagnostic
         .labels
         .iter()
         .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
-        .expect("expected the inferred namespace path to be the first location")
-        .location;
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 1);
-    assert_eq!(first_location.end_pos.char_column, 8);
+        .and_then(|label| label.span)
+        .expect("expected the inferred namespace path's previous span");
+    assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
 }
 
 #[test]
@@ -5816,8 +5820,8 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .rebind_source_identity(final_id, final_path, canonical)
         .expect("retained source should rebind");
     assert_eq!(
-        prepared.file_dependency_clauses[0].dependency.span,
-        original_span
+        prepared.file_dependency_clauses[0].dependency.span.local(),
+        original_span.local()
     );
     assert_eq!(
         prepared.file_dependency_clauses[0]
@@ -5834,11 +5838,13 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         .expect("retain source snapshot");
     database.retain_span_builder(final_id, spans);
     let database = database.finish().expect("install original span table");
-    let resolve = |span| {
-        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
         &source[range.start() as usize..range.end() as usize]
     };
-    assert_eq!(resolve(original_span), path_text);
+    let rebound_dependency_span = prepared.file_dependency_clauses[0].dependency.span;
+    assert_eq!(rebound_dependency_span.source(), final_id);
+    assert_eq!(resolve(rebound_dependency_span), path_text);
     let selections = &prepared.dependency_selections;
     assert_eq!(resolve(selections[0].source_span), "render");
     assert_eq!(
@@ -5927,8 +5933,13 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .iter()
         .find_map(|header| match &header.kind {
             HeaderKind::Function { signature, .. } => Some((
-                signature.parameters[0].span,
-                signature.returns[0].value.span,
+                signature.parameters[0]
+                    .span
+                    .expect("authored parameter should retain its span"),
+                signature.returns[0]
+                    .value
+                    .span
+                    .expect("authored return should retain its span"),
             )),
             _ => None,
         })
@@ -5937,7 +5948,11 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .headers
         .iter()
         .find_map(|header| match &header.kind {
-            HeaderKind::Choice { variants, .. } => Some(variants[0].span),
+            HeaderKind::Choice { variants, .. } => Some(
+                variants[0]
+                    .span
+                    .expect("authored choice variant should retain its span"),
+            ),
             _ => None,
         })
         .expect("choice shell");
@@ -5974,8 +5989,8 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
     let database = database.finish().expect("install original span table");
-    let resolve = |span| {
-        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
         &source[range.start() as usize..range.end() as usize]
     };
     let signature = prepared
@@ -5986,9 +6001,25 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
             _ => None,
         })
         .expect("function shell");
-    assert_eq!(signature.parameters[0].span, original_member_span);
-    assert_eq!(signature.returns[0].value.span, original_return_span);
-    assert_eq!(resolve(signature.parameters[0].span), member_name);
+    let rebound_member_span = signature.parameters[0]
+        .span
+        .expect("authored parameter should retain its span");
+    let rebound_return_span = signature.returns[0]
+        .value
+        .span
+        .expect("authored return should retain its span");
+    assert_eq!(rebound_member_span.local(), original_member_span.local());
+    assert_eq!(rebound_member_span.source(), final_id);
+    assert_eq!(rebound_return_span.local(), original_return_span.local());
+    assert_eq!(rebound_return_span.source(), final_id);
+    assert_eq!(
+        resolve(
+            signature.parameters[0]
+                .span
+                .expect("authored parameter should retain its span")
+        ),
+        member_name
+    );
     assert_eq!(
         signature.parameters[0]
             .id
@@ -5996,7 +6027,15 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
             .map(|name| merged.resolve(name)),
         Some(member_name.as_str())
     );
-    assert_eq!(resolve(signature.returns[0].value.span), return_name);
+    assert_eq!(
+        resolve(
+            signature.returns[0]
+                .value
+                .span
+                .expect("authored return should retain its span")
+        ),
+        return_name
+    );
     let variants = prepared
         .headers
         .iter()
@@ -6005,13 +6044,31 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
             _ => None,
         })
         .expect("choice shell");
-    assert_eq!(variants[0].span, original_variant_span);
-    assert_eq!(resolve(variants[0].span), variant_name);
+    let rebound_variant_span = variants[0]
+        .span
+        .expect("authored choice variant should retain its span");
+    assert_eq!(rebound_variant_span.local(), original_variant_span.local());
+    assert_eq!(rebound_variant_span.source(), final_id);
+    assert_eq!(
+        resolve(
+            variants[0]
+                .span
+                .expect("authored choice variant should retain its span")
+        ),
+        variant_name
+    );
     assert_eq!(merged.resolve(variants[0].id), variant_name);
     let ChoiceVariantPayloadSyntax::Record { fields } = &variants[0].payload else {
         panic!("record payload");
     };
-    assert_eq!(resolve(fields[0].span), "field");
+    assert_eq!(
+        resolve(
+            fields[0]
+                .span
+                .expect("authored variant field should retain its span")
+        ),
+        "field"
+    );
     let fields = prepared
         .headers
         .iter()
@@ -6020,7 +6077,14 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
             _ => None,
         })
         .expect("struct shell");
-    assert_eq!(resolve(fields[0].span), "member");
+    assert_eq!(
+        resolve(
+            fields[0]
+                .span
+                .expect("authored struct field should retain its span")
+        ),
+        "member"
+    );
 }
 
 #[test]
@@ -6078,17 +6142,9 @@ Generic of A must {trait_name}\n"
             match &header.kind {
                 HeaderKind::Trait { declaration } => {
                     header_counts[0] += 1;
-                    anchors.push((
-                        declaration.span,
-                        declaration.name_location.clone(),
-                        table.resolve(declaration.name).to_owned(),
-                    ));
+                    anchors.push((declaration.span, table.resolve(declaration.name).to_owned()));
                     let requirement = declaration.requirements.first().expect("trait requirement");
-                    anchors.push((
-                        requirement.span,
-                        requirement.name_location.clone(),
-                        table.resolve(requirement.name).to_owned(),
-                    ));
+                    anchors.push((requirement.span, table.resolve(requirement.name).to_owned()));
                 }
                 HeaderKind::TraitConformance { conformance } => {
                     match conformance.target.kind {
@@ -6102,15 +6158,10 @@ Generic of A must {trait_name}\n"
                     generated_header_names.push(header.tokens.src_path.to_portable_string(table));
                     anchors.push((
                         conformance.target.span,
-                        conformance.target.location.clone(),
                         table.resolve(conformance.target.name).to_owned(),
                     ));
                     for trait_ref in &conformance.traits {
-                        anchors.push((
-                            trait_ref.span,
-                            trait_ref.location.clone(),
-                            table.resolve(trait_ref.name).to_owned(),
-                        ));
+                        anchors.push((trait_ref.span, table.resolve(trait_ref.name).to_owned()));
                     }
                 }
                 HeaderKind::TraitIncompatibility { incompatibility } => {
@@ -6118,15 +6169,10 @@ Generic of A must {trait_name}\n"
                     generated_header_names.push(header.tokens.src_path.to_portable_string(table));
                     anchors.push((
                         incompatibility.subject.span,
-                        incompatibility.subject.location.clone(),
                         table.resolve(incompatibility.subject.name).to_owned(),
                     ));
                     for trait_ref in &incompatibility.incompatible_traits {
-                        anchors.push((
-                            trait_ref.span,
-                            trait_ref.location.clone(),
-                            table.resolve(trait_ref.name).to_owned(),
-                        ));
+                        anchors.push((trait_ref.span, table.resolve(trait_ref.name).to_owned()));
                     }
                 }
                 _ => {}
@@ -6180,8 +6226,8 @@ Generic of A must {trait_name}\n"
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
     let database = database.finish().expect("install original span table");
-    let resolve = |span| {
-        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
         &source[range.start() as usize..range.end() as usize]
     };
 
@@ -6190,61 +6236,49 @@ Generic of A must {trait_name}\n"
     assert_eq!(rebound_header_counts, original_header_counts);
     assert_eq!(rebound_header_names, original_header_names);
     assert_eq!(rebound_anchors.len(), original_anchors.len());
-    for (
-        (original_span, original_location, expected_text),
-        (rebound_span, rebound_location, rebound_text),
-    ) in original_anchors.iter().zip(rebound_anchors.iter())
+    for ((original_span, expected_text), (rebound_span, rebound_text)) in
+        original_anchors.iter().zip(rebound_anchors.iter())
     {
-        assert_eq!(rebound_span, original_span, "span encoding changed");
+        assert_eq!(
+            rebound_span.local(),
+            original_span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(
+            rebound_span.source(),
+            final_id,
+            "rebound span should carry the final source identity"
+        );
         assert_eq!(
             rebound_text, expected_text,
             "string remap changed anchor name"
         );
-        let resolved_range = SourceSpan::new(prepared.file_id, *rebound_span).byte_range(&database);
-        assert_eq!(
-            resolved_range.start(),
-            original_location.start_byte,
-            "resolved span start changed"
-        );
-        assert_eq!(
-            resolved_range.end(),
-            original_location.end_byte,
-            "resolved span end changed"
-        );
-        assert_eq!(
-            rebound_location.start_byte, original_location.start_byte,
-            "legacy anchor start changed"
-        );
-        assert_eq!(
-            rebound_location.end_byte, original_location.end_byte,
-            "legacy anchor end changed"
-        );
+        let resolved_range = rebound_span.byte_range(&database);
         assert_eq!(
             resolve(*rebound_span),
             expected_text,
             "span no longer resolves to the exact authored UTF-8 bytes"
+        );
+        assert!(
+            resolved_range.end() >= resolved_range.start(),
+            "authored span must resolve to a valid source range"
         );
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct ParsedTypeAnchorSnapshot {
-    span: LocalSpan,
-    legacy_start: u32,
-    legacy_end: u32,
+    span: SourceSpan,
     expected_text: String,
 }
 
 fn push_parsed_type_anchor(
-    span: LocalSpan,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     expected_text: String,
     snapshots: &mut Vec<ParsedTypeAnchorSnapshot>,
 ) {
     snapshots.push(ParsedTypeAnchorSnapshot {
-        span,
-        legacy_start: location.start_byte,
-        legacy_end: location.end_byte,
+        span: span.expect("authored parsed type anchor should retain its span"),
         expected_text,
     });
 }
@@ -6256,97 +6290,67 @@ fn collect_parsed_type_anchor_snapshots(
 ) {
     match parsed_type {
         ParsedTypeRef::Inferred => {}
-        ParsedTypeRef::Named {
-            name,
-            location,
-            span,
-        } => push_parsed_type_anchor(
-            *span,
-            location,
-            string_table.resolve(*name).to_owned(),
-            snapshots,
-        ),
-        ParsedTypeRef::Qualified {
-            path,
-            location,
-            span,
-        } => push_parsed_type_anchor(
-            *span,
-            location,
-            string_table.resolve(path[0]).to_owned(),
-            snapshots,
-        ),
+        ParsedTypeRef::Named { name, span } => {
+            push_parsed_type_anchor(*span, string_table.resolve(*name).to_owned(), snapshots)
+        }
+        ParsedTypeRef::Qualified { path, span } => {
+            push_parsed_type_anchor(*span, string_table.resolve(path[0]).to_owned(), snapshots)
+        }
         ParsedTypeRef::Applied {
             base,
             arguments,
-            location,
             span,
         } => {
-            push_parsed_type_anchor(*span, location, "of".to_owned(), snapshots);
+            push_parsed_type_anchor(*span, "of".to_owned(), snapshots);
             collect_parsed_type_anchor_snapshots(base, string_table, snapshots);
             for argument in arguments {
                 collect_parsed_type_anchor_snapshots(argument, string_table, snapshots);
             }
         }
-        ParsedTypeRef::BuiltinBool { location, span }
-        | ParsedTypeRef::BuiltinInt { location, span }
-        | ParsedTypeRef::BuiltinFloat { location, span }
-        | ParsedTypeRef::BuiltinString { location, span }
-        | ParsedTypeRef::BuiltinChar { location, span } => {
+        ParsedTypeRef::BuiltinBool { span }
+        | ParsedTypeRef::BuiltinInt { span }
+        | ParsedTypeRef::BuiltinFloat { span }
+        | ParsedTypeRef::BuiltinString { span }
+        | ParsedTypeRef::BuiltinChar { span } => {
             let expected_text = match parsed_type {
                 ParsedTypeRef::BuiltinBool { .. } => "Bool",
                 ParsedTypeRef::BuiltinInt { .. } => "Int",
                 ParsedTypeRef::BuiltinFloat { .. } => "Float",
                 ParsedTypeRef::BuiltinString { .. } => "String",
                 ParsedTypeRef::BuiltinChar { .. } => "Char",
-                _ => unreachable!("matched builtin or This type"),
+                _ => unreachable!("matched builtin type"),
             };
-            push_parsed_type_anchor(*span, location, expected_text.to_owned(), snapshots);
+            push_parsed_type_anchor(*span, expected_text.to_owned(), snapshots);
         }
         ParsedTypeRef::Collection {
             element,
-            location,
             span,
             fixed_capacity,
         } => {
-            push_parsed_type_anchor(*span, location, "{".to_owned(), snapshots);
+            push_parsed_type_anchor(*span, "{".to_owned(), snapshots);
             collect_parsed_type_anchor_snapshots(element, string_table, snapshots);
             if let Some(capacity) = fixed_capacity {
                 match capacity {
-                    ParsedCollectionCapacity::Literal {
-                        value,
-                        location,
-                        span,
-                    } => push_parsed_type_anchor(*span, location, value.to_string(), snapshots),
-                    ParsedCollectionCapacity::BareConstant {
-                        name,
-                        location,
-                        span,
-                    } => push_parsed_type_anchor(
-                        *span,
-                        location,
-                        string_table.resolve(*name).to_owned(),
-                        snapshots,
-                    ),
+                    ParsedCollectionCapacity::Literal { value, span } => {
+                        push_parsed_type_anchor(*span, value.to_string(), snapshots)
+                    }
+                    ParsedCollectionCapacity::BareConstant { name, span } => {
+                        push_parsed_type_anchor(
+                            *span,
+                            string_table.resolve(*name).to_owned(),
+                            snapshots,
+                        )
+                    }
                 }
             }
         }
-        ParsedTypeRef::Map {
-            key,
-            value,
-            location,
-            span,
-        } => {
-            push_parsed_type_anchor(*span, location, "{".to_owned(), snapshots);
+        ParsedTypeRef::Map { key, value, span } => {
+            push_parsed_type_anchor(*span, "{".to_owned(), snapshots);
             collect_parsed_type_anchor_snapshots(key, string_table, snapshots);
             collect_parsed_type_anchor_snapshots(value, string_table, snapshots);
         }
-        ParsedTypeRef::Optional {
-            inner,
-            location,
-            span,
-        } => {
-            push_parsed_type_anchor(*span, location, "?".to_owned(), snapshots);
+        ParsedTypeRef::Optional { inner, span } => {
+            push_parsed_type_anchor(*span, "?".to_owned(), snapshots);
             collect_parsed_type_anchor_snapshots(inner, string_table, snapshots);
         }
         ParsedTypeRef::This { .. } => {}
@@ -6546,13 +6550,18 @@ INFERRED #= 1\n"
     assert_eq!(rebound_inferred_count, inferred_count);
     assert_eq!(rebound_anchors.len(), original_anchors.len());
     for (original, rebound) in original_anchors.iter().zip(rebound_anchors.iter()) {
-        assert_eq!(rebound.span, original.span, "span encoding changed");
+        assert_eq!(
+            rebound.span.local(),
+            original.span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(
+            rebound.span.source(),
+            final_id,
+            "rebound span should carry the final source identity"
+        );
         assert_eq!(rebound.expected_text, original.expected_text);
-        assert_eq!(rebound.legacy_start, original.legacy_start);
-        assert_eq!(rebound.legacy_end, original.legacy_end);
-        let resolved_range = SourceSpan::new(prepared.file_id, rebound.span).byte_range(&database);
-        assert_eq!(resolved_range.start(), original.legacy_start);
-        assert_eq!(resolved_range.end(), original.legacy_end);
+        let resolved_range = rebound.span.byte_range(&database);
         assert_eq!(
             source.get(resolved_range.start() as usize..resolved_range.end() as usize),
             Some(original.expected_text.as_str()),
@@ -6560,7 +6569,6 @@ INFERRED #= 1\n"
         );
     }
 }
-
 #[test]
 fn generic_parameter_and_bound_spans_retain_exact_ranges_after_remapping_and_rebinding() {
     let parameter_name = format!("Element{}", "E".repeat(1100));
@@ -6651,16 +6659,16 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
             owner_counts[owner_index] += 1;
             for parameter in &generic_parameters.parameters {
                 anchors.push((
-                    parameter.span,
-                    parameter.location.start_byte,
-                    parameter.location.end_byte,
+                    parameter
+                        .span
+                        .expect("authored generic parameter should retain its span"),
                     table.resolve(parameter.name).to_owned(),
                 ));
                 for trait_bound in &parameter.trait_bounds {
                     anchors.push((
-                        trait_bound.span,
-                        trait_bound.location.start_byte,
-                        trait_bound.location.end_byte,
+                        trait_bound
+                            .span
+                            .expect("authored generic trait bound should retain its span"),
                         table.resolve(trait_bound.trait_name).to_owned(),
                     ));
                 }
@@ -6683,7 +6691,7 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
     assert_eq!(
         original_anchors
             .iter()
-            .map(|anchor| anchor.3.clone())
+            .map(|anchor| anchor.1.clone())
             .collect::<Vec<_>>(),
         vec![
             parameter_name.clone(),
@@ -6698,12 +6706,10 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         ]
     );
     let original_resolver = spans.resolver();
-    for (span, start_byte, end_byte, expected_text) in &original_anchors {
-        let resolved_range = span.resolve_with(original_resolver);
-        assert_eq!(resolved_range.start(), *start_byte);
-        assert_eq!(resolved_range.end(), *end_byte);
+    for (span, expected_text) in &original_anchors {
+        let resolved_range = span.local().resolve_with(original_resolver);
         assert_eq!(
-            source.get(*start_byte as usize..*end_byte as usize),
+            source.get(resolved_range.start() as usize..resolved_range.end() as usize),
             Some(expected_text.as_str()),
             "the original span must cover the exact authored UTF-8 bytes"
         );
@@ -6740,8 +6746,8 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
     let database = database.finish().expect("install original span table");
-    let resolve = |span| {
-        let range = SourceSpan::new(prepared.file_id, span).byte_range(&database);
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
         source
             .get(range.start() as usize..range.end() as usize)
             .expect("retained source range")
@@ -6750,21 +6756,24 @@ State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
     let (rebound_owner_counts, rebound_anchors) = snapshot_anchors(&prepared, &merged);
     assert_eq!(rebound_owner_counts, original_owner_counts);
     assert_eq!(rebound_anchors.len(), original_anchors.len());
-    for (
-        (original_span, original_start, original_end, original_text),
-        (rebound_span, rebound_start, rebound_end, rebound_text),
-    ) in original_anchors.iter().zip(rebound_anchors.iter())
+    for ((original_span, original_text), (rebound_span, rebound_text)) in
+        original_anchors.iter().zip(rebound_anchors.iter())
     {
-        assert_eq!(rebound_span, original_span, "span encoding changed");
-        assert_eq!(rebound_start, original_start, "legacy anchor start changed");
-        assert_eq!(rebound_end, original_end, "legacy anchor end changed");
+        assert_eq!(
+            rebound_span.local(),
+            original_span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(rebound_span.source(), final_id);
         assert_eq!(
             rebound_text, original_text,
             "string remap changed anchor name"
         );
-        let resolved_range = SourceSpan::new(prepared.file_id, *rebound_span).byte_range(&database);
-        assert_eq!(resolved_range.start(), *original_start);
-        assert_eq!(resolved_range.end(), *original_end);
+        let resolved_range = rebound_span.byte_range(&database);
         assert_eq!(resolve(*rebound_span), original_text);
+        assert!(
+            resolved_range.end() >= resolved_range.start(),
+            "authored span must resolve to a valid source range"
+        );
     }
 }

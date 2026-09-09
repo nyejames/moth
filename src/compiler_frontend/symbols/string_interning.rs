@@ -48,6 +48,7 @@ pub(crate) trait StringTableResolver {
     fn resolve(&self, id: StringId) -> &str;
 
     /// Resolve an interned string ID when it belongs to this identity table.
+    #[allow(dead_code)] // Retained for deferred checked lookups across identity tables.
     fn try_resolve(&self, id: StringId) -> Option<&str>;
 }
 

@@ -16,15 +16,15 @@ use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordSta
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 impl Expression {
     pub fn runtime(
         rpn: ExpressionRpn,
         data_type: DataType,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         // Detects whether any nested node performs regular division so the
@@ -34,8 +34,7 @@ impl Expression {
 
         Self::new(
             ExpressionKind::Runtime(rpn),
-            location,
-            None,
+            span,
             type_id,
             data_type,
             value_mode,
@@ -43,11 +42,10 @@ impl Expression {
         .with_regular_division_provenance(contains_regular_division)
     }
 
-    pub fn structural_string(pieces: Vec<ConstStringPiece>, location: SourceLocation) -> Self {
+    pub fn structural_string(pieces: Vec<ConstStringPiece>, span: Option<SourceSpan>) -> Self {
         Self::new(
             ExpressionKind::StructuralString { pieces },
-            location,
-            None,
+            span,
             builtin_type_ids::STRING,
             DataType::StringSlice,
             ValueMode::ImmutableOwned,
@@ -57,7 +55,7 @@ impl Expression {
     pub fn reference(
         id: InternedPath,
         data_type: DataType,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         let type_id = test_builtin_type_id_for_data_type(&data_type);
@@ -65,8 +63,7 @@ impl Expression {
             id,
             data_type,
             type_id,
-            location,
-            None,
+            span,
             value_mode,
             ConstRecordState::RuntimeValue,
         )
@@ -76,13 +73,13 @@ impl Expression {
         name: InternedPath,
         args: Vec<Expression>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self::function_call_with_arguments(
             name,
             shared_positional_call_arguments(args),
             result_type_ids,
-            location,
+            span,
         )
     }
 
@@ -90,7 +87,7 @@ impl Expression {
         name: InternedPath,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         call_expression(
             ExpressionKind::FunctionCall {
@@ -99,7 +96,7 @@ impl Expression {
                 result_type_ids: result_type_ids.clone(),
             },
             result_type_ids,
-            location,
+            span,
         )
     }
 
@@ -108,7 +105,7 @@ impl Expression {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         call_expression(
             ExpressionKind::HandledFallibleFunctionCall {
@@ -116,10 +113,10 @@ impl Expression {
                 args,
                 result_type_ids: result_type_ids.clone(),
                 handling,
-                propagation_location: None,
+                propagation_span: None,
             },
             result_type_ids,
-            location,
+            span,
         )
     }
 
@@ -127,13 +124,13 @@ impl Expression {
         id: ExternalFunctionId,
         args: Vec<Expression>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self::host_function_call_with_arguments(
             id,
             shared_positional_call_arguments(args),
             result_type_ids,
-            location,
+            span,
         )
     }
 
@@ -141,7 +138,7 @@ impl Expression {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         call_expression(
             ExpressionKind::HostFunctionCall {
@@ -150,7 +147,7 @@ impl Expression {
                 result_type_ids: result_type_ids.clone(),
             },
             result_type_ids,
-            location,
+            span,
         )
     }
 
@@ -158,7 +155,7 @@ impl Expression {
         variant: FallibleCarrierVariant,
         value: Expression,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         Self::result_construct_with_type_id(
@@ -166,8 +163,7 @@ impl Expression {
             value,
             DataType::Inferred,
             type_id,
-            location,
-            None,
+            span,
             value_mode,
         )
     }
@@ -194,7 +190,7 @@ fn test_builtin_type_id_for_data_type(data_type: &DataType) -> TypeId {
 fn call_expression(
     kind: ExpressionKind,
     result_type_ids: Vec<TypeId>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Expression {
     let expression_type_id = match result_type_ids.as_slice() {
         [] => builtin_type_ids::NONE,
@@ -206,8 +202,7 @@ fn call_expression(
 
     Expression::new(
         kind,
-        location,
-        None,
+        span,
         expression_type_id,
         // Test-only fallback: exact diagnostic spelling requires a TypeEnvironment.
         // Call-site diagnostics should render from canonical TypeId.
@@ -223,13 +218,13 @@ fn call_expression(
 /// Wraps plain `Expression` values in shared positional `CallArgument` nodes.
 ///
 /// WHAT: test helper that avoids repeating the same `CallAccessMode::Shared` and
-///       location-clone boilerplate at every hand-built call site.
+///       span-copy boilerplate at every hand-built call site.
 fn shared_positional_call_arguments(values: Vec<Expression>) -> Vec<CallArgument> {
     values
         .into_iter()
         .map(|value| {
-            let location = value.location.clone();
-            CallArgument::positional(value, CallAccessMode::Shared, location)
+            let span = value.span;
+            CallArgument::positional(value, CallAccessMode::Shared, span)
         })
         .collect()
 }

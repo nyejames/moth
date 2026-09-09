@@ -32,6 +32,29 @@ fn tokenize_source(
     (tokens, string_table)
 }
 
+fn tokenize_source_with_id(
+    source: &str,
+    span_builder: &mut ExtendedSpanBuilder,
+    file_id: SourceId,
+) -> (
+    crate::compiler_frontend::tokenizer::tokens::FileTokens,
+    StringTable,
+) {
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let tokens = tokenize(
+        source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut string_table,
+        file_id,
+        span_builder,
+    )
+    .expect("source should tokenize");
+    (tokens, string_table)
+}
+
 #[test]
 fn path_token_terminates_at_unquoted_whitespace() {
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -82,7 +105,7 @@ fn quoted_path_component_retains_whitespace() {
 }
 
 #[test]
-fn try_path_for_token_rejects_wrong_table_and_location_mismatch() {
+fn try_path_for_token_rejects_wrong_table_and_span_mismatch() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let (tokens, _) = tokenize_source("@core/math\n", &mut span_builder);
     let path_token = tokens
@@ -93,46 +116,53 @@ fn try_path_for_token_rejects_wrong_table_and_location_mismatch() {
     let TokenKind::Path(path_id) = path_token.kind else {
         panic!("expected a path token");
     };
+    let token_span = SourceSpan::new(tokens.file_id, path_token.span);
 
     tokens
         .path_syntax
-        .try_path_for_token(path_id, &path_token.location)
+        .try_path_for_token(path_id, token_span)
         .expect("the owning table must accept its own token");
 
     let none_error = tokens
         .path_syntax
         .try_path_for_token(
             crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
-            &path_token.location,
+            token_span,
         )
         .expect_err("NONE must stay an infrastructure failure");
     assert!(none_error.msg.contains("absent PathSyntaxId marker"));
 
     let empty_error = crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new()
-        .try_path_for_token(path_id, &path_token.location)
+        .try_path_for_token(path_id, token_span)
         .expect_err("an empty wrong table must stay an infrastructure failure");
     assert!(empty_error.msg.contains("outside a table"));
 
     let mut other_span_builder = ExtendedSpanBuilder::new();
-    let (other, _) = tokenize_source("@other/path\n", &mut other_span_builder);
+    let (other, _) = tokenize_source_with_id(
+        "@other/path\n",
+        &mut other_span_builder,
+        SourceId::from_index(7),
+    );
     let other_error = other
         .path_syntax
-        .try_path_for_token(path_id, &path_token.location)
-        .expect_err("a same-index row from another table must stay an infrastructure failure");
+        .try_path_for_token(path_id, token_span)
+        .expect_err("a same-index row from another source must stay an infrastructure failure");
     assert!(
         other_error
             .msg
             .contains("does not belong to the consumed path token")
     );
 
-    let mut mismatched_location = path_token.location.clone();
-    mismatched_location.start_pos.line_number += 4;
-    let location_error = tokens
+    let mismatched_span = SourceSpan::new(
+        tokens.file_id,
+        crate::compiler_frontend::source::LocalSpan::source_start(),
+    );
+    let span_error = tokens
         .path_syntax
-        .try_path_for_token(path_id, &mismatched_location)
-        .expect_err("a location mismatch must stay an infrastructure failure");
+        .try_path_for_token(path_id, mismatched_span)
+        .expect_err("a span mismatch must stay an infrastructure failure");
     assert!(
-        location_error
+        span_error
             .msg
             .contains("does not belong to the consumed path token")
     );
@@ -156,7 +186,7 @@ fn path_rejects_whitespace_after_introducer_or_separator() {
             Ok(_) => panic!(
                 "whitespace cannot separate a path introducer or separator from its component"
             ),
-            Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+            Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
             Err(TokenizeFailure::Infrastructure(error)) => {
                 panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
             }
@@ -183,7 +213,7 @@ fn path_errors_remain_structured() {
         &mut span_builder,
     ) {
         Ok(_) => panic!("public root suffix should fail"),
-        Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
         Err(TokenizeFailure::Infrastructure(error)) => {
             panic!("path fixture tokenization encountered infrastructure failure: {error:?}")
         }
@@ -231,14 +261,14 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
     };
     let row = tokens
         .path_syntax
-        .try_path_for_token(path_id, &token.location)
+        .try_path_for_token(path_id, SourceSpan::new(tokens.file_id, token.span))
         .expect("owned path");
     assert_eq!(
         spans.len(),
         1,
         "the path token and row share one overflow row"
     );
-    assert_eq!(row.span, token.span);
+    assert_eq!(row.span.local(), token.span);
 
     let mut captured_tokens = vec![token.clone()];
     let (subset, _) = tokens
@@ -250,9 +280,9 @@ fn long_multibyte_path_retains_one_original_span_through_generic_capture() {
     };
     let captured = subset.try_path(captured_id).expect("captured path row");
     assert_eq!(captured.span, row.span);
-    assert_eq!(captured_tokens[0].span, row.span);
+    assert_eq!(captured_tokens[0].span, row.span.local());
 
-    let retained_span = SourceSpan::new(source_id, captured.span);
+    let retained_span = captured.span;
     let mut database = SourceDatabaseBuilder::new(sources);
     database
         .sources_mut()

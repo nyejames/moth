@@ -95,7 +95,6 @@ fn render_payload_message(
     let string_table = context.string_table;
 
     match payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => msg.clone(),
         DiagnosticPayload::ExpectedToken { expected, found } => {
             expected_token_message(expected, found.as_ref(), string_table)
         }

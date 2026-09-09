@@ -20,28 +20,30 @@ use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
-/// Boxed diagnostic result for struct shell parsing.
+/// Two-lane result for struct shell parsing.
 ///
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper
-///       propagates the already-boxed `parse_record_body` diagnostic without unboxing.
-/// WHY: struct shell parsing is a delegation layer; the boxed boundary belongs to
+///       propagates both lanes from `parse_record_body` without unboxing.
+/// WHY: struct shell parsing is a delegation layer; the two-lane boundary belongs to
 ///      record-body parsing, and each plain-`CompilerDiagnostic` caller unboxes once.
-type StructShellResult = Result<Vec<SignatureMemberSyntax>, Box<CompilerDiagnostic>>;
+type StructShellResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 
 /// Parse a struct field-list shell from `| field Type [= default], ... |` syntax.
 ///
 /// WHAT: advances past the opening `|`, parses all fields via `parse_signature_members`,
 /// advances past the closing `|`, and validates that any default values are compile-time constants.
 /// WHY: this is the single canonical struct field parser. Used by header parsing to populate
-/// `StructHeaderMetadata.fields` and by body-declaration parsing for inline struct literals.
 pub fn parse_struct_shell(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     owner_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> StructShellResult {
     parse_record_body(
         token_stream,
@@ -49,6 +51,7 @@ pub fn parse_struct_shell(
         warnings,
         SignatureMemberContext::StructField,
         owner_path,
+        span_builder,
     )
 }
 
@@ -80,10 +83,7 @@ pub(crate) fn validate_struct_default_values(
         let is_compile_time_constant = classification?.is_compile_time_value();
 
         if !is_compile_time_constant {
-            return Err(CompilerDiagnostic::invalid_struct_default_value(
-                field.value.location.clone(),
-            )
-            .into());
+            return Err(CompilerDiagnostic::invalid_struct_default_value(field.value.span).into());
         }
     }
 

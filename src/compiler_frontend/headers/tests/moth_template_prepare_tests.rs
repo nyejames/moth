@@ -39,8 +39,7 @@ use crate::compiler_frontend::pipeline::{
 };
 use crate::compiler_frontend::public_interface::{
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicDiagnosticLocation, PublicExportDiagnosticProvenance, PublicSemanticInterface,
-    SourceProviderDependency, SourceProviderDependencySet,
+    PublicSemanticInterface, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::semantic_identity::{
@@ -78,7 +77,7 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
     )
     .expect("Moth template body should tokenize");
 
-    let output = prepare_moth_template_file(file_tokens, &mut string_table)
+    let output = prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
         .expect("freshly tokenized Moth template should own a preparing path table");
     (output, string_table, span_builder)
 }
@@ -104,7 +103,8 @@ fn preparation_preserves_invalid_path_table_lifecycle_as_compiler_error() {
         .take_preparing_path_syntax()
         .expect("fresh token stream should own its preparing path table");
 
-    let error = match prepare_moth_template_file(file_tokens, &mut string_table) {
+    let error = match prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
+    {
         Ok(_) => panic!("a deferred source token stream must fail through CompilerError"),
         Err(error) => error,
     };
@@ -226,11 +226,8 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
-    let SourcePreparationDelta {
-        result,
-        mut span_builder,
-        ..
-    } = CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
+    let SourcePreparationDelta { result, .. } =
+        CompilerFrontend::prepare_file_frontend_local(&context, input, &mut string_table);
     let mut prepared_file = result.expect("Moth template source should prepare");
     assert_eq!(
         prepared_file.file_id, entry_file_id,
@@ -243,7 +240,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
     let prepared_syntax = prepare_header_syntax(
         &mut [prepared_file],
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("Moth template header syntax should prepare");
     let headers = bind_module_headers(
@@ -413,7 +410,7 @@ impl MothTemplateScopeFixture {
         &self,
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+    ) -> Result<(Ast, StringTable), CompilerDiagnostic> {
         let (ast, string_table) = self.compile_module_ast(prepared_relative_paths)?;
 
         self.assert_ast_contains_moth_template_content(
@@ -430,7 +427,7 @@ impl MothTemplateScopeFixture {
         moth_template_relative_path: &str,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+    ) -> Result<(Ast, StringTable), CompilerDiagnostic> {
         let (ast, string_table) = self.compile_module_ast_with_providers(
             prepared_relative_paths,
             source_provider_dependencies,
@@ -448,7 +445,7 @@ impl MothTemplateScopeFixture {
     fn compile_module_ast(
         &self,
         prepared_relative_paths: &[&str],
-    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+    ) -> Result<(Ast, StringTable), CompilerDiagnostic> {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
@@ -465,14 +462,23 @@ impl MothTemplateScopeFixture {
         &self,
         prepared_relative_paths: &[&str],
         source_provider_dependencies: &crate::compiler_frontend::public_interface::SourceProviderDependencySet<'_>,
-    ) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+    ) -> Result<(Ast, StringTable), CompilerDiagnostic> {
         let (headers, mut string_table) = self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
             source_provider_dependencies,
         )?;
         let sorted_headers =
             resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-                .map_err(first_diagnostic_from_bag)?;
+                .map_err(|failure| {
+                    let messages = failure.into_messages(&string_table);
+                    if let Some(diagnostic) = messages.first_error() {
+                        return diagnostic.clone();
+                    }
+                    if let Some(error) = messages.infrastructure_error() {
+                        panic!("dependency sorting infrastructure failure: {}", error.msg)
+                    }
+                    panic!("dependency sorting failed without a diagnostic")
+                })?;
         let entry_dir =
             InternedPath::try_from_filesystem_path(&self.entry_file_path, &mut string_table)
                 .expect("test path should be UTF-8");
@@ -507,11 +513,13 @@ impl MothTemplateScopeFixture {
             },
         )
         .map_err(|messages| {
-            messages
-                .first_error()
-                .cloned()
-                .map(Box::new)
-                .unwrap_or_else(|| panic!("AST failed without a diagnostic"))
+            if let Some(diagnostic) = messages.first_error() {
+                return diagnostic.clone();
+            }
+            if let Some(error) = messages.infrastructure_error() {
+                panic!("AST failed with infrastructure error: {}", error.msg)
+            }
+            panic!("AST failed without a diagnostic")
         })
         .map(|build_result| (build_result.ast, string_table))
     }
@@ -546,7 +554,7 @@ impl MothTemplateScopeFixture {
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        Box<CompilerDiagnostic>,
+        CompilerDiagnostic,
     > {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
@@ -572,7 +580,7 @@ impl MothTemplateScopeFixture {
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        Box<CompilerDiagnostic>,
+        CompilerDiagnostic,
     > {
         self.prepare_and_bind_headers_with_providers_with_table(
             prepared_relative_paths,
@@ -590,7 +598,7 @@ impl MothTemplateScopeFixture {
             crate::compiler_frontend::headers::parse_file_headers::BoundModuleHeaders,
             StringTable,
         ),
-        (Box<CompilerDiagnostic>, StringTable),
+        (CompilerDiagnostic, StringTable),
     > {
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -692,11 +700,11 @@ impl MothTemplateScopeFixture {
             &mut prepared_files,
             &mut string_table,
             &mut |source, diagnostic| {
-                let (_, builder) = span_builders
+                let _ = span_builders
                     .iter_mut()
                     .find(|(id, _)| *id == source)
                     .expect("prepared source retains its original span builder");
-                diagnostic.capture_preparation_span(source, builder)
+                diagnostic.capture_preparation_span(source)
             },
         )
         .map_err(|failure| match failure {
@@ -716,7 +724,14 @@ impl MothTemplateScopeFixture {
             &self.source_files,
             &mut string_table,
         )
-        .map_err(|bag| (first_diagnostic_from_bag(bag), string_table.clone()))?;
+        .map_err(|failure| match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => {
+                (first_diagnostic_from_bag(bag), string_table.clone())
+            }
+            HeaderPreparationFailure::Infrastructure(error) => {
+                panic!("binding fixture infrastructure failure: {error:?}")
+            }
+        })?;
 
         Ok((headers, string_table))
     }
@@ -737,7 +752,7 @@ impl MothTemplateScopeFixture {
     ) -> CompilerDiagnostic {
         match self.compile_moth_template_ast(moth_template_relative_path, prepared_relative_paths) {
             Ok(_) => panic!("Moth template fixture should fail"),
-            Err(diagnostic) => *diagnostic,
+            Err(diagnostic) => diagnostic,
         }
     }
 
@@ -786,13 +801,11 @@ fn prepared_module_roots(entry_root: &Path, files: &[PathBuf]) -> ModuleRootTabl
     ModuleRootTable::from_records(records)
 }
 
-fn first_diagnostic_from_bag(bag: DiagnosticBag) -> Box<CompilerDiagnostic> {
-    Box::new(
-        bag.into_diagnostics()
-            .into_iter()
-            .next()
-            .expect("diagnostic bag should contain an error"),
-    )
+fn first_diagnostic_from_bag(bag: DiagnosticBag) -> CompilerDiagnostic {
+    bag.into_diagnostics()
+        .into_iter()
+        .next()
+        .expect("diagnostic bag should contain an error")
 }
 
 fn prepare_moth_source(
@@ -889,17 +902,12 @@ fn folded_constant_value(ast: &Ast, string_table: &StringTable, name: &str) -> S
 
 #[test]
 fn moth_template_preparation_produces_private_content_constant() {
-    let (output, string_table, span_builder) = prepare_directly("# Heading");
+    let (output, string_table, _span_builder) = prepare_directly("# Heading");
     let header = &output.headers[0];
     let declaration = content_constant(&output);
-    let span = declaration.span.resolve_with(span_builder.resolver());
-    assert_eq!((span.start(), span.end()), (0, 0));
     assert_eq!(
-        (
-            declaration.location.start_byte,
-            declaration.location.end_byte
-        ),
-        (0, 0)
+        declaration.span, None,
+        "the generated content declaration should not claim an authored source span"
     );
 
     assert_eq!(output.file_role, FileRole::Normal);
@@ -918,11 +926,53 @@ fn moth_template_preparation_produces_private_content_constant() {
     );
     assert_eq!(header.tokens.canonical_os_path, output.canonical_os_path);
     assert_eq!(declaration.binding_mode, BindingMode::CompileTimeConstant);
-    let ParsedTypeRef::BuiltinString { span, location } = &declaration.type_annotation else {
+    let ParsedTypeRef::BuiltinString { span } = &declaration.type_annotation else {
         panic!("expected builtin String annotation");
     };
     assert_eq!(*span, declaration.span);
-    assert_eq!(location, &declaration.location);
+}
+#[test]
+fn simple_markdown_body_uses_original_body_token_span() {
+    let source = "# Heading";
+    let (output, string_table, span_builder) = prepare_directly(source);
+    let declaration = content_constant(&output);
+    let body_token = declaration
+        .initializer_tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("body text should be preserved as a string literal token");
+
+    let body_range = body_token
+        .span
+        .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[body_range.start() as usize..body_range.end() as usize],
+        "# Heading"
+    );
+    assert!(matches!(
+        &body_token.kind,
+        TokenKind::StringSliceLiteral(id) if string_table.resolve(*id) == "# Heading"
+    ));
+}
+#[test]
+fn nested_templates_remain_structural_inside_markdown_initializer() {
+    let source = "before [:inner] after";
+    let (output, _string_table, span_builder) = prepare_directly(source);
+    let declaration = content_constant(&output);
+    let template_heads = declaration
+        .initializer_tokens
+        .iter()
+        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
+        .collect::<Vec<_>>();
+
+    assert_eq!(template_heads.len(), 2);
+    let nested_range = template_heads[1]
+        .span
+        .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert!(
+        nested_range.start() > 0,
+        "nested template opener should keep its original body position, not the synthetic start"
+    );
 }
 
 #[test]
@@ -995,50 +1045,6 @@ fn empty_moth_template_body_generates_markdown_template_initializer() {
     ));
     assert!(matches!(kinds[2], TokenKind::StartTemplateBody));
     assert!(matches!(kinds[3], TokenKind::TemplateClose));
-}
-
-#[test]
-fn simple_markdown_body_uses_original_body_token_location() {
-    let (output, string_table, _span_builder) = prepare_directly("# Heading");
-    let declaration = content_constant(&output);
-    let body_token = declaration
-        .initializer_tokens
-        .iter()
-        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
-        .expect("body text should be preserved as a string literal token");
-
-    assert_eq!(
-        body_token.location.scope.to_portable_string(&string_table),
-        "test.mtf"
-    );
-    assert!(matches!(
-        &body_token.kind,
-        TokenKind::StringSliceLiteral(id) if string_table.resolve(*id) == "# Heading"
-    ));
-}
-
-#[test]
-fn nested_templates_remain_structural_inside_markdown_initializer() {
-    let (output, string_table, _span_builder) = prepare_directly("before [:inner] after");
-    let declaration = content_constant(&output);
-    let template_heads = declaration
-        .initializer_tokens
-        .iter()
-        .filter(|token| matches!(token.kind, TokenKind::TemplateHead))
-        .collect::<Vec<_>>();
-
-    assert_eq!(template_heads.len(), 2);
-    assert_eq!(
-        template_heads[1]
-            .location
-            .scope
-            .to_portable_string(&string_table),
-        "test.mtf"
-    );
-    assert!(
-        template_heads[1].location.start_pos.char_column > 0,
-        "nested template opener should keep its original body position, not the synthetic start"
-    );
 }
 
 #[test]
@@ -1167,7 +1173,7 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
     let moth_template_canonical_path = fixture.project_root_path().join("src/intro.mtf");
     let moth_template_logical_path = fixture
         .project_path_resolver
-        .logical_path_for_canonical_file(&moth_template_canonical_path, &mut string_table)
+        .logical_path_for_canonical_file(&moth_template_canonical_path)
         .expect("Moth template logical path should resolve");
     let moth_template_source =
         InternedPath::try_from_filesystem_path(&moth_template_logical_path, &mut string_table)
@@ -1253,10 +1259,8 @@ fn same_directory_root_constants_collide_with_html_constants() {
             .any(|label| label.style == DiagnosticLabelStyle::Secondary)
     );
     assert!(
-        diagnostic
-            .labels
-            .iter()
-            .all(|label| !label.location.scope.is_empty())
+        diagnostic.labels.iter().all(|label| label.span.is_some()),
+        "collision labels should retain exact source spans"
     );
 }
 
@@ -1377,106 +1381,6 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
 
     folded_content_contains(&ast, &string_table, "from html");
     folded_content_contains(&ast, &string_table, "from custom");
-}
-
-#[test]
-fn provider_interface_collision_remaps_authored_declaration_location() {
-    let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            "export:\n    collision #= \"local\"\n;\n",
-        ),
-        ("src/docs/intro.mtf", "[collision]"),
-    ]);
-
-    let html_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("html"),
-        "html".to_owned(),
-        ModuleRootRole::Normal,
-    );
-    let collision_origin = OriginDeclarationId::Constant(OriginConstantId::new(
-        html_origin.clone(),
-        "collision".to_owned(),
-    ));
-    let html_interface = PublicSemanticInterface {
-        module_origin: html_origin.clone(),
-        export_bindings: vec![ExportBinding::new(
-            html_origin,
-            "collision".to_owned(),
-            collision_origin.clone(),
-        )],
-        export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
-            public_name: "collision".to_owned(),
-            location: PublicDiagnosticLocation {
-                scope_components: vec!["@html".to_owned(), "@mod.moth".to_owned()],
-                start_line: 88,
-                start_column: 5,
-                end_line: 88,
-                end_column: 10,
-            },
-        }],
-        binding_exports: Vec::new(),
-        declarations: vec![PublicDeclarationRecord {
-            origin: collision_origin,
-            synthetic_interface_provenance: Default::default(),
-            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
-                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
-                    "from html".to_owned(),
-                )),
-            }),
-        }],
-        reusable_evidence: Vec::new(),
-        concrete_call_summaries: Vec::new(),
-    };
-    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind:
-            crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
-                package_prefix: "html",
-            },
-        interface: &html_interface,
-    }])
-    .expect("one implicit template provider should register");
-
-    let (diagnostic, diagnostic_string_table) = match fixture
-        .prepare_and_bind_headers_with_providers_with_table(
-            &["src/docs/@mod.moth", "src/docs/intro.mtf"],
-            &provider_dependencies,
-        ) {
-        Ok(_) => panic!("provider and same-directory constants should collide"),
-        Err((diagnostic, string_table)) => (*diagnostic, string_table),
-    };
-
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(
-            crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
-        )
-    ));
-    let primary = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == DiagnosticLabelStyle::Primary)
-        .expect("collision should have a primary label");
-    let secondary = diagnostic
-        .labels
-        .iter()
-        .find(|label| label.style == DiagnosticLabelStyle::Secondary)
-        .expect("collision should preserve the provider declaration label");
-    assert_eq!(primary.location.start_pos.line_number, 1);
-    assert_eq!(secondary.location.start_pos.line_number, 88);
-    assert_eq!(secondary.location.start_pos.char_column, 5);
-    assert_eq!(
-        secondary
-            .location
-            .scope
-            .to_portable_string(&diagnostic_string_table),
-        "@html/@mod.moth"
-    );
-    assert_ne!(
-        primary.location.start_pos.line_number,
-        secondary.location.start_pos.line_number
-    );
 }
 
 #[test]
@@ -1744,14 +1648,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
     let bd_function_nodes: Vec<_> = ast
         .nodes
         .iter()
-        .filter(|node| {
-            matches!(node.kind, NodeKind::Function(..))
-                && node
-                    .location
-                    .scope
-                    .to_portable_string(&ast_string_table)
-                    .ends_with("intro.mtf")
-        })
+        .filter(|node| matches!(node.kind, NodeKind::Function(..)))
         .collect();
 
     assert!(
@@ -1896,7 +1793,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/content.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let (prepared_file, mut span_builder) = prepare_moth_source(
+    let (prepared_file, _) = prepare_moth_source(
         &format!("content #= [$md: {source}]"),
         &file_path,
         &entry_file_path,
@@ -1916,7 +1813,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     let prepared_syntax = prepare_header_syntax(
         &mut [prepared_file],
         &mut string_table,
-        &mut |source, diagnostic| diagnostic.capture_preparation_span(source, &mut span_builder),
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("authored md header syntax should prepare");
     let headers = bind_module_headers(

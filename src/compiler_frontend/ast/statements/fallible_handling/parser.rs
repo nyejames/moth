@@ -34,7 +34,7 @@ use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_com
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 use super::catch_handler::{
     CatchFallibleHandler, CatchFallibleHandlerSite, parse_catch_fallible_handler_typed,
@@ -48,7 +48,6 @@ pub(crate) struct HandledFallibleCall {
     pub(crate) name: InternedPath,
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
-    pub(crate) call_location: SourceLocation,
     pub(crate) call_span: Option<SourceSpan>,
 }
 
@@ -64,7 +63,6 @@ pub(crate) struct HandledFallibleHostCall {
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
     pub(crate) error_type_id: TypeId,
-    pub(crate) call_location: SourceLocation,
     pub(crate) call_span: Option<SourceSpan>,
 }
 
@@ -78,7 +76,7 @@ struct FallibleHandlingSite<'a> {
     success_result_type_ids: &'a [TypeId],
     error_return_type_id: TypeId,
     value_required: bool,
-    value_required_location: SourceLocation,
+    value_required_span: Option<SourceSpan>,
     compilation_stage: &'a str,
     allow_boundary_catch: bool,
 }
@@ -87,7 +85,7 @@ impl HandledFallibleHostCall {
     pub(crate) fn into_expression(
         self,
         handling: FallibleHandling,
-        propagation_location: Option<SourceLocation>,
+        propagation_span: Option<SourceSpan>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
         let expression_handling = match &handling {
@@ -103,13 +101,12 @@ impl HandledFallibleHostCall {
                     result_type_ids: self.result_type_ids,
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
-                    location: self.call_location.clone(),
                     span: self.call_span,
                 },
                 type_environment,
             );
-        let function_call_expression = match propagation_location {
-            Some(location) => function_call_expression.with_propagation_location(location),
+        let function_call_expression = match propagation_span {
+            Some(span) => function_call_expression.with_propagation_span(Some(span)),
             None => function_call_expression,
         };
 
@@ -132,7 +129,6 @@ impl HandledFallibleCall {
             self.args,
             self.result_type_ids,
             type_environment,
-            self.call_location,
             self.call_span,
         )
     }
@@ -140,7 +136,7 @@ impl HandledFallibleCall {
     pub(crate) fn into_expression(
         self,
         handling: FallibleHandling,
-        propagation_location: Option<SourceLocation>,
+        propagation_span: Option<SourceSpan>,
         type_environment: &mut TypeEnvironment,
     ) -> Expression {
         let expression_handling = match &handling {
@@ -155,11 +151,10 @@ impl HandledFallibleCall {
                 self.result_type_ids,
                 expression_handling,
                 type_environment,
-                self.call_location.clone(),
                 self.call_span,
             );
-        let function_call_expression = match propagation_location {
-            Some(location) => function_call_expression.with_propagation_location(location),
+        let function_call_expression = match propagation_span {
+            Some(span) => function_call_expression.with_propagation_span(Some(span)),
             None => function_call_expression,
         };
 
@@ -196,7 +191,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                 token_stream.current_token_kind(),
                 operand_is_optional,
             ),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
@@ -216,8 +211,8 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
     let success_type_diagnostic_spelling =
         diagnostic_type_spelling(handled_type_id, type_interner.environment());
 
-    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
-        .then(|| token_stream.current_postfix_operator_location());
+    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_span());
 
     if let Some(handling) = parse_fallible_handling_suffix(
         token_stream,
@@ -227,14 +222,13 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
             success_result_type_ids: &success_result_type_ids,
             error_return_type_id,
             value_required,
-            value_required_location: expression.location.clone(),
+            value_required_span: expression.span,
             compilation_stage: EXPRESSION_STAGE,
             allow_boundary_catch,
         },
         None,
         string_table,
     )? {
-        let expression_location = expression.location.clone();
         let expression_span = expression.span;
 
         return Ok(match handling {
@@ -243,12 +237,11 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                 FallibleExpressionHandling::Propagate,
                 handled_type_id,
                 success_type_diagnostic_spelling,
-                expression_location,
                 expression_span,
             )
-            .with_propagation_location(
-                propagation_location.expect("propagation handling must have a postfix location"),
-            ),
+            .with_propagation_span(Some(
+                propagation_span.expect("propagation handling must have a postfix span"),
+            )),
 
             FallibleHandling::Handler { .. } => {
                 let handled_expression = Expression::handled_result_with_type_id(
@@ -256,7 +249,6 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                     FallibleExpressionHandling::Recover,
                     handled_type_id,
                     success_type_diagnostic_spelling,
-                    expression_location,
                     expression_span,
                 );
 
@@ -320,13 +312,13 @@ fn parse_postfix_propagation(
     site: FallibleHandlingSite<'_>,
     type_environment: &TypeEnvironment,
 ) -> Result<FallibleHandling, ExpressionParseError> {
-    let propagation_location = token_stream.current_postfix_operator_location();
+    let propagation_span = token_stream.current_postfix_operator_span();
     token_stream.advance();
 
     let Some(expected_error_type_id) = context.expected_error_type else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
-            propagation_location,
+            Some(propagation_span),
         )
         .into());
     };
@@ -340,7 +332,7 @@ fn parse_postfix_propagation(
             expected_error_type_id,
             site.error_return_type_id,
             TypeMismatchContext::ErrorReturn,
-            propagation_location,
+            Some(propagation_span),
         )
         .into());
     }
@@ -361,7 +353,6 @@ pub(crate) fn wrap_catch_expression(
 ) -> Expression {
     debug_assert!(matches!(handler, FallibleHandling::Handler { .. }));
 
-    let location = handled_expression.location.clone();
     let span = handled_expression.span;
     let result_type_id = handled_expression.type_id;
     let diagnostic_type = handled_expression.diagnostic_type.to_owned();
@@ -374,7 +365,6 @@ pub(crate) fn wrap_catch_expression(
                 result_type_ids,
             })),
         },
-        location,
         span,
         result_type_id,
         diagnostic_type,
@@ -393,7 +383,7 @@ fn parse_catch_handling_suffix(
     if !site.allow_boundary_catch {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOutsideBoundary,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -433,7 +423,7 @@ fn parse_catch_handling_suffix(
 
         _ => Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
     }
@@ -456,7 +446,7 @@ fn parse_inline_catch_without_error_binding(
             error_return_type_id: site.error_return_type_id,
             value_required: site.value_required,
             compilation_stage: site.compilation_stage,
-            value_required_location: site.value_required_location,
+            value_required_span: site.value_required_span,
         },
         string_table,
     )?;
@@ -482,7 +472,7 @@ fn parse_catch_without_error_binding(
             error_return_type_id: site.error_return_type_id,
             value_required: site.value_required,
             compilation_stage: site.compilation_stage,
-            value_required_location: site.value_required_location,
+            value_required_span: site.value_required_span,
         },
         warnings,
         string_table,
@@ -505,7 +495,7 @@ fn parse_catch_handler(
         error_return_type_id: site.error_return_type_id,
         value_required: site.value_required,
         compilation_stage: site.compilation_stage,
-        value_required_location: site.value_required_location,
+        value_required_span: site.value_required_span,
     };
 
     let CatchFallibleHandler { error, body } = if next_catch_binding_is_inline(token_stream) {
@@ -573,8 +563,8 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
-        .then(|| token_stream.current_postfix_operator_location());
+    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(
         token_stream,
@@ -584,7 +574,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
             success_result_type_ids: &call.result_type_ids,
             error_return_type_id,
             value_required,
-            value_required_location: call.call_location.clone(),
+            value_required_span: call.call_span,
             compilation_stage: FUNCTION_CALL_STAGE,
             allow_boundary_catch,
         },
@@ -595,14 +585,14 @@ pub(crate) fn parse_fallible_handling_suffix_for_call_expression(
     let Some(handling) = handling else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
 
     Ok(call.into_expression(
         handling,
-        propagation_location,
+        propagation_span,
         type_interner.environment_mut_for_derived_types(),
     ))
 }
@@ -621,8 +611,8 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
         allow_boundary_catch,
     } = handler_call;
 
-    let propagation_location = (token_stream.current_token_kind() == &TokenKind::Bang)
-        .then(|| token_stream.current_postfix_operator_location());
+    let propagation_span = (token_stream.current_token_kind() == &TokenKind::Bang)
+        .then(|| token_stream.current_postfix_operator_span());
 
     let handling = parse_fallible_handling_suffix(
         token_stream,
@@ -632,7 +622,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
             success_result_type_ids: &call.result_type_ids,
             error_return_type_id: call.error_type_id,
             value_required,
-            value_required_location: call.call_location.clone(),
+            value_required_span: call.call_span,
             compilation_stage: FUNCTION_CALL_STAGE,
             allow_boundary_catch,
         },
@@ -643,14 +633,14 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
     let Some(handling) = handling else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
 
     Ok(call.into_expression(
         handling,
-        propagation_location,
+        propagation_span,
         type_interner.environment_mut_for_derived_types(),
     ))
 }
@@ -663,7 +653,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_host_call_expression(
 pub(crate) struct CastCatchSite {
     pub(crate) success_type_id: TypeId,
     pub(crate) error_type_id: TypeId,
-    pub(crate) value_required_location: SourceLocation,
+    pub(crate) value_required_span: Option<SourceSpan>,
     pub(crate) allow_boundary_catch: bool,
 }
 
@@ -689,7 +679,7 @@ pub(crate) fn parse_cast_catch_handling_suffix(
             success_result_type_ids: &success_type_ids,
             error_return_type_id: site.error_type_id,
             value_required: true,
-            value_required_location: site.value_required_location,
+            value_required_span: site.value_required_span,
             compilation_stage: EXPRESSION_STAGE,
             allow_boundary_catch: site.allow_boundary_catch,
         },

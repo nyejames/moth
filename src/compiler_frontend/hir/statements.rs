@@ -22,12 +22,10 @@ use crate::compiler_frontend::hir::numeric::{
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 #[derive(Debug, Clone)]
 pub struct HirStatement {
     pub id: HirNodeId,
     pub kind: HirStatementKind,
-    pub location: SourceLocation,
     /// Exact authored syntax span; compiler-generated HIR statements are span-free.
     pub span: Option<SourceSpan>,
 }
@@ -187,8 +185,6 @@ pub enum HirStatementKind {
 
 impl HirStatement {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.location.remap_string_ids(remap);
-
         match &mut self.kind {
             HirStatementKind::Assign { target, value } => {
                 target.remap_string_ids(remap);

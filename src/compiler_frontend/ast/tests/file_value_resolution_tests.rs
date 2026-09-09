@@ -21,7 +21,6 @@ use crate::compiler_frontend::ast::{
     Ast, ContextKind, FileValueResolutionServices, ScopeContext, Stage0ResolutionFacts,
     TopLevelDeclarationTable,
 };
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCompileTimePathReason,
     InvalidExpressionReason, PathKind, RuleDiagnosticKind, SyntaxDiagnosticKind,
@@ -177,7 +176,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
         &mut span_builder,
     ) {
         Ok(_) => panic!("a public root path cannot have a suffix"),
-        Err(TokenizeFailure::Diagnosed(diagnostic)) => *diagnostic,
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => diagnostic,
         Err(TokenizeFailure::Infrastructure(error)) => {
             panic!("file-value fixture tokenization encountered infrastructure failure: {error:?}")
         }
@@ -275,12 +274,10 @@ fn content_file_value_behind_child_module_boundary_surfaces_stage0_diagnostic() 
     let result = resolve_file_value_fixture(
         "@child/existing.mtf",
         PreparedFileReferenceClass::ContentSource,
-        ResolvedFileReferenceOutcome::Diagnostic(Box::new(
-            CompilerDiagnostic::invalid_compile_time_path(
-                InternedPath::from_single_str("child/existing.mtf", &mut boundary_strings),
-                InvalidCompileTimePathReason::EscapesModuleBoundary,
-                SourceLocation::default(),
-            ),
+        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
+            InternedPath::from_single_str("child/existing.mtf", &mut boundary_strings),
+            InvalidCompileTimePathReason::EscapesModuleBoundary,
+            None,
         )),
     );
 
@@ -296,12 +293,10 @@ fn resource_file_value_behind_support_facade_surfaces_stage0_diagnostic() {
     let result = resolve_file_value_fixture(
         "@support/existing.svg",
         PreparedFileReferenceClass::ResourceFile,
-        ResolvedFileReferenceOutcome::Diagnostic(Box::new(
-            CompilerDiagnostic::invalid_compile_time_path(
-                InternedPath::from_single_str("support/existing.svg", &mut boundary_strings),
-                InvalidCompileTimePathReason::EscapesModuleBoundary,
-                SourceLocation::default(),
-            ),
+        ResolvedFileReferenceOutcome::Diagnostic(CompilerDiagnostic::invalid_compile_time_path(
+            InternedPath::from_single_str("support/existing.svg", &mut boundary_strings),
+            InvalidCompileTimePathReason::EscapesModuleBoundary,
+            None,
         )),
     );
 
@@ -350,7 +345,6 @@ fn compile_fixture(
     };
     let mut prepared_outputs =
         Vec::with_capacity(moth_files.len() + templates.len() + markdown_files.len());
-    let mut retained_span_builders = Vec::new();
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
@@ -378,9 +372,6 @@ fn compile_fixture(
         )
         .expect("Moth header preparation should succeed");
 
-        // Prepared outputs keep their identity, but their token spans still index this
-        // builder's table; keep every builder alive through the binding assertions below.
-        retained_span_builders.push((file_id_for(path), span_builder));
         prepared_outputs.push(output);
     }
 
@@ -401,10 +392,10 @@ fn compile_fixture(
             &mut span_builder,
         )
         .expect("Moth template tokenization should succeed");
-        retained_span_builders.push((file_id_for(path), span_builder));
 
-        let mut output = prepare_moth_template_file(file_tokens, &mut string_table)
-            .expect("Moth template preparation should succeed");
+        let mut output =
+            prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
+                .expect("Moth template preparation should succeed");
         output
             .freeze_path_syntax(&string_table)
             .expect("prepared template should satisfy the path invariant");
@@ -485,13 +476,7 @@ fn compile_fixture(
     let prepared_syntax = prepare_header_syntax(
         &mut prepared_outputs,
         &mut string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(file_id, _)| *file_id == source)
-                .expect("prepared source retains its original span builder");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax preparation should succeed");
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -693,9 +678,10 @@ fn assert_invalid_expression_reason(
     >,
     expected_reason: InvalidExpressionReason,
 ) {
-    let diagnostic = CompilerDiagnostic::from(
-        result.expect_err("invalid file value should produce a diagnostic"),
-    );
+    let error = result.expect_err("invalid file value should produce a diagnostic");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidExpression)
@@ -727,9 +713,10 @@ fn assert_surfaced_stage0_boundary_diagnostic(
     >,
     expected_reason: InvalidCompileTimePathReason,
 ) {
-    let diagnostic = CompilerDiagnostic::from(
-        result.expect_err("a boundary-rejected file value must not resolve"),
-    );
+    let error = result.expect_err("a boundary-rejected file value must not resolve");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidCompileTimePath)

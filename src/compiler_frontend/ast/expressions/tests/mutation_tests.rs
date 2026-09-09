@@ -44,7 +44,7 @@ fn immutable_assignment_retains_exact_operator_span() {
         diagnostic.primary_span,
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span))
     );
-    assert_eq!(diagnostic.labels[0].location, diagnostic.primary_location);
+    assert_eq!(diagnostic.labels.len(), 1);
 }
 
 #[test]

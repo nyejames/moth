@@ -24,14 +24,14 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     expression: Expression,
 ) -> Result<Expression, ExpressionParseError> {
     let expression_span = expression.span;
-    let propagation_location = token_stream.current_postfix_operator_location();
+    let propagation_span = Some(token_stream.current_postfix_operator_span());
     token_stream.advance();
 
     let type_environment = type_interner.environment();
     let Some(inner_type_id) = type_environment.option_inner_type(expression.type_id) else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::NotOptionExpression,
-            propagation_location,
+            propagation_span,
         )
         .into());
     };
@@ -39,7 +39,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     let [function_return_type_id] = context.current_function_return_type_ids.as_slice() else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
-            propagation_location,
+            propagation_span,
         )
         .into());
     };
@@ -47,7 +47,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     if !type_environment.is_option(*function_return_type_id) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
-            propagation_location,
+            propagation_span,
         )
         .into());
     }
@@ -59,7 +59,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     ) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch,
-            propagation_location,
+            propagation_span,
         )
         .into());
     }
@@ -67,7 +67,7 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     if token_stream.current_token_kind() == &TokenKind::Catch {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationCatchConflict,
-            token_stream.current_location(),
+            Some(token_stream.current_postfix_operator_span()),
         )
         .into());
     }
@@ -77,7 +77,6 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
         expression,
         inner_type_id,
         diagnostic_type,
-        propagation_location,
         expression_span,
     ))
 }

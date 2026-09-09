@@ -24,16 +24,15 @@ use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeCo
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 
-/// Boxed diagnostic result for resolved casts.
+/// Diagnostic result for resolved casts.
 ///
-/// Cast resolution returns directly into the expression parser's boxed diagnostic family, so
-/// both owners share one error shape without changing accumulation or rendering boundaries.
-type CastResolutionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Cast resolution returns directly into the expression parser's diagnostic family, so both
+/// owners share one error shape without changing accumulation or rendering boundaries.
+type CastResolutionResult<T> = Result<T, CompilerDiagnostic>;
 
 /// Inputs for resolving one explicit `cast` at a typed receiving boundary.
 ///
@@ -54,7 +53,6 @@ pub(crate) struct CastResolutionInput<'a> {
     pub(crate) type_environment: &'a mut TypeEnvironment,
     pub(crate) string_table: &'a StringTable,
     pub(crate) active_generic_type_context: Option<&'a ActiveGenericTypeContext>,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -80,28 +78,27 @@ pub(crate) fn resolve_cast_expression(
         type_environment,
         string_table,
         active_generic_type_context,
-        location,
         span,
     } = input;
 
     let source_type_id = source.type_id;
 
     if type_environment.is_option(source_type_id) {
-        return Err(Box::new(CompilerDiagnostic::invalid_cast(
+        return Err(CompilerDiagnostic::invalid_cast(
             InvalidCastReason::SourceIsOptional,
             Some(source_type_id),
             Some(target_type_id),
-            source.location,
-        )));
+            source.span,
+        ));
     }
 
     if source_type_id == target_type_id {
-        return Err(Box::new(CompilerDiagnostic::invalid_cast(
+        return Err(CompilerDiagnostic::invalid_cast(
             InvalidCastReason::SameSourceAndTarget,
             Some(source_type_id),
             Some(target_type_id),
-            source.location,
-        )));
+            source.span,
+        ));
     }
 
     let source_target =
@@ -126,12 +123,12 @@ pub(crate) fn resolve_cast_expression(
                 } else {
                     InvalidCastReason::NoEvidence
                 };
-                return Err(Box::new(CompilerDiagnostic::invalid_cast(
+                return Err(CompilerDiagnostic::invalid_cast(
                     reason,
                     Some(source_type_id),
                     Some(target_type_id),
-                    source.location,
-                )));
+                    source.span,
+                ));
             }
         },
 
@@ -143,12 +140,12 @@ pub(crate) fn resolve_cast_expression(
                 } else {
                     InvalidCastReason::NoEvidence
                 };
-                return Err(Box::new(CompilerDiagnostic::invalid_cast(
+                return Err(CompilerDiagnostic::invalid_cast(
                     reason,
                     Some(source_type_id),
                     Some(target_type_id),
-                    source.location,
-                )));
+                    source.span,
+                ));
             }
         },
     };
@@ -161,7 +158,6 @@ pub(crate) fn resolve_cast_expression(
         requires_optional_wrap_after_cast,
         evidence,
         handling,
-        location,
         span,
     };
 

@@ -10,7 +10,6 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[test]
 fn empty_summary_has_zero_counts_and_false_flags() {
@@ -74,7 +73,6 @@ fn record_helpers_preserve_summary_shape_contracts() {
 fn contribution_source_marker_recompute_records_the_source_count() {
     let mut store = TemplateIrStore::new();
     let plan = store.push_slot_plan(super::super::slot_plan::TemplateSlotPlan {
-        location: SourceLocation::default(),
         span: None,
         contribution_sources: vec![],
         slot_sites: vec![],
@@ -83,14 +81,12 @@ fn contribution_source_marker_recompute_records_the_source_count() {
         &mut store,
         plan,
         RuntimeSlotContributionSourceId(0),
-        SourceLocation::default(),
         None,
     );
     let sequence = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![marker],
         },
-        SourceLocation::default(),
         None,
     ));
 
@@ -105,7 +101,6 @@ fn summarize_existing_root_rejects_a_node_cycle() {
     let mut store = TemplateIrStore::new();
     let sequence = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
         None,
     ));
     MalformedTirStore::new(&mut store).set_node_kind(
@@ -128,7 +123,6 @@ fn summarize_existing_root_rejects_a_template_cycle() {
     let mut store = TemplateIrStore::new();
     let child_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
         None,
     ));
     let first = store.push_template(TemplateIr::new(
@@ -136,7 +130,6 @@ fn summarize_existing_root_rejects_a_template_cycle() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
         None,
     ));
     let reference = TemplateTirChildReference::new(
@@ -150,7 +143,6 @@ fn summarize_existing_root_rejects_a_template_cycle() {
             reference,
             occurrence_id,
         },
-        SourceLocation::default(),
         None,
     ));
     MalformedTirStore::new(&mut store).set_template_root(first, cycle_node);
@@ -174,21 +166,18 @@ fn nested_sequence_summary_records_real_depth() {
             byte_len: 1,
             origin: TemplateSegmentOrigin::Body,
         },
-        SourceLocation::default(),
         None,
     ));
     let inner = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![leaf],
         },
-        SourceLocation::default(),
         None,
     ));
     let outer = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![inner],
         },
-        SourceLocation::default(),
         None,
     ));
 
@@ -225,7 +214,6 @@ fn summarize_existing_root_rejects_a_missing_child_template() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
         None,
     ));
 
@@ -247,7 +235,6 @@ fn summarize_existing_root_rejects_a_child_template_with_a_missing_root() {
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
         None,
     ));
     let occurrence_id = store.next_child_template_occurrence_id();
@@ -260,7 +247,6 @@ fn summarize_existing_root_rejects_a_child_template_with_a_missing_root() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
         None,
     ));
 
@@ -293,14 +279,14 @@ fn formatted_markdown_root_summary_matches_recompute() {
             text,
             "Hello `code`".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
         builder.finish_template(
             root,
             style.clone(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -355,22 +341,22 @@ fn nested_child_formatter_publishes_derived_version_and_updates_reference() {
             text,
             "Hello `code`".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
         let child_id = builder.finish_template(
             child_root,
             child_style.clone(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
-        let child_node = builder.push_child_template_node(child_id, SourceLocation::default());
+        let child_node = builder.push_child_template_node(child_id, None);
         let parent_id = builder.finish_template(
             child_node,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
         (parent_id, child_id, child_root)
     };

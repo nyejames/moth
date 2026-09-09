@@ -48,9 +48,8 @@ fn compile_boracle_input(
     path: &str,
 ) -> Result<(BoracleModuleInput, StringTable), CompilerMessages> {
     let normalized_path = if path.trim().is_empty() { "." } else { path };
-    let mut path_string_table = StringTable::new();
-    let valid_path = check_if_valid_path(normalized_path, &mut path_string_table)
-        .map_err(|error| CompilerMessages::from_error(error, path_string_table.clone()))?;
+    let valid_path = check_if_valid_path(normalized_path)
+        .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?;
 
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let BuildBootstrap {

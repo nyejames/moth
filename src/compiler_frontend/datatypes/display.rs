@@ -19,6 +19,7 @@ use super::ids::{BuiltinTypeConstructor, TypeConstructor, TypeId};
 // -----------------------------------------------------------
 
 /// Renders a `TypeId` to a human-readable string.
+#[allow(dead_code)] // Used by feature/test-gated HIR display and diagnostics tests.
 pub fn display_type(type_id: TypeId, env: &TypeEnvironment, table: &StringTable) -> String {
     display_type_with_resolver(type_id, env, table)
 }

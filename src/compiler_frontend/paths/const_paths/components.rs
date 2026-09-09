@@ -6,15 +6,13 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
 use crate::compiler_frontend::tokenizer::tokens::TokenStream;
 
 use super::PathComponents;
 
-/// Boxed diagnostic result for the connected path-component family.
-///
-/// Component parsing and validation feed the public path parser, which unboxes once when it
-/// returns the diagnostic to its tokenizer-facing caller.
-type ComponentResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Connected tokenizer-facing result for path-component parsing.
+type ComponentResult<T> = TokenizeResult<T>;
 
 /// WHAT: Parsed result of one path component, with its raw text and whether it was quoted.
 /// WHY: downstream validation needs to know whether quotes were used to allow spaces.
@@ -54,10 +52,11 @@ fn parse_quoted_component(
 
     loop {
         let Some(next) = stream.peek().copied() else {
-            return Err(Box::new(CompilerDiagnostic::invalid_path(
+            return Err(CompilerDiagnostic::invalid_path(
                 PathKind::MissingClosingQuote,
-                stream.new_location(),
-            )));
+                Some(stream.current_source_span()?),
+            )
+            .into());
         };
 
         if next == '"' {
@@ -72,10 +71,11 @@ fn parse_quoted_component(
             stream.next();
 
             let Some(escaped) = stream.peek().copied() else {
-                return Err(Box::new(CompilerDiagnostic::invalid_path(
+                return Err(CompilerDiagnostic::invalid_path(
                     PathKind::MissingClosingQuote,
-                    stream.new_location(),
-                )));
+                    Some(stream.current_source_span()?),
+                )
+                .into());
             };
 
             match escaped {
@@ -84,10 +84,11 @@ fn parse_quoted_component(
                     stream.next();
                 }
                 _ => {
-                    return Err(Box::new(CompilerDiagnostic::invalid_path(
+                    return Err(CompilerDiagnostic::invalid_path(
                         PathKind::InvalidEscape,
-                        stream.new_location(),
-                    )));
+                        Some(stream.current_source_span()?),
+                    )
+                    .into());
                 }
             }
 
@@ -118,10 +119,11 @@ pub(super) fn parse_bare_component(
     }
 
     if value.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::EmptyComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     Ok(ParsedComponent {
@@ -195,10 +197,11 @@ fn validate_path_component(
     _string_table: &StringTable,
 ) -> ComponentResult<()> {
     if component.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::EmptyComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     // Reject a path component that starts with `@` after the path introducer was consumed.
@@ -206,10 +209,11 @@ fn validate_path_component(
     //      `@` starting any component (such as `@@pages` or `@helper/@home`) is not a valid
     //      module name. Normal module-root filenames are cosmetic filesystem markers.
     if !was_quoted && component.starts_with('@') {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::LeadingAtInPathComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     if component == "." || component == ".." {
@@ -217,34 +221,38 @@ fn validate_path_component(
             return Ok(());
         }
 
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     if component.ends_with('.') {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     if component
         .chars()
         .any(|character| !is_valid_component_char(character, was_quoted))
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     if is_reserved_windows_name(component) {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            stream.new_location(),
-        )));
+            Some(stream.current_source_span()?),
+        )
+        .into());
     }
 
     Ok(())

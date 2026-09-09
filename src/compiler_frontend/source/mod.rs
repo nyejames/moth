@@ -64,4 +64,5 @@ pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;
 pub(crate) use span::{
     ExtendedSpanBuilder, LocalSpan, SourceSpan, SpanCapacityError, SpanCapacityReason,
+    SpanJoinError,
 };

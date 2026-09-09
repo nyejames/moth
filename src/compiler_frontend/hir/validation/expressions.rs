@@ -170,7 +170,7 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .ast_source_id_for_hir(value_location)
+            .ast_span_for_hir(value_location)
             .is_none()
         {
             return Err(self.error_with_hir(
@@ -185,7 +185,7 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .hir_source_id_for_hir(value_location)
+            .hir_source_span_for_hir(value_location)
             .is_none()
         {
             return Err(self.error_with_hir(

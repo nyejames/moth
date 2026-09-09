@@ -51,7 +51,6 @@ fn lower_minimal_reactive_source_module_with_report(
             ty: types.int,
             mutable: true,
             region,
-            source_info: Some(test_source_location(1)),
             span: None,
         }],
         statements: vec![statement(
@@ -60,7 +59,6 @@ fn lower_minimal_reactive_source_module_with_report(
                 target: HirPlace::Local(source_local),
                 value: int_expression(1, 5, types.int, region),
             },
-            2,
         )],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
     };
@@ -86,7 +84,7 @@ fn lower_minimal_reactive_source_module_with_report(
         path: source_path,
         kind: HirReactiveSourceKind::Declaration,
         type_id: types.int,
-        location: test_source_location(1),
+        span: None,
     });
 
     lower_hir_to_js(
@@ -109,7 +107,6 @@ fn reactive_invalidation_report(statement_id: u32, source: ReactiveSourceId) -> 
             statement_id,
             source,
             kind: ReactiveInvalidationKind::Assignment,
-            location: test_source_location(2),
             span: None,
         }],
     );
@@ -144,7 +141,6 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
                 ty: types.string,
                 mutable: true,
                 region,
-                source_info: Some(test_source_location(1)),
                 span: None,
             },
             HirLocal {
@@ -152,7 +148,6 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
                 ty: types.collection_int,
                 mutable: true,
                 region,
-                source_info: Some(test_source_location(1)),
                 span: None,
             },
         ],
@@ -162,7 +157,6 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
                 vec_local: fragments_local,
                 value: template_value,
             },
-            2,
         )],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
     };
@@ -188,7 +182,7 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
         path: source_path,
         kind: HirReactiveSourceKind::Declaration,
         type_id: types.string,
-        location: test_source_location(1),
+        span: None,
     });
 
     module
@@ -199,11 +193,11 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
             dependencies: vec![HirReactiveTemplateDependency {
                 source: ReactiveSourceId(0),
                 type_id: types.string,
-                location: test_source_location(1),
+                span: None,
             }],
             template_value_parameters: vec![],
             template_backed: false,
-            location: test_source_location(2),
+            span: None,
         });
 
     lower_hir_to_js(
@@ -242,10 +236,9 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
             ty: types.string,
             mutable: false,
             region,
-            source_info: Some(test_source_location(1)),
             span: None,
         }],
-        statements: vec![statement(1, HirStatementKind::Expr(parameter_value), 2)],
+        statements: vec![statement(1, HirStatementKind::Expr(parameter_value))],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
     };
 
@@ -272,10 +265,10 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
             dependencies: vec![],
             template_value_parameters: vec![HirReactiveTemplateParameterDependency {
                 parameter,
-                location: test_source_location(1),
+                span: None,
             }],
             template_backed: true,
-            location: test_source_location(2),
+            span: None,
         });
 
     lower_hir_to_js(

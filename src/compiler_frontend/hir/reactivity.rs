@@ -8,10 +8,9 @@
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ReactiveSourceId(pub u32);
 
@@ -31,13 +30,12 @@ pub(crate) struct HirReactiveSource {
     pub(crate) path: InternedPath,
     pub(crate) kind: HirReactiveSourceKind,
     pub(crate) type_id: TypeId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl HirReactiveSource {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.path.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 }
 
@@ -45,25 +43,21 @@ impl HirReactiveSource {
 pub(crate) struct HirReactiveTemplateDependency {
     pub(crate) source: ReactiveSourceId,
     pub(crate) type_id: TypeId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl HirReactiveTemplateDependency {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.location.remap_string_ids(remap);
-    }
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HirReactiveTemplateParameterDependency {
     pub(crate) parameter: LocalId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl HirReactiveTemplateParameterDependency {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.location.remap_string_ids(remap);
-    }
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +67,7 @@ pub(crate) struct HirReactiveTemplate {
     pub(crate) dependencies: Vec<HirReactiveTemplateDependency>,
     pub(crate) template_value_parameters: Vec<HirReactiveTemplateParameterDependency>,
     pub(crate) template_backed: bool,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl HirReactiveTemplate {
@@ -89,7 +83,5 @@ impl HirReactiveTemplate {
         for dependency in &mut self.template_value_parameters {
             dependency.remap_string_ids(remap);
         }
-
-        self.location.remap_string_ids(remap);
     }
 }

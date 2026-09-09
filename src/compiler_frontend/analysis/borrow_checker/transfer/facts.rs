@@ -7,7 +7,6 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{FunctionLayout, 
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     AccessKind, OptionalTransferStatus, ValueAccessClassification, ValueBorrowFact,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::source::SourceSpan;
 use rustc_hash::FxHashMap;
@@ -15,12 +14,8 @@ use rustc_hash::FxHashMap;
 #[derive(Debug, Clone)]
 pub(super) struct StatementAccessTracker {
     root_access: Vec<Option<AccessKind>>,
-    // WHAT: first access location recorded per root, so same-statement conflicts can label
-    // the earlier access without changing transfer rules.
-    root_access_location: Vec<Option<SourceLocation>>,
-    // WHAT: first access span recorded per root, alongside the location above.
-    // WHY: same-statement conflicts report the earlier access span without inventing
-    // spans for generated accesses.
+    // WHAT: first access span recorded per root, so same-statement conflicts can label
+    // the earlier access without inventing spans for generated accesses.
     root_access_span: Vec<Option<SourceSpan>>,
     pub(super) shared_roots: RootSet,
     pub(super) mutable_roots: RootSet,
@@ -30,7 +25,6 @@ impl StatementAccessTracker {
     pub(super) fn new(root_count: usize) -> Self {
         Self {
             root_access: vec![None; root_count],
-            root_access_location: vec![None; root_count],
             root_access_span: vec![None; root_count],
             shared_roots: RootSet::empty(root_count),
             mutable_roots: RootSet::empty(root_count),
@@ -48,12 +42,6 @@ impl StatementAccessTracker {
         }
     }
 
-    // WHAT: returns the source location of the first access recorded for this root.
-    // WHY: same-statement conflicts report the earlier access as the secondary label.
-    pub(super) fn access_location(&self, root_index: usize) -> Option<&SourceLocation> {
-        self.root_access_location[root_index].as_ref()
-    }
-
     // WHAT: returns the span of the first access recorded for this root.
     // WHY: same-statement conflicts report the earlier access span without inventing
     // spans for generated accesses.
@@ -65,7 +53,6 @@ impl StatementAccessTracker {
         &mut self,
         root_index: usize,
         access: AccessKind,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     ) {
         match access {
@@ -73,9 +60,8 @@ impl StatementAccessTracker {
             AccessKind::Mutable => self.mutable_roots.insert(root_index),
         }
 
-        // Keep the first recorded location so the conflicting (earlier) access is labelled.
-        if self.root_access_location[root_index].is_none() {
-            self.root_access_location[root_index] = Some(location);
+        // Keep the first recorded span so the conflicting earlier access is labelled.
+        if self.root_access_span[root_index].is_none() {
             self.root_access_span[root_index] = span;
         }
 

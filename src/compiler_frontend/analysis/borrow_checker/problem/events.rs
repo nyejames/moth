@@ -4,15 +4,13 @@ use super::ids::{
     BindingId, BlockId, CallId, EventId, LoanId, PlaceId, PointId, UseId, ValueOriginId,
 };
 use super::places::ProjectionElem;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::hir::ids::HirNodeId;
 use crate::compiler_frontend::source::SourceSpan;
 
-/// Optional mapping retained for diagnostics and inspection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Optional exact span mapping retained for diagnostics and inspection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EventSource {
     pub(crate) hir_node: Option<HirNodeId>,
-    pub(crate) location: Option<SourceLocation>,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -34,7 +32,6 @@ impl EventSource {
     pub(crate) const fn none() -> Self {
         Self {
             hir_node: None,
-            location: None,
             span: None,
         }
     }

@@ -21,7 +21,6 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::diagnostic_payload::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::diagnostic_severity::DiagnosticSeverity;
 use crate::compiler_frontend::display_messages::format_terse_compiler_messages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -249,11 +248,10 @@ pub fn run_frontend_benchmark(
         })?;
     let normalized = if path.trim().is_empty() { "." } else { path };
 
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(normalized, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(normalized) {
         Ok(path) => path,
         Err(error) => {
-            let messages = CompilerMessages::from_error(error, path_string_table);
+            let messages = CompilerMessages::from_error(error, StringTable::new());
             let diagnostic_codes = collect_diagnostic_codes(&messages);
 
             return Err(FrontendBenchmarkError {
@@ -329,18 +327,16 @@ pub fn run_frontend_benchmark(
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
     let error_count = messages.error_count();
-    let diagnostic_codes = collect_diagnostic_codes(&messages);
-    let has_infrastructure_diagnostic = messages.diagnostics().any(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InfrastructureError { .. }
-        )
-    });
+    let mut diagnostic_codes = collect_diagnostic_codes(&messages);
+    let has_infrastructure_error = messages.has_infrastructure_error();
+    if has_infrastructure_error {
+        diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
+    }
 
     // User diagnostics are an expected benchmark outcome, but an infrastructure
-    // payload or a failed compilation with no user error is still a runner
+    // failure or a failed compilation with no user error is still a runner
     // failure and must abort the benchmark.
-    if has_infrastructure_diagnostic || (compilation_failed && error_count == 0) {
+    if has_infrastructure_error || (compilation_failed && error_count == 0) {
         return Err(FrontendBenchmarkError {
             kind: FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,

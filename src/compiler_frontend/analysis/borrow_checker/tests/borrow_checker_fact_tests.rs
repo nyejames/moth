@@ -22,7 +22,6 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
-use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -64,14 +63,14 @@ fn statement_terminator_and_value_facts_are_populated() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y.clone(),
-                    Expression::int(0, test_source_location(2), None, ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
@@ -81,7 +80,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                         vec![runtime_operand_item(Expression::bool(
                             true,
                             test_source_location(3),
-                            None,
                             ValueMode::ImmutableOwned,
                         ))],
                         builtin_type_ids::BOOL,
@@ -99,7 +97,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             value: Expression::int(
                                 2,
                                 test_source_location(4),
-                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -116,7 +113,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             value: Expression::int(
                                 3,
                                 test_source_location(5),
-                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -127,7 +123,7 @@ fn statement_terminator_and_value_facts_are_populated() {
                 test_source_location(3),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -156,13 +152,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                 "missing statement fact for statement {:?}",
                 statement.id
             );
-            assert!(
-                hir.side_table
-                    .hir_source_location_for_hir(HirLocation::Statement(statement.id))
-                    .is_some(),
-                "statement {:?} should have source mapping",
-                statement.id
-            );
         }
     }
 
@@ -179,10 +168,6 @@ fn statement_terminator_and_value_facts_are_populated() {
         assert!(
             report.analysis.value_fact(value_id).is_some(),
             "missing value fact for value {value_id:?}"
-        );
-        assert!(
-            hir.side_table.value_source_location(value_id).is_some(),
-            "value {value_id:?} should have side-table source mapping"
         );
     }
 }
@@ -227,11 +212,11 @@ fn drop_statement_produces_statement_fact() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
+                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         )],
-        test_source_location(1),
+        None,
     );
 
     let mut hir = lower_hir(
@@ -260,7 +245,6 @@ fn drop_statement_produces_statement_fact() {
     entry_block.statements.push(HirStatement {
         id: HirNodeId(next_statement_id),
         kind: HirStatementKind::Drop(drop_local),
-        location: test_source_location(2),
         span: None,
     });
 
@@ -296,18 +280,20 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     data.clone(),
-                    Expression::int(7, test_source_location(1), None, ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     first_ref.clone(),
-                    Expression::reference(
+                    Expression::reference_with_type_id(
                         data.clone(),
                         DataType::Int,
+                        builtin_type_ids::INT,
                         test_source_location(2),
                         ValueMode::MutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     ),
                 )),
                 test_source_location(2),
@@ -327,17 +313,19 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     second_ref,
-                    Expression::reference(
+                    Expression::reference_with_type_id(
                         data,
                         DataType::Int,
+                        builtin_type_ids::INT,
                         test_source_location(4),
                         ValueMode::MutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     ),
                 )),
                 test_source_location(4),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -347,10 +335,11 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("reborrow after last-use should pass");
 
-    let second_statement_id = find_statement_id_for_line(&hir, 4)
-        .expect("should locate the reborrow statement by source line");
-    let data_local = find_assigned_local_for_line(&hir, 1)
-        .expect("should locate the source local by declaration line");
+    let second_statement_id =
+        find_assign_statement_id_for_local_name(&hir, &string_table, "second_ref")
+            .expect("should locate the reborrow statement");
+    let data_local =
+        find_local_by_name(&hir, &string_table, "data").expect("should locate the source local");
     let entry_state = report
         .analysis
         .statement_entry_states
@@ -388,18 +377,20 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     source.clone(),
-                    Expression::int(7, test_source_location(10), None, ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     target,
-                    Expression::reference(
+                    Expression::reference_with_type_id(
                         source,
                         DataType::Int,
+                        builtin_type_ids::INT,
                         test_source_location(11),
                         ValueMode::MutableOwned,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     ),
                 )),
                 test_source_location(11),
@@ -407,12 +398,12 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel,
-                    Expression::int(0, test_source_location(12), None, ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(12), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(12),
             ),
         ],
-        test_source_location(2),
+        None,
     );
 
     let hir = lower_hir(
@@ -422,12 +413,13 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
         .expect("inferred assignment transfer should pass");
 
-    let source_local = find_assigned_local_for_line(&hir, 10)
-        .expect("should locate the source local by declaration line");
-    let target_local = find_assigned_local_for_line(&hir, 11)
-        .expect("should locate the target local by declaration line");
+    let source_local =
+        find_local_by_name(&hir, &string_table, "source").expect("should locate the source local");
+    let target_local =
+        find_local_by_name(&hir, &string_table, "target").expect("should locate the target local");
     let sentinel_statement_id =
-        find_statement_id_for_line(&hir, 12).expect("should locate the sentinel statement");
+        find_assign_statement_id_for_local_name(&hir, &string_table, "sentinel")
+            .expect("should locate the sentinel statement");
     let entry_state = report
         .analysis
         .statement_entry_states
@@ -1039,7 +1031,6 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             result_type_ids: vec![builtin_type_ids::STRING, builtin_type_ids::STRING],
             error_type_id: builtin_type_ids::STRING,
             handling: FallibleExpressionHandling::Propagate,
-            location: test_source_location(2),
             span: None,
         },
         &mut expression_types,
@@ -1079,7 +1070,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             NodeKind::Return(vec![external_call]),
             test_source_location(2),
         )],
-        test_source_location(1),
+        None,
     );
     let caller = function_node(
         caller_name.clone(),
@@ -1113,7 +1104,6 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::string_slice(
                         string_table.intern("hello"),
                         test_source_location(5),
-                        None,
                         ValueMode::MutableOwned,
                     ),
                 )),
@@ -1138,7 +1128,6 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                         FallibleExpressionHandling::Propagate,
                         &mut expression_types,
                         test_source_location(6),
-                        None,
                     ),
                 )),
                 test_source_location(6),
@@ -1146,7 +1135,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel_name,
-                    Expression::int(0, test_source_location(7), None, ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(7), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(7),
             ),
@@ -1155,20 +1144,18 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::string_slice(
                         string_table.intern("done"),
                         test_source_location(8),
-                        None,
                         ValueMode::ImmutableOwned,
                     ),
                     Expression::string_slice(
                         string_table.intern("done"),
                         test_source_location(8),
-                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 ]),
                 test_source_location(8),
             ),
         ],
-        test_source_location(5),
+        None,
     );
     let start = function_node(
         start_name,
@@ -1177,7 +1164,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             returns: vec![],
         },
         vec![],
-        test_source_location(9),
+        None,
     );
     let hir = lower_hir(
         build_ast_with_registered_types(vec![unknown, caller, start], entry_path),
@@ -1267,53 +1254,6 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         "retained unknown result should retain the possible argument root, got {:?}",
         result_snapshot.alias_roots
     );
-}
-
-fn find_statement_id_for_line(
-    hir: &crate::compiler_frontend::hir::module::HirModule,
-    line: i32,
-) -> Option<HirNodeId> {
-    for block in &hir.blocks {
-        for statement in &block.statements {
-            let Some(source) = hir
-                .side_table
-                .hir_source_location_for_hir(HirLocation::Statement(statement.id))
-            else {
-                continue;
-            };
-            if source.start_pos.line_number == line {
-                return Some(statement.id);
-            }
-        }
-    }
-    None
-}
-
-fn find_assigned_local_for_line(
-    hir: &crate::compiler_frontend::hir::module::HirModule,
-    line: i32,
-) -> Option<crate::compiler_frontend::hir::ids::LocalId> {
-    for block in &hir.blocks {
-        for statement in &block.statements {
-            let Some(source) = hir
-                .side_table
-                .hir_source_location_for_hir(HirLocation::Statement(statement.id))
-            else {
-                continue;
-            };
-            if source.start_pos.line_number != line {
-                continue;
-            }
-            if let HirStatementKind::Assign {
-                target: HirPlace::Local(local),
-                ..
-            } = &statement.kind
-            {
-                return Some(*local);
-            }
-        }
-    }
-    None
 }
 
 fn find_local_by_name(

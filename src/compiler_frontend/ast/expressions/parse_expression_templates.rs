@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -35,11 +34,7 @@ pub(super) fn parse_template_expression(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> Result<Option<Expression>, ExpressionParseError> {
-    let template_span_location = token_stream.current_location();
-    let template_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let template_span = Some(token_stream.current_span());
     let template_context = context.new_template_parsing_context();
     let template = if context.kind.is_constant_context() {
         Template::new_const_required_with_type_interner(
@@ -116,17 +111,11 @@ pub(super) fn parse_template_expression(
             let mut folded_expression = match fold_result.emission {
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
                     ConstStringValue::Text(value),
-                ) => Expression::string_slice(
-                    value,
-                    template_span_location.clone(),
-                    template_span,
-                    value_mode.as_owned(),
-                ),
+                ) => Expression::string_slice(value, template_span, value_mode.as_owned()),
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
                     ConstStringValue::Pieces(pieces),
                 ) => Expression::new(
                     ExpressionKind::StructuralString { pieces },
-                    template_span_location.clone(),
                     template_span,
                     crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
                     crate::compiler_frontend::datatypes::DataType::StringSlice,
@@ -135,7 +124,6 @@ pub(super) fn parse_template_expression(
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::NoOutput => {
                     Expression::string_slice(
                         fold_context.string_table.intern(""),
-                        template_span_location.clone(),
                         template_span,
                         value_mode.as_owned(),
                     )
@@ -168,7 +156,7 @@ pub(super) fn parse_template_expression(
             let diagnostic = CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             );
 
             Err(diagnostic.into())

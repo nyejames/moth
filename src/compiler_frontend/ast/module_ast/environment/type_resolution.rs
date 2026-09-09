@@ -39,7 +39,6 @@ use crate::compiler_frontend::declaration_syntax::choice::{
     ChoiceVariant, ChoiceVariantPayload, ChoiceVariantPayloadSyntax, ChoiceVariantSyntax,
 };
 use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::sync::Arc;
 
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
@@ -85,7 +84,7 @@ fn member_shell_diagnostic_for_context(
         MemberShellSemanticContext::StructField
             if is_non_constant_struct_default_diagnostic(&diagnostic) =>
         {
-            CompilerDiagnostic::invalid_struct_default_value(diagnostic.primary_location.clone())
+            CompilerDiagnostic::invalid_struct_default_value(primary_span)
         }
 
         MemberShellSemanticContext::StructField
@@ -165,8 +164,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             id: header.tokens.src_path.to_owned(),
                             value: Expression::new(
                                 ExpressionKind::NoValue,
-                                header.name_location.to_owned(),
-                                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                                header.name_span,
                                 struct_type_id,
                                 DataType::runtime_struct(
                                     header.tokens.src_path.to_owned(),
@@ -174,10 +172,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 ),
                                 ValueMode::ImmutableReference,
                             ),
-                            binding_span: Some(SourceSpan::new(
-                                header.tokens.file_id,
-                                header.name_span,
-                            )),
+                            binding_span: header.name_span,
                             config_qualifier: None,
                         },
                     )
@@ -219,8 +214,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             id: header.tokens.src_path.to_owned(),
                             value: Expression::new(
                                 ExpressionKind::NoValue,
-                                header.name_location.to_owned(),
-                                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                                header.name_span,
                                 choice_type_id,
                                 DataType::Choices {
                                     nominal_path: header.tokens.src_path.to_owned(),
@@ -229,10 +223,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 },
                                 ValueMode::ImmutableReference,
                             ),
-                            binding_span: Some(SourceSpan::new(
-                                header.tokens.file_id,
-                                header.name_span,
-                            )),
+                            binding_span: header.name_span,
                             config_qualifier: None,
                         },
                     )
@@ -367,7 +358,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let visibility = self.header_visibility(header, string_table)?;
 
-            let source_file_scope = header.canonical_source_file(string_table);
+            let source_file_scope = header.source_file.clone();
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
                 header,
                 generic_parameters,
@@ -402,7 +393,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )
             .map_err(|error| match error {
                 StructFieldResolutionError::Diagnostic(diagnostic) => {
-                    self.diagnostic_messages(*diagnostic, string_table)
+                    self.diagnostic_messages(diagnostic, string_table)
                 }
                 StructFieldResolutionError::Infrastructure(error) => {
                     self.error_messages(*error, string_table)
@@ -434,9 +425,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 generic_parameters,
                 &used_parameters,
                 &header.tokens.src_path,
-                &header.name_location,
+                header.name_span,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             // Generic structs must not contain recursive field types that reference
             // the struct itself through generic parameters.
@@ -445,10 +436,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     validate_no_recursive_generic_type(
                         &header.tokens.src_path,
                         &field.value.diagnostic_type,
-                        &field.value.location,
+                        field.value.span,
                         string_table,
                     )
-                    .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+                    .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
                 }
             }
 
@@ -474,7 +465,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let source_file_scope = header.canonical_source_file(string_table);
+            let source_file_scope = header.source_file.clone();
             let visibility = self.header_visibility(header, string_table)?;
 
             let generic_parameter_scope = self.generic_parameter_scope_for_header(
@@ -504,7 +495,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut type_resolution_context,
                 string_table,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             // Every generic parameter declared on the choice must appear in at least one
             // variant payload type; unused parameters indicate a declaration error.
@@ -517,9 +508,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 generic_parameters,
                 &used_parameters,
                 &header.tokens.src_path,
-                &header.name_location,
+                header.name_span,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             // Generic choices must not contain recursive payload types that reference
             // the choice itself through generic parameters.
@@ -530,11 +521,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             validate_no_recursive_generic_type(
                                 &header.tokens.src_path,
                                 &field.value.diagnostic_type,
-                                &field.value.location,
+                                field.value.span,
                                 string_table,
                             )
                             .map_err(|diagnostic| {
-                                self.diagnostic_messages(*diagnostic, string_table)
+                                self.diagnostic_messages(diagnostic, string_table)
                             })?;
                         }
                     }
@@ -560,7 +551,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     name: variant.id,
                     tag,
                     payload,
-                    location: variant.location.clone(),
                     span: variant.span,
                 });
             }
@@ -595,8 +585,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     id: header.tokens.src_path.to_owned(),
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        header.name_location.to_owned(),
-                        Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                        header.name_span,
                         choice_type_id,
                         DataType::Choices {
                             nominal_path: header.tokens.src_path.to_owned(),
@@ -605,7 +594,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         },
                         ValueMode::ImmutableReference,
                     ),
-                    binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                    binding_span: header.name_span,
                     config_qualifier: None,
                 },
             )
@@ -618,7 +607,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // Ensure no runtime struct contains itself as a field type, directly or indirectly.
         // This check runs after all field types are resolved so the full graph is visible.
         validate_no_recursive_runtime_structs(&self.resolved_struct_fields_by_path, string_table)
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         Ok(())
     }
@@ -734,7 +723,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     self.validate_nominal_generic_bound_type_id(
                         type_id,
-                        header.name_location.clone(),
+                        header.name_span,
                         &validation_context,
                         string_table,
                     )?;
@@ -746,7 +735,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     };
                     self.validate_nominal_generic_bound_type_id(
                         declaration.value.type_id,
-                        declaration.value.location.clone(),
+                        declaration.value.span,
                         &validation_context,
                         string_table,
                     )?;
@@ -762,7 +751,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     for field in fields.clone() {
                         self.validate_nominal_generic_bound_type_id(
                             field.value.type_id,
-                            field.value.location,
+                            field.value.span,
                             &validation_context,
                             string_table,
                         )?;
@@ -781,7 +770,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             for field in fields {
                                 self.validate_nominal_generic_bound_type_id(
                                     field.value.type_id,
-                                    field.value.location,
+                                    field.value.span,
                                     &validation_context,
                                     string_table,
                                 )?;
@@ -802,7 +791,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     for parameter in resolved_signature.signature.parameters {
                         self.validate_nominal_generic_bound_type_id(
                             parameter.value.type_id,
-                            parameter.value.location,
+                            parameter.value.span,
                             &validation_context,
                             string_table,
                         )?;
@@ -812,7 +801,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         if let Some(type_id) = return_slot.type_id {
                             self.validate_nominal_generic_bound_type_id(
                                 type_id,
-                                header.name_location.clone(),
+                                header.name_span,
                                 &validation_context,
                                 string_table,
                             )?;
@@ -830,7 +819,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn validate_nominal_generic_bound_type_id(
         &self,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         validation_context: &NominalBoundSurfaceValidationContext<'_>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -842,8 +831,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.resolved_type_aliases_by_path,
         );
 
-        validate_nominal_generic_bound_evidence(type_id, location, &evidence_context)
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))
+        validate_nominal_generic_bound_evidence(type_id, span, &evidence_context)
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
     /// Resolve struct field and choice variant types needed for constant constructor parsing.
@@ -903,7 +892,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     }
                     .map_err(|error| match error {
                         StructFieldResolutionError::Diagnostic(diagnostic) => {
-                            self.diagnostic_messages(*diagnostic, string_table)
+                            self.diagnostic_messages(diagnostic, string_table)
                         }
                         StructFieldResolutionError::Infrastructure(error) => {
                             self.error_messages(*error, string_table)
@@ -968,7 +957,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             string_table,
                         )
                     }
-                    .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+                    .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
                     // Publish the completed payload signature before a constant annotation can
                     // intern a generic choice instance.  As with structs, the canonical
@@ -996,7 +985,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 name: variant.id,
                                 tag,
                                 payload,
-                                location: variant.location.clone(),
                                 span: variant.span,
                             });
                         }
@@ -1209,8 +1197,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 )
                 .map_err(|error| match error {
                     ExpressionParseError::Diagnostic(diagnostic) => {
-                        ExpressionParseError::Diagnostic(Box::new(
-                            member_shell_diagnostic_for_context(*diagnostic, member_context),
+                        ExpressionParseError::Diagnostic(member_shell_diagnostic_for_context(
+                            diagnostic,
+                            member_context,
                         ))
                     }
                     ExpressionParseError::Infrastructure(error) => {
@@ -1264,18 +1253,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             emit_warnings,
                         )
                         .map_err(|mut messages| {
-                            let variant_span = SourceSpan::new(header.tokens.file_id, variant.span);
+                            let variant_span = variant.span;
                             for diagnostic in &mut messages.diagnostics {
                                 if diagnostic
                                     .labels
                                     .iter()
-                                    .any(|label| label.span == Some(variant_span))
+                                    .any(|label| label.span == variant_span)
                                 {
                                     continue;
                                 }
-                                let mut label =
-                                    DiagnosticLabel::secondary(variant.location.clone(), None);
-                                label.span = Some(variant_span);
+                                let label = DiagnosticLabel::secondary(variant_span, None);
                                 diagnostic.labels.push(label);
                             }
                             messages
@@ -1289,8 +1276,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             resolved_variants.push(ChoiceVariant {
                 id: variant.id,
                 payload,
-                location: variant.location.clone(),
-                span: Some(SourceSpan::new(header.tokens.file_id, variant.span)),
+                span: variant.span,
             });
         }
 

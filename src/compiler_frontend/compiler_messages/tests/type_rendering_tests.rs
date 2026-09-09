@@ -4,7 +4,6 @@
 //! WHY: diagnostics carry `TypeId`s, so the renderer is the contract that turns semantic type
 //! identity into source-level names when a module `TypeEnvironment` is available.
 
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::render::terminal::format_payload_guidance;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostics_with_context;
 use crate::compiler_frontend::compiler_messages::render::{
@@ -55,7 +54,7 @@ fn rule_diagnostics_render_receiver_type_names() {
         None,
         Some(int_type),
         Vec::new(),
-        SourceLocation::default(),
+        None,
     );
     let field_guidance = format_payload_guidance(&field_access.payload, context);
     assert!(field_guidance.iter().any(|line| line.contains("'Int'")));
@@ -67,7 +66,7 @@ fn rule_diagnostics_render_receiver_type_names() {
         None,
         None,
         None,
-        SourceLocation::default(),
+        None,
     );
     let assignment_guidance = format_payload_guidance(&assignment.payload, context);
     assert!(
@@ -102,7 +101,6 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
                 name: ready,
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
-                location: SourceLocation::default(),
                 span: None,
             },
             ChoiceVariantDefinition {
@@ -111,7 +109,6 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
                 payload: ChoiceVariantPayloadDefinition::Record {
                     fields: Box::new([]),
                 },
-                location: SourceLocation::default(),
                 span: None,
             },
         ]
@@ -186,7 +183,7 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
         type_environment.builtins().int,
         type_environment.builtins().string,
         TypeMismatchContext::Assignment,
-        SourceLocation::default(),
+        None,
     );
 
     let context = DiagnosticRenderContext::new(&string_table)

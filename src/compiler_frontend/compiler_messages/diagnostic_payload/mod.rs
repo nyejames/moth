@@ -5,10 +5,10 @@
 //! pre-rendered strings or generic argument maps.
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 mod reason_keys;
 mod remap;
@@ -28,12 +28,12 @@ pub enum DiagnosticPayload {
     //  General Syntax
     // -----------------
     ExpectedToken {
-        expected: TokenKind,
-        found: Option<TokenKind>,
+        expected: DiagnosticToken,
+        found: Option<DiagnosticToken>,
     },
 
     UnexpectedToken {
-        found: TokenKind,
+        found: DiagnosticToken,
     },
 
     UnexpectedTrailingComma,
@@ -618,20 +618,6 @@ pub enum DiagnosticPayload {
 
     CommonSyntaxMistake {
         reason: CommonSyntaxMistakeReason,
-    },
-
-    // -------------------------
-    //  Infrastructure Payloads
-    // -------------------------
-    /// Boundary payload for direct internal/tooling `CompilerError` rendering.
-    /// User-facing source diagnostics must use typed payload variants instead.
-    InfrastructureError {
-        msg: String,
-        error_type: crate::compiler_frontend::compiler_errors::ErrorType,
-        metadata: std::collections::HashMap<
-            crate::compiler_frontend::compiler_errors::CompilerErrorMetadataKey,
-            String,
-        >,
     },
 }
 

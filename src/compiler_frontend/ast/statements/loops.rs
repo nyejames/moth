@@ -39,9 +39,6 @@ pub fn create_loop(
     let header_token = token_stream
         .tokens
         .get(token_stream.index.saturating_sub(1));
-    let location = header_token
-        .map(|token| token.location.clone())
-        .unwrap_or_else(|| token_stream.current_location());
     let span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
     let scope = context.scope.clone();
     let colon_index = find_loop_header_colon_index(token_stream)?;
@@ -53,7 +50,7 @@ pub fn create_loop(
     {
         return Err(CompilerDiagnostic::invalid_loop_header(
             InvalidLoopHeaderReason::EmptyHeader,
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -90,12 +87,7 @@ pub fn create_loop(
         },
     };
 
-    Ok(AstNode {
-        kind,
-        location,
-        span,
-        scope,
-    })
+    Ok(AstNode { kind, span, scope })
 }
 
 fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> {
@@ -113,7 +105,7 @@ fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> 
         if is_top_level && matches!(token.kind, TokenKind::End | TokenKind::Eof) {
             return Err(CompilerDiagnostic::invalid_loop_header(
                 InvalidLoopHeaderReason::MissingColon,
-                token.location.clone(),
+                Some(SourceSpan::new(token_stream.file_id, token.span)),
             )
             .into());
         }
@@ -124,7 +116,7 @@ fn find_loop_header_colon_index(token_stream: &FileTokens) -> LoopResult<usize> 
 
     Err(CompilerDiagnostic::invalid_loop_header(
         InvalidLoopHeaderReason::MissingColon,
-        token_stream.current_location(),
+        Some(token_stream.current_span()),
     )
     .into())
 }

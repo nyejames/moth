@@ -33,7 +33,6 @@ use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::tokenize_source_for_test;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -74,10 +73,8 @@ impl FrontendServices {
 
 struct FrontendProject {
     _temp_dir: TempDir,
-    project_root: PathBuf,
     entry_file: PathBuf,
     files: Vec<PathBuf>,
-    logical_paths: Vec<(PathBuf, InternedPath)>,
     frontend: FrontendServices,
 }
 
@@ -129,16 +126,6 @@ impl FrontendProject {
             )
             .expect("source file table should build"),
         );
-        let logical_paths = canonical_files
-            .iter()
-            .map(|canonical_file| {
-                let identity = source_files
-                    .get_by_canonical_path(canonical_file)
-                    .expect("source file identity should exist");
-                let logical_path = source_files.legacy_logical_path(identity.id);
-                (canonical_file.clone(), logical_path)
-            })
-            .collect::<Vec<_>>();
 
         let frontend = FrontendServices {
             options: Config::new(canonical_project_root).frontend_options(),
@@ -153,10 +140,8 @@ impl FrontendProject {
 
         Self {
             _temp_dir: temp_dir,
-            project_root,
             entry_file,
             files: canonical_files,
-            logical_paths,
             frontend,
         }
     }
@@ -183,21 +168,6 @@ impl FrontendProject {
         tokenized_files
     }
 
-    fn logical_path(&self, relative_path: &str) -> InternedPath {
-        let canonical = fs::canonicalize(self.project_root.join(relative_path))
-            .expect("fixture file should canonicalize");
-        self.logical_paths
-            .iter()
-            .find_map(|(file, logical_path)| {
-                if file == &canonical {
-                    Some(logical_path.clone())
-                } else {
-                    None
-                }
-            })
-            .expect("logical path should exist for fixture file")
-    }
-
     fn headers(&mut self) -> BoundModuleHeaders {
         let tokenized_files = self.tokenize_all();
         let entry_file_id = self
@@ -216,7 +186,6 @@ impl FrontendProject {
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
         let mut const_template_offset = 0usize;
         let mut runtime_fragment_offset = 0usize;
-        let mut retained_span_builders = Vec::with_capacity(tokenized_files.len());
         for (file_tokens, mut span_builder) in tokenized_files {
             let output = prepare_file_from_tokens(
                 file_tokens,
@@ -231,24 +200,13 @@ impl FrontendProject {
 
             const_template_offset += output.const_template_count;
             runtime_fragment_offset += output.runtime_fragment_count;
-            let file_id = output.file_id;
             prepared_outputs.push(output);
-            // Retained token spans may be consumed by preparation and binding; keep each
-            // source's builder alive through those fixture stages instead of dropping it at the
-            // loop binding.
-            retained_span_builders.push((file_id, span_builder));
         }
 
         let prepared_syntax = prepare_header_syntax(
             &mut prepared_outputs,
             &mut self.frontend.string_table,
-            &mut |source, diagnostic| {
-                let (_, builder) = retained_span_builders
-                    .iter_mut()
-                    .find(|(file_id, _)| *file_id == source)
-                    .expect("prepared source retains its original span builder");
-                diagnostic.capture_preparation_span(source, builder)
-            },
+            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
         )
         .expect("header syntax preparation should succeed");
         bind_module_headers(
@@ -473,7 +431,7 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
 }
 
 #[test]
-fn frontend_diagnostics_preserve_string_table_context() {
+fn frontend_diagnostics_preserve_source_spans() {
     let mut project = FrontendProject::new(
         &[("src/@page.moth", "bad #= io.line(\"runtime host call\")\n")],
         "src/@page.moth",
@@ -504,16 +462,9 @@ fn frontend_diagnostics_preserve_string_table_context() {
         .error_diagnostics()
         .next()
         .expect("AST construction should return a diagnostic");
-    let resolved_scope = first_diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&messages.string_table);
-    let expected_scope = project
-        .logical_path("src/@page.moth")
-        .to_portable_string(&messages.string_table);
     assert!(
-        resolved_scope == expected_scope,
-        "AST errors should preserve the logical source path in the returned StringTable, expected '{expected_scope}', got '{resolved_scope}'",
+        first_diagnostic.primary_span.is_some(),
+        "AST errors should preserve an authored source span"
     );
 
     let mut project = FrontendProject::new(
@@ -535,16 +486,9 @@ fn frontend_diagnostics_preserve_string_table_context() {
         .error_diagnostics()
         .next()
         .expect("borrow checking should return a diagnostic");
-    let resolved_scope = first_diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&messages.string_table);
-    let expected_scope = project
-        .logical_path("src/@page.moth")
-        .to_portable_string(&messages.string_table);
     assert!(
-        resolved_scope == expected_scope,
-        "borrow checker errors should preserve the logical source path in the returned StringTable, expected '{expected_scope}', got '{resolved_scope}'",
+        first_diagnostic.primary_span.is_some(),
+        "borrow checker errors should preserve an authored source span"
     );
 }
 

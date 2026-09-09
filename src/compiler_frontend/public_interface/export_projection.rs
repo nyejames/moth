@@ -46,9 +46,7 @@
 //! narrower because imported-module-root headers belong to another module's component.
 
 use super::SourceProviderDependencySet;
-use super::model::{
-    PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
-};
+use super::model::{PublicBindingExport, PublicExportDiagnosticProvenance};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
@@ -59,11 +57,10 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
 };
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -711,7 +708,7 @@ fn collect_free_export_bindings(
         ));
         export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
             public_name,
-            location: portable_source_location(&header.name_location, string_table),
+            span: header.name_span,
         });
     }
 
@@ -731,10 +728,10 @@ fn collect_free_export_bindings(
         if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
             let public_name = reexport.binding.public_name().to_owned();
             export_bindings.push(reexport.binding);
-            if let Some(location) = reexport.provenance {
+            if let Some(span) = reexport.provenance {
                 export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
                     public_name,
-                    location,
+                    span: Some(span),
                 });
             }
         }
@@ -750,24 +747,6 @@ fn collect_free_export_bindings(
 
     export_diagnostic_provenance.sort_by(|left, right| left.public_name.cmp(&right.public_name));
     Ok((export_bindings, export_diagnostic_provenance))
-}
-
-pub(crate) fn portable_source_location(
-    location: &SourceLocation,
-    string_table: &StringTable,
-) -> PublicDiagnosticLocation {
-    PublicDiagnosticLocation {
-        scope_components: location
-            .scope
-            .as_components()
-            .iter()
-            .map(|component| string_table.resolve(*component).to_owned())
-            .collect(),
-        start_line: location.start_pos.line_number,
-        start_column: location.start_pos.char_column,
-        end_line: location.end_pos.line_number,
-        end_column: location.end_pos.char_column,
-    }
 }
 
 /// Collect re-export bindings from `module_root_public_exports` and
@@ -841,7 +820,7 @@ struct ReexportBindingContext<'a> {
 
 struct ReexportBinding {
     binding: ExportBinding,
-    provenance: Option<PublicDiagnosticLocation>,
+    provenance: Option<SourceSpan>,
 }
 
 fn resolve_active_root_source<'a>(
@@ -940,9 +919,7 @@ fn collect_one_reexport_binding<'a>(
                 export_name,
                 provider_origin,
             ),
-            provenance: view
-                .export_diagnostic_provenance(selected_name_text)
-                .cloned(),
+            provenance: view.export_diagnostic_provenance(selected_name_text),
         });
         return Ok(());
     }
@@ -987,14 +964,11 @@ fn collect_one_reexport_binding<'a>(
 
     // Determine the declaration category from the header kind and build the origin.
     let origin = reexport_declaration_origin(header, context.module_origin, name)?;
-
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
+
     bindings.push(ReexportBinding {
         binding: ExportBinding::new(context.module_origin.clone(), export_name, origin),
-        provenance: Some(portable_source_location(
-            &header.name_location,
-            context.string_table,
-        )),
+        provenance: header.name_span,
     });
 
     Ok(())

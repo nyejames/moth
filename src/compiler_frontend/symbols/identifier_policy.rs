@@ -5,11 +5,11 @@
 //! WHY: identifier rules should not drift between frontend stages; one module keeps policy
 //! and diagnostics consistent.
 
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, NamingConvention, ReservedNameOwner,
 };
 use crate::compiler_frontend::keywords::RESERVED_KEYWORD_SHADOWS;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,10 +97,9 @@ pub(crate) fn is_uppercase_constant_name(name: &str) -> bool {
     has_uppercase
 }
 
-/// Builds a naming warning for the given identifier/category, if style does not match policy.
 pub(crate) fn naming_warning_for_identifier(
     name: crate::compiler_frontend::symbols::string_interning::StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     naming_kind: IdentifierNamingKind,
     string_table: &StringTable,
 ) -> Option<CompilerDiagnostic> {
@@ -114,7 +113,7 @@ pub(crate) fn naming_warning_for_identifier(
             Some(CompilerDiagnostic::identifier_naming_convention(
                 name,
                 NamingConvention::CamelCase,
-                location,
+                span,
             ))
         }
         IdentifierNamingKind::ValueLike => {
@@ -125,7 +124,7 @@ pub(crate) fn naming_warning_for_identifier(
             Some(CompilerDiagnostic::identifier_naming_convention(
                 name,
                 NamingConvention::LowercaseWithUnderscores,
-                location,
+                span,
             ))
         }
         IdentifierNamingKind::TopLevelConstant => {
@@ -138,34 +137,32 @@ pub(crate) fn naming_warning_for_identifier(
             Some(CompilerDiagnostic::identifier_naming_convention(
                 name,
                 NamingConvention::LowercaseOrUppercaseWithUnderscores,
-                location,
+                span,
             ))
         }
     }
 }
 
-/// Returns a hard error when the identifier shadows a reserved keyword.
 pub(crate) fn reserved_keyword_shadow_error(
     name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::reserved_name_collision(name, ReservedNameOwner::Keyword, location)
+    CompilerDiagnostic::reserved_name_collision(name, ReservedNameOwner::Keyword, span)
 }
 
-/// Boxed diagnostic result for reserved-identifier checks.
+/// Direct diagnostic result for reserved-identifier checks.
 ///
-/// Most parser callers already use boxed diagnostic boundaries, while the few diagnostic-bag
-/// owners unbox explicitly when they accumulate the failure.
-type IdentifierPolicyResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Most parser callers preserve this source diagnostic on their own typed boundary.
+type IdentifierPolicyResult<T> = Result<T, CompilerDiagnostic>;
 
 pub(crate) fn ensure_not_keyword_shadow_identifier(
     name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> IdentifierPolicyResult<()> {
     let identifier = string_table.resolve(name);
     if is_keyword_shadow_identifier(identifier) {
-        return Err(Box::new(reserved_keyword_shadow_error(name, location)));
+        return Err(reserved_keyword_shadow_error(name, span));
     }
 
     Ok(())

@@ -16,8 +16,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
-    collect_module_function_link_facts_with_string_table,
-    collect_reachability_from_function_link_facts,
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -38,19 +37,17 @@ use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// The identity and diagnostic facts one generated request needs while materialising.
+/// The identity and call-site span one generated request needs while materialising.
 struct MaterialisingRequest {
     identity: GeneratedFunctionIdentity,
     display_name: String,
-    diagnostic_location: SourceLocation,
-    diagnostic_span: Option<SourceSpan>,
+    call_span: Option<SourceSpan>,
     #[cfg(feature = "timers")]
     timing_context: Option<crate::timing::TimingContext>,
 }
@@ -72,7 +69,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
             .identity(*request_id)
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
             .clone();
-        let (display_name, diagnostic_location, diagnostic_span) = transaction
+        let (display_name, call_span) = transaction
             .request_facts(*request_id)
             .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
         materialise_generated_request(
@@ -81,8 +78,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
             &MaterialisingRequest {
                 identity,
                 display_name,
-                diagnostic_location,
-                diagnostic_span,
+                call_span,
                 #[cfg(feature = "timers")]
                 timing_context,
             },
@@ -114,8 +110,7 @@ fn materialise_generated_request<'build>(
             return Err(CompilerMessages::from_diagnostic(
                 recursive_generic_function_instantiation(
                     Some(compiler.string_table.intern(&request.display_name)),
-                    request.diagnostic_location.clone(),
-                    request.diagnostic_span,
+                    request.call_span,
                 ),
                 compiler.string_table.clone(),
             ));
@@ -145,8 +140,7 @@ fn materialise_generated_request<'build>(
             ModuleMaterialisationInput {
                 identity: &request.identity,
                 requester_context,
-                requester_call_location: &request.diagnostic_location,
-                requester_call_span: request.diagnostic_span,
+                requester_call_span: request.call_span,
                 external_package_registry: context.external_packages.as_ref(),
                 style_directives: context.style_directives,
                 build_profile: context.build_profile,
@@ -161,8 +155,7 @@ fn materialise_generated_request<'build>(
             .materialise_ast(
                 &request.identity,
                 requester_context,
-                &request.diagnostic_location,
-                request.diagnostic_span,
+                request.call_span,
                 #[cfg(feature = "timers")]
                 request.timing_context,
             ),
@@ -205,8 +198,7 @@ fn materialise_generated_request<'build>(
                 .function_name
                 .map(|name| generated_string_table.resolve(name).to_owned())
                 .unwrap_or_else(|| "<generated>".to_owned()),
-            diagnostic_location: request.call_location.clone(),
-            diagnostic_span: request.call_span,
+            call_span: request.call_span,
         }
     }));
 
@@ -226,19 +218,19 @@ fn materialise_generated_request<'build>(
                 CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
             })?
             .clone();
-        let (nested_name, nested_location, nested_span) = transaction
-            .request_facts(*nested_request_id)
-            .map_err(|error| {
-                CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-            })?;
+        let (nested_name, nested_span) =
+            transaction
+                .request_facts(*nested_request_id)
+                .map_err(|error| {
+                    CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+                })?;
         materialise_generated_request(
             context,
             *nested_request_id,
             &MaterialisingRequest {
                 identity: nested_identity,
                 display_name: nested_name,
-                diagnostic_location: nested_location,
-                diagnostic_span: nested_span,
+                call_span: nested_span,
                 #[cfg(feature = "timers")]
                 timing_context: request.timing_context,
             },
@@ -293,11 +285,9 @@ fn materialise_generated_request<'build>(
         .insert(request.identity.clone(), function_id);
     increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
     let borrow_analysis = check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
-    let functions = collect_module_function_link_facts_with_string_table(
-        &hir_module,
-        &generated_compiler.string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &generated_compiler.string_table))?;
+    let functions = collect_module_function_link_facts(&hir_module).map_err(|error| {
+        CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
+    })?;
     let reachability = collect_reachability_from_function_link_facts(&functions, &[function_id])
         .map_err(|error| {
             CompilerMessages::from_error_ref(error, &generated_compiler.string_table)

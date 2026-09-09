@@ -30,7 +30,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -78,11 +77,7 @@ pub(super) fn parse_struct_constructor_expression(
         type_id,
     } = input;
 
-    let constructor_location = token_stream.current_location();
-    let constructor_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let constructor_span = Some(token_stream.current_span());
     let struct_name_display = string_table.resolve(struct_name).to_owned();
 
     // The stream is positioned on the struct symbol when called.
@@ -127,7 +122,6 @@ pub(super) fn parse_struct_constructor_expression(
                 template: GenericNominalTemplate::StructFields(&constructor_field_views),
                 constructor_fields: Some(&constructor_field_views),
                 raw_args: Some(&raw_args),
-                location: constructor_location.clone(),
                 span: constructor_span,
             },
             context,
@@ -163,7 +157,7 @@ pub(super) fn parse_struct_constructor_expression(
         CallDiagnosticContext::struct_constructor(&struct_name_display),
         &raw_args,
         &expectations,
-        constructor_location.clone(),
+        constructor_span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
@@ -213,7 +207,7 @@ pub(super) fn parse_struct_constructor_expression(
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                     Some(field_name),
-                    value.location,
+                    value.span,
                 )
                 .into());
             }
@@ -241,7 +235,6 @@ pub(super) fn parse_struct_constructor_expression(
     let struct_expr = Expression::struct_instance(
         struct_path.to_owned(),
         struct_fields,
-        constructor_location,
         constructor_span,
         instance_ownership,
         enforce_const_record,

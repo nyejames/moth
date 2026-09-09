@@ -6,7 +6,6 @@ use crate::compiler_frontend::ast::const_values::facts::{
 };
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, InvalidPageMetadataReason, RuleDiagnosticKind,
 };
@@ -24,6 +23,7 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
@@ -58,7 +58,7 @@ fn string_constant(name: &str, value: &str) -> HirModuleConst {
 fn add_const_fact(
     module: &mut HirModule,
     name: &str,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) {
     let declaration_path = InternedPath::from_single_str(name, string_table);
@@ -69,7 +69,7 @@ fn add_const_fact(
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
             value_kind: ConstFactValueKind::RenderableTemplate,
-            location,
+            span,
         },
     );
 }
@@ -86,7 +86,7 @@ fn fixture_resource_id(resources: &mut ModuleResourceTable, relative_path: &str)
         PortableResourcePath::from_relative_logical_path(Path::new(relative_path))
             .expect("fixture resource path should be portable"),
     );
-    resources.intern_origin(origin, SourceLocation::default())
+    resources.intern_origin(origin, None)
 }
 
 /// Renders the page-metadata payload message through the shared render boundary.
@@ -170,7 +170,7 @@ fn rejects_non_string_reserved_values() {
         value: HirConstValue::Bool(true),
     }];
 
-    let error = extract_html_page_metadata(
+    let PageMetadataError::Diagnostic(error) = extract_html_page_metadata(
         &module,
         module
             .start_function
@@ -178,7 +178,9 @@ fn rejects_non_string_reserved_values() {
         &ModuleResourceTable::new(),
         &mut string_table,
     )
-    .expect_err("non-string metadata should fail");
+    .expect_err("non-string metadata should fail") else {
+        panic!("page metadata infrastructure failure is not a user diagnostic");
+    };
     assert_eq!(
         error.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)
@@ -241,7 +243,6 @@ fn renders_structural_string_reserved_values() {
     let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
     plan.plan_origin(
         origin,
-        Default::default(),
         None,
         context.clone(),
         &mut string_table,
@@ -272,16 +273,10 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
         .expect("fixture resource should be present")
         .origin
         .clone();
-    let metadata_location = SourceLocation::new(
-        InternedPath::from_single_str("metadata.moth", &mut string_table),
-        CharPosition {
-            line_number: 11,
-            char_column: 3,
-        },
-        CharPosition {
-            line_number: 11,
-            char_column: 15,
-        },
+    let mut extended = ExtendedSpanBuilder::default();
+    let metadata_span = SourceSpan::new(
+        SourceId::from_index(0),
+        LocalSpan::exact(11, 12, &mut extended).expect("fixture span should fit"),
     );
     module.module_constants = vec![HirModuleConst {
         id: HirConstId(0),
@@ -297,7 +292,7 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
     add_const_fact(
         &mut module,
         "page_favicon",
-        metadata_location.clone(),
+        Some(metadata_span),
         &mut string_table,
     );
 
@@ -315,8 +310,7 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
         plan.resource_uses,
         vec![MetadataResourceUse {
             origin,
-            authored_location: metadata_location,
-            authored_span: None,
+            authored_span: Some(metadata_span),
         }]
     );
     assert!(plan.uses_site_root);
@@ -331,7 +325,7 @@ fn rejects_duplicate_reserved_values() {
         string_constant("docs/@page.moth/page_title", "Another"),
     ];
 
-    let error = extract_html_page_metadata(
+    let PageMetadataError::Diagnostic(error) = extract_html_page_metadata(
         &module,
         module
             .start_function
@@ -339,7 +333,9 @@ fn rejects_duplicate_reserved_values() {
         &ModuleResourceTable::new(),
         &mut string_table,
     )
-    .expect_err("duplicate metadata should fail");
+    .expect_err("duplicate metadata should fail") else {
+        panic!("page metadata infrastructure failure is not a user diagnostic");
+    };
     assert_eq!(
         error.kind,
         DiagnosticKind::Rule(RuleDiagnosticKind::InvalidPageMetadata)

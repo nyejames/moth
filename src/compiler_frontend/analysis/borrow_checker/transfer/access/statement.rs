@@ -30,7 +30,7 @@ pub(crate) fn transfer_statement(
 
     match &statement.kind {
         HirStatementKind::Assign { target, value } => {
-            let location = context.diagnostics.statement_error_location(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let span = context.diagnostics.statement_error_span(statement);
             let pending_invalidations = reactive_assignment_invalidations(
                 context,
@@ -50,7 +50,6 @@ pub(crate) fn transfer_statement(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
-                    span,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -70,7 +69,6 @@ pub(crate) fn transfer_statement(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
-                    span,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -107,8 +105,7 @@ pub(crate) fn transfer_statement(
             args,
             result,
         } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let semantics = resolve_call_semantics(context, target, args.len(), location.clone())?;
             let call_args = args
                 .iter()
@@ -134,7 +131,6 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
-                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -151,8 +147,7 @@ pub(crate) fn transfer_statement(
             args,
             result,
         } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let mut call_args = Vec::with_capacity(args.len() + 1);
             call_args.push(CallArgumentTransfer {
                 argument: receiver,
@@ -188,7 +183,6 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
-                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -200,8 +194,7 @@ pub(crate) fn transfer_statement(
         }
 
         HirStatementKind::CastOp { source, result, .. } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -211,7 +204,6 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
-                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -226,8 +218,7 @@ pub(crate) fn transfer_statement(
 
         HirStatementKind::FormatFloat { source, result, .. }
         | HirStatementKind::ValidateFloat { source, result, .. } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -237,7 +228,6 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
-                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -253,8 +243,7 @@ pub(crate) fn transfer_statement(
         HirStatementKind::NumericOp {
             operands, result, ..
         } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let arguments = numeric_op_arguments(operands);
             let call_args = arguments
                 .iter()
@@ -273,7 +262,6 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
-                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -284,8 +272,7 @@ pub(crate) fn transfer_statement(
         }
 
         HirStatementKind::Expr(expression) => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {
                 context,
                 layout,
@@ -293,7 +280,6 @@ pub(crate) fn transfer_statement(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
-                span,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -311,8 +297,7 @@ pub(crate) fn transfer_statement(
         }
 
         HirStatementKind::PushRuntimeFragment { value, .. } => {
-            let location = context.diagnostics.statement_error_location(statement);
-            let span = context.diagnostics.statement_error_span(statement);
+            let location = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {
                 context,
                 layout,
@@ -320,7 +305,6 @@ pub(crate) fn transfer_statement(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
-                span,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -348,7 +332,7 @@ pub(crate) fn transfer_statement(
                 value,
                 block_id,
                 statement_order,
-                context.diagnostics.statement_error_location(statement),
+                context.diagnostics.statement_error_span(statement),
                 &mut aggregate_context,
             )?;
         }
@@ -359,9 +343,9 @@ pub(crate) fn transfer_statement(
                 expression,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_location(
+                context.diagnostics.value_error_span(
                     expression.id,
-                    context.diagnostics.statement_error_location(statement),
+                    context.diagnostics.statement_error_span(statement),
                 ),
                 &mut aggregate_context,
             )?;
@@ -373,9 +357,9 @@ pub(crate) fn transfer_statement(
                 value,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_location(
+                context.diagnostics.value_error_span(
                     value.id,
-                    context.diagnostics.statement_error_location(statement),
+                    context.diagnostics.statement_error_span(statement),
                 ),
                 &mut aggregate_context,
             )?;
@@ -387,9 +371,9 @@ pub(crate) fn transfer_statement(
                 source,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_location(
+                context.diagnostics.value_error_span(
                     source.id,
-                    context.diagnostics.statement_error_location(statement),
+                    context.diagnostics.statement_error_span(statement),
                 ),
                 &mut aggregate_context,
             )?;
@@ -402,9 +386,9 @@ pub(crate) fn transfer_statement(
                 source,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_location(
+                context.diagnostics.value_error_span(
                     source.id,
-                    context.diagnostics.statement_error_location(statement),
+                    context.diagnostics.statement_error_span(statement),
                 ),
                 &mut aggregate_context,
             )?;
@@ -437,8 +421,7 @@ struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
     block_id: BlockId,
     current_order: i32,
     tracker: &'tracker mut StatementAccessTracker,
-    location: SourceLocation,
-    span: Option<SourceSpan>,
+    location: Option<SourceSpan>,
     stats: &'stats mut BlockTransferStats,
     value_fact_buffer: &'facts mut ValueFactBuffer,
 }
@@ -465,7 +448,7 @@ fn transfer_call_arguments_and_result(
         let argument_location = input
             .context
             .diagnostics
-            .value_error_location(argument.id, input.location.clone());
+            .value_error_span(argument.id, input.location);
 
         record_call_argument_reads(
             input,
@@ -480,7 +463,7 @@ fn transfer_call_arguments_and_result(
         let argument_location = input
             .context
             .diagnostics
-            .value_error_location(arg.argument.id, input.location.clone());
+            .value_error_span(arg.argument.id, input.location);
         let effect = effective_call_argument_effect(
             arg.effect,
             arg_index,
@@ -498,7 +481,6 @@ fn transfer_call_arguments_and_result(
                 block_id: input.block_id,
                 tracker: input.tracker,
                 location: argument_location.clone(),
-                span: arg.argument.span,
                 current_order: input.current_order,
                 stats: input.stats,
                 value_fact_buffer: input.value_fact_buffer,
@@ -520,7 +502,7 @@ fn record_call_argument_reads(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     argument: &HirExpression,
     effect: ArgEffect,
-    argument_location: &SourceLocation,
+    argument_location: &Option<SourceSpan>,
     arg_roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
     if matches!(
@@ -535,7 +517,6 @@ fn record_call_argument_reads(
             block_id: input.block_id,
             tracker: input.tracker,
             location: argument_location.clone(),
-            span: argument.span,
             current_order: input.current_order,
             stats: input.stats,
             value_fact_buffer: input.value_fact_buffer,
@@ -565,7 +546,6 @@ fn record_call_argument_reads(
         block_id: input.block_id,
         tracker: input.tracker,
         location: argument_location.clone(),
-        span: argument.span,
         current_order: input.current_order,
         stats: input.stats,
         value_fact_buffer: input.value_fact_buffer,
@@ -582,7 +562,7 @@ fn transfer_call_argument_access(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     argument: &HirExpression,
     effect: ArgEffect,
-    argument_location: SourceLocation,
+    argument_location: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     match effect {
         ArgEffect::SharedBorrow => Ok(()),
@@ -691,7 +671,7 @@ fn roots_overlap(left: &RootSet, right: &RootSet) -> bool {
 fn check_call_mutable_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     mutable_roots: &RootSet,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     if mutable_roots.is_empty() {
@@ -726,7 +706,7 @@ fn check_call_may_consume(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     argument: &HirExpression,
     mutable_roots: &RootSet,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
@@ -810,7 +790,7 @@ fn check_call_may_consume(
 fn check_call_borrow_fallback(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
@@ -824,7 +804,7 @@ fn check_call_borrow_fallback(
 fn check_call_shared_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     if roots.is_empty() {
@@ -933,7 +913,7 @@ fn reactive_assignment_invalidations(
     state: &BorrowState,
     statement_id: HirNodeId,
     target: &HirPlace,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     match target {
@@ -961,7 +941,6 @@ fn reactive_assignment_invalidations(
                 statement_id,
                 source,
                 kind: ReactiveInvalidationKind::Assignment,
-                location,
                 span,
             }])
         }
@@ -986,7 +965,6 @@ fn reactive_assignment_invalidations(
                 &roots,
                 statement_id,
                 ReactiveInvalidationKind::PlaceWrite(kind),
-                location,
                 span,
             ))
         }
@@ -1000,7 +978,7 @@ fn reactive_map_mutation_invalidations(
     statement_id: HirNodeId,
     op: HirMapOp,
     receiver: &HirExpression,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     if !op.requires_mutable_receiver() {
@@ -1021,7 +999,6 @@ fn reactive_map_mutation_invalidations(
         &roots,
         statement_id,
         ReactiveInvalidationKind::MapMutation(op),
-        location,
         span,
     ))
 }
@@ -1033,7 +1010,7 @@ fn reactive_mutable_call_invalidations(
     statement_id: HirNodeId,
     target: &CallTarget,
     args: &[CallArgumentTransfer<'_>],
-    location: SourceLocation,
+    location: Option<SourceSpan>,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     let mut invalidations = Vec::new();
 
@@ -1047,7 +1024,7 @@ fn reactive_mutable_call_invalidations(
 
         let argument_location = context
             .diagnostics
-            .value_error_location(arg.argument.id, location.clone());
+            .value_error_span(arg.argument.id, location);
         let roots = mutable_argument_roots(
             layout,
             state,
@@ -1065,7 +1042,6 @@ fn reactive_mutable_call_invalidations(
                 target: Box::new(target.clone()),
                 argument_index,
             },
-            argument_location,
             arg.argument.span,
         ));
     }
@@ -1079,7 +1055,6 @@ fn invalidations_for_roots(
     roots: &RootSet,
     statement_id: HirNodeId,
     kind: ReactiveInvalidationKind,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 ) -> Vec<ReactiveInvalidationFact> {
     let mut sources = roots
@@ -1099,7 +1074,6 @@ fn invalidations_for_roots(
             statement_id,
             source,
             kind: kind.clone(),
-            location: location.clone(),
             span,
         })
         .collect()

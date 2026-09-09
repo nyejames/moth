@@ -1,18 +1,17 @@
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
-    OpenConstruct, collect_declaration_initializer_tokens, collect_symbol_references,
-    consume_balanced_template_region, find_expression_end_index,
+    OpenConstruct, TokenScanFailure, collect_declaration_initializer_tokens,
+    collect_symbol_references, consume_balanced_template_region, find_expression_end_index,
     has_top_level_comma_before_statement_end, innermost_open_construct,
 };
 
 fn token(kind: TokenKind) -> Token {
-    Token::new(kind, SourceLocation::default())
+    Token::new(kind, LocalSpan::source_start())
 }
 
 fn stream_from_kinds(kinds: Vec<TokenKind>, string_table: &mut StringTable) -> FileTokens {
@@ -268,7 +267,10 @@ fn collect_symbol_references_matches_initializer_behavior_for_bare_symbol() {
         token(TokenKind::Newline),
         token(TokenKind::Eof),
     ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(&tokens);
+    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
+        &tokens,
+        SourceId::COMPILATION_ROOT,
+    );
     assert_eq!(refs.len(), 1);
     assert_eq!(string_table.resolve(refs[0].name), "value");
     assert!(refs[0].dot_member.is_none());
@@ -287,7 +289,10 @@ fn collect_symbol_references_matches_initializer_behavior_for_dot_member() {
         token(TokenKind::Symbol(member)),
         token(TokenKind::Newline),
     ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(&tokens);
+    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
+        &tokens,
+        SourceId::COMPILATION_ROOT,
+    );
     assert_eq!(refs.len(), 1);
     assert_eq!(string_table.resolve(refs[0].name), "config");
     assert_eq!(
@@ -306,7 +311,10 @@ fn collect_symbol_references_matches_initializer_behavior_for_call() {
         token(TokenKind::OpenParenthesis),
         token(TokenKind::CloseParenthesis),
     ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(&tokens);
+    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
+        &tokens,
+        SourceId::COMPILATION_ROOT,
+    );
     assert_eq!(refs.len(), 1);
     assert_eq!(string_table.resolve(refs[0].name), "helper");
     assert!(refs[0].followed_by_call);
@@ -322,7 +330,10 @@ fn collect_symbol_references_matches_initializer_behavior_for_choice_namespace()
         token(TokenKind::DoubleColon),
         token(TokenKind::Symbol(string_table.intern("Ready"))),
     ];
-    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(&tokens);
+    let refs = crate::compiler_frontend::utilities::token_scan::collect_symbol_references(
+        &tokens,
+        SourceId::COMPILATION_ROOT,
+    );
     assert_eq!(refs.len(), 1);
     assert_eq!(string_table.resolve(refs[0].name), "Status");
     assert!(!refs[0].followed_by_call);
@@ -338,13 +349,19 @@ fn collect_symbol_references_matches_initializer_behavior_for_choice_namespace()
 /// Panics when the error is not an `UnexpectedEndOfFile` diagnostic so each test
 /// names exactly what it protects.
 fn eof_expected_delimiter(
-    error: &crate::compiler_frontend::compiler_messages::CompilerDiagnostic,
+    failure: &TokenScanFailure,
     string_table: &StringTable,
 ) -> Option<String> {
-    let DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } = &error.payload else {
+    let diagnostic = match failure {
+        TokenScanFailure::Diagnostic(diagnostic) => diagnostic,
+        TokenScanFailure::Infrastructure(error) => {
+            panic!("token scanner infrastructure failure: {error:?}")
+        }
+    };
+    let DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } = &diagnostic.payload else {
         panic!(
             "expected UnexpectedEndOfFile diagnostic, got {:?}",
-            error.payload
+            diagnostic.payload
         );
     };
     expected_delimiter.map(|id| string_table.resolve(id).to_owned())
@@ -639,25 +656,15 @@ fn initializer_references_carry_the_scanned_token_span() {
     let mut string_table = StringTable::new();
     let mut builder = ExtendedSpanBuilder::new();
     let name = string_table.intern("other_const");
-    let scope = InternedPath::from_single_str("token_scan_tests", &mut string_table);
+    let source_id = SourceId::from_index(1);
     let span = LocalSpan::exact(4, 11, &mut builder).expect("reference bounds should encode");
     let tokens = vec![
-        Token::with_span(
-            TokenKind::Symbol(name),
-            SourceLocation::with_byte_range(
-                scope,
-                CharPosition::default(),
-                CharPosition::default(),
-                4,
-                15,
-            ),
-            span,
-        ),
-        Token::new(TokenKind::Newline, SourceLocation::default()),
-        Token::new(TokenKind::Eof, SourceLocation::default()),
+        Token::with_span(TokenKind::Symbol(name), span),
+        Token::new(TokenKind::Newline, LocalSpan::source_start()),
+        Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];
 
-    let references = collect_symbol_references(&tokens);
+    let references = collect_symbol_references(&tokens, source_id);
 
     assert_eq!(
         references.len(),
@@ -666,7 +673,8 @@ fn initializer_references_carry_the_scanned_token_span() {
     );
     assert_eq!(references[0].name, name);
     assert_eq!(
-        references[0].span, span,
-        "the reference must keep the token's exact span"
+        references[0].span,
+        Some(SourceSpan::new(source_id, span)),
+        "the reference must keep the token's exact span and source identity"
     );
 }

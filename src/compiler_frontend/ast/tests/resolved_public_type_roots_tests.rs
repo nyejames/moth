@@ -22,7 +22,6 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -37,11 +36,10 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::Declaration
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, TraitVisibility};
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -65,8 +63,7 @@ fn header(
         file_role,
         export_mode,
         local_ordering_hints: std::collections::HashSet::new(),
-        name_location: SourceLocation::default(),
-        name_span: LocalSpan::source_start(),
+        name_span: None,
         tokens: FileTokens::new(src_path, SourceId::COMPILATION_ROOT, Vec::new()),
         source_file: InternedPath::from_single_str("root.moth", string_table),
         capacity_references: Vec::new(),
@@ -103,13 +100,12 @@ fn alias_kind() -> HeaderKind {
 fn constant_kind() -> HeaderKind {
     HeaderKind::Constant {
         declaration: DeclarationSyntax {
-            span: LocalSpan::source_start(),
+            span: None,
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
             config_qualifier: None,
             initializer_tokens: Vec::new(),
             initializer_references: Vec::new(),
-            location: SourceLocation::default(),
         },
     }
 }
@@ -118,7 +114,6 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
     let parameter = Declaration {
         id: InternedPath::new(),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Int,
             int_type_id,
@@ -142,7 +137,6 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     let parameter = Declaration {
         id: InternedPath::new(),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Int,
             int_type_id,
@@ -161,7 +155,7 @@ fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
     ResolvedTypeAlias {
         diagnostic_type: DataType::Inferred,
         target_type_id,
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
     }
 }
 
@@ -169,7 +163,6 @@ fn constant_declaration(type_id: TypeId, decl_path: InternedPath) -> Declaration
     Declaration {
         id: decl_path,
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
             None,
             DataType::Int,
             type_id,
@@ -584,31 +577,18 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
 }
 
 #[test]
-fn missing_alias_entry_is_a_located_internal_error() {
+fn missing_alias_entry_is_internal_error() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
 
     let alias_path = path("unretained_alias", &mut string_table);
-    let mut alias_header = header(
+    let alias_header = header(
         alias_kind(),
         alias_path.to_owned(),
         FileRole::ActiveModuleRoot,
         HeaderExportMode::Public,
         &mut string_table,
-    );
-    // A non-default position proves the shared missing-fact constructor carries the declaration
-    // location for the whole root-fact family, not just an error type.
-    alias_header.name_location = SourceLocation::new(
-        InternedPath::from_single_str("root.moth", &mut string_table),
-        CharPosition {
-            line_number: 7,
-            char_column: 3,
-        },
-        CharPosition {
-            line_number: 7,
-            char_column: 19,
-        },
     );
 
     let result = build_table(
@@ -633,15 +613,6 @@ fn missing_alias_entry_is_a_located_internal_error() {
         error.msg.contains("active-root transparent alias"),
         "the error must name the missing fact, got: {}",
         error.msg
-    );
-    assert_eq!(
-        (
-            error.location.start_pos.line_number,
-            error.location.start_pos.char_column
-        ),
-        (7, 3),
-        "the missing-fact error must report the alias declaration position, got {:?}",
-        error.location
     );
 }
 
@@ -920,7 +891,7 @@ fn register_source_trait(
         source_file: InternedPath::new(),
         this_type,
         requirements: Vec::new(),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         visibility: TraitVisibility::Source { exported: true },
     };
     trait_environment.insert(definition);

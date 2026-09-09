@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
@@ -42,8 +43,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -51,7 +50,6 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     let mut string_table = StringTable::new();
     let item_path = InternedPath::from_single_str("item", &mut string_table);
     let index_path = InternedPath::from_single_str("index", &mut string_table);
-    let location = test_source_location(1);
     let member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
@@ -61,13 +59,13 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     let bindings = LoopBindings {
         item: Some(Declaration {
             id: item_path,
-            value: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+            value: Expression::int(0, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         }),
         index: Some(Declaration {
             id: index_path,
-            value: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+            value: Expression::int(0, None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         }),
@@ -75,7 +73,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
 
     let collection_bindings = build_collection_iteration_bindings(
         &bindings,
-        &Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned)
+        &Expression::int(1, None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(provenance.clone()),
         0,
         &provenance,
@@ -104,12 +102,7 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
         bindings: vec![],
     };
 
-    let condition = Expression::bool(
-        true,
-        test_source_location(1),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let condition = Expression::bool(true, None, ValueMode::ImmutableOwned);
     let resolved = resolve_fold_bindings_in_expression(&condition, &mut fold_context)
         .expect("resolution should succeed");
 
@@ -129,12 +122,7 @@ fn string_slice_with_no_bindings_returns_borrowed() {
         bindings: vec![],
     };
 
-    let text = Expression::string_slice(
-        text_id,
-        test_source_location(1),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let text = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
     let resolved = resolve_fold_bindings_in_expression(&text, &mut fold_context)
         .expect("resolution should succeed");
 
@@ -153,22 +141,19 @@ fn bool_condition_binding_substitution_returns_owned() {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str("show", &mut string_table);
 
-    let binding_value = Expression::bool(
-        true,
-        test_source_location(2),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let binding_value = Expression::bool(true, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {
         path: path.clone(),
         value: binding_value,
     }];
 
-    let condition = Expression::reference(
+    let condition = Expression::reference_with_type_id(
         path,
         DataType::Bool,
-        test_source_location(1),
+        builtin_type_ids::BOOL,
+        None,
         ValueMode::ImmutableOwned,
+        ConstRecordState::RuntimeValue,
     );
 
     let mut fold_context = TirFoldContext {
@@ -203,7 +188,6 @@ fn option_present_capture_substitution_returns_owned() {
 
     let inner_value = Expression::string_slice(
         string_table.intern("Alice"),
-        test_source_location(2),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -213,11 +197,13 @@ fn option_present_capture_substitution_returns_owned() {
         path: path.clone(),
         value: option_value,
     }];
-    let scrutinee = Expression::reference(
+    let scrutinee = Expression::reference_with_type_id(
         path,
         DataType::StringSlice,
-        test_source_location(1),
+        builtin_type_ids::STRING,
+        None,
         ValueMode::ImmutableOwned,
+        ConstRecordState::RuntimeValue,
     );
 
     let mut fold_context = TirFoldContext {
@@ -244,15 +230,15 @@ fn option_capture_classifies_same_store_payload_under_active_fold_borrow() {
     let template_id = {
         let mut store_borrow = store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store_borrow);
-        let slot = builder.push_slot_node(SlotKey::Default, test_source_location(1));
-        let root = builder.push_sequence_node(vec![slot], test_source_location(1));
+        let slot = builder.push_slot_node(SlotKey::Default, None);
+        let root = builder.push_sequence_node(vec![slot], None);
 
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            test_source_location(1),
+            None,
         )
     };
 
@@ -272,25 +258,25 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
     let option_value = Expression::coerced(
         Expression::string_slice(
             string_table.intern("payload"),
-            test_source_location(1),
             None,
             ValueMode::ImmutableOwned,
         ),
         builtin_type_ids::STRING,
     );
-    let scrutinee = Expression::reference(
+    let scrutinee = Expression::reference_with_type_id(
         option_path.clone(),
         DataType::StringSlice,
-        test_source_location(1),
+        builtin_type_ids::STRING,
+        None,
         ValueMode::ImmutableOwned,
+        ConstRecordState::RuntimeValue,
     );
     let capture_path = InternedPath::from_single_str("payload", &mut string_table);
     let pattern = MatchPattern::OptionPresentCapture {
         name: string_table.intern("payload"),
         binding_path: capture_path.clone(),
         inner_type_id: builtin_type_ids::STRING,
-        location: test_source_location(1),
-        binding_location: test_source_location(1),
+        span: None,
         binding_span: None,
     };
 
@@ -321,7 +307,6 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
 fn store_qualified_template_with_tir_reference(tir_reference: TemplateTirReference) -> Template {
     Template {
         tir_reference,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -336,11 +321,13 @@ fn assert_store_backed_option_capture(
         Expression::template(payload_template, ValueMode::ImmutableOwned),
         builtin_type_ids::STRING,
     );
-    let scrutinee = Expression::reference(
+    let scrutinee = Expression::reference_with_type_id(
         option_path.clone(),
         DataType::StringSlice,
-        test_source_location(1),
+        builtin_type_ids::STRING,
+        None,
         ValueMode::ImmutableOwned,
+        ConstRecordState::RuntimeValue,
     );
     let capture_name = string_table.intern("payload");
     let capture_path = InternedPath::from_single_str("payload", string_table);
@@ -348,8 +335,7 @@ fn assert_store_backed_option_capture(
         name: capture_name,
         binding_path: capture_path.clone(),
         inner_type_id: builtin_type_ids::STRING,
-        location: test_source_location(1),
-        binding_location: test_source_location(1),
+        span: None,
         binding_span: None,
     };
 
@@ -388,7 +374,6 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
     let mut string_table = StringTable::new();
     let inner = Expression::string_slice(
         string_table.intern("value"),
-        test_source_location(1),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -419,18 +404,13 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
     let mut tir_store = TemplateIrStore::new();
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut tir_store);
-        let root = builder.push_text_node(
-            text_id,
-            6,
-            TemplateSegmentOrigin::Body,
-            test_source_location(1),
-        );
+        let root = builder.push_text_node(text_id, 6, TemplateSegmentOrigin::Body, None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            test_source_location(1),
+            None,
         )
     };
 
@@ -440,7 +420,6 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
             phase: TemplateTirPhase::Parsed,
             context: TemplateViewContext::default(),
         },
-        location: SourceLocation::default(),
         span: None,
     };
 
@@ -487,29 +466,19 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
 
     let rpn = ExpressionRpn {
         items: vec![
-            ExpressionRpnItem::Operand(Expression::int(
-                1,
-                test_source_location(1),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
+            ExpressionRpnItem::Operand(Expression::int(1, None, ValueMode::ImmutableOwned)),
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
-                location: test_source_location(1),
                 span: None,
             },
-            ExpressionRpnItem::Operand(Expression::int(
-                2,
-                test_source_location(1),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
+            ExpressionRpnItem::Operand(Expression::int(2, None, ValueMode::ImmutableOwned)),
         ],
     };
-    let runtime_expr = Expression::runtime(
+    let runtime_expr = Expression::runtime_with_type_id(
         rpn,
         DataType::Int,
-        test_source_location(1),
+        builtin_type_ids::INT,
+        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -527,37 +496,33 @@ fn rpn_with_bound_reference_operand_returns_owned() {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str("counter", &mut string_table);
 
-    let binding_value =
-        Expression::int(5, test_source_location(2), None, ValueMode::ImmutableOwned);
+    let binding_value = Expression::int(5, None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {
         path: path.clone(),
         value: binding_value,
     }];
     let rpn = ExpressionRpn {
         items: vec![
-            ExpressionRpnItem::Operand(Expression::reference(
+            ExpressionRpnItem::Operand(Expression::reference_with_type_id(
                 path,
                 DataType::Int,
-                test_source_location(1),
+                builtin_type_ids::INT,
+                None,
                 ValueMode::ImmutableOwned,
+                ConstRecordState::RuntimeValue,
             )),
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
-                location: test_source_location(1),
                 span: None,
             },
-            ExpressionRpnItem::Operand(Expression::int(
-                1,
-                test_source_location(1),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
+            ExpressionRpnItem::Operand(Expression::int(1, None, ValueMode::ImmutableOwned)),
         ],
     };
-    let runtime_expr = Expression::runtime(
+    let runtime_expr = Expression::runtime_with_type_id(
         rpn,
         DataType::Int,
-        test_source_location(1),
+        builtin_type_ids::INT,
+        None,
         ValueMode::ImmutableOwned,
     );
 

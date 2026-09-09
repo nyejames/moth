@@ -27,7 +27,6 @@ use crate::compiler_frontend::semantic_identity::{GeneratedFunctionIdentity, Ori
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashMap;
 
@@ -129,7 +128,6 @@ impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
 pub(crate) struct CanonicalGeneratedRequest {
     pub(crate) identity: GeneratedFunctionIdentity,
     pub(crate) function_name: Option<StringId>,
-    pub(crate) call_location: SourceLocation,
     pub(crate) call_span: Option<SourceSpan>,
 }
 
@@ -219,13 +217,12 @@ pub(crate) fn install_generated_request_contracts(
                 .type_environment
                 .intern_fallible_carrier(success_type_id, error_type_id)
         });
-        let summary = bootstrap_call_summary_from_signature(&signature);
         identities.push(CanonicalGeneratedRequest {
             identity: identity.clone(),
             function_name: request.key.function_path.name(),
-            call_location: request.call_location.clone(),
             call_span: request.call_span,
         });
+        let summary = bootstrap_call_summary_from_signature(&signature);
         let contract = AstImportedFunctionContract {
             target: SourceFunctionTarget::Generated {
                 identity,

@@ -46,42 +46,60 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parsed_ref_to_data_type,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 /// Resolve a parsed type annotation through the parsed-ref-aware path.
 ///
 /// WHAT: folds fixed-collection capacity syntax, projects completed type aliases to their
 ///       required target identity, and produces canonical `TypeId` identity.
 /// WHY: this is the semantic entry point for all type annotations that start as
-///      `ParsedTypeRef`; it must not hide capacity folding inside `parsed_ref_to_data_type`.
 pub(crate) fn resolve_parsed_type_annotation(
     source_ref: ParsedTypeRef,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
-    resolve_parsed_type_annotation_inner(source_ref, location, context, string_table, scope_context)
+    resolve_parsed_type_annotation_inner(source_ref, span, context, string_table, scope_context)
 }
 
+fn parsed_type_ref_span(source_ref: &ParsedTypeRef) -> Option<SourceSpan> {
+    match source_ref {
+        ParsedTypeRef::Inferred => None,
+        ParsedTypeRef::Named { span, .. }
+        | ParsedTypeRef::Qualified { span, .. }
+        | ParsedTypeRef::Applied { span, .. }
+        | ParsedTypeRef::BuiltinBool { span, .. }
+        | ParsedTypeRef::BuiltinInt { span, .. }
+        | ParsedTypeRef::BuiltinFloat { span, .. }
+        | ParsedTypeRef::BuiltinString { span, .. }
+        | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::This { span, .. }
+        | ParsedTypeRef::Collection { span, .. }
+        | ParsedTypeRef::Map { span, .. }
+        | ParsedTypeRef::Optional { span, .. } => *span,
+    }
+}
 fn resolve_parsed_type_annotation_inner(
     source_ref: ParsedTypeRef,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &mut StringTable,
     scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
+    let source_ref_span = parsed_type_ref_span(&source_ref);
+
     match &source_ref {
         ParsedTypeRef::Collection {
             element,
             fixed_capacity,
-            location: collection_location,
             ..
         } => {
             let element_annotation = resolve_parsed_type_annotation_inner(
                 *element.clone(),
-                collection_location,
+                source_ref_span.or(span),
                 context,
                 string_table,
                 scope_context,
@@ -111,12 +129,12 @@ fn resolve_parsed_type_annotation_inner(
                             if is_non_constant_because_no_scope {
                                 return fallback_parsed_ref_to_data_type(
                                     source_ref,
-                                    location,
+                                    source_ref_span.or(span),
                                     context,
                                     string_table,
                                 );
                             }
-                            return Err(diagnostic.into_boxed());
+                            return Err(diagnostic.into_diagnostic());
                         }
                     }
                 }
@@ -138,33 +156,28 @@ fn resolve_parsed_type_annotation_inner(
             });
         }
 
-        ParsedTypeRef::Map {
-            key,
-            value,
-            location: map_location,
-            ..
-        } => {
+        ParsedTypeRef::Map { key, value, .. } => {
             // Validate inline nesting depth before resolution.
             let nesting_depth = map_nesting_depth(&source_ref);
             if nesting_depth > 2 {
-                return Err(Box::new(CompilerDiagnostic::invalid_map_type(
+                return Err(CompilerDiagnostic::invalid_map_type(
                     InvalidMapTypeReason::ExcessiveInlineNesting {
                         depth: nesting_depth,
                     },
-                    map_location.clone(),
-                )));
+                    source_ref_span.or(span),
+                ));
             }
 
             let key_annotation = resolve_parsed_type_annotation_inner(
                 *key.clone(),
-                map_location,
+                source_ref_span.or(span),
                 context,
                 string_table,
                 scope_context,
             )?;
             let value_annotation = resolve_parsed_type_annotation_inner(
                 *value.clone(),
-                map_location,
+                source_ref_span.or(span),
                 context,
                 string_table,
                 scope_context,
@@ -174,7 +187,7 @@ fn resolve_parsed_type_annotation_inner(
             let value_id = value_annotation.type_id.unwrap_or(builtin_type_ids::NONE);
 
             // Enforce the scalar-key policy for first-class ordered maps.
-            validate_map_key_type(key_id, context.type_environment, map_location)?;
+            validate_map_key_type(key_id, context.type_environment, source_ref_span.or(span))?;
 
             let type_id = context.type_environment.intern_map(key_id, value_id);
             let diagnostic_type = DataType::GenericInstance {
@@ -212,7 +225,7 @@ fn resolve_parsed_type_annotation_inner(
         _ => {}
     }
 
-    fallback_parsed_ref_to_data_type(source_ref, location, context, string_table)
+    fallback_parsed_ref_to_data_type(source_ref, source_ref_span.or(span), context, string_table)
 }
 
 /// Fallback path for parsed type annotations that do not need custom handling.
@@ -221,12 +234,12 @@ fn resolve_parsed_type_annotation_inner(
 ///       `resolve_type`, preserving the existing behavior for non-collection types.
 fn fallback_parsed_ref_to_data_type(
     source_ref: ParsedTypeRef,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
     let diagnostic_type = parsed_ref_to_data_type(&source_ref);
-    let resolved_diagnostic_type = resolve_type(&diagnostic_type, location, context, string_table)?;
+    let resolved_diagnostic_type = resolve_type(&diagnostic_type, span, context, string_table)?;
 
     let type_id = if matches!(resolved_diagnostic_type, DataType::Inferred) {
         None
@@ -234,7 +247,7 @@ fn fallback_parsed_ref_to_data_type(
         Some(resolve_diagnostic_type_to_type_id_checked(
             &resolved_diagnostic_type,
             context.type_environment,
-            location,
+            span,
         )?)
     };
 
@@ -274,43 +287,41 @@ pub(crate) fn resolve_diagnostic_type_to_type_id(
 pub(crate) fn resolve_diagnostic_type_to_type_id_checked(
     data_type: &DataType,
     type_environment: &mut TypeEnvironment,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> TypeResolutionResult<TypeId> {
     resolve_diagnostic_type_to_type_id_opt(data_type, type_environment)
-        .ok_or_else(|| Box::new(unresolved_type_id_diagnostic(data_type, location)))
+        .ok_or_else(|| unresolved_type_id_diagnostic(data_type, span))
 }
 
 fn unresolved_type_id_diagnostic(
     data_type: &DataType,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     match data_type {
-        DataType::NamedType(name) => {
-            CompilerDiagnostic::unknown_type_name(*name, location.to_owned())
-        }
+        DataType::NamedType(name) => CompilerDiagnostic::unknown_type_name(*name, span),
         DataType::NamespacedType { path } => {
             if let Some(name) = path.last().copied() {
-                CompilerDiagnostic::unknown_type_name(name, location.to_owned())
+                CompilerDiagnostic::unknown_type_name(name, span)
             } else {
                 CompilerDiagnostic::invalid_type_annotation(
                     TypeAnnotationContext::DeclarationTarget,
                     InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                        found: TokenKind::Eof,
+                        found: TokenKind::Eof.into(),
                     },
-                    location.to_owned(),
+                    span,
                 )
             }
         }
         DataType::GenericInstance {
             base: GenericBaseType::Named(name),
             ..
-        } => CompilerDiagnostic::unknown_type_name(*name, location.to_owned()),
+        } => CompilerDiagnostic::unknown_type_name(*name, span),
         _ => CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
-                found: TokenKind::Eof,
+                found: TokenKind::Eof.into(),
             },
-            location.to_owned(),
+            span,
         ),
     }
 }
@@ -466,7 +477,7 @@ pub(crate) fn returns_diagnostic_type_to_type_id_opt(
 
 pub(crate) fn resolve_type(
     data_type: &DataType,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<DataType> {
@@ -474,16 +485,16 @@ pub(crate) fn resolve_type(
 
     match data_type {
         DataType::NamedType(type_name) => {
-            resolve_named_type_from_context(*type_name, location, context, string_table)
+            resolve_named_type_from_context(*type_name, span, context, string_table)
         }
 
         DataType::TypeParameter { .. } => Ok(data_type.to_owned()),
         DataType::GenericInstance { base, arguments } => {
             let resolved_base =
-                resolve_generic_base_type(base, arguments, location, context, string_table)?;
+                resolve_generic_base_type(base, arguments, span, context, string_table)?;
             let mut resolved_arguments = Vec::with_capacity(arguments.len());
             for argument in arguments {
-                resolved_arguments.push(resolve_type(argument, location, context, string_table)?);
+                resolved_arguments.push(resolve_type(argument, span, context, string_table)?);
             }
 
             if matches!(
@@ -494,9 +505,9 @@ pub(crate) fn resolve_type(
                 let key_id = resolve_diagnostic_type_to_type_id_checked(
                     key_type,
                     context.type_environment,
-                    location,
+                    span,
                 )?;
-                validate_map_key_type(key_id, context.type_environment, location)?;
+                validate_map_key_type(key_id, context.type_environment, span)?;
             }
 
             // Attempt lazy instantiation for user-declared generic structs/choices.
@@ -508,7 +519,7 @@ pub(crate) fn resolve_type(
                     base_path,
                     kind,
                     &resolved_arguments,
-                    location,
+                    span,
                     context,
                 )?
             {
@@ -521,21 +532,21 @@ pub(crate) fn resolve_type(
             })
         }
         DataType::Option(inner) => {
-            let resolved_inner = resolve_type(inner, location, context, string_table)?;
-            reject_nested_option_type(&resolved_inner, location)?;
+            let resolved_inner = resolve_type(inner, span, context, string_table)?;
+            reject_nested_option_type(&resolved_inner, span)?;
 
             Ok(DataType::Option(Box::new(resolved_inner)))
         }
         DataType::Returns(values) => {
             let mut resolved_values = Vec::with_capacity(values.len());
             for value in values {
-                resolved_values.push(resolve_type(value, location, context, string_table)?);
+                resolved_values.push(resolve_type(value, span, context, string_table)?);
             }
             Ok(DataType::Returns(resolved_values))
         }
         DataType::FallibleCarrier { success, error } => Ok(DataType::fallible_carrier(
-            resolve_type(success, location, context, string_table)?,
-            resolve_type(error, location, context, string_table)?,
+            resolve_type(success, span, context, string_table)?,
+            resolve_type(error, span, context, string_table)?,
         )),
         DataType::Function(receiver, signature) => {
             let resolved_receiver = receiver
@@ -547,15 +558,14 @@ pub(crate) fn resolve_type(
             for parameter in &mut resolved_signature.parameters {
                 parameter.value.diagnostic_type = resolve_type(
                     &parameter.value.diagnostic_type,
-                    &parameter.value.location,
+                    parameter.value.span.or(span),
                     context,
                     string_table,
                 )?;
             }
 
             for return_slot in &mut resolved_signature.returns {
-                return_slot.value =
-                    resolve_type(&return_slot.value, location, context, string_table)?;
+                return_slot.value = resolve_type(&return_slot.value, span, context, string_table)?;
             }
 
             Ok(DataType::Function(
@@ -564,7 +574,7 @@ pub(crate) fn resolve_type(
             ))
         }
         DataType::NamespacedType { path } => {
-            resolve_namespaced_type_from_context(path, location, context)
+            resolve_namespaced_type_from_context(path, span, context)
         }
 
         DataType::Struct { .. } | DataType::Choices { .. } => {
@@ -578,7 +588,7 @@ pub(crate) fn resolve_type(
                 let mut resolved_parameter = parameter.to_owned();
                 resolved_parameter.value.diagnostic_type = resolve_type(
                     &parameter.value.diagnostic_type,
-                    &parameter.value.location,
+                    parameter.value.span.or(span),
                     context,
                     string_table,
                 )?;
@@ -593,14 +603,14 @@ pub(crate) fn resolve_type(
 
 fn reject_nested_option_type(
     resolved_inner: &DataType,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> TypeResolutionResult<()> {
     if matches!(resolved_inner, DataType::Option(_)) {
-        return Err(Box::new(CompilerDiagnostic::invalid_type_annotation(
+        return Err(CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::NestedOptional,
-            location.to_owned(),
-        )));
+            span,
+        ));
     }
 
     Ok(())

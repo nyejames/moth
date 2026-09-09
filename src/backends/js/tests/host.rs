@@ -28,7 +28,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(1, "hello", types.string, RegionId(0)),
         },
-        1,
     );
 
     let call_statement = statement(
@@ -44,7 +43,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
             )],
             result: None,
         },
-        2,
     );
 
     let block = HirBlock {
@@ -76,7 +74,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            emit_locations: false,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -135,7 +132,6 @@ fn auto_invokes_start_function_when_enabled() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            emit_locations: false,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),

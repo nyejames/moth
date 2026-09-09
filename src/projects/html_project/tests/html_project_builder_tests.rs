@@ -31,7 +31,6 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::resource_output_plan::ResourceUseKind;
 use crate::projects::html_project::tests::test_support::{
@@ -96,7 +95,7 @@ fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
 
 fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
     assert!(
-        messages.first_infrastructure_error_for_tests().is_none(),
+        messages.infrastructure_error().is_none(),
         "project policy failures should stay as typed config diagnostics"
     );
 
@@ -240,10 +239,10 @@ fn shared_resource_origin_defers_one_output_file_across_pages() {
         module
             .executable
             .resource_table
-            .intern_origin(resource_origin.clone(), SourceLocation::default());
+            .intern_origin(resource_origin.clone(), None);
         module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
             runtime_insertion_index: 0,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                 resource_origin.clone(),
             )]),
@@ -301,7 +300,6 @@ fn resource_destination_collision_preflights_before_read() {
     resource_output_plan
         .plan_origin(
             origin,
-            SourceLocation::default(),
             None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
@@ -363,7 +361,6 @@ fn missing_module_source_preflights_before_reading_other_records() {
         resource_output_plan
             .plan_origin(
                 origin,
-                SourceLocation::default(),
                 None,
                 ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
                 &mut string_table,
@@ -414,7 +411,6 @@ fn successful_resource_emit_reads_and_writes_bytes() {
     resource_output_plan
         .plan_origin(
             origin,
-            SourceLocation::default(),
             None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
@@ -462,7 +458,6 @@ fn successful_resource_emit_reads_and_writes_bytes() {
                 builder: BuilderKind::Html,
                 profile: BuildProfile::Dev,
             },
-            setting_location: SourceLocation::default(),
             setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
@@ -549,7 +544,7 @@ fn emits_const_fragment_and_calls_start() {
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
-        location: SourceLocation::default(),
+        span: None,
         value: OwnedFoldedString::Text(String::from("<meta charset=\"utf-8\">")),
     }];
 
@@ -672,7 +667,6 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
                 builder: BuilderKind::Html,
                 profile: BuildProfile::Dev,
             },
-            setting_location: SourceLocation::default(),
             setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,

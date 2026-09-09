@@ -37,13 +37,10 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
-use crate::compiler_frontend::source::{
-    LocalSpan, SourceDatabase, SourceId, SourceSlot, SourceSpan,
-};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -227,19 +224,13 @@ pub(crate) struct ModuleSymbols {
 
     // Order-independent maps built during header parsing.
     pub(crate) canonical_source_by_symbol_path: FxHashMap<InternedPath, InternedPath>,
-    // Authored declaration-name locations keyed by canonical symbol path. These remain local to
-    // header/binding preparation; public interfaces convert them to portable diagnostic
-    // provenance before crossing a module boundary.
-    pub(crate) declaration_locations_by_symbol_path: FxHashMap<InternedPath, SourceLocation>,
-    /// Exact authored declaration-name spans keyed by the same canonical symbol path.
+    /// Exact authored declaration-name spans keyed by canonical symbol path.
     ///
-    /// WHAT: carries the source-owned header anchor into binding collision diagnostics.
-    /// WHY: the legacy location remains the display bridge, while this map keeps the exact byte
-    /// range available to the first downstream symbol consumer.
+    /// WHAT: carries source-owned declaration anchors into binding collision diagnostics.
+    /// WHY: declaration provenance is a byte range and remains source-qualified until a
+    ///      diagnostic crosses the module boundary.
     pub(crate) declaration_spans_by_symbol_path: FxHashMap<InternedPath, SourceSpan>,
     pub(crate) module_file_paths: FxHashSet<InternedPath>,
-    // Per-file metadata is recorded for every prepared file, including dependency-only root files that
-    // produce no declaration headers.
     pub(crate) file_roles_by_source: FxHashMap<InternedPath, FileRole>,
     pub(crate) source_ids_by_source: FxHashMap<InternedPath, SourceId>,
     pub(crate) file_dependency_clauses_by_source:
@@ -336,7 +327,6 @@ impl ModuleSymbols {
             compiler_owned_declarations: Vec::new(),
             builtin_declarations: Vec::new(),
             canonical_source_by_symbol_path: FxHashMap::default(),
-            declaration_locations_by_symbol_path: FxHashMap::default(),
             declaration_spans_by_symbol_path: FxHashMap::default(),
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
@@ -437,21 +427,18 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 let data_type = DataType::Function(Box::new(None), FunctionSignature::default());
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
-                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
-            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.tokens.src_path,
             declaration,
-            &header.name_location,
-            header.tokens.file_id,
             header.name_span,
         )),
         HeaderKind::Struct { .. } => Some(Declaration {
@@ -463,14 +450,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 );
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
-                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
-            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
@@ -483,14 +469,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 };
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
-                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
-            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::StartFunction => {
@@ -513,8 +498,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     );
                     Expression::new(
                         ExpressionKind::NoValue,
-                        header.name_location.to_owned(),
-                        Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+                        header.name_span,
                         type_id_hint_for_diagnostic_type(&data_type),
                         data_type,
                         ValueMode::ImmutableReference,
@@ -535,9 +519,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
 fn constant_declaration_placeholder(
     path: &InternedPath,
     declaration: &DeclarationSyntax,
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
-    file_id: SourceId,
-    name_span: LocalSpan,
+    name_span: Option<SourceSpan>,
 ) -> Declaration {
     Declaration {
         id: path.to_owned(),
@@ -545,14 +527,13 @@ fn constant_declaration_placeholder(
             let data_type = parsed_ref_to_data_type(&declaration.semantic_type());
             Expression::new(
                 ExpressionKind::NoValue,
-                location.to_owned(),
-                Some(SourceSpan::new(file_id, name_span)),
+                name_span,
                 type_id_hint_for_diagnostic_type(&data_type),
                 data_type,
                 declaration.value_mode(),
             )
         },
-        binding_span: Some(SourceSpan::new(file_id, name_span)),
+        binding_span: name_span,
         config_qualifier: None,
     }
 }

@@ -178,7 +178,6 @@ fn external_call_block(
                 args: vec![],
                 result: None,
             },
-            1,
         )],
         terminator: HirTerminator::Return(unit_expression(block_id, unit_type, RegionId(block_id))),
     }

@@ -7,7 +7,6 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 #[test]
 fn fresh_marks_template_to_skip_parent_child_wrappers() {
@@ -91,18 +90,6 @@ fn children_directive_accepts_const_string_reference() {
         id: scope.append(prefix_name),
         value: Expression::string_slice(
             string_table.intern("prefix: "),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120,
-                },
-                ..Default::default()
-            },
             None,
             ValueMode::ImmutableOwned,
         ),
@@ -290,9 +277,4 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
             "expected InvalidChildrenArgument for $children argument ending at a template boundary, found {payload:?}"
         ),
     }
-    assert!(
-        !is_default_error_location(&error.primary_location),
-        "$children argument ending at a template boundary should carry a meaningful source location, got {:?}",
-        error.primary_location
-    );
 }

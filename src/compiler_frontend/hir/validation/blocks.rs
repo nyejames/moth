@@ -90,30 +90,30 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .ast_source_id_for_hir(statement_location)
+            .ast_span_for_hir(statement_location)
             .is_none()
         {
-            return Err(self.error_with_text_location(
+            return Err(self.error_with_hir(
                 format!(
                     "Statement {} is missing AST->HIR side-table mapping",
                     statement.id
                 ),
-                &statement.location,
+                Some(statement_location),
             ));
         }
 
         if self
             .module
             .side_table
-            .hir_source_id_for_hir(statement_location)
+            .hir_source_span_for_hir(statement_location)
             .is_none()
         {
-            return Err(self.error_with_text_location(
+            return Err(self.error_with_hir(
                 format!(
                     "Statement {} is missing HIR source side-table mapping",
                     statement.id
                 ),
-                &statement.location,
+                Some(statement_location),
             ));
         }
 
@@ -128,7 +128,7 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .ast_source_id_for_hir(terminator_location)
+            .ast_span_for_hir(terminator_location)
             .is_none()
         {
             return Err(self.error_with_hir(
@@ -140,7 +140,7 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .hir_source_id_for_hir(terminator_location)
+            .hir_source_span_for_hir(terminator_location)
             .is_none()
         {
             return Err(self.error_with_hir(

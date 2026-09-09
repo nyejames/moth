@@ -21,13 +21,13 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 
 fn test_template_ir_store() -> Rc<RefCell<TemplateIrStore>> {
@@ -84,7 +84,7 @@ fn cast_expression(
     type_environment: &mut TypeEnvironment,
 ) -> Expression {
     let source_type_id = source.type_id;
-    let location = source.location.clone();
+    let span = source.span;
     let cast = ResolvedCastExpression {
         source: Box::new(source),
         source_type_id,
@@ -93,8 +93,7 @@ fn cast_expression(
         requires_optional_wrap_after_cast,
         evidence,
         handling,
-        location,
-        span: None,
+        span,
     };
 
     let result_type_id = if requires_optional_wrap_after_cast {
@@ -215,7 +214,6 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
     let rhs = Expression::string_slice(
         string_table.intern("plain"),
         Default::default(),
-        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -251,12 +249,10 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
         ExpressionRpnItem::Operand(Expression::string_slice(
             string_table.intern("plain"),
             Default::default(),
-            None,
             ValueMode::ImmutableOwned,
         )),
         ExpressionRpnItem::Operator {
             operator: Operator::Equality,
-            location: Default::default(),
             span: None,
         },
     ];
@@ -292,23 +288,20 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
         ExpressionRpnItem::Operand(Expression::string_slice(
             string_table.intern("plain"),
             Default::default(),
-            None,
             ValueMode::ImmutableOwned,
         )),
         ExpressionRpnItem::Operator {
             operator: Operator::Equality,
-            location: Default::default(),
             span: None,
         },
         ExpressionRpnItem::Operand(Expression::reference(
             flag,
             DataType::Bool,
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableReference,
         )),
         ExpressionRpnItem::Operator {
             operator: Operator::And,
-            location: Default::default(),
             span: None,
         },
     ];
@@ -345,13 +338,11 @@ fn evaluate_operator_rejects_string_concatenation() {
     let lhs = Expression::string_slice(
         string_table.intern("moth"),
         Default::default(),
-        None,
         ValueMode::ImmutableOwned,
     );
     let rhs = Expression::string_slice(
         string_table.intern("ball"),
         Default::default(),
-        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -369,8 +360,8 @@ fn evaluate_operator_rejects_string_concatenation() {
 #[test]
 fn evaluate_operator_rejects_negative_integer_exponent() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::int(-1, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table)
@@ -386,8 +377,8 @@ fn evaluate_operator_rejects_negative_integer_exponent() {
 #[test]
 fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::bool(true, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::bool(true, Default::default(), ValueMode::ImmutableOwned);
 
     let result = lhs
         .evaluate_operator(&rhs, &Operator::Add, &mut string_table)
@@ -399,8 +390,8 @@ fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
 #[test]
 fn evaluate_operator_divides_ints_to_float() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(5, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
     let result =
         expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Divide, &mut string_table));
@@ -419,8 +410,8 @@ fn evaluate_operator_divides_ints_to_float() {
 #[test]
 fn evaluate_operator_integer_division_truncates_toward_zero() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(-5, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(-5, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
     let result = expect_folded_operator(lhs.evaluate_operator(
         &rhs,
@@ -435,8 +426,8 @@ fn evaluate_operator_integer_division_truncates_toward_zero() {
 #[test]
 fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(5, Default::default(), None, ValueMode::ImmutableOwned);
-    let zero = Expression::int(0, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
+    let zero = Expression::int(0, Default::default(), ValueMode::ImmutableOwned);
 
     let divide_error = lhs
         .evaluate_operator(&zero, &Operator::Divide, &mut string_table)
@@ -462,13 +453,8 @@ fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
 #[test]
 fn evaluate_operator_rejects_integer_add_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(
-        i32::MAX,
-        Default::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(1, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(i32::MAX, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Add, &mut string_table)
@@ -484,13 +470,8 @@ fn evaluate_operator_rejects_integer_add_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_subtract_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(
-        i32::MIN,
-        Default::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(1, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Subtract, &mut string_table)
@@ -506,13 +487,8 @@ fn evaluate_operator_rejects_integer_subtract_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_multiply_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(
-        i32::MAX,
-        Default::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(i32::MAX, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Multiply, &mut string_table)
@@ -528,8 +504,8 @@ fn evaluate_operator_rejects_integer_multiply_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_exponent_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::int(31, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(31, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table)
@@ -545,13 +521,8 @@ fn evaluate_operator_rejects_integer_exponent_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_division_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(
-        i32::MIN,
-        Default::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(-1, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::IntDivide, &mut string_table)
@@ -567,13 +538,8 @@ fn evaluate_operator_rejects_integer_division_overflow() {
 #[test]
 fn evaluate_operator_rejects_integer_modulus_overflow() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(
-        i32::MIN,
-        Default::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(-1, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(i32::MIN, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Modulus, &mut string_table)
@@ -589,8 +555,8 @@ fn evaluate_operator_rejects_integer_modulus_overflow() {
 #[test]
 fn evaluate_operator_rejects_non_finite_float_exponent_result() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::float(1.0e308, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::float(2.0, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table)
@@ -606,8 +572,8 @@ fn evaluate_operator_rejects_non_finite_float_exponent_result() {
 #[test]
 fn evaluate_operator_rejects_non_finite_float_multiply_result() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::float(1.0e308, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::float(1.0e308, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Multiply, &mut string_table)
@@ -624,12 +590,7 @@ fn evaluate_operator_rejects_non_finite_float_multiply_result() {
 fn constant_fold_rejects_integer_unary_negation_overflow() {
     let mut string_table = StringTable::new();
     let nodes = vec![
-        rvalue_item(Expression::int(
-            i32::MIN,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        rvalue_item(Expression::int(i32::MIN, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::Negate),
     ];
 
@@ -646,8 +607,8 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
 #[test]
 fn evaluate_operator_rejects_float_modulo_by_zero() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::float(1.0, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::float(0.0, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::float(1.0, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::float(0.0, Default::default(), ValueMode::ImmutableOwned);
 
     let error = lhs
         .evaluate_operator(&rhs, &Operator::Modulus, &mut string_table)
@@ -663,8 +624,8 @@ fn evaluate_operator_rejects_float_modulo_by_zero() {
 #[test]
 fn evaluate_operator_folds_mixed_int_float_addition() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(2, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::float(1.5, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::float(1.5, Default::default(), ValueMode::ImmutableOwned);
 
     let result =
         expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Add, &mut string_table));
@@ -679,8 +640,8 @@ fn evaluate_operator_folds_mixed_int_float_addition() {
 #[test]
 fn evaluate_operator_folds_mixed_int_float_division() {
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(5, Default::default(), None, ValueMode::ImmutableOwned);
-    let rhs = Expression::float(2.0, Default::default(), None, ValueMode::ImmutableOwned);
+    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
+    let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
 
     let result =
         expect_folded_operator(lhs.evaluate_operator(&rhs, &Operator::Divide, &mut string_table));
@@ -698,21 +659,11 @@ fn constant_fold_reports_static_failure_inside_runtime_expression() {
     let runtime_var = Expression::reference(
         InternedPath::from_single_str("runtime_var", &mut string_table),
         DataType::Int,
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
     );
-    let one = Expression::int(
-        1,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let zero = Expression::int(
-        0,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let one = Expression::int(1, None, ValueMode::ImmutableOwned);
+    let zero = Expression::int(0, None, ValueMode::ImmutableOwned);
 
     let nodes = vec![
         rvalue_item(runtime_var),
@@ -738,21 +689,11 @@ fn constant_fold_partially_folds_runtime_expression() {
     let runtime_var = Expression::reference(
         InternedPath::from_single_str("runtime_var", &mut string_table),
         DataType::Int,
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
     );
-    let two = Expression::int(
-        2,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let three = Expression::int(
-        3,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let two = Expression::int(2, None, ValueMode::ImmutableOwned);
+    let three = Expression::int(3, None, ValueMode::ImmutableOwned);
 
     let nodes = vec![
         rvalue_item(runtime_var),
@@ -855,8 +796,7 @@ fn fold_string_to_int_cast_uses_string_policy_row() {
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("42".to_string());
-    let source =
-        Expression::string_slice(text, Default::default(), None, ValueMode::ImmutableOwned);
+    let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
 
     let cast = cast_expression(
@@ -884,8 +824,7 @@ fn fold_string_to_float_cast_uses_string_policy_row() {
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("3.5e2".to_string());
-    let source =
-        Expression::string_slice(text, Default::default(), None, ValueMode::ImmutableOwned);
+    let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().float;
 
     let cast = cast_expression(
@@ -914,7 +853,6 @@ fn rvalue_item(expression: Expression) -> ExpressionRpnItem {
 fn operator_item(operator: Operator) -> ExpressionRpnItem {
     ExpressionRpnItem::Operator {
         operator,
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -923,25 +861,10 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 fn constant_fold_folds_comparison_then_boolean_chain() {
     let mut string_table = StringTable::new();
     let nodes = vec![
-        rvalue_item(Expression::int(
-            1,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
-        rvalue_item(Expression::int(
-            2,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::LessThan),
-        rvalue_item(Expression::bool(
-            true,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        rvalue_item(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::And),
     ];
 
@@ -960,12 +883,7 @@ fn constant_fold_folds_comparison_then_boolean_chain() {
 fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
     let mut string_table = StringTable::new();
     let nodes = vec![
-        rvalue_item(Expression::int(
-            1,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::Not),
     ];
 
@@ -995,15 +913,10 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
         rvalue_item(Expression::reference(
             flag_name,
             DataType::Bool,
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableReference,
         )),
-        rvalue_item(Expression::bool(
-            true,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        rvalue_item(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::And),
     ];
 
@@ -1033,49 +946,41 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
     ));
 }
 
-/// Build a source location that is distinguishable from every other one in a test.
-fn marked_location(line: i32, string_table: &mut StringTable) -> SourceLocation {
-    SourceLocation::new(
-        InternedPath::from_single_str("provenance_probe", string_table),
-        CharPosition {
-            line_number: line,
-            char_column: line * 10,
-        },
-        CharPosition {
-            line_number: line,
-            char_column: line * 10 + 4,
-        },
+/// Build a source span that is distinguishable from every other one in a test.
+fn marked_span(start: u32) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::from_index(7),
+        LocalSpan::exact(start, 4, &mut span_builder).expect("provenance span should fit"),
     )
 }
 
 #[test]
 fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
     // Folding consumes its input, so a moved-back operand could silently become a
-    // reconstruction. Distinct locations and value modes on every input make that visible:
+    // reconstruction. Distinct spans and value modes on every input make that visible:
     // a rebuilt operand would carry defaults, not the values asserted below.
     let mut string_table = StringTable::new();
     let flag_name = InternedPath::from_single_str("flag", &mut string_table);
-    let flag_location = marked_location(7, &mut string_table);
-    let literal_location = marked_location(11, &mut string_table);
-    let operator_location = marked_location(23, &mut string_table);
+    let flag_span = marked_span(70);
+    let literal_span = marked_span(110);
+    let operator_span = marked_span(230);
 
     let nodes = vec![
         rvalue_item(Expression::reference(
             flag_name.clone(),
             DataType::Bool,
-            flag_location.clone(),
+            Some(flag_span),
             ValueMode::MutableReference,
         )),
         rvalue_item(Expression::bool(
             true,
-            literal_location.clone(),
-            None,
+            Some(literal_span),
             ValueMode::ImmutableOwned,
         )),
         ExpressionRpnItem::Operator {
             operator: Operator::And,
-            location: operator_location.clone(),
-            span: None,
+            span: Some(operator_span),
         },
     ];
 
@@ -1086,23 +991,20 @@ fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
     let ExpressionRpnItem::Operand(runtime_operand) = &folded[0] else {
         panic!("the runtime reference should stay an operand");
     };
-    assert_eq!(runtime_operand.location, flag_location);
+    assert_eq!(runtime_operand.span, Some(flag_span));
     assert_eq!(runtime_operand.value_mode, ValueMode::MutableReference);
 
     let ExpressionRpnItem::Operand(literal_operand) = &folded[1] else {
         panic!("the literal should stay an operand");
     };
-    assert_eq!(literal_operand.location, literal_location);
+    assert_eq!(literal_operand.span, Some(literal_span));
     assert_eq!(literal_operand.value_mode, ValueMode::ImmutableOwned);
 
-    let ExpressionRpnItem::Operator {
-        operator, location, ..
-    } = &folded[2]
-    else {
+    let ExpressionRpnItem::Operator { operator, span } = &folded[2] else {
         panic!("the unfoldable operator should be preserved");
     };
     assert_eq!(*operator, Operator::And);
-    assert_eq!(*location, operator_location);
+    assert_eq!(*span, Some(operator_span));
 }
 
 #[test]
@@ -1111,26 +1013,24 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     // their original order while the folded operand takes its own provenance from the fold.
     let mut string_table = StringTable::new();
     let counter_name = InternedPath::from_single_str("counter", &mut string_table);
-    let counter_location = marked_location(3, &mut string_table);
-    let left_literal_location = marked_location(5, &mut string_table);
+    let counter_span = marked_span(30);
+    let left_literal_span = marked_span(50);
 
     let nodes = vec![
         rvalue_item(Expression::reference(
             counter_name,
             DataType::Int,
-            counter_location.clone(),
+            Some(counter_span),
             ValueMode::ImmutableReference,
         )),
         rvalue_item(Expression::int(
             2,
-            left_literal_location.clone(),
-            None,
+            Some(left_literal_span),
             ValueMode::ImmutableOwned,
         )),
         rvalue_item(Expression::int(
             3,
-            marked_location(6, &mut string_table),
-            None,
+            Some(marked_span(60)),
             ValueMode::ImmutableOwned,
         )),
         operator_item(Operator::Add),
@@ -1144,7 +1044,7 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     let ExpressionRpnItem::Operand(moved) = &folded[0] else {
         panic!("the runtime reference should stay an operand");
     };
-    assert_eq!(moved.location, counter_location);
+    assert_eq!(moved.span, Some(counter_span));
 
     let ExpressionRpnItem::Operand(computed) = &folded[1] else {
         panic!("the constant half should fold to one operand");
@@ -1152,7 +1052,7 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     assert!(matches!(computed.kind, ExpressionKind::Int(5)));
     // The folded operand inherits the left operand's anchor, so the reduction stays
     // attributable to authored source rather than to a synthesized position.
-    assert_eq!(computed.location, left_literal_location);
+    assert_eq!(computed.span, Some(left_literal_span));
 }
 
 #[test]
@@ -1160,19 +1060,17 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
     // The single-result path hands the folded operand back by move. Its anchor must still be
     // the authored one, not a default produced by rebuilding the value.
     let mut string_table = StringTable::new();
-    let left_location = marked_location(13, &mut string_table);
+    let left_span = marked_span(130);
 
     let nodes = vec![
         rvalue_item(Expression::int(
             20,
-            left_location.clone(),
-            None,
+            Some(left_span),
             ValueMode::ImmutableOwned,
         )),
         rvalue_item(Expression::int(
             22,
-            marked_location(14, &mut string_table),
-            None,
+            Some(marked_span(140)),
             ValueMode::ImmutableOwned,
         )),
         operator_item(Operator::Add),
@@ -1185,7 +1083,7 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
         panic!("a fully folded expression should be one operand");
     };
     assert!(matches!(result.kind, ExpressionKind::Int(42)));
-    assert_eq!(result.location, left_location);
+    assert_eq!(result.span, Some(left_span));
 }
 
 #[test]
@@ -1193,12 +1091,7 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
     let mut string_table = StringTable::new();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(
-        42,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
 
     let cast = cast_expression(
@@ -1261,12 +1154,7 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
     let mut string_table = StringTable::new();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(
-        7,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::int(7, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
 
     let cast = cast_expression(
@@ -1306,12 +1194,7 @@ fn fold_cast_fallible_string_to_int_success_folds_to_int() {
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
 
     let cast = cast_expression(
@@ -1339,12 +1222,7 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("not a number".to_string());
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
 
     let cast = cast_expression(
@@ -1370,12 +1248,7 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(
-        42,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
     let method_path = InternedPath::from_single_str("to_string", &mut string_table);
 
@@ -1406,12 +1279,7 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(
-        42,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
 
     let cast = cast_expression(
@@ -1437,15 +1305,14 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
 }
 
 fn catch_handler_body(value: Expression) -> Vec<AstNode> {
-    let location = value.location.clone();
+    let span = value.span;
 
     vec![AstNode {
         kind: NodeKind::ThenValue(ProducedValues {
             expressions: vec![value],
-            location: location.clone(),
+            span,
         }),
-        location,
-        span: None,
+        span,
         scope: InternedPath::new(),
     }]
 }
@@ -1494,26 +1361,16 @@ fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
         "render",
         "fallback",
     );
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
-    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-        source_member.clone(),
-    ));
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned)
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+            source_member.clone(),
+        ));
     let target_type_id = type_environment.builtins().int;
-    let handler_value = Expression::int(
-        0,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
-    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::from_members(vec![
-        handler_member.clone(),
-        handler_member.clone(),
-    ]));
+    let handler_value = Expression::int(0, None, ValueMode::ImmutableOwned)
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::from_members(vec![
+            handler_member.clone(),
+            handler_member.clone(),
+        ]));
 
     let cast = fallible_builtin_cast_with_catch(
         source,
@@ -1551,23 +1408,13 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
         "render",
         "fallback",
     );
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
-    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-        source_member.clone(),
-    ));
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned)
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+            source_member.clone(),
+        ));
     let target_type_id = type_environment.builtins().int;
-    let handler_value = Expression::int(
-        999,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
-    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(handler_member));
+    let handler_value = Expression::int(999, None, ValueMode::ImmutableOwned)
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(handler_member));
 
     let cast = fallible_builtin_cast_with_catch(
         source,
@@ -1595,18 +1442,13 @@ fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() 
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
 
     let handler_value = Expression::reference(
         InternedPath::from_single_str("runtime_value", &mut string_table),
         DataType::Int,
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
     );
 
@@ -1631,12 +1473,7 @@ fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
 
     let cast = fallible_builtin_cast_with_catch(
@@ -1660,36 +1497,20 @@ fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
     let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(
-        text,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
-    let location = SourceLocation::default();
+    let span = None;
 
-    let then_body = catch_handler_body(Expression::int(
-        1,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    ));
-    let else_body = catch_handler_body(Expression::int(
-        2,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    ));
+    let then_body = catch_handler_body(Expression::int(1, None, ValueMode::ImmutableOwned));
+    let else_body = catch_handler_body(Expression::int(2, None, ValueMode::ImmutableOwned));
     let branching_handler = vec![AstNode {
         kind: NodeKind::If(
-            Expression::bool(false, location.clone(), None, ValueMode::ImmutableOwned),
+            Expression::bool(false, span, ValueMode::ImmutableOwned),
             then_body,
             Some(else_body),
             test_if_branch_metadata(true),
         ),
-        location,
-        span: None,
+        span,
         scope: InternedPath::new(),
     }];
 

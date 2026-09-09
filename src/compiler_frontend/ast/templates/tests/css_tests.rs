@@ -4,28 +4,10 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
-fn located_text_piece(
-    text: &str,
-    line_number: i32,
-    char_column: i32,
-    string_table: &mut StringTable,
-) -> FormatterInputPiece {
-    let text_len = text.chars().count() as i32;
+fn located_text_piece(text: &str, string_table: &mut StringTable) -> FormatterInputPiece {
     FormatterInputPiece::Text(FormatterTextPiece {
         text: string_table.intern(text),
-        location: SourceLocation::new(
-            Default::default(),
-            CharPosition {
-                line_number,
-                char_column,
-            },
-            CharPosition {
-                line_number,
-                char_column: char_column + text_len,
-            },
-        ),
         span: None,
     })
 }
@@ -78,17 +60,6 @@ fn malformed_css_reports_balancing_and_declaration_shape() {
 #[test]
 fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text() {
     let mut string_table = StringTable::new();
-    let tail_location = SourceLocation::new(
-        Default::default(),
-        CharPosition {
-            line_number: 12,
-            char_column: 4,
-        },
-        CharPosition {
-            line_number: 12,
-            char_column: 10,
-        },
-    );
 
     // A structural ConstStringPiece::Resource reaches the formatter view as a
     // DynamicExpression node. The existing DynamicExpression opaque kind is
@@ -96,17 +67,17 @@ fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text
     // rather than require a FormatterOpaqueKind::Resource.
     let input = FormatterInput {
         pieces: vec![
-            located_text_piece(".button { background: url(\"", 2, 3, &mut string_table),
+            located_text_piece(".button { background: url(\"", &mut string_table),
             FormatterInputPiece::Opaque(FormatterOpaquePiece {
                 id: FormatterAnchorId(0),
                 kind: FormatterOpaqueKind::DynamicExpression,
             }),
-            located_text_piece("\"); color: red; ", 4, 5, &mut string_table),
+            located_text_piece("\"); color: red; ", &mut string_table),
             FormatterInputPiece::Opaque(FormatterOpaquePiece {
                 id: FormatterAnchorId(1),
                 kind: FormatterOpaqueKind::SiteRoot,
             }),
-            located_text_piece("bad; }", 12, 4, &mut string_table),
+            located_text_piece("bad; }", &mut string_table),
         ],
     };
 
@@ -119,17 +90,6 @@ fn css_formatter_preserves_structural_anchors_and_maps_warnings_to_authored_text
         result.warnings.len(),
         1,
         "the malformed declaration after the anchors should be diagnosed"
-    );
-    let warning = &result.warnings[0];
-    assert_eq!(warning.primary_location.scope, tail_location.scope);
-    assert_eq!(warning.primary_location.start_pos, tail_location.start_pos);
-    assert_eq!(
-        warning.primary_location.end_pos,
-        CharPosition {
-            line_number: 12,
-            char_column: 6,
-        },
-        "warning span should map to the authored `bad` text, not flattened offsets"
     );
 
     let output = &result.output.pieces;

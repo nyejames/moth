@@ -11,14 +11,15 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::{eval_log, return_compiler_error};
 
-/// Order a parsed expression fragment into RPN and return the expression source location anchor.
+/// Order a parsed expression fragment into RPN and return its authored span anchor.
 pub(super) fn order_expression_nodes(
     nodes: Vec<ExpressionRpnItem>,
-) -> Result<(Vec<ExpressionRpnItem>, SourceLocation), CompilerError> {
+) -> Result<(Vec<ExpressionRpnItem>, Option<SourceSpan>), CompilerError> {
     if nodes.is_empty() {
         return_compiler_error!("No nodes found in expression. This should never happen.");
     }
@@ -30,7 +31,7 @@ pub(super) fn order_expression_nodes(
     // `(n - 1) / 2` operators, so the operator stack is bounded by half the input.
     let mut output_queue: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len());
     let mut operator_stack: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len() / 2);
-    let location = extract_expression_location(&nodes)?;
+    let span = extract_expression_span(&nodes)?;
 
     // The parser already handled parentheses recursively, so this pass only needs to order the
     // flat infix fragment by precedence and associativity before typing/folding it.
@@ -61,7 +62,7 @@ pub(super) fn order_expression_nodes(
         output_queue.push(operator);
     }
 
-    Ok((output_queue, location))
+    Ok((output_queue, span))
 }
 
 // Standard shunting-yard pop rule: earlier operators leave the stack when they bind at least
@@ -104,23 +105,23 @@ fn operator_from_item(item: &ExpressionRpnItem) -> Result<&Operator, CompilerErr
     Ok(operator)
 }
 
-/// Returns the source location of the first non-operator node in the fragment.
+/// Returns the authored span of the first non-operator node in the fragment.
 ///
-/// Falls back to the first node's location if every node is an operator.
-pub(super) fn extract_expression_location(
+/// Falls back to the first node's span if every node is an operator.
+pub(super) fn extract_expression_span(
     nodes: &[ExpressionRpnItem],
-) -> Result<SourceLocation, CompilerError> {
+) -> Result<Option<SourceSpan>, CompilerError> {
     if nodes.is_empty() {
         return_compiler_error!("No nodes found in expression. This should never happen.");
     }
 
-    // Skip operator nodes and return the location of the first expression node.
+    // Skip operator nodes and return the span of the first expression node.
     for node in nodes {
         if matches!(node, ExpressionRpnItem::Operand(_)) {
-            return Ok(node.source_location());
+            return Ok(node.source_span());
         }
     }
 
     // Fallback to first node if all nodes are operators (should not happen).
-    Ok(nodes[0].source_location())
+    Ok(nodes[0].source_span())
 }

@@ -9,7 +9,6 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind, Operator};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -71,23 +70,14 @@ impl ExpressionRpn {
 pub enum ExpressionRpnItem {
     /// An expression operand whose value is only known at runtime.
     Operand(Expression),
-    /// A symbolic or keyword operator with its source location preserved for diagnostics.
+    /// A symbolic or keyword operator with its exact source span preserved for diagnostics.
     Operator {
         operator: Operator,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     },
 }
 
 impl ExpressionRpnItem {
-    /// Source location of this RPN item.
-    pub fn source_location(&self) -> SourceLocation {
-        match self {
-            ExpressionRpnItem::Operand(expression) => expression.location.clone(),
-            ExpressionRpnItem::Operator { location, .. } => location.clone(),
-        }
-    }
-
     /// Exact authored span of this RPN item, if the owning file has an identity.
     pub fn source_span(&self) -> Option<SourceSpan> {
         match self {
@@ -109,7 +99,6 @@ pub struct PlaceExpression {
     pub type_id: TypeId,
     pub diagnostic_type: DataType,
     pub value_mode: ValueMode,
-    pub location: SourceLocation,
     pub span: Option<SourceSpan>,
 }
 

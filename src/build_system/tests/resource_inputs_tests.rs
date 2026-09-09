@@ -12,7 +12,6 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
 use std::path::Path;
 
@@ -73,9 +72,8 @@ fn live_source_hash_and_read_reuse_one_cached_filesystem_read() {
     attach_origin(&mut registry, origin("live.bin"), live_source)
         .expect("live resource origin should attach");
 
-    let mut string_table = StringTable::new();
     let content_hash = registry
-        .hash_source(live_source, &mut string_table)
+        .hash_source(live_source)
         .expect("live source should hash");
     assert!(matches!(
         registry.records()[live_source.index()].content(),
@@ -87,19 +85,19 @@ fn live_source_hash_and_read_reuse_one_cached_filesystem_read() {
     fs::remove_file(&live_path).expect("live source should be removable after the first read");
     assert_eq!(
         registry
-            .read_source(live_source, &mut string_table)
+            .read_source(live_source)
             .expect("read should use the cached hash bytes"),
         [7_u8, 8, 9]
     );
     assert_eq!(
         registry
-            .hash_source(live_source, &mut string_table)
+            .hash_source(live_source)
             .expect("repeated hashing should use the cached bytes"),
         content_hash
     );
     assert_eq!(
         registry
-            .read_source(live_source, &mut string_table)
+            .read_source(live_source)
             .expect("repeated reading should use the cached bytes"),
         [7_u8, 8, 9]
     );

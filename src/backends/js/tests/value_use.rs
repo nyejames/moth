@@ -55,7 +55,6 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
             region,
             ValueKind::RValue,
         )),
-        1,
     );
 
     let block = HirBlock {
@@ -120,7 +119,6 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(1, "hello", types.string, region),
         },
-        1,
     );
 
     let copy_to_field = statement(
@@ -138,7 +136,6 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
                 ValueKind::RValue,
             ),
         },
-        2,
     );
 
     let load_to_field = statement(
@@ -156,7 +153,6 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
                 ValueKind::RValue,
             ),
         },
-        3,
     );
 
     let block = HirBlock {
@@ -288,7 +284,6 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
             ],
             result: Some(LocalId(1)),
         },
-        1,
     );
 
     let caller_block = HirBlock {
@@ -387,7 +382,6 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
             )],
             result: None,
         },
-        1,
     );
 
     let copy_call = statement(
@@ -403,7 +397,6 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
             )],
             result: None,
         },
-        2,
     );
 
     let block = HirBlock {

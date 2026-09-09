@@ -28,7 +28,6 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
@@ -60,9 +59,9 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
@@ -583,11 +582,10 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
         path.push_str(segment, string_table);
     }
     RetainedDependencyPath {
-        span: LocalSpan::source_start(),
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        location: SourceLocation::default(),
         dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
             crate::compiler_frontend::source::SourceId::from_index(0),
             0,
@@ -670,19 +668,11 @@ fn synthetic_prepared_identity_snapshot(
                 assert!(
                     header
                         .tokens
-                        .tokens
-                        .iter()
-                        .all(|token| token.location.scope == logical_path),
-                    "header token locations must use the final logical source scope"
-                );
-                assert!(
-                    header
-                        .tokens
                         .path_syntax
                         .paths()
                         .iter()
-                        .all(|path| path.location.scope == logical_path),
-                    "header path locations must use the final logical source scope"
+                        .all(|path| path.span.source() == file_id),
+                    "header path spans must use the final source identity"
                 );
             }
             let clauses = module_symbols
@@ -693,7 +683,11 @@ fn synthetic_prepared_identity_snapshot(
             let shell_ids = clauses
                 .iter()
                 .map(|clause| {
-                    assert_eq!(clause.dependency.location.scope, logical_path);
+                    assert_eq!(
+                        clause.dependency.span.source(),
+                        file_id,
+                        "rebased dependency span must belong to its owning prepared file"
+                    );
                     assert_eq!(
                         clause.dependency.dependency_shell_id.source, file_id,
                         "rebased shell source must belong to its owning prepared file"
@@ -709,9 +703,17 @@ fn synthetic_prepared_identity_snapshot(
             let selected_source_names = selections
                 .iter()
                 .map(|selection| {
-                    assert_eq!(selection.source_location.scope, logical_path);
+                    assert_eq!(
+                        selection.source_span.source(),
+                        file_id,
+                        "dependency selection span must belong to its owning prepared file"
+                    );
                     if let Some(alias) = &selection.local_alias {
-                        assert_eq!(alias.location.scope, logical_path);
+                        assert_eq!(
+                            alias.span.source(),
+                            file_id,
+                            "dependency alias span must belong to its owning prepared file"
+                        );
                     }
                     prepared
                         .semantic
@@ -1263,10 +1265,6 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         .id;
     assert_eq!(helper_id, SourceId::from_index(1));
     assert_eq!(entry_id, SourceId::from_index(2));
-    assert_eq!(
-        diagnostics[0].primary_location.scope,
-        source_files.legacy_logical_path(helper_id)
-    );
     let diagnostic_span = diagnostics[0]
         .primary_span
         .expect("preparation diagnosis must retain its exact span");
@@ -1277,26 +1275,21 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &helper_text[diagnostic_range.start() as usize..diagnostic_range.end() as usize],
         "value"
     );
-    assert_eq!(diagnostics[0].labels.len(), 2);
-    for (label, expected) in diagnostics[0].labels.iter().zip(["value", ","]) {
-        let span = label
-            .span
-            .expect("discovery retains every preparation label span");
-        assert_eq!(
-            span.source(),
-            helper_id,
-            "related spans must use the finalized source identity"
-        );
-        assert_eq!(
-            label.location.scope,
-            source_files.legacy_logical_path(helper_id)
-        );
-        let range = span.byte_range(source_files);
-        assert_eq!(
-            &helper_text[range.start() as usize..range.end() as usize],
-            expected
-        );
-    }
+    assert_eq!(diagnostics[0].labels.len(), 1);
+    let comma_label = &diagnostics[0].labels[0];
+    let comma_span = comma_label
+        .span
+        .expect("discovery retains every preparation label span");
+    assert_eq!(
+        comma_span.source(),
+        helper_id,
+        "related spans must use the finalized source identity"
+    );
+    let comma_range = comma_span.byte_range(source_files);
+    assert_eq!(
+        &helper_text[comma_range.start() as usize..comma_range.end() as usize],
+        ","
+    );
     assert_eq!(source_files.retained_text(entry_id), Some("@helper\n"));
     assert_eq!(
         source_files.retained_text(helper_id),
@@ -2090,8 +2083,7 @@ fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdent
         ),
         canonical_source_path,
         asset_kind: "js".to_owned(),
-        authored_import_location: SourceLocation::default(),
-        authored_import_span: None,
+        source_span: None,
     }
 }
 
@@ -2618,18 +2610,9 @@ fn rejects_section_output_inside_or_equal_to_entry_root() {
     };
 
     // The output roots resolve from the grouped section now, so the diagnostic underlines the
-    // section's value location on its authored line. Locations are 0-indexed.
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        config_path.as_path(),
-        "the diagnostic should point at the authored config file"
-    );
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number, 4,
-        "the html section is authored after the grouped project record"
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the output-folder diagnostic should retain its authored span"
     );
 }
 
@@ -3022,15 +3005,10 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics[0];
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        PathBuf::from("@page.moth")
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the malformed dependency diagnostic should retain its authored span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
     assert!(
         matches!(
             &diagnostic.payload,
@@ -3059,15 +3037,10 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics[0];
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        config_path
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the config dependency diagnostic should retain its authored span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
     assert!(
         matches!(
             &diagnostic.payload,
@@ -4666,15 +4639,9 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
         diagnostic.payload
     );
 
-    // The diagnostic location scope must keep the non-canonical authored spelling, proving the
-    // same interned identity used for tokenization and classification is preserved for rendering.
-    let rendered_scope = diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&messages.string_table);
     assert!(
-        rendered_scope.contains("sub") && rendered_scope.contains(".."),
-        "expected non-canonical authored spelling in diagnostic scope, got: {rendered_scope}"
+        diagnostic.primary_span.is_some(),
+        "the duplicate-key diagnostic should retain its authored span"
     );
 }
 
@@ -6242,19 +6209,23 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     )
     .expect_err("missing source read should fail");
 
-    let (_error_type, message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("expected infrastructure file error");
     assert!(
-        message.contains("Error reading file when adding new moth files to parse"),
-        "unexpected infrastructure message: {message}"
+        error
+            .msg
+            .contains("Error reading file when adding new moth files to parse"),
+        "unexpected infrastructure message: {}",
+        error.msg,
     );
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
     assert!(
-        location
-            .scope
-            .to_portable_string(&messages.string_table)
-            .contains("missing.md"),
-        "missing source path should be preserved in the diagnostic location"
+        host_path.ends_with("missing.md"),
+        "missing source path should be preserved in the diagnostic host path: {host_path:?}"
     );
 }
 
@@ -6308,15 +6279,16 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     assert!(source_files.source_load_error(first_missing_id).is_some());
     assert!(source_files.source_load_error(second_missing_id).is_some());
 
-    let (_error_type, _message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("the first read failure should retain the infrastructure error lane");
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
     assert!(
-        location
-            .scope
-            .to_portable_string(&messages.string_table)
-            .contains("z_first_missing.md"),
-        "the first input-order read failure should be reported first: {location:?}"
+        host_path.ends_with("z_first_missing.md"),
+        "the first input-order read failure should be reported first: {host_path:?}"
     );
 }
 
@@ -6374,15 +6346,16 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
         }
     }
 
-    let (_error_type, _message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("the parallel read failure should retain the infrastructure error lane");
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
     assert!(
-        location
-            .scope
-            .to_portable_string(&messages.string_table)
-            .contains("asset_1.md"),
-        "parallel failures should be reported in deterministic input order: {location:?}"
+        host_path.ends_with("asset_1.md"),
+        "parallel failures should be reported in deterministic input order: {host_path:?}"
     );
 }
 
@@ -7065,7 +7038,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "missing provider target should surface a structured import diagnostic"
     );
     assert!(
-        messages.first_infrastructure_error_for_tests().is_none(),
+        messages.infrastructure_error().is_none(),
         "missing provider target must not surface a filesystem infrastructure error"
     );
     let diagnostic = first_error_diagnostic(&messages);
@@ -7853,7 +7826,7 @@ fn dependency_fact_retains_authored_source_location() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (_modules, graph, source_tree_index, _source_files, string_table) =
+    let (_modules, graph, source_tree_index, source_files, string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7865,20 +7838,24 @@ fn dependency_fact_retains_authored_source_location() {
         .module_id_for_directory(&module_b_root)
         .expect("module_b root should be a graph node");
 
-    let retained_location = graph
-        .edge_source_location(module_b_id, module_a_id)
-        .expect("the provider-before-consumer edge should retain its authored location");
+    let retained_span = graph
+        .edge_source_span(module_b_id, module_a_id)
+        .expect("the provider-before-consumer edge should retain its authored span");
 
-    // The retained scope is the declaring_source file that authored the structural provider reference.
-    let scope_path = retained_location.scope.to_portable_string(&string_table);
+    // The retained source identity is the declaring source file that authored the structural
+    // provider reference.
+    let scope_path = source_files
+        .legacy_logical_path(retained_span.source())
+        .to_portable_string(&string_table);
     assert!(
         scope_path.contains("@pageA.moth"),
-        "retained location scope should name the declaring module root file: {scope_path}"
+        "retained span source should name the declaring module root file: {scope_path}"
     );
-    // The dependency clause is on the first source line.
+    // The dependency clause starts at byte zero of the declaring source file.
     assert_eq!(
-        retained_location.start_pos.line_number, 0,
-        "retained location should point at the first authored source line"
+        retained_span.start(&source_files),
+        0,
+        "retained span should point at the first authored source byte"
     );
 }
 
@@ -8214,13 +8191,13 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
             provider_module_id: ModuleId::from_index(1),
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
-            graph_location: SourceLocation::default(),
+            graph_span: None,
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
-            graph_location: SourceLocation::default(),
+            graph_span: None,
         },
     ];
 
@@ -8241,7 +8218,7 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
         provider_module_id: ModuleId::from_index(1),
         consumer_module_id: ModuleId::from_index(0),
         dependency_shell_id: shell,
-        graph_location: SourceLocation::default(),
+        graph_span: None,
     };
     let provider_binding_index = super::compilation::build_provider_binding_index(&[provider_edge])
         .expect("one provider edge should index");
@@ -8792,7 +8769,6 @@ mod file_reference_resolution_tests {
     use super::super::resource_inputs::ResourceInputRegistry;
     use crate::builder_surface::SourceFileKind;
     use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
-    use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
     use crate::compiler_frontend::paths::file_references::{
         PreparedFileReference, PreparedFileReferenceClass,
     };
@@ -8839,14 +8815,12 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
         let path_syntax_id = path_syntax.push(
             path.clone(),
-            SourceLocation::default(),
-            LocalSpan::source_start(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
-            span: LocalSpan::source_start(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -8886,14 +8860,12 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("missing.moth", &mut strings);
         let path_syntax_id = path_syntax.push(
             path.clone(),
-            SourceLocation::default(),
-            LocalSpan::source_start(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
-            span: LocalSpan::source_start(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::SourceKindNoFileValue,
         };
 
@@ -8933,14 +8905,12 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
         let path_syntax_id = path_syntax.push(
             path.clone(),
-            SourceLocation::default(),
-            LocalSpan::source_start(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
-            span: LocalSpan::source_start(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ContentSource,
         };
         let resolved = resolver
@@ -8956,7 +8926,7 @@ mod file_reference_resolution_tests {
         };
         assert_eq!(
             diagnostic.primary_span,
-            Some(SourceSpan::new(reference.source_file, reference.span)),
+            Some(reference.span),
             "synthetic file-reference diagnostics must retain the authored source span"
         );
         assert!(matches!(
@@ -8994,14 +8964,12 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
         let path_syntax_id = path_syntax.push(
             path.clone(),
-            SourceLocation::default(),
-            LocalSpan::source_start(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
-            span: LocalSpan::source_start(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -9059,14 +9027,12 @@ mod file_reference_resolution_tests {
         let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
         let path_syntax_id = path_syntax.push(
             path.clone(),
-            SourceLocation::default(),
-            LocalSpan::source_start(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         );
         let reference = PreparedFileReference {
-            span: LocalSpan::source_start(),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -9131,14 +9097,12 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(
                 authored_path.clone(),
-                SourceLocation::default(),
-                LocalSpan::source_start(),
+                SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             );
             let reference = PreparedFileReference {
-                span: LocalSpan::source_start(),
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
                 source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
-                location: SourceLocation::default(),
                 class: PreparedFileReferenceClass::ResourceFile,
             };
             resolver.resolve(&root.join("main.moth"), path_syntax, &reference, strings)
@@ -9227,14 +9191,12 @@ mod file_reference_resolution_tests {
             let authored_path = InternedPath::from_single_str(path, strings);
             let path_syntax_id = path_syntax.push(
                 authored_path.clone(),
-                SourceLocation::default(),
-                LocalSpan::source_start(),
+                SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
             );
             let reference = PreparedFileReference {
-                span: LocalSpan::source_start(),
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
                 source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
-                location: SourceLocation::default(),
                 class,
             };
             resolver

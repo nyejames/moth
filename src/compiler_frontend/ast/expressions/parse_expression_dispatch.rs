@@ -50,7 +50,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::find_expression_end_index;
@@ -76,21 +76,20 @@ pub(super) struct ExpressionDispatchState<'a> {
 
 pub(super) struct ExpressionOperandInput {
     pub(super) operand: Expression,
-    pub(super) wrapper_location: SourceLocation,
     pub(super) wrapper_span: Option<SourceSpan>,
 }
 
 /// Reports adjacent operands at the second expression without guessing the missing operator.
 fn reject_adjacent_operand(
     expression: &[ExpressionRpnItem],
-    second_expression_location: &SourceLocation,
+    second_expression_span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let previous_is_operand = matches!(expression.last(), Some(ExpressionRpnItem::Operand(_)));
 
     if previous_is_operand {
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            second_expression_location.clone(),
+            second_expression_span,
         )
         .into());
     }
@@ -126,7 +125,7 @@ fn reject_second_operand_after_value_template(
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
     while token_stream.current_token_kind() == &TokenKind::TemplateHead {
-        let next_template_start = token_stream.current_location();
+        let next_template_start = Some(token_stream.current_span());
         let next_template = parse_template_expression(
             token_stream,
             context,
@@ -148,7 +147,7 @@ fn reject_second_operand_after_value_template(
     if is_value_operand_start_token(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -240,7 +239,7 @@ fn push_expression_after_suffixes(
             const_record_expression_name(&expression_after_option_propagation, string_table);
         return Err(CompilerDiagnostic::const_record_used_as_value(
             record_name,
-            expression_after_option_propagation.location.clone(),
+            expression_after_option_propagation.span,
         )
         .into());
     }
@@ -260,9 +259,8 @@ pub(super) fn push_expression_operand(
     allow_boundary_catch: bool,
     operand: Expression,
 ) -> Result<(), ExpressionParseError> {
-    let wrapper_location = operand.location.clone();
     let wrapper_span = operand.span;
-    push_expression_operand_at_location(
+    push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
@@ -271,19 +269,17 @@ pub(super) fn push_expression_operand(
         allow_boundary_catch,
         ExpressionOperandInput {
             operand,
-            wrapper_location,
             wrapper_span,
         },
     )
 }
-
-/// Push an expression operand while preserving a distinct wrapper location for suffix parsing.
+/// Push an expression operand while preserving a distinct wrapper span for suffix parsing.
 ///
 /// WHAT: keeps postfix/fallible/option handling on the existing dispatch path without requiring
 /// callers to construct `NodeKind::ExpressionStatement` themselves.
-/// WHY: constant references may carry declaration-origin expression locations, but diagnostics
+/// WHY: constant references may carry declaration-origin expression spans, but diagnostics
 /// for suffixes and const-record misuse should still point at the source use site.
-pub(super) fn push_expression_operand_at_location(
+pub(super) fn push_expression_operand_with_span(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -298,7 +294,6 @@ pub(super) fn push_expression_operand_at_location(
         parse_postfix_chain_expression(
             token_stream,
             operand_input.operand,
-            operand_input.wrapper_location,
             operand_input.wrapper_span,
             PostfixChainAccess::shared(),
             context,
@@ -363,7 +358,6 @@ fn parse_unary_operator(
                 ));
                 expression.push(ExpressionRpnItem::Operator {
                     operator: Operator::Negate,
-                    location: token_stream.current_location(),
                     span,
                 });
             }
@@ -376,7 +370,6 @@ fn parse_unary_operator(
             ));
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
-                location: token_stream.current_location(),
                 span,
             });
             true
@@ -388,15 +381,10 @@ fn parse_unary_operator(
 fn push_operator_item(
     expression: &mut Vec<ExpressionRpnItem>,
     _context: &ScopeContext,
-    location: SourceLocation,
     span: Option<SourceSpan>,
     operator: Operator,
 ) {
-    expression.push(ExpressionRpnItem::Operator {
-        operator,
-        location,
-        span,
-    });
+    expression.push(ExpressionRpnItem::Operator { operator, span });
 }
 
 /// Convenience for the common match arm that pushes an operator and advances.
@@ -406,12 +394,11 @@ fn advance_with_operator(
     token_stream: &FileTokens,
     operator: Operator,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let location = token_stream.current_location();
     let span = Some(SourceSpan::new(
         token_stream.file_id,
         token_stream.current_token().span,
     ));
-    push_operator_item(expression, context, location, span, operator);
+    push_operator_item(expression, context, span, operator);
     Ok(ExpressionTokenStep::Advance)
 }
 
@@ -434,7 +421,7 @@ pub(super) fn dispatch_expression_token(
 
     // Reject definite adjacency before semantic name, call or constructor parsing.
     if is_value_operand_start_token(&token) {
-        reject_adjacent_operand(state.expression, &token_stream.current_location())?;
+        reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
     }
 
     // This state machine is intentionally flat: each token either appends one AST node, advances
@@ -459,7 +446,6 @@ pub(super) fn dispatch_expression_token(
         TokenKind::CloseParenthesis => dispatch_close_parenthesis(token_stream, state),
 
         TokenKind::OpenParenthesis => {
-            let group_location = token_stream.current_location();
             let group_span = Some(SourceSpan::new(
                 token_stream.file_id,
                 token_stream.current_token().span,
@@ -486,7 +472,7 @@ pub(super) fn dispatch_expression_token(
                 });
             let value = create_expression_with_trailing_newline_policy(grouped_input)?;
 
-            push_expression_operand_at_location(
+            push_expression_operand_with_span(
                 token_stream,
                 context,
                 type_interner,
@@ -495,7 +481,6 @@ pub(super) fn dispatch_expression_token(
                 state.allow_boundary_catch,
                 ExpressionOperandInput {
                     operand: value,
-                    wrapper_location: group_location,
                     wrapper_span: group_span,
                 },
             )?;
@@ -520,7 +505,7 @@ pub(super) fn dispatch_expression_token(
                 return Err(CompilerDiagnostic::invalid_builtin_call(
                     InvalidBuiltinCallReason::ScalarConstructorRemoved,
                     cast_name,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -531,7 +516,10 @@ pub(super) fn dispatch_expression_token(
                 return Err(error.into());
             }
 
-            Err(CompilerDiagnostic::unexpected_token(token, token_stream.current_location()).into())
+            Err(
+                CompilerDiagnostic::unexpected_token(token, Some(token_stream.current_span()))
+                    .into(),
+            )
         }
 
         TokenKind::OpenCurly => {
@@ -599,7 +587,6 @@ pub(super) fn dispatch_expression_token(
             Ok(ExpressionTokenStep::Continue)
         }
         TokenKind::Path(path_syntax) => {
-            let path_location = token_stream.current_location();
             let path_span = Some(SourceSpan::new(
                 token_stream.file_id,
                 token_stream.current_token().span,
@@ -613,7 +600,7 @@ pub(super) fn dispatch_expression_token(
                 string_table,
             )?;
             token_stream.advance();
-            push_expression_operand_at_location(
+            push_expression_operand_with_span(
                 token_stream,
                 context,
                 type_interner,
@@ -622,7 +609,6 @@ pub(super) fn dispatch_expression_token(
                 state.allow_boundary_catch,
                 ExpressionOperandInput {
                     operand,
-                    wrapper_location: path_location,
                     wrapper_span: path_span,
                 },
             )?;
@@ -630,7 +616,6 @@ pub(super) fn dispatch_expression_token(
         }
 
         TokenKind::TemplateHead => {
-            let template_start_location = token_stream.current_location();
             let template_expression = parse_template_expression(
                 token_stream,
                 context,
@@ -644,7 +629,7 @@ pub(super) fn dispatch_expression_token(
                 return Ok(ExpressionTokenStep::Continue);
             };
 
-            reject_adjacent_operand(state.expression, &template_start_location)?;
+            reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
 
             reject_second_operand_after_value_template(
                 token_stream,
@@ -659,11 +644,7 @@ pub(super) fn dispatch_expression_token(
         }
 
         TokenKind::Copy => {
-            let copy_location = token_stream.current_location();
-            let copy_span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            let copy_span = Some(token_stream.current_span());
             token_stream.advance();
 
             let copied_place =
@@ -673,7 +654,6 @@ pub(super) fn dispatch_expression_token(
                 copied_place.place,
                 copied_place.diagnostic_type,
                 copied_place.type_id,
-                copy_location.clone(),
                 copy_span,
                 state.value_mode.to_owned(),
             );
@@ -690,33 +670,33 @@ pub(super) fn dispatch_expression_token(
         // -------------------------------
         TokenKind::If => Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueBlockOutsideReceiver,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
 
         TokenKind::Assert => Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::ExpressionPositionNotAllowed,
             Some(string_table.intern("assert")),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
 
         TokenKind::Must | TokenKind::TraitThis => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
                 "Expression Parsing",
                 "expression parsing",
             )?;
 
-            Err(reserved_trait_keyword_error(keyword, token_stream.current_location()).into())
+            Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
         TokenKind::Hash => {
             if token_stream.peek_next_token() != Some(&TokenKind::TemplateHead) {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Hash,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -729,7 +709,7 @@ pub(super) fn dispatch_expression_token(
         {
             Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into())
         }
@@ -817,7 +797,7 @@ pub(super) fn dispatch_expression_token(
         // -------------------------------
         TokenKind::Wildcard => Err(CompilerDiagnostic::unexpected_token(
             TokenKind::Wildcard,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
 
@@ -837,7 +817,7 @@ pub(super) fn dispatch_expression_token(
             if context.inside_anonymous_const_record {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::NestedAnonymousConstRecord,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -864,7 +844,7 @@ pub(super) fn dispatch_expression_token(
             } else {
                 Err(CompilerDiagnostic::deferred_feature_reason(
                     DeferredFeatureReason::RuntimeAnonymousRecord,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into())
             }
@@ -872,7 +852,7 @@ pub(super) fn dispatch_expression_token(
 
         TokenKind::AddAssign => Err(CompilerDiagnostic::unexpected_token(
             TokenKind::AddAssign,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
 
@@ -883,7 +863,10 @@ pub(super) fn dispatch_expression_token(
                 return Err(error.into());
             }
 
-            Err(CompilerDiagnostic::unexpected_token(token, token_stream.current_location()).into())
+            Err(
+                CompilerDiagnostic::unexpected_token(token, Some(token_stream.current_span()))
+                    .into(),
+            )
         }
     }
 }
@@ -902,7 +885,7 @@ fn dispatch_delimiter_token(
             TokenKind::Comma => {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Comma,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -910,7 +893,7 @@ fn dispatch_delimiter_token(
             TokenKind::Arrow => {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Arrow,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -922,7 +905,7 @@ fn dispatch_delimiter_token(
     if state.consume_closing_parenthesis {
         return Err(CompilerDiagnostic::missing_closing_delimiter(
             string_table.intern(")"),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -944,7 +927,7 @@ fn dispatch_close_parenthesis(
     if state.expression.is_empty() {
         return Err(CompilerDiagnostic::unexpected_token(
             TokenKind::CloseParenthesis,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -1025,7 +1008,7 @@ fn dispatch_is_token(
             if state.expression.len() > 1 {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Colon,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -1064,7 +1047,7 @@ fn parse_cast_expression(
     if !state.expression.is_empty() {
         let token = token_stream.current_token_kind().clone();
         return Err(
-            CompilerDiagnostic::unexpected_token(token, token_stream.current_location()).into(),
+            CompilerDiagnostic::unexpected_token(token, Some(token_stream.current_span())).into(),
         );
     }
 
@@ -1081,7 +1064,7 @@ fn parse_cast_expression(
                 InvalidCastReason::TargetIsGenericParameter,
                 None,
                 Some(target_type_id),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -1091,7 +1074,7 @@ fn parse_cast_expression(
                 InvalidCastReason::TargetNotBuiltin,
                 None,
                 Some(target_type_id),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -1101,18 +1084,14 @@ fn parse_cast_expression(
                 InvalidCastReason::MissingExplicitTarget,
                 None,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
     };
 
-    let cast_location = token_stream.current_location();
-    let cast_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
-    let propagate = token_stream.current_token_kind() == &TokenKind::CastBang;
+    let cast_span = Some(token_stream.current_span());
+    let propagate = matches!(token_stream.current_token_kind(), TokenKind::CastBang);
     token_stream.advance();
 
     // Attached `cast!` is a lexical token. A standalone `!` after `cast` is a
@@ -1122,7 +1101,7 @@ fn parse_cast_expression(
             InvalidCastReason::BangMustAttachToCast,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -1146,7 +1125,7 @@ fn parse_cast_expression(
             InvalidCastReason::PropagationAndRecoveryConflict,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -1158,7 +1137,7 @@ fn parse_cast_expression(
         CastHandling::Propagate
     } else if token_stream.current_token_kind() == &TokenKind::Catch {
         let error_type_id =
-            resolve_builtin_error_type_typed(context, &operand.location, string_table)?.type_id;
+            resolve_builtin_error_type_typed(context, operand.span, string_table)?.type_id;
         catch_handler = Some(parse_cast_catch_handling_suffix(
             token_stream,
             context,
@@ -1166,7 +1145,7 @@ fn parse_cast_expression(
             CastCatchSite {
                 success_type_id: target_type_id,
                 error_type_id,
-                value_required_location: operand.location.clone(),
+                value_required_span: operand.span,
                 allow_boundary_catch: state.allow_boundary_catch,
             },
             string_table,
@@ -1179,13 +1158,13 @@ fn parse_cast_expression(
     // For propagation, validate that the enclosing function can receive the error value.
     if propagate {
         let error_type_id =
-            resolve_builtin_error_type_typed(context, &operand.location, string_table)?.type_id;
+            resolve_builtin_error_type_typed(context, operand.span, string_table)?.type_id;
         let Some(expected_error_type_id) = context.expected_error_type else {
             return Err(CompilerDiagnostic::invalid_cast(
                 InvalidCastReason::PropagationRequiresErrorReturn,
                 None,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         };
@@ -1199,7 +1178,7 @@ fn parse_cast_expression(
                 expected_error_type_id,
                 error_type_id,
                 TypeMismatchContext::ErrorReturn,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -1216,7 +1195,6 @@ fn parse_cast_expression(
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
         active_generic_type_context: context.active_generic_type_context(),
-        location: cast_location,
         span: cast_span,
     })?;
 

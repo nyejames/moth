@@ -4,7 +4,7 @@
 //! WHY: avoids duplicating the same helper in every file that touches filesystem paths.
 
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
-    CompilerError, CompilerMessages,
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -62,15 +62,10 @@ pub(crate) fn file_error_with_rejection_reason(
     reason: crate::build_system::output::OutputRejectionReason,
     string_table: &StringTable,
 ) -> CompilerMessages {
-    use crate::compiler_frontend::compiler_errors::CompilerErrorMetadataKey;
-    use std::collections::HashMap;
-
-    let mut error_string_table = string_table.clone();
-    let mut metadata = HashMap::new();
-    metadata.insert(
+    let mut error = CompilerError::file_error(path, msg);
+    error.new_metadata_entry(
         CompilerErrorMetadataKey::OutputRejectionReason,
-        reason.as_metadata_value().to_string(),
+        reason.as_metadata_value().to_owned(),
     );
-    let error = CompilerError::new_file_error(path, msg, metadata, &mut error_string_table);
-    CompilerMessages::from_error(error, error_string_table)
+    CompilerMessages::from_error(error, string_table.clone())
 }

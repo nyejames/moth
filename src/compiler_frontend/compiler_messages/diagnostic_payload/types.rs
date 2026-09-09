@@ -666,8 +666,8 @@ pub enum InvalidTypeAnnotationReason {
     AsNotValidHere,
     UnexpectedColon,
     ReactiveAccessNotAllowed,
-    InvalidTokenAfterName { token: TokenKind },
-    ExpectedTypeAnnotation { found: TokenKind },
+    InvalidTokenAfterName { token: DiagnosticToken },
+    ExpectedTypeAnnotation { found: DiagnosticToken },
     DuplicateOptional,
     NestedOptional,
 }
@@ -753,7 +753,7 @@ pub enum InvalidGenericParameterReason {
     EmptyParameterList,
     BoundsMustUseIs,
     ListMustStayWithHeader,
-    InvalidToken { found: TokenKind },
+    InvalidToken { found: DiagnosticToken },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -872,7 +872,7 @@ pub enum InvalidSignatureMemberReason {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InvalidFunctionSignatureReason {
-    MissingArrowOrColon { found: TokenKind },
+    MissingArrowOrColon { found: DiagnosticToken },
     UnexpectedEndAfterParameters,
     MissingReturnType,
     MissingTraitRequirementReturnType,
@@ -881,7 +881,7 @@ pub enum InvalidFunctionSignatureReason {
     UnexpectedEndInReturns,
     MissingColonAfterReturns,
     UnexpectedArrowInReturns,
-    MissingCommaOrColon { found: TokenKind },
+    MissingCommaOrColon { found: DiagnosticToken },
     VoidNotAllowed,
     MultipleErrorReturnSlots,
     ErrorSlotNotLast,

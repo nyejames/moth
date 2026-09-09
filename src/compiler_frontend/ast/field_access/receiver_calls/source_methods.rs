@@ -42,7 +42,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 pub(super) fn lookup_receiver_method<'a>(
     context: &'a ScopeContext,
@@ -80,7 +80,6 @@ struct GenericReceiverMethodInferenceInput<'a, 'interner> {
     receiver_node: &'a AstNode,
     receiver_mutable: bool,
     raw_args: &'a [CallArgument],
-    member_location: &'a SourceLocation,
     member_span: Option<SourceSpan>,
     scope_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'interner>,
@@ -102,7 +101,6 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         receiver_node,
         receiver_mutable,
         raw_args,
-        member_location,
         member_span,
         scope_context,
         type_interner,
@@ -114,9 +112,8 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
     } else {
         CallAccessMode::Shared
     };
-    let receiver_arg =
-        CallArgument::positional(receiver_expr, receiver_access, member_location.clone())
-            .with_parameter_slot(ParameterSlot::new(0));
+    let receiver_arg = CallArgument::positional(receiver_expr, receiver_access, member_span)
+        .with_parameter_slot(ParameterSlot::new(0));
 
     let mut inference_args = Vec::with_capacity(raw_args.len() + 1);
     inference_args.push(receiver_arg);
@@ -138,7 +135,6 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         template,
         raw_arguments: &inference_args,
         expected_context: GenericCallExpectedContext::None,
-        call_location: member_location.clone(),
         call_span: member_span,
         type_environment: type_interner.environment_mut_for_derived_types(),
         string_table,
@@ -148,14 +144,12 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         inference.key.type_arguments.as_ref(),
         scope_context,
         type_interner.environment(),
-        member_location.clone(),
         member_span,
     )?;
 
     if scope_context.is_generic_function_instantiation_active(&inference.key) {
         return Err(recursive_generic_function_instantiation(
             template.function_path.name(),
-            member_location.clone(),
             member_span,
         )
         .into());
@@ -166,7 +160,6 @@ fn infer_generic_receiver_method_target<'a, 'interner>(
         evidence: selected_evidence,
         key: inference.key,
         instance_path: inference.instance_path.clone(),
-        call_location: member_location.clone(),
         call_span: member_span,
     };
 
@@ -177,10 +170,9 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) receiver_node: &'a AstNode,
     pub(super) member_name: StringId,
-    pub(super) member_location: SourceLocation,
     pub(super) member_span: Option<SourceSpan>,
     pub(super) receiver_access_mode: ReceiverAccessMode,
-    pub(super) authored_marker_location: Option<SourceLocation>,
+    pub(super) authored_marker_span: Option<SourceSpan>,
     pub(super) scope_context: &'a ScopeContext,
     pub(super) source_method: SourceReceiverMethodTarget<'a>,
     pub(super) type_interner: &'a mut AstTypeInterner<'interner>,
@@ -194,10 +186,9 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         token_stream,
         receiver_node,
         member_name,
-        member_location,
         member_span,
         receiver_access_mode,
-        authored_marker_location,
+        authored_marker_span,
         scope_context,
         source_method,
         type_interner,
@@ -211,7 +202,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             Some(member_name),
             None,
             None,
-            member_location,
+            member_span,
         )
         .into());
     }
@@ -223,25 +214,20 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             Some(member_name),
             None,
             None,
-            member_location,
+            member_span,
         )
         .into());
     }
 
-    let member_span = member_span.or_else(|| {
-        Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ))
-    });
+    let member_span = member_span.or_else(|| Some(token_stream.current_span()));
     token_stream.advance();
 
     let method_name = string_table.resolve(member_name).to_owned();
     validate_receiver_access(
         receiver_node,
         receiver_access_mode,
-        &member_location,
-        authored_marker_location.as_ref(),
+        member_span,
+        authored_marker_span,
         ReceiverAccessRequirement {
             requires_mutable: source_method.receiver_mutable(),
             diagnostic: ReceiverAccessDiagnostic::ReceiverMethod {
@@ -274,7 +260,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         receiver_node,
                         receiver_mutable: method_entry.receiver_mutable,
                         raw_args: &raw_args,
-                        member_location: &member_location,
                         member_span,
                         scope_context,
                         type_interner,
@@ -301,7 +286,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                         receiver_node,
                         receiver_mutable: method.receiver_mutable,
                         raw_args: &raw_args,
-                        member_location: &member_location,
                         member_span,
                         scope_context,
                         type_interner,
@@ -320,7 +304,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         CallDiagnosticContext::receiver_method(&method_name),
         &raw_args,
         &expectations,
-        member_location.clone(),
+        member_span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
@@ -349,14 +333,12 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
-        member_location.clone(),
         member_span,
     );
 
     Ok(AstNode {
         kind: NodeKind::ExpressionStatement(method_call_expression),
         scope: scope_context.scope.to_owned(),
-        location: member_location,
         span: member_span,
     })
 }

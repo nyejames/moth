@@ -301,7 +301,7 @@ Diagnostics are durable compiler data rather than a final formatting step.
 - `CompilerError` owns impossible compiler states, transformation failures, filesystem failures and tooling or backend infrastructure failures.
 - `DiagnosticBag` owns stage-local accumulation.
 - `CompilerMessages` is used at build and rendering boundaries.
-- Diagnostic payloads carry structured reasons, source locations, symbols and semantic identities rather than pre-rendered prose.
+- Diagnostic payloads carry structured reasons, exact `SourceSpan` values, symbols and semantic identities rather than pre-rendered prose.
 - Deferred-feature diagnostics remain distinct from outside-design-scope diagnostics.
 
 Type diagnostics carry semantic type identities plus context. Rendering resolves user-facing names through `DiagnosticRenderContext` and the relevant local type environment.
@@ -312,7 +312,7 @@ Every user-facing diagnostic has a stable code and descriptor independent of its
 
 One project or package compilation boundary owns a diagnostic identity context from bootstrap through final rendering.
 
-- `SourceLocation` stores interned path and scope identity rather than owned display paths.
+- `SourceSpan` stores a final `SourceId` and exact local byte range; source display paths are resolved through the attached context.
 - Parallel workers may return deterministic string-table deltas.
 - File deltas merge in original source order.
 - Module deltas merge in canonical module order.

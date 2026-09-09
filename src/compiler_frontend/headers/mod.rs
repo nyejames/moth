@@ -31,3 +31,4 @@ pub(crate) mod synthetic_content_header;
 mod top_level_classifier;
 mod trait_headers;
 mod types;
+pub(crate) use types::HeaderParseFailure;

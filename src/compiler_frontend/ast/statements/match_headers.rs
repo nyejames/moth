@@ -32,7 +32,7 @@ use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -54,13 +54,13 @@ pub(crate) struct ParsedMatchArmHeader {
     pub(crate) guard: Option<Expression>,
     pub(crate) arm_scope: ScopeContext,
     pub(crate) matched_choice_variant: Option<StringId>,
-    pub(crate) pattern_location: SourceLocation,
+    pub(crate) pattern_span: Option<SourceSpan>,
 }
 
 struct ParsedMatchPatternHeader {
     pattern: MatchPattern,
     matched_choice_variant: Option<StringId>,
-    pattern_location: SourceLocation,
+    pattern_span: Option<SourceSpan>,
     arm_scope: ScopeContext,
 }
 
@@ -105,10 +105,9 @@ pub(crate) fn parse_scrutinee_until_is(
 pub(crate) fn build_option_present_capture_scope_and_pattern(
     match_context: &ScopeContext,
     capture_name: StringId,
-    binding_location: &SourceLocation,
     binding_span: Option<SourceSpan>,
     inner_type_id: TypeId,
-    pattern_location: &SourceLocation,
+    pattern_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
@@ -119,7 +118,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
             InvalidMatchPatternReason::CaptureBindingShadowsVariable,
             None,
             None,
-            binding_location.clone(),
+            binding_span,
         )
         .into());
     }
@@ -132,7 +131,6 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         id: binding_path.clone(),
         value: Expression::new(
             ExpressionKind::NoValue,
-            binding_location.clone(),
             binding_span,
             inner_type_id,
             capture_data_type,
@@ -142,15 +140,14 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         config_qualifier: None,
     };
 
-    let binding_location = declaration.value.location.clone();
-    arm_scope.add_var(declaration, binding_location.clone());
+    let declaration_span = declaration.value.span;
+    arm_scope.add_var(declaration, declaration_span);
 
     let pattern = MatchPattern::OptionPresentCapture {
         name: capture_name,
         binding_path,
         inner_type_id,
-        location: pattern_location.clone(),
-        binding_location,
+        span: pattern_span.clone(),
         binding_span,
     };
 
@@ -172,7 +169,7 @@ pub(crate) fn parse_match_arm_header(
     let ParsedMatchPatternHeader {
         pattern,
         matched_choice_variant,
-        pattern_location,
+        pattern_span,
         arm_scope,
     } = parse_match_pattern_header(
         scrutinee,
@@ -197,7 +194,7 @@ pub(crate) fn parse_match_arm_header(
         guard,
         arm_scope,
         matched_choice_variant,
-        pattern_location,
+        pattern_span,
     })
 }
 
@@ -286,7 +283,7 @@ fn parse_match_pattern_header(
         Some(TypeKind::Choice | TypeKind::GenericInstance)
     );
 
-    let (pattern, matched_choice_variant, pattern_location, arm_scope) = if is_choice {
+    let (pattern, matched_choice_variant, pattern_span, arm_scope) = if is_choice {
         let type_environment = type_interner.environment();
         let variants = choice_variants_for_type(scrutinee.type_id, type_environment);
         let nominal_path = type_environment
@@ -305,14 +302,14 @@ fn parse_match_pattern_header(
             string_table,
         )?;
         let matched_choice_variant = Some(parsed.variant);
-        let pattern_location = parsed.location.clone();
+        let pattern_span = parsed.span;
         let (arm_scope, pattern) = build_arm_scope_with_choice_captures(
             match_context,
             parsed,
             type_environment,
             string_table,
         )?;
-        (pattern, matched_choice_variant, pattern_location, arm_scope)
+        (pattern, matched_choice_variant, pattern_span, arm_scope)
     } else {
         let option_inner_type_id = type_environment.option_inner_type(scrutinee.type_id);
         if let Some(inner_type_id) = option_inner_type_id {
@@ -326,31 +323,29 @@ fn parse_match_pattern_header(
                     InvalidMatchPatternReason::BareCaptureOnOptionalScrutinee,
                     None,
                     None,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
 
             let pattern =
                 parse_option_pattern(token_stream, inner_type_id, string_table, type_environment)?;
-            let location = pattern.location().to_owned();
+            let pattern_span = pattern.span();
 
             let (arm_scope, pattern) = if let MatchPattern::OptionPresentCapture {
                 name,
-                binding_location,
                 binding_span,
                 inner_type_id: capture_inner_type_id,
-                location: pattern_location,
+                span: parsed_pattern_span,
                 ..
             } = &pattern
             {
                 build_option_present_capture_scope_and_pattern(
                     match_context,
                     *name,
-                    binding_location,
                     *binding_span,
                     *capture_inner_type_id,
-                    pattern_location,
+                    *parsed_pattern_span,
                     type_interner,
                     string_table,
                 )?
@@ -358,7 +353,7 @@ fn parse_match_pattern_header(
                 (match_context.clone(), pattern)
             };
 
-            (pattern, None, location, arm_scope)
+            (pattern, None, pattern_span, arm_scope)
         } else {
             let pattern = parse_non_choice_pattern(
                 token_stream,
@@ -366,15 +361,15 @@ fn parse_match_pattern_header(
                 string_table,
                 type_environment,
             )?;
-            let location = pattern.location().to_owned();
-            (pattern, None, location, match_context.clone())
+            let pattern_span = pattern.span();
+            (pattern, None, pattern_span, match_context.clone())
         }
     };
 
     Ok(ParsedMatchPatternHeader {
         pattern,
         matched_choice_variant,
-        pattern_location,
+        pattern_span,
         arm_scope,
     })
 }
@@ -383,7 +378,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
         return Err(deferred_feature_reason_diagnostic(
             DeferredFeatureReason::CaptureTaggedPattern,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -393,7 +388,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
             InvalidMatchPatternReason::AsNotValid,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -401,7 +396,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
     if token_stream.current_token_kind() == &TokenKind::Colon {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::LegacyColonSyntax,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -409,7 +404,7 @@ fn reject_invalid_pattern_suffix(token_stream: &FileTokens) -> MatchHeaderResult
     if token_stream.current_token_kind() == &TokenKind::Arrow {
         return Err(CompilerDiagnostic::invalid_match_arm(
             InvalidMatchArmReason::InvalidArrow,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -459,7 +454,7 @@ fn build_arm_scope_with_choice_captures(
                 InvalidMatchPatternReason::CaptureBindingShadowsVariable,
                 None,
                 None,
-                capture.binding_location.clone(),
+                capture.binding_span,
             )
             .into());
         }
@@ -471,7 +466,6 @@ fn build_arm_scope_with_choice_captures(
             id: binding_path.clone(),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                capture.binding_location.clone(),
                 capture.binding_span,
                 capture.type_id,
                 diagnostic_type_spelling(capture.type_id, type_environment),
@@ -481,15 +475,13 @@ fn build_arm_scope_with_choice_captures(
             config_qualifier: None,
         };
 
-        let binding_location = declaration.value.location.clone();
-        arm_scope.add_var(declaration, binding_location);
+        let declaration_span = declaration.value.span;
+        arm_scope.add_var(declaration, declaration_span);
         captures.push(ChoicePayloadCapture {
             field_index: capture.field_index,
             type_id: capture.type_id,
             binding_path,
-            location: capture.location,
             span: capture.span,
-            binding_location: capture.binding_location,
             binding_span: capture.binding_span,
         });
     }
@@ -500,7 +492,6 @@ fn build_arm_scope_with_choice_captures(
             nominal_path: parsed_pattern.nominal_path,
             tag: parsed_pattern.tag,
             captures,
-            location: parsed_pattern.location,
             span: parsed_pattern.span,
         },
     ))
@@ -522,7 +513,6 @@ fn choice_variants_for_type(type_id: TypeId, env: &TypeEnvironment) -> Vec<Choic
                 .map(|variant| ChoiceVariant {
                     id: variant.name,
                     payload: convert_choice_payload(&variant.payload, env),
-                    location: variant.location.clone(),
                     span: variant.span,
                 })
                 .collect()
@@ -543,7 +533,6 @@ fn convert_choice_payload(
                     id: field.name.clone(),
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        field.location.clone(),
                         field.span,
                         field.type_id,
                         diagnostic_type_spelling(field.type_id, type_environment),

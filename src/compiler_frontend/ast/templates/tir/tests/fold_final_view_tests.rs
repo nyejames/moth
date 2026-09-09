@@ -59,7 +59,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
@@ -76,21 +75,11 @@ fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldCont
 }
 
 fn int_expression(value: i32) -> Expression {
-    Expression::int(
-        value,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
+    Expression::int(value, None, ValueMode::ImmutableOwned)
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(
-        value,
-        SourceLocation::default(),
-        None,
-        ValueMode::ImmutableOwned,
-    )
+    Expression::bool(value, None, ValueMode::ImmutableOwned)
 }
 
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
@@ -199,41 +188,30 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
             .expect("test resource path should be portable"),
     );
     let mut resource_table = ModuleResourceTable::new();
-    let resource = resource_table.intern_origin(resource_origin, SourceLocation::default());
+    let resource = resource_table.intern_origin(resource_origin, None);
     let structural_expression = Expression::new(crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
         pieces: vec![ConstStringPiece::Resource(resource), ConstStringPiece::SiteRoot],
-    }, SourceLocation::default(), None, builtin_type_ids::STRING, DataType::StringSlice, ValueMode::ImmutableOwned);
+    }, None, builtin_type_ids::STRING, DataType::StringSlice, ValueMode::ImmutableOwned);
 
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let before_node = builder.push_text_node(
-            before,
-            "before".len(),
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let before_node =
+            builder.push_text_node(before, "before".len(), TemplateSegmentOrigin::Body, None);
         let resource_node = builder.push_dynamic_expression_node(
             structural_expression,
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
-        let after_node = builder.push_text_node(
-            after,
-            "after".len(),
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let root = builder.push_sequence_node(
-            vec![before_node, resource_node, after_node],
-            SourceLocation::default(),
-        );
+        let after_node =
+            builder.push_text_node(after, "after".len(), TemplateSegmentOrigin::Body, None);
+        let root = builder.push_sequence_node(vec![before_node, resource_node, after_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -280,7 +258,7 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
     let mut store = TemplateIrStore::new();
     let before = string_table.intern("before");
     let after = string_table.intern("after");
-    let location = SourceLocation::default();
+    let location = None;
 
     let (template_id, occurrence_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -344,7 +322,7 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
 fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
     let before = string_table.intern("before");
     let after = string_table.intern("after");
 
@@ -416,7 +394,7 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
 -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
 
     let build_branch_template = |store: &mut TemplateIrStore, selected: bool| {
         let mut builder = TemplateIrBuilder::new(store);
@@ -425,7 +403,6 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(selected)),
             selected_slot,
-            location.clone(),
             None,
             builder.store.next_expression_site_id(),
         );
@@ -483,7 +460,7 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
 fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
     let (template_id, occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_slot_node(SlotKey::Default, location.clone());
@@ -529,7 +506,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
 fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
     let named_key = SlotKey::Named(string_table.intern("named"));
 
     let (parent_template_id, wrapper_occurrence) = {
@@ -596,7 +573,7 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
 fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
     let (template_id, body_occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body_slot = builder.push_slot_node(SlotKey::Default, location.clone());
@@ -614,7 +591,6 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
         };
         let aggregate_output = builder.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
-            location.clone(),
             None,
         ));
         let open = builder.push_text_node(
@@ -669,7 +645,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
 fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
-    let location = SourceLocation::default();
+    let location = None;
 
     let false_branch_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -677,7 +653,6 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             hidden_slot,
-            location.clone(),
             None,
             builder.store.next_expression_site_id(),
         );
@@ -736,28 +711,21 @@ fn final_view_fold_branch_selects_body() {
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
-        let yes_node = builder.push_text_node(
-            yes_text,
-            3,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(true)),
             yes_node,
-            SourceLocation::default(),
             None,
             builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
+        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 
@@ -777,28 +745,21 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
-        let yes_node = builder.push_text_node(
-            yes_text,
-            3,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
-            SourceLocation::default(),
             None,
             builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
+        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 
@@ -819,38 +780,22 @@ fn final_view_fold_false_branch_selects_fallback() {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
         let no_text = string_table.intern("no");
-        let yes_node = builder.push_text_node(
-            yes_text,
-            3,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let fallback_node = builder.push_text_node(
-            no_text,
-            2,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
+        let fallback_node = builder.push_text_node(no_text, 2, TemplateSegmentOrigin::Body, None);
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
-            SourceLocation::default(),
             None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(
-            vec![branch],
-            Some(fallback_node),
-            None,
-            SourceLocation::default(),
-        );
+        let root = builder.push_branch_chain_node(vec![branch], Some(fallback_node), None, None);
 
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 
@@ -889,19 +834,14 @@ fn build_range_loop_template(
             end_kind: RangeEndKind::Exclusive,
         }),
     };
-    let root = builder.push_loop_node(
-        header,
-        body_root,
-        aggregate_wrapper,
-        SourceLocation::default(),
-    );
+    let root = builder.push_loop_node(header, body_root, aggregate_wrapper, None);
 
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -911,12 +851,7 @@ fn final_view_fold_loop_body_concatenates_iterations() {
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(
-            dot_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
         build_range_loop_template(string_table, store, 0, 3, dot_node, None)
     });
 
@@ -946,57 +881,41 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
                 item_path.clone(),
                 DataType::Int,
                 builtin_type_ids::INT,
-                SourceLocation::default(),
                 None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
         let range_provenance = SyntheticInterfaceProvenance::single(member.clone());
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: Some(Declaration {
                     id: item_path,
-                    value: Expression::int(
-                        0,
-                        SourceLocation::default(),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    ),
+                    value: Expression::int(0, None, ValueMode::ImmutableOwned),
                     binding_span: None,
                     config_qualifier: None,
                 }),
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::int(
-                    0,
-                    SourceLocation::default(),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )
-                .with_synthetic_interface_provenance(range_provenance.clone()),
-                end: Expression::int(
-                    2,
-                    SourceLocation::default(),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )
-                .with_synthetic_interface_provenance(range_provenance),
+                start: Expression::int(0, None, ValueMode::ImmutableOwned)
+                    .with_synthetic_interface_provenance(range_provenance.clone()),
+                end: Expression::int(2, None, ValueMode::ImmutableOwned)
+                    .with_synthetic_interface_provenance(range_provenance),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
         };
-        let root = builder.push_loop_node(header, body, None, SourceLocation::default());
+        let root = builder.push_loop_node(header, body, None, None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 
@@ -1036,12 +955,7 @@ fn final_view_fold_zero_iteration_loop_is_no_output() {
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(
-            dot_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
         build_range_loop_template(string_table, store, 0, 0, dot_node, None)
     });
 
@@ -1092,24 +1006,10 @@ fn final_view_fold_loop_preserves_output_before_break_and_continue() {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
         let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(
-            dot_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let break_node = builder
-            .push_loop_control_node(TemplateLoopControlKind::Break, SourceLocation::default());
-        let after_node = builder.push_text_node(
-            after_text,
-            5,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let body_root = builder.push_sequence_node(
-            vec![dot_node, break_node, after_node],
-            SourceLocation::default(),
-        );
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+        let break_node = builder.push_loop_control_node(TemplateLoopControlKind::Break, None);
+        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
+        let body_root = builder.push_sequence_node(vec![dot_node, break_node, after_node], None);
         build_range_loop_template(string_table, store, 0, 3, body_root, None)
     });
     let break_emission = fold_final_view_fixture(
@@ -1130,24 +1030,10 @@ fn final_view_fold_loop_preserves_output_before_break_and_continue() {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
         let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(
-            dot_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let continue_node = builder
-            .push_loop_control_node(TemplateLoopControlKind::Continue, SourceLocation::default());
-        let after_node = builder.push_text_node(
-            after_text,
-            5,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let body_root = builder.push_sequence_node(
-            vec![dot_node, continue_node, after_node],
-            SourceLocation::default(),
-        );
+        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+        let continue_node = builder.push_loop_control_node(TemplateLoopControlKind::Continue, None);
+        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
+        let body_root = builder.push_sequence_node(vec![dot_node, continue_node, after_node], None);
         build_range_loop_template(string_table, store, 0, 3, body_root, None)
     });
     let continue_emission = fold_final_view_fixture(
@@ -1173,7 +1059,6 @@ fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
-            SourceLocation::default(),
             None,
         ));
 
@@ -1182,29 +1067,12 @@ fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
         let close_text = string_table.intern("]");
         let x_text = string_table.intern("x");
 
-        let open_node = builder.push_text_node(
-            open_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let close_node = builder.push_text_node(
-            close_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let wrapper_root = builder.push_sequence_node(
-            vec![open_node, aggregate_node, close_node],
-            SourceLocation::default(),
-        );
+        let open_node = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, None);
+        let close_node = builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, None);
+        let wrapper_root =
+            builder.push_sequence_node(vec![open_node, aggregate_node, close_node], None);
 
-        let body_node = builder.push_text_node(
-            x_text,
-            1,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let body_node = builder.push_text_node(x_text, 1, TemplateSegmentOrigin::Body, None);
         build_range_loop_template(string_table, store, 0, 3, body_node, Some(wrapper_root))
     });
 
@@ -1223,7 +1091,7 @@ fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
     let mut string_table = StringTable::new();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
-        let empty_body = builder.push_sequence_node(vec![], SourceLocation::default());
+        let empty_body = builder.push_sequence_node(vec![], None);
         build_range_loop_template(
             string_table,
             store,
@@ -1253,7 +1121,6 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
     let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
-            SourceLocation::default(),
             None,
         ));
 
@@ -1263,7 +1130,7 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 
@@ -1308,14 +1175,14 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
             text,
             "Hello `code`".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
         builder.finish_template(
             root,
             style.clone(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -1380,12 +1247,10 @@ fn final_view_runtime_slot_application_requires_handoff() {
             wrapper: OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text("<shell>".to_owned()),
                 reactive_subscription: None,
-                location: SourceLocation::default(),
                 span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            location: SourceLocation::default(),
             span: None,
         };
         let expression =
@@ -1394,7 +1259,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
             expression,
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
 
         builder.finish_template(
@@ -1402,7 +1267,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         )
     });
 

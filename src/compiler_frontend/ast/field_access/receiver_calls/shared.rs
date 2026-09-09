@@ -27,7 +27,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
 };
@@ -65,7 +65,7 @@ pub(super) fn receiver_result_type_ids_for_call(
         if !token_stream_starts_fallible_handling_suffix(token_stream) {
             return Err(CompilerDiagnostic::invalid_fallible_handling(
                 InvalidFallibleHandlingReason::UnhandledErrorReturn,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -87,7 +87,7 @@ pub(super) fn receiver_result_type_ids_for_call(
         );
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -130,7 +130,6 @@ fn declaration_for_trait_bound_parameter(
     type_id: TypeId,
     diagnostic_type: DataType,
     value_mode: ValueMode,
-    location: SourceLocation,
     span: Option<SourceSpan>,
     binding_span: Option<SourceSpan>,
 ) -> Declaration {
@@ -138,7 +137,6 @@ fn declaration_for_trait_bound_parameter(
         id,
         value: Expression::new(
             ExpressionKind::NoValue,
-            location,
             span,
             type_id,
             diagnostic_type,
@@ -170,7 +168,6 @@ pub(super) fn signature_from_trait_requirement(
         receiver_type_id,
         diagnostic_type_spelling(receiver_type_id, type_environment),
         receiver_mode,
-        requirement.location.clone(),
         requirement.span,
         // Synthetic receiver has no authored binding token.
         None,
@@ -187,7 +184,6 @@ pub(super) fn signature_from_trait_requirement(
             type_id,
             diagnostic_type_spelling(type_id, type_environment),
             parameter.value_mode.clone(),
-            parameter.location.clone(),
             parameter.span,
             parameter.span,
         ));

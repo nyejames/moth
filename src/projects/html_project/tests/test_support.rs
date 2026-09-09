@@ -37,7 +37,6 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_tests::integration_test_runner::assertions::html_shell_violation;
 use crate::projects::html_project::external_js::runtime_assets::js_runtime_asset_identity;
 use std::path::{Path, PathBuf};
@@ -167,7 +166,6 @@ pub(crate) fn add_reachable_external_import(
             args: vec![],
             result: None,
         },
-        location: SourceLocation::default(),
         span: None,
     });
 
@@ -255,7 +253,6 @@ pub(crate) fn js_runtime_asset_import(
         StablePackageIdentity::binding(PackageOrigin::ProjectLocal, "@test/js-runtime"),
         &logical_source_path,
         canonical_source_path,
-        SourceLocation::default(),
         None,
     )
     .expect("fixture JS runtime asset identity should be internally valid")
@@ -283,8 +280,7 @@ pub(crate) fn non_js_runtime_asset_import(
                 .expect("fixture foreign asset path should be valid"),
         ),
         canonical_source_path,
-        authored_import_span: None,
+        source_span: None,
         asset_kind: asset_kind.to_owned(),
-        authored_import_location: SourceLocation::default(),
     }
 }

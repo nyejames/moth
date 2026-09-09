@@ -22,7 +22,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -99,26 +99,17 @@ pub(super) fn parse_anonymous_const_record_expression(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
-    let record_location = token_stream.current_location();
-    let record_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let record_span = current_span(token_stream);
     token_stream.advance(); // past the opening `|`
 
     let mut fields: Vec<Declaration> = Vec::new();
-    let mut seen_field_names: FxHashMap<StringId, SourceLocation> = FxHashMap::default();
+    let mut seen_field_names: FxHashMap<StringId, Option<SourceSpan>> = FxHashMap::default();
 
     // Empty record: `| |` (with optional authored newlines) is allowed.
     token_stream.skip_newlines();
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
         token_stream.advance();
-        return Ok(finish_record(
-            Vec::new(),
-            record_location,
-            record_span,
-            type_interner,
-        ));
+        return Ok(finish_record(Vec::new(), record_span, type_interner));
     }
 
     loop {
@@ -150,7 +141,7 @@ pub(super) fn parse_anonymous_const_record_expression(
             _ => {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
@@ -187,19 +178,14 @@ pub(super) fn parse_anonymous_const_record_expression(
                 return Err(CompilerDiagnostic::expected_token(
                     TokenKind::Comma,
                     Some(token_stream.current_token_kind().to_owned()),
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
         }
     }
 
-    Ok(finish_record(
-        fields,
-        record_location,
-        record_span,
-        type_interner,
-    ))
+    Ok(finish_record(fields, record_span, type_interner))
 }
 
 /// Parse one `name = value` or `name #Config of T = value` record field.
@@ -213,30 +199,30 @@ fn parse_record_field(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     fields: &mut Vec<Declaration>,
-    seen_field_names: &mut FxHashMap<StringId, SourceLocation>,
+    seen_field_names: &mut FxHashMap<StringId, Option<SourceSpan>>,
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
-    let name_location = token_stream.current_location();
-    let binding_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
-    ensure_not_keyword_shadow_identifier(field_name, name_location.clone(), string_table)
+    let binding_span = current_span(token_stream);
+    ensure_not_keyword_shadow_identifier(field_name, binding_span, string_table)
         .map_err(ExpressionParseError::from)?;
 
-    if let Some(first_location) = seen_field_names.get(&field_name) {
+    if let Some(first_span) = seen_field_names.get(&field_name) {
         return Err(CompilerDiagnostic::duplicate_declaration(
             field_name,
-            Some(first_location.to_owned()),
-            name_location,
+            *first_span,
+            binding_span,
         )
         .into());
     }
-    seen_field_names.insert(field_name, name_location);
+    seen_field_names.insert(field_name, binding_span);
     token_stream.advance(); // past the field name
 
     let mut qualifier = if starts_build_config_qualifier(token_stream, string_table) {
-        Some(parse_build_config_qualifier(token_stream, string_table)?)
+        Some(parse_build_config_qualifier(
+            token_stream,
+            string_table,
+            None,
+        )?)
     } else {
         None
     };
@@ -246,7 +232,7 @@ fn parse_record_field(
         // the dedicated record-field reason instead of a generic `=` expectation.
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-            token_stream.current_location(),
+            current_span(token_stream),
         )
         .into());
     }
@@ -261,7 +247,7 @@ fn parse_record_field(
         ) {
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
@@ -270,14 +256,14 @@ fn parse_record_field(
             if looks_like_nested_record_literal(&token_stream.tokens, token_stream.index) {
                 return Err(CompilerDiagnostic::invalid_expression(
                     InvalidExpressionReason::NestedAnonymousConstRecord,
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
 
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
@@ -285,17 +271,12 @@ fn parse_record_field(
         // A bare `none` has no inferred option type. The qualifier carries the option contract,
         // so retain a sentinel and let the config resolver construct the typed OptionNone value.
         if token_stream.current_token_kind() == &TokenKind::NoneLiteral && qualifier.is_some() {
-            let location = token_stream.current_location();
-            let span = Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ));
+            let span = current_span(token_stream);
             token_stream.advance();
             if let Some(qualifier) = qualifier.as_mut() {
                 qualifier.default_none = true;
             }
             Expression::no_value(
-                location,
                 span,
                 crate::compiler_frontend::datatypes::DataType::Inferred,
                 ValueMode::ImmutableOwned,
@@ -306,21 +287,11 @@ fn parse_record_field(
     } else {
         // A qualified required field may omit its initializer so explicit inputs or builder
         // globals can satisfy it. Optional absence resolves to an ordinary OptionNone.
-        let (location, span) = match qualifier.as_ref() {
-            Some(qualifier) => (
-                qualifier.qualifier_location.clone(),
-                qualifier.qualifier_span,
-            ),
-            None => (
-                token_stream.current_location(),
-                Some(SourceSpan::new(
-                    token_stream.file_id,
-                    token_stream.current_token().span,
-                )),
-            ),
-        };
+        let span = qualifier
+            .as_ref()
+            .and_then(|qualifier| qualifier.qualifier_span)
+            .or_else(|| current_span(token_stream));
         Expression::no_value(
-            location,
             span,
             crate::compiler_frontend::datatypes::DataType::Inferred,
             ValueMode::ImmutableOwned,
@@ -363,18 +334,11 @@ fn parse_record_field_value(
 
 fn finish_record(
     fields: Vec<Declaration>,
-    record_location: SourceLocation,
-    record_span: Option<SourceSpan>,
+    span: Option<SourceSpan>,
     type_interner: &AstTypeInterner<'_>,
 ) -> Expression {
     let record_type_id = type_interner.environment().anonymous_const_record_type();
-    Expression::anonymous_const_record(
-        fields,
-        record_location,
-        record_span,
-        ValueMode::ImmutableOwned,
-        record_type_id,
-    )
+    Expression::anonymous_const_record(fields, span, ValueMode::ImmutableOwned, record_type_id)
 }
 
 fn unexpected_record_end(
@@ -383,7 +347,14 @@ fn unexpected_record_end(
 ) -> ExpressionParseError {
     CompilerDiagnostic::unexpected_end_of_file(
         Some(string_table.intern("|")),
-        token_stream.current_location(),
+        current_span(token_stream),
     )
     .into()
+}
+
+fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
 }

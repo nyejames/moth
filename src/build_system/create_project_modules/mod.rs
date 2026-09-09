@@ -206,7 +206,6 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 format!(
                     "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
                 ),
-                string_table,
             );
             Err(CompilerMessages::from_error_ref(err, string_table))
         }
@@ -234,7 +233,6 @@ pub(crate) fn compile_single_file_boracle(
         let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
             &config.entry_dir,
             format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
-            string_table,
         );
         return Err(CompilerMessages::from_error_ref(error, string_table));
     };

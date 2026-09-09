@@ -35,7 +35,6 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, RenderSourceContext,
 };
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
@@ -44,14 +43,12 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionCategory,
-    PublicSemanticInterface,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginDeclarationId,
     OriginFunctionId, StableModuleOriginIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
 use crate::compiler_frontend::source::SourceDatabase;
@@ -172,7 +169,7 @@ pub struct ProjectCompilation {
 #[derive(Debug)]
 pub(crate) enum ProjectAssemblyError {
     Diagnostic {
-        diagnostic: Box<CompilerDiagnostic>,
+        diagnostic: CompilerDiagnostic,
         string_table: StringTable,
     },
     Infrastructure(CompilerError),
@@ -187,11 +184,11 @@ impl From<CompilerError> for ProjectAssemblyError {
 impl ProjectAssemblyError {
     fn project_context_escape(
         reason: ProjectContextEscapeReason,
-        location: SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
         string_table: StringTable,
     ) -> Self {
         Self::Diagnostic {
-            diagnostic: Box::new(CompilerDiagnostic::project_context_escape(reason, location)),
+            diagnostic: CompilerDiagnostic::project_context_escape(reason, span),
             string_table,
         }
     }
@@ -204,7 +201,7 @@ impl ProjectAssemblyError {
             } => {
                 let remap = string_table.merge_from(&diagnostic_table);
                 diagnostic.remap_string_ids(&remap);
-                CompilerMessages::from_diagnostics(vec![*diagnostic], string_table.clone())
+                CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
             }
             Self::Infrastructure(error) => {
                 CompilerMessages::from_error(error, string_table.clone())
@@ -216,7 +213,7 @@ impl ProjectAssemblyError {
             Self::Diagnostic {
                 diagnostic,
                 string_table,
-            } => CompilerMessages::from_diagnostics(vec![*diagnostic], string_table),
+            } => CompilerMessages::from_diagnostics(vec![diagnostic], string_table),
             Self::Infrastructure(error) => CompilerMessages::from_error(error, StringTable::new()),
         }
     }
@@ -1079,8 +1076,7 @@ fn plan_project_package_facade(
     };
     let facade_module_ref = CompiledModuleRef::Project(facade_module_id);
     let facade_interface = boundary_interface_at(project, source_packages, facade_module_ref)?;
-    let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
-    validate_facade_declaration_provenance(facade_interface, facade_module)?;
+    validate_facade_declaration_provenance(facade_interface)?;
     let FacadeRootPlan {
         selected_base_modules,
         roots_by_module,
@@ -1130,17 +1126,10 @@ fn collect_facade_reachability(
             &roots,
         )?;
         if let Some(offending_function) = reachability.first_project_context_function() {
-            let mut string_table = StringTable::new();
-            let location = offending_function
-                .diagnostic_location()
-                .map(|location| location.to_source_location(&mut string_table))
-                .unwrap_or_else(|| {
-                    project_context_location_for_module(reachable_module, &mut string_table)
-                });
             return Err(ProjectAssemblyError::project_context_escape(
                 ProjectContextEscapeReason::ReachableExecutable,
-                location,
-                string_table,
+                offending_function.declaration_span(),
+                StringTable::new(),
             ));
         }
 
@@ -1214,90 +1203,34 @@ fn collect_facade_reachability(
 
 fn validate_facade_declaration_provenance(
     facade_interface: &PublicSemanticInterface,
-    facade_module: &Module,
 ) -> Result<(), ProjectAssemblyError> {
     for declaration in &facade_interface.declarations {
         if declaration
             .synthetic_interface_provenance
             .contains_class(SyntheticInterfaceClass::ProjectContext)
         {
-            let (location, string_table) = project_context_location_for_declaration(
-                facade_interface,
-                declaration,
-                facade_module,
-            );
+            let span = facade_interface
+                .export_bindings
+                .iter()
+                .find(|binding| binding.origin() == &declaration.origin)
+                .map(|binding| binding.public_name())
+                .and_then(|public_name| {
+                    facade_interface
+                        .export_diagnostic_provenance
+                        .iter()
+                        .find(|provenance| provenance.public_name == public_name)
+                        .and_then(|provenance| provenance.span)
+                });
             return Err(ProjectAssemblyError::project_context_escape(
                 ProjectContextEscapeReason::ExportedDeclaration,
-                location,
-                string_table,
+                span,
+                StringTable::new(),
             ));
         }
     }
     Ok(())
 }
 
-fn project_context_location_for_declaration(
-    facade_interface: &PublicSemanticInterface,
-    declaration: &PublicDeclarationRecord,
-    facade_module: &Module,
-) -> (SourceLocation, StringTable) {
-    let mut string_table = StringTable::new();
-    let public_name = facade_interface
-        .export_bindings
-        .iter()
-        .find(|binding| binding.origin() == &declaration.origin)
-        .map(|binding| binding.public_name());
-
-    if let Some(public_name) = public_name
-        && let Some(provenance) = facade_interface
-            .export_diagnostic_provenance
-            .iter()
-            .find(|provenance| provenance.public_name == public_name)
-    {
-        let location = &provenance.location;
-        let scope = InternedPath::from_components(
-            location
-                .scope_components
-                .iter()
-                .map(|component| string_table.intern(component))
-                .collect(),
-        );
-        return (
-            SourceLocation::new(
-                scope,
-                CharPosition {
-                    line_number: location.start_line,
-                    char_column: location.start_column,
-                },
-                CharPosition {
-                    line_number: location.end_line,
-                    char_column: location.end_column,
-                },
-            ),
-            string_table,
-        );
-    }
-
-    (
-        project_context_location_for_module(facade_module, &mut string_table),
-        string_table,
-    )
-}
-
-fn project_context_location_for_module(
-    module: &Module,
-    string_table: &mut StringTable,
-) -> SourceLocation {
-    if module.metadata.entry_point.as_os_str().is_empty() {
-        return SourceLocation::new(
-            InternedPath::from_single_str("<package-facade>", string_table),
-            CharPosition::default(),
-            CharPosition::default(),
-        );
-    }
-
-    SourceLocation::from_path(&module.metadata.entry_point, string_table)
-}
 fn build_module_owner_by_origin(
     project: &CompiledGraphBoundary,
     source_packages: &CompletedSourcePackageRegistry,
@@ -1353,9 +1286,8 @@ fn validate_source_package_facades(
             module_id: package.root_module_id,
         };
         let facade_interface = package.root_interface()?;
-        let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
         let label = format!("Source package @{} facade", package.package_prefix());
-        validate_facade_declaration_provenance(facade_interface, facade_module)?;
+        validate_facade_declaration_provenance(facade_interface)?;
         let FacadeRootPlan {
             roots_by_module, ..
         } = plan_facade_roots(
@@ -1680,11 +1612,10 @@ pub fn build_project(
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildResult, CompilerMessages> {
     let build_profile = BuildProfile::from_flags(flags);
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(entry_path, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, path_string_table));
+            return Err(CompilerMessages::from_error(error, StringTable::new()));
         }
     };
 

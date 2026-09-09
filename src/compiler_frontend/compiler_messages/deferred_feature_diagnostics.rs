@@ -3,8 +3,8 @@
 //! WHAT: provides one helper pattern for deferred language-surface failures.
 //! WHY: parser/tokenizer callsites should not hand-roll metadata keys and wording patterns.
 
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DeferredFeatureReason};
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Build a structured diagnostic for a known deferred language surface.
 ///
@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DeferredFe
 /// legacy rule errors or string metadata maps.
 pub(crate) fn deferred_feature_reason_diagnostic(
     reason: DeferredFeatureReason,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::deferred_feature_reason(reason, location)
+    CompilerDiagnostic::deferred_feature_reason(reason, span)
 }

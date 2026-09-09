@@ -57,7 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -317,7 +317,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     .visibility_for(&header.source_file)
                     .map_err(|error| self.error_messages(error, string_table))?,
             );
-            let source_file_scope = header.canonical_source_file(string_table);
+            let source_file_scope = header.source_file.clone();
 
             match &header.kind {
                 HeaderKind::Function {
@@ -599,7 +599,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Err(self.diagnostic_messages(
                 recursive_generic_function_instantiation(
                     request.key.function_path.name(),
-                    request.call_location,
                     request.call_span,
                 ),
                 string_table,
@@ -739,11 +738,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             Ok(body) => body,
             Err(ExpressionParseError::Diagnostic(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
-                    *diagnostic,
+                    diagnostic,
                     GenericInstantiationDiagnosticContext {
-                        call_location: request.call_location.clone(),
                         call_span: request.call_span,
-                        declaration_location: template.declaration_location.clone(),
+                        declaration_span: template.declaration_span,
                         substitutions: substitution_diagnostics,
                     },
                 );
@@ -770,8 +768,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
         self.ast.push(AstNode {
             kind: NodeKind::Function(request.instance_path.clone(), signature, body),
-            location: template.declaration_location,
-            // Donor declaration range; consumer identity must not pair with it until 1F5.
+            // Generated instance has no consumer-local authored declaration range.
             span: None,
             scope: request.instance_path,
         });
@@ -866,8 +863,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.validated_generic_template_bodies.push(AstNode {
             kind: NodeKind::Function(template.function_path, resolved_signature.signature, body),
-            location: template.declaration_location,
-            // Donor declaration range; consumer identity must not pair with it until 1F5.
+            // Generic body validation retains no consumer-local authored declaration range.
             span: None,
             scope: header.tokens.src_path,
         });
@@ -953,8 +949,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // module-wide, not only within a local scope.
         self.ast.push(AstNode {
             kind: NodeKind::Function(token_stream.src_path, resolved_signature.signature, body),
-            location: header.name_location,
-            span: Some(SourceSpan::new(token_stream.file_id, header.name_span)),
+            span: header.name_span,
             scope: function_scope,
         });
 
@@ -1021,9 +1016,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
             &start_return_type,
             &mut self.environment.type_environment,
-            &header.name_location,
+            None,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
         let start_signature = FunctionSignature {
             parameters: vec![],
             returns: vec![ReturnSlot {
@@ -1036,7 +1031,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),
-            location: header.name_location,
+            // The implicit start function has no authored declaration span.
             span: None,
             scope: start_scope,
         });
@@ -1070,8 +1065,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.ast.push(AstNode {
             kind: NodeKind::StructDefinition(header.tokens.src_path.to_owned(), fields),
-            location: header.name_location,
-            span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+            span: header.name_span,
             scope: header.tokens.src_path,
         });
 
@@ -1132,13 +1126,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     TemplatePreparationOutcome::Helper(_) => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
-                            template.location,
+                            template.span,
                         )
                     }
                     TemplatePreparationOutcome::Runtime(_) => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                            template.location,
+                            template.span,
                         )
                     }
                     TemplatePreparationOutcome::Foldable => unreachable!(),
@@ -1210,7 +1204,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> CompilerMessages {
         match error {
             TemplateError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         }
@@ -1224,7 +1218,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> CompilerMessages {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             ExpressionParseError::Infrastructure(error) => {
                 self.error_messages(*error, string_table)

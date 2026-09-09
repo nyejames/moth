@@ -20,7 +20,6 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use std::sync::Arc;
 
@@ -124,6 +123,7 @@ pub struct SlotPlaceholder {
     pub applied_child_wrappers: Vec<TemplateWrapperReference>,
     pub child_wrappers: Vec<TemplateWrapperReference>,
     pub skip_parent_child_wrappers: bool,
+    #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
     pub span: Option<SourceSpan>,
 }
 
@@ -162,15 +162,16 @@ pub enum TemplateSegmentOrigin {
 
 /// Metadata for a V1 `$(source)` template subscription.
 ///
-/// WHAT: records the resolved reactive source identity, ordinary underlying value type, and
-/// authored source location without changing the segment expression's semantic `TypeId`.
-/// WHY: subscriptions are template metadata, not a wrapper type or borrow. Later HIR/backend
-/// stages can preserve this dependency while ordinary `[source]` head captures remain snapshots.
+/// WHAT: records the resolved reactive source identity and ordinary underlying
+/// value type without changing the segment expression's semantic `TypeId`.
+/// WHY: subscriptions are template metadata, not a wrapper type or borrow. Later
+/// HIR/backend stages can preserve this dependency while ordinary `[source]`
+/// head captures remain snapshots.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReactiveSubscription {
     pub source: ReactiveSource,
     pub type_id: TypeId,
-    pub location: SourceLocation,
+    /// Exact authored source range of the subscription expression, when known.
     pub span: Option<SourceSpan>,
 }
 
@@ -281,10 +282,9 @@ impl Style {
 /// The central template representation in the AST.
 ///
 /// A `Template` is a narrow durable handle carrying its TIR identity and source
-/// location. Effective style, kind and wrapper context are owned by the
-/// `TemplateIr` entry resolved through `tir_reference`. The `Template` is the
-/// durable value passed between parsing, composition, formatting, folding and
-/// AST finalization.
+/// span. Effective style, kind and wrapper context are owned by the `TemplateIr`
+/// entry resolved through `tir_reference`. The `Template` is the durable value
+/// passed between parsing, composition, formatting, folding and AST finalization.
 #[derive(Clone, Debug)]
 pub struct Template {
     /// Authoritative TIR reference.
@@ -294,6 +294,6 @@ pub struct Template {
     ///      needed by consumers of the shared module store.
     pub(crate) tir_reference: TemplateTirReference,
 
-    pub location: SourceLocation,
+    /// Exact authored source range for this template, when available.
     pub span: Option<SourceSpan>,
 }

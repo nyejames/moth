@@ -1317,7 +1317,6 @@ fn discard_inactive_assertion_messages_in_loop_header(header: &mut TemplateLoopH
 fn replace_inactive_assertion_message(message: &mut Expression) {
     let inert_message = Expression::new(
         ExpressionKind::OptionNone,
-        message.location.clone(),
         message.span,
         message.type_id,
         message.diagnostic_type.clone(),
@@ -1328,13 +1327,13 @@ fn replace_inactive_assertion_message(message: &mut Expression) {
 
 #[derive(Debug)]
 pub(super) enum TemplateNormalizationError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for TemplateNormalizationError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        TemplateNormalizationError::Diagnostic(Box::new(diagnostic))
+        TemplateNormalizationError::Diagnostic(diagnostic)
     }
 }
 
@@ -1520,7 +1519,7 @@ fn normalize_expression_templates_with_context(
                     {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
-                            template.location.to_owned(),
+                            template.span,
                         )
                         .into());
                     }
@@ -1851,7 +1850,7 @@ fn materialize_runtime_template_handoff_for_hir(
         return Err(CompilerDiagnostic::invalid_template_slot(
             InvalidTemplateSlotReason::InsertOutsideParentSlot,
             None,
-            template.location.to_owned(),
+            template.span,
         )
         .into());
     }

@@ -18,25 +18,27 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::require_bin
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation,
 };
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
-/// Boxed diagnostic result for signature member/parameter parsing.
+/// Two-lane result for signature member/parameter parsing.
 ///
 /// WHAT: keeps parameter and member shell parsing on one small error boundary while
-///       preserving structured diagnostics for header and AST callers.
+///       preserving structured diagnostics for header and AST callers, with infrastructure
+///       failures aborting through the typed lane.
 /// WHY: these connected parsers otherwise carry the large diagnostic value
 ///      through every successful header parse. Plain callers unbox once.
-type SignatureMemberParseResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type SignatureMemberParseResult<T> = Result<T, HeaderParseFailure>;
 
 /// Distinguishes the two syntactic contexts that share `| ... |` member parsing.
 ///
@@ -58,8 +60,7 @@ pub struct SignatureMemberSyntax {
     pub is_reactive: bool,
     pub type_annotation: ParsedTypeRef,
     pub default_tokens: Vec<Token>,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: Option<SourceSpan>,
 }
 
 /// Function return-channel syntax before it becomes an AST `ReturnChannel`.
@@ -73,8 +74,7 @@ pub enum ReturnChannelSyntax {
 #[derive(Clone, Debug)]
 pub struct FunctionReturnSyntax {
     pub type_annotation: ParsedTypeRef,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,7 +99,6 @@ impl SignatureMemberSyntax {
         for token in &mut self.default_tokens {
             token.remap_string_ids(remap);
         }
-        self.location.remap_string_ids(remap);
     }
 
     pub fn validate_required_source_prefix(
@@ -110,22 +109,6 @@ impl SignatureMemberSyntax {
             .try_rebind_required_prefix(provisional_source_file, provisional_source_file)?;
         Ok(())
     }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        self.id = self
-            .id
-            .try_rebind_required_prefix(provisional_source_file, logical_path)?;
-        self.type_annotation.rebind_source_identity(logical_path);
-        for token in &mut self.default_tokens {
-            token.location.rebind_source_identity(logical_path);
-        }
-        self.location.rebind_source_identity(logical_path);
-        Ok(())
-    }
 }
 
 impl FunctionReturnSyntax {
@@ -133,15 +116,6 @@ impl FunctionReturnSyntax {
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-    ) {
-        self.type_annotation.rebind_source_identity(logical_path);
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -166,20 +140,6 @@ impl FunctionSignatureSyntax {
         }
         Ok(())
     }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        for parameter in &mut self.parameters {
-            parameter.rebind_source_identity(logical_path, provisional_source_file)?;
-        }
-        for return_slot in &mut self.returns {
-            return_slot.value.rebind_source_identity(logical_path);
-        }
-        Ok(())
-    }
 }
 
 /// Parse a full function signature shell from `| params | -> returns:`.
@@ -191,6 +151,7 @@ pub fn parse_function_signature_syntax(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     function_path: &InternedPath,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance();
 
@@ -200,6 +161,7 @@ pub fn parse_function_signature_syntax(
         warnings,
         SignatureMemberContext::FunctionParameter,
         function_path,
+        span_builder,
     )?;
     token_stream.advance();
 
@@ -224,9 +186,9 @@ pub fn parse_function_signature_syntax(
         | TokenKind::Symbol(_) => {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone(),
+                    found: token_stream.current_token_kind().clone().into(),
                 },
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -234,7 +196,7 @@ pub fn parse_function_signature_syntax(
         TokenKind::Newline | TokenKind::Eof | TokenKind::End => {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::UnexpectedEndAfterParameters,
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -242,9 +204,9 @@ pub fn parse_function_signature_syntax(
         _ => {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::MissingArrowOrColon {
-                    found: token_stream.current_token_kind().clone(),
+                    found: token_stream.current_token_kind().clone().into(),
                 },
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -260,19 +222,18 @@ pub fn parse_function_signature_syntax(
 
 /// Parses a `| name [~]Type [= default], ... |` member list into neutral shells.
 ///
-/// ENTRY INVARIANT: the stream is positioned just after the opening `|`.
-/// EXIT INVARIANT: the stream is positioned on the closing `|`.
 pub fn parse_signature_members_syntax(
     token_stream: &mut FileTokens,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
     member_context: SignatureMemberContext,
     owner_path: &InternedPath,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<Vec<SignatureMemberSyntax>> {
     let mut members = Vec::with_capacity(1);
     let mut expecting_member = true;
     let mut member_index = 0;
-    let mut seen_member_names: FxHashMap<StringId, SourceLocation> = FxHashMap::default();
+    let mut seen_member_names: FxHashMap<StringId, SourceSpan> = FxHashMap::default();
 
     fn ensure_member_slot(
         expecting_member: bool,
@@ -282,7 +243,7 @@ pub fn parse_signature_members_syntax(
             return Err(CompilerDiagnostic::expected_token(
                 TokenKind::Comma,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -299,7 +260,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::End => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     None,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -307,7 +268,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::Arrow | TokenKind::Colon => {
                 return Err(CompilerDiagnostic::unexpected_token(
                     token_stream.current_token_kind().to_owned(),
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -322,6 +283,7 @@ pub fn parse_signature_members_syntax(
                     warnings,
                     false,
                     member_context,
+                    span_builder,
                 )?;
 
                 record_ordinary_member_name(&mut seen_member_names, &member)?;
@@ -333,7 +295,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::This if member_context == SignatureMemberContext::FunctionParameter => {
                 ensure_member_slot(expecting_member, token_stream)?;
 
-                let this_id = string_table.intern("this");
+                let this_id = string_table.intern("This");
                 let member = parse_signature_member_syntax(
                     token_stream,
                     owner_path.append(this_id),
@@ -341,6 +303,7 @@ pub fn parse_signature_members_syntax(
                     warnings,
                     true,
                     member_context,
+                    span_builder,
                 )?;
 
                 members.push(member);
@@ -351,7 +314,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::This => {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ThisNotAllowed,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -362,7 +325,7 @@ pub fn parse_signature_members_syntax(
                 if member_index > 0 {
                     return Err(CompilerDiagnostic::invalid_signature_member(
                         InvalidSignatureMemberReason::TraitBareThisOnlyReceiver,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     )
                     .into());
                 }
@@ -372,6 +335,7 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     owner_path.append(this_id),
                     ValueMode::ImmutableOwned,
+                    span_builder,
                 )?;
 
                 members.push(member);
@@ -387,7 +351,7 @@ pub fn parse_signature_members_syntax(
                 if token_stream.current_token_kind() != &TokenKind::TraitThis {
                     return Err(CompilerDiagnostic::invalid_signature_member(
                         InvalidSignatureMemberReason::TraitReceiverMustBeThis,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     )
                     .into());
                 }
@@ -395,7 +359,7 @@ pub fn parse_signature_members_syntax(
                 if member_index > 0 {
                     return Err(CompilerDiagnostic::invalid_signature_member(
                         InvalidSignatureMemberReason::TraitMutableThisOnlyFirstParameter,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     )
                     .into());
                 }
@@ -405,6 +369,7 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     owner_path.append(this_id),
                     ValueMode::MutableOwned,
+                    span_builder,
                 )?;
 
                 members.push(member);
@@ -416,7 +381,7 @@ pub fn parse_signature_members_syntax(
                 token_stream.advance();
                 if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
                     return Err(CompilerDiagnostic::unexpected_trailing_comma(
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     )
                     .into());
                 }
@@ -426,15 +391,16 @@ pub fn parse_signature_members_syntax(
             TokenKind::Must | TokenKind::TraitThis => {
                 let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                     token_stream.current_token_kind(),
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                     "Struct/Parameter Parsing",
                     "signature member parsing",
-                )
-                .map_err(CompilerDiagnostic::from)?;
+                )?;
 
-                return Err(
-                    reserved_trait_keyword_error(keyword, token_stream.current_location()).into(),
-                );
+                return Err(reserved_trait_keyword_error(
+                    keyword,
+                    current_source_span(token_stream),
+                )
+                .into());
             }
 
             TokenKind::Newline => {
@@ -444,7 +410,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::Eof => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     None,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -456,7 +422,7 @@ pub fn parse_signature_members_syntax(
 
                 return Err(CompilerDiagnostic::unexpected_token(
                     token_stream.current_token_kind().to_owned(),
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -476,26 +442,27 @@ pub fn parse_signature_members_syntax(
 /// duplicate members from reaching HIR or infrastructure invariants, and avoids
 /// function-, struct- or choice-specific duplicate validators.
 fn record_ordinary_member_name(
-    seen_member_names: &mut FxHashMap<StringId, SourceLocation>,
+    seen_member_names: &mut FxHashMap<StringId, SourceSpan>,
     member: &SignatureMemberSyntax,
 ) -> SignatureMemberParseResult<()> {
     let Some(member_name) = member.id.name() else {
         return Ok(());
     };
 
-    if let Some(first_location) = seen_member_names.get(&member_name) {
+    if let Some(first_span) = seen_member_names.get(&member_name) {
         return Err(CompilerDiagnostic::duplicate_declaration(
             member_name,
-            Some(first_location.clone()),
-            member.location.clone(),
+            Some(*first_span),
+            member.span,
         )
         .into());
     }
 
-    seen_member_names.insert(member_name, member.location.clone());
+    if let Some(member_span) = member.span {
+        seen_member_names.insert(member_name, member_span);
+    }
     Ok(())
 }
-
 fn parse_signature_member_syntax(
     token_stream: &mut FileTokens,
     full_name: InternedPath,
@@ -503,24 +470,17 @@ fn parse_signature_member_syntax(
     warnings: &mut Vec<CompilerDiagnostic>,
     allow_reserved_this: bool,
     member_context: SignatureMemberContext,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
-    let member_location = token_stream.current_location();
-    let member_span = token_stream.tokens[token_stream.index].span;
-    let member_name = full_name
-        .name()
-        .map(|id| string_table.resolve(id).to_owned())
-        .unwrap_or_else(|| String::from("<unknown>"));
-
-    if (!allow_reserved_this || member_name != "this")
-        && let Some(name_id) = full_name.name()
-    {
-        ensure_not_keyword_shadow_identifier(name_id, member_location.clone(), string_table)?;
+    let member_span = current_source_span(token_stream);
+    if !allow_reserved_this && let Some(name_id) = full_name.name() {
+        ensure_not_keyword_shadow_identifier(name_id, member_span.clone(), string_table)?;
     }
 
     if let Some(name_id) = full_name.name()
         && let Some(warning) = naming_warning_for_identifier(
             name_id,
-            member_location.clone(),
+            member_span.clone(),
             IdentifierNamingKind::ValueLike,
             string_table,
         )
@@ -542,13 +502,16 @@ fn parse_signature_member_syntax(
             if member_context != SignatureMemberContext::FunctionParameter {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ReactiveAccessNotAllowed,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
 
-            require_binding_marker_adjacent(token_stream, BindingMode::ReactiveRuntime)
-                .map_err(|diagnostic| *diagnostic)?;
+            require_binding_marker_adjacent(
+                token_stream,
+                BindingMode::ReactiveRuntime,
+                span_builder,
+            )?;
             token_stream.advance();
             is_reactive = true;
         }
@@ -559,7 +522,7 @@ fn parse_signature_member_syntax(
     if token_stream.current_token_kind() == &TokenKind::Hash {
         return Err(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::CompileTimeParameterDeferred,
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -569,7 +532,7 @@ fn parse_signature_member_syntax(
     {
         return Err(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::ChoicePayloadMutable,
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -589,21 +552,21 @@ fn parse_signature_member_syntax(
             if is_reactive {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ReactiveParameterDefaultValue,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
             if member_context == SignatureMemberContext::TraitRequirement {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::TraitRequirementDefaultValue,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
             if member_context == SignatureMemberContext::ChoicePayloadField {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::ChoicePayloadDefaultValue,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -619,7 +582,7 @@ fn parse_signature_member_syntax(
         TokenKind::As => {
             return Err(CompilerDiagnostic::unexpected_token(
                 token_stream.current_token_kind().to_owned(),
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -627,7 +590,7 @@ fn parse_signature_member_syntax(
         _ => {
             return Err(CompilerDiagnostic::unexpected_token(
                 token_stream.current_token_kind().to_owned(),
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -639,7 +602,6 @@ fn parse_signature_member_syntax(
         is_reactive,
         type_annotation,
         default_tokens,
-        location: member_location,
         span: member_span,
     })
 }
@@ -663,18 +625,15 @@ fn parse_trait_this_member_syntax(
     token_stream: &mut FileTokens,
     full_name: InternedPath,
     value_mode: ValueMode,
+    _span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
-    let member_location = token_stream.current_location();
-    let member_span = token_stream.tokens[token_stream.index].span;
+    let member_span = current_source_span(token_stream);
 
     token_stream.advance(); // past This
 
     // Trait receiver parameters have no explicit type annotation;
     // the type is implicitly the implementing concrete type.
-    let type_annotation = ParsedTypeRef::This {
-        location: member_location.clone(),
-        span: member_span,
-    };
+    let type_annotation = ParsedTypeRef::This { span: member_span };
 
     // Default values are not allowed in trait requirements.
     let default_tokens = Vec::new();
@@ -685,7 +644,6 @@ fn parse_trait_this_member_syntax(
         is_reactive: false,
         type_annotation,
         default_tokens,
-        location: member_location,
         span: member_span,
     })
 }
@@ -712,7 +670,7 @@ fn collect_member_default_tokens(
     if is_missing_default_boundary(token_stream.current_token_kind()) {
         return Err(CompilerDiagnostic::invalid_signature_member(
             InvalidSignatureMemberReason::MissingDefaultValue,
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -735,7 +693,7 @@ fn collect_member_default_tokens(
         if matches!(token_kind, TokenKind::Eof) {
             return Err(CompilerDiagnostic::unexpected_end_of_file(
                 None,
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -748,7 +706,7 @@ fn collect_member_default_tokens(
     if tokens.is_empty() {
         return Err(CompilerDiagnostic::unexpected_token(
             token_stream.current_token_kind().to_owned(),
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -772,9 +730,8 @@ fn parse_trait_requirement_return_list(
         token_stream,
         InvalidFunctionSignatureReason::MissingTraitRequirementReturnType,
     ) {
-        return Err(diagnostic);
+        return Err(diagnostic.into());
     }
-
     loop {
         return_slots.push(parse_single_return_item_syntax(
             token_stream,
@@ -785,13 +742,13 @@ fn parse_trait_requirement_return_list(
 
         match token_stream.current_token_kind() {
             TokenKind::Comma => {
-                let comma_location = token_stream.current_location();
+                let comma_span = current_source_span(token_stream);
                 token_stream.advance();
 
                 match token_stream.current_token_kind() {
                     TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
                         return Err(
-                            CompilerDiagnostic::unexpected_trailing_comma(comma_location).into(),
+                            CompilerDiagnostic::unexpected_trailing_comma(comma_span).into()
                         );
                     }
 
@@ -806,9 +763,9 @@ fn parse_trait_requirement_return_list(
             unexpected_token => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone(),
+                        found: unexpected_token.clone().into(),
                     },
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -825,15 +782,16 @@ pub fn parse_trait_requirement_signature_syntax(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     method_path: &InternedPath,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance(); // past |
-
     let parameters = parse_signature_members_syntax(
         token_stream,
         string_table,
         warnings,
         SignatureMemberContext::TraitRequirement,
         method_path,
+        span_builder,
     )?;
     token_stream.advance(); // past |
 
@@ -862,11 +820,14 @@ pub fn parse_trait_requirement_signature_syntax(
 fn missing_return_type_after_arrow(
     token_stream: &FileTokens,
     reason: InvalidFunctionSignatureReason,
-) -> Option<Box<CompilerDiagnostic>> {
+) -> Option<CompilerDiagnostic> {
     match token_stream.current_token_kind() {
         TokenKind::Colon | TokenKind::Newline | TokenKind::End | TokenKind::Eof => Some(
-            CompilerDiagnostic::invalid_function_signature(reason, token_stream.current_location())
-                .into(),
+            CompilerDiagnostic::invalid_function_signature(
+                reason,
+                current_source_span(token_stream),
+            )
+            .into(),
         ),
         _ => None,
     }
@@ -884,7 +845,7 @@ fn parse_return_list_syntax(
         token_stream,
         InvalidFunctionSignatureReason::MissingReturnType,
     ) {
-        return Err(diagnostic);
+        return Err(diagnostic.into());
     }
 
     loop {
@@ -897,14 +858,14 @@ fn parse_return_list_syntax(
 
         match token_stream.current_token_kind() {
             TokenKind::Comma => {
-                let comma_location = token_stream.current_location();
+                let comma_span = current_source_span(token_stream);
                 token_stream.advance();
 
                 match token_stream.current_token_kind() {
                     TokenKind::Colon => {
                         return Err(CompilerDiagnostic::invalid_function_signature(
                             InvalidFunctionSignatureReason::TrailingCommaInReturns,
-                            comma_location,
+                            comma_span,
                         )
                         .into());
                     }
@@ -912,7 +873,7 @@ fn parse_return_list_syntax(
                     TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
                         return Err(CompilerDiagnostic::invalid_function_signature(
                             InvalidFunctionSignatureReason::UnexpectedEndAfterComma,
-                            comma_location,
+                            comma_span,
                         )
                         .into());
                     }
@@ -923,7 +884,7 @@ fn parse_return_list_syntax(
             TokenKind::Symbol(symbol) if string_table.resolve(*symbol) == "where" => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::GenericWhereConstraintsUnsupported,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -935,30 +896,30 @@ fn parse_return_list_syntax(
             TokenKind::Eof => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::UnexpectedEndInReturns,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
             TokenKind::Newline | TokenKind::End => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingColonAfterReturns,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
             TokenKind::Arrow => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::UnexpectedArrowInReturns,
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
             unexpected_token => {
                 return Err(CompilerDiagnostic::invalid_function_signature(
                     InvalidFunctionSignatureReason::MissingCommaOrColon {
-                        found: unexpected_token.clone(),
+                        found: unexpected_token.clone().into(),
                     },
-                    token_stream.current_location(),
+                    current_source_span(token_stream),
                 )
                 .into());
             }
@@ -980,14 +941,13 @@ fn parse_value_return_type_syntax(
     string_table: &StringTable,
     type_context: TypeAnnotationContext,
 ) -> SignatureMemberParseResult<ReturnSlotSyntax> {
-    let location = token_stream.current_location();
-    let span = token_stream.tokens[token_stream.index].span;
+    let span = current_source_span(token_stream);
     let type_annotation = parse_type_annotation(token_stream, type_context, string_table)?;
 
     if parsed_type_ref_is_void(&type_annotation, string_table) {
         return Err(CompilerDiagnostic::invalid_function_signature(
             InvalidFunctionSignatureReason::VoidNotAllowed,
-            location,
+            span,
         )
         .into());
     }
@@ -1002,7 +962,6 @@ fn parse_value_return_type_syntax(
     Ok(ReturnSlotSyntax {
         value: FunctionReturnSyntax {
             type_annotation,
-            location,
             span,
         },
         channel,
@@ -1023,7 +982,7 @@ fn validate_return_slots_syntax(
     if error_return_slots.len() > 1 {
         return Err(CompilerDiagnostic::invalid_function_signature(
             InvalidFunctionSignatureReason::MultipleErrorReturnSlots,
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -1033,7 +992,7 @@ fn validate_return_slots_syntax(
     {
         return Err(CompilerDiagnostic::invalid_function_signature(
             InvalidFunctionSignatureReason::ErrorSlotNotLast,
-            token_stream.current_location(),
+            current_source_span(token_stream),
         )
         .into());
     }
@@ -1042,7 +1001,7 @@ fn validate_return_slots_syntax(
         if parsed_type_ref_is_void(&return_slot.value.type_annotation, string_table) {
             return Err(CompilerDiagnostic::invalid_function_signature(
                 InvalidFunctionSignatureReason::VoidNotAllowed,
-                token_stream.current_location(),
+                current_source_span(token_stream),
             )
             .into());
         }
@@ -1056,6 +1015,13 @@ fn parsed_type_ref_is_void(type_ref: &ParsedTypeRef, string_table: &StringTable)
         type_ref,
         ParsedTypeRef::Named { name, .. } if string_table.resolve(*name) == "Void"
     )
+}
+
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }
 
 #[cfg(test)]

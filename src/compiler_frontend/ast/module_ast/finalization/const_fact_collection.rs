@@ -116,7 +116,6 @@ impl<'a> ConstFactCollector<'a> {
                     source: ConstBindingSource::ExplicitHash,
                     value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
                     value: AstConstFactValue::Stored(value_id),
-                    location: metadata.location.clone(),
                 },
             );
         }

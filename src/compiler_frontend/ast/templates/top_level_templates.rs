@@ -13,9 +13,9 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -36,7 +36,6 @@ pub struct AstConstTopLevelFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
     pub value: ConstStringValue,
-    pub _location: SourceLocation,
 }
 
 /// Folded value for a top-level const template.
@@ -71,7 +70,7 @@ pub enum AstDocFragmentKind {
 pub struct AstDocFragment {
     pub kind: AstDocFragmentKind,
     pub value: StringId,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 // -------------------------
@@ -105,7 +104,6 @@ pub(crate) fn collect_const_top_level_fragments(
         result.push(AstConstTopLevelFragment {
             runtime_insertion_index: fragment.runtime_insertion_index,
             value,
-            _location: fragment.location.clone(),
         });
     }
 

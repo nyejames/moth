@@ -24,7 +24,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -71,28 +70,16 @@ pub(super) fn parse_namespace_access(
     } = input;
 
     token_stream.advance(); // move from namespace name to '.'
-    let mut dot_location = token_stream.current_location();
-    let mut dot_span = Some(SourceSpan::new(
-        token_stream.file_id,
-        token_stream.current_token().span,
-    ));
+    let mut dot_span = Some(token_stream.current_span());
     token_stream.advance(); // move from '.' to first member name
 
     let mut current_record = root_record;
 
     loop {
-        let member_location = if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
-            dot_location.clone()
-        } else {
-            token_stream.current_location()
-        };
         let member_span = if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
             dot_span
         } else {
-            Some(SourceSpan::new(
-                token_stream.file_id,
-                token_stream.current_token().span,
-            ))
+            Some(token_stream.current_span())
         };
         let TokenKind::Symbol(member_name) = token_stream.current_token_kind().to_owned() else {
             return Err(CompilerDiagnostic::invalid_field_access(
@@ -100,7 +87,7 @@ pub(super) fn parse_namespace_access(
                 None,
                 None,
                 Vec::new(),
-                member_location,
+                member_span,
             )
             .into());
         };
@@ -117,22 +104,16 @@ pub(super) fn parse_namespace_access(
                 NamespaceRecordSource::SourceFile(_)
             )
         {
-            return Err(CompilerDiagnostic::nested_dependency_traversal(
-                root_name,
-                member_location,
-            )
-            .into());
+            return Err(
+                CompilerDiagnostic::nested_dependency_traversal(root_name, member_span).into(),
+            );
         }
 
         match lookup {
             NamespaceMemberLookup::ChildNamespace(child_record) => {
                 if has_following_dot {
                     token_stream.advance(); // to '.'
-                    dot_location = token_stream.current_location();
-                    dot_span = Some(SourceSpan::new(
-                        token_stream.file_id,
-                        token_stream.current_token().span,
-                    ));
+                    dot_span = Some(token_stream.current_span());
                     token_stream.advance(); // to next member name
                     current_record = child_record;
                     continue;
@@ -142,7 +123,7 @@ pub(super) fn parse_namespace_access(
                     member_name,
                     NamespaceTypeValueMisuseKind::Value,
                     NamespaceTypeValueMisuseKind::Namespace,
-                    member_location,
+                    member_span,
                 )
                 .into());
             }
@@ -153,7 +134,7 @@ pub(super) fn parse_namespace_access(
                         member_name,
                         NamespaceTypeValueMisuseKind::Namespace,
                         NamespaceTypeValueMisuseKind::Value,
-                        member_location,
+                        member_span,
                     )
                     .into());
                 }
@@ -171,7 +152,6 @@ pub(super) fn parse_namespace_access(
                     &mut leaf_context,
                     value_member,
                     member_name,
-                    member_location,
                     member_span,
                     expected_result_evidence_allowed,
                 );
@@ -194,14 +174,14 @@ pub(super) fn parse_namespace_access(
                     member_name,
                     expected,
                     found,
-                    member_location,
+                    member_span,
                 )
                 .into());
             }
 
             NamespaceMemberLookup::Missing => {
                 return Err(
-                    CompilerDiagnostic::unknown_value_name(member_name, member_location).into(),
+                    CompilerDiagnostic::unknown_value_name(member_name, member_span).into(),
                 );
             }
         }

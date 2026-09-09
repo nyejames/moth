@@ -6,24 +6,27 @@
 //! kinds become user-facing prose.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticLabel};
 use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::LinePosition;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthChar;
 
-/// Exact primary source position used by the renderer boundary.
+/// Exact primary source position resolved from an attached source identity context.
 ///
-/// A retained source span is resolved against the frozen identity context when one is present,
-/// falling back to the transitional database that owns its source identity. The
-/// legacy location remains the fallback for diagnostics that have no usable retained snapshot.
+/// A diagnostic source span is meaningful only while its owning frozen identity context or source
+/// database remains attached to the message set. The render boundary resolves the span's byte
+/// range through that owner and borrows the retained source line; no producer-side line/column
+/// representation is consulted.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DiagnosticPrimaryPosition {
-    pub(crate) scope: InternedPath,
-    pub(crate) source: Option<SourceId>,
+pub(crate) struct DiagnosticPrimaryPosition<'a> {
+    pub(crate) source: SourceId,
+    pub(crate) path: PathBuf,
+    pub(crate) host_path: Option<&'a Path>,
     pub(crate) start: LinePosition,
     pub(crate) end: LinePosition,
+    pub(crate) line: &'a str,
 }
 
 /// Render-boundary data needed to turn diagnostic facts into user-facing text.
@@ -31,12 +34,11 @@ pub(crate) struct DiagnosticPrimaryPosition {
 /// WHAT: carries shared lookup tables by reference while diagnostics keep only stable IDs.
 /// WHY: type diagnostics should store semantic `TypeId`s, not rendered strings or owned
 /// `TypeEnvironment` snapshots. The render boundary decides how those IDs become names.
-/// Frozen identity rows are authoritative for retained source spans when present; the
-/// transitional `StringTable`/`SourceDatabase` rows remain for diagnostics with no frozen row.
+/// Frozen identity rows are authoritative for retained source spans; the attached `SourceDatabase`
+/// is consulted only when no frozen identity context is attached.
 #[derive(Clone, Copy)]
 pub(crate) struct DiagnosticRenderContext<'a> {
     pub(crate) string_table: &'a dyn StringTableResolver,
-    legacy_string_table: &'a dyn StringTableResolver,
     pub(crate) type_environment: Option<&'a TypeEnvironment>,
     pub(crate) source_database: Option<&'a SourceDatabase>,
     pub(crate) frozen_identity: Option<&'a FrozenIdentityContext>,
@@ -46,24 +48,9 @@ impl<'a> DiagnosticRenderContext<'a> {
     pub(crate) fn new(string_table: &'a dyn StringTableResolver) -> Self {
         Self {
             string_table,
-            legacy_string_table: string_table,
             type_environment: None,
             source_database: None,
             frozen_identity: None,
-        }
-    }
-
-    /// Build a render context directly from an immutable identity snapshot.
-    ///
-    /// WHAT: selects the frozen string table and source snapshots as one authoritative owner.
-    /// WHY: a frozen diagnostic context must never resolve IDs through an unrelated mutable table.
-    pub(crate) fn from_frozen_identity(frozen_identity: &'a FrozenIdentityContext) -> Self {
-        Self {
-            string_table: frozen_identity.strings(),
-            legacy_string_table: frozen_identity.strings(),
-            type_environment: None,
-            source_database: None,
-            frozen_identity: Some(frozen_identity),
         }
     }
 
@@ -102,210 +89,88 @@ impl<'a> DiagnosticRenderContext<'a> {
         self
     }
 
-    /// Borrow one retained source line through the frozen snapshot when present.
+    /// Resolve a diagnostic's primary span through an attached source identity owner.
     ///
-    /// Frozen lookup is authoritative: a unique frozen match wins. Otherwise the transitional
-    /// `SourceDatabase` behavior is preserved unchanged.
-    pub(crate) fn retained_source_line(
-        self,
-        scope: &InternedPath,
-        line_number: i32,
-    ) -> Option<&'a str> {
-        if let Some(frozen) = self.frozen_identity {
-            if let Some(line) =
-                frozen_source_line(frozen, self.legacy_string_table, scope, line_number)
-            {
-                return Some(line);
-            }
-            if let Some(line) = frozen_source_line(frozen, frozen.strings(), scope, line_number) {
-                return Some(line);
-            }
-        }
-        let source_database = self.source_database?;
-        let slot = source_database.unique_record_for_logical_path(scope)?;
-        let line_number = u32::try_from(line_number).ok()?;
-        source_database.line_index(slot.id)?.line_text(line_number)
-    }
-    /// Resolve a diagnostic's primary span into renderer columns while its source snapshot is
-    /// still available. SourceSpan ranges are half-open; legacy locations are converted to the
-    /// same exclusive-end shape so caret lengths remain one calculation in every renderer.
-    ///
-    /// The frozen identity context is authoritative when present: its source records and
-    /// `LineIndex` resolve the exact half-open `SourceSpan` byte range with unchanged scalar
-    /// columns. Otherwise the transitional `SourceDatabase` behavior is preserved.
-    ///
-    /// The reserved compilation root owns no snapshot, so its spans never enter either retained
-    /// branch and renderers keep omitting a physical source frame for them; the legacy location
-    /// remains their fallback shape.
+    /// SourceSpan ranges are half-open byte offsets. The owner supplies both the extended-span
+    /// table and the retained source snapshot, so line/column conversion and source text always
+    /// come from one identity context. Compilation-root spans and diagnostics without an
+    /// attached owner intentionally have no physical source position.
     pub(crate) fn primary_position(
         self,
         diagnostic: &CompilerDiagnostic,
-    ) -> DiagnosticPrimaryPosition {
-        if let Some(span) = diagnostic.primary_span
-            && span.source() != SourceId::COMPILATION_ROOT
-            && let Some(frozen) = self.frozen_identity
-            && let Some(line_index) = frozen.line_index(span.source())
-        {
-            let range = span.byte_range(frozen);
-            if let (Some(start), Some(end)) = (
-                line_index.position(range.start()),
-                line_index.position(range.end()),
-            ) {
-                return DiagnosticPrimaryPosition {
-                    scope: frozen_interned_path(frozen, span.source())
-                        .unwrap_or_else(|| diagnostic.primary_location.scope.clone()),
-                    source: Some(span.source()),
-                    start,
-                    end,
-                };
-            }
-        }
-        if let Some(span) = diagnostic.primary_span
-            && span.source() != SourceId::COMPILATION_ROOT
-            && let Some(source_database) = self.source_database
-            && let Some(line_index) = source_database.line_index(span.source())
-        {
-            let range = span.byte_range(source_database);
-            if let (Some(start), Some(end)) = (
-                line_index.position(range.start()),
-                line_index.position(range.end()),
-            ) {
-                return DiagnosticPrimaryPosition {
-                    scope: source_database.legacy_logical_path(span.source()),
-                    source: Some(span.source()),
-                    start,
-                    end,
-                };
-            }
-        }
-
-        let location = &diagnostic.primary_location;
-        DiagnosticPrimaryPosition {
-            scope: location.scope.clone(),
-            source: None,
-            start: legacy_line_position(
-                location.start_pos.line_number,
-                location.start_pos.char_column,
-            ),
-            end: legacy_line_position(
-                location.end_pos.line_number,
-                location.end_pos.char_column.saturating_add(1),
-            ),
-        }
+    ) -> Option<DiagnosticPrimaryPosition<'a>> {
+        diagnostic
+            .primary_span
+            .and_then(|span| self.resolve_span(span))
     }
 
-    /// Borrow the retained line behind a resolved primary position, or `None` when no snapshot
-    /// is available.
-    ///
-    /// A compilation-root primary position carries no source identity, so it looks its line up
-    /// through the legacy logical path and yields `None` when the root has no frame to render.
-    /// Frozen snapshots are authoritative when present; the transitional database remains the
-    /// fallback.
-    pub(crate) fn retained_source_line_for_primary(
+    /// Resolve one secondary label span through the attached source identity owner.
+    pub(crate) fn label_position(
         self,
-        position: &DiagnosticPrimaryPosition,
-    ) -> Option<&'a str> {
-        if let Some(source) = position.source {
-            if let Some(frozen) = self.frozen_identity
-                && let Some(line) = frozen
-                    .line_index(source)
-                    .and_then(|line_index| line_index.line_text(position.start.line))
-            {
-                return Some(line);
-            }
-            if let Some(source_database) = self.source_database
-                && let Some(line) = source_database
-                    .line_index(source)
-                    .and_then(|line_index| line_index.line_text(position.start.line))
-            {
-                return Some(line);
-            }
+        label: &DiagnosticLabel,
+    ) -> Option<DiagnosticPrimaryPosition<'a>> {
+        label.span.and_then(|span| self.resolve_span(span))
+    }
+
+    fn resolve_span(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
+        if span.source() == SourceId::COMPILATION_ROOT {
             return None;
         }
 
-        self.retained_source_line(&position.scope, position.start.line as i32)
-    }
-}
-
-/// Borrow one retained line for a legacy `InternedPath` scope from a frozen snapshot.
-///
-/// WHAT: scans the frozen slots for the unique source whose logical path spells the same
-/// components, comparing resolved string content (never IDs across tables), then borrows the
-/// retained line without copying source text or touching the filesystem.
-/// WHY: frozen path tables carry `PathId` identities while legacy callers still pass
-/// `InternedPath` scopes; content comparison keeps the frozen row authoritative without a new
-/// cross-module API. Ambiguity or absence yields `None`, matching transitional uniqueness.
-fn frozen_source_line<'a>(
-    frozen: &'a FrozenIdentityContext,
-    string_table: &dyn StringTableResolver,
-    scope: &InternedPath,
-    line_number: i32,
-) -> Option<&'a str> {
-    let line_number = u32::try_from(line_number).ok()?;
-    let mut matched: Option<SourceId> = None;
-    for slot in frozen.iter() {
-        if !frozen_path_matches_scope(frozen, slot.logical_path, string_table, scope) {
-            continue;
+        if let Some(frozen) = self.frozen_identity {
+            return self.resolve_span_in_frozen(frozen, span);
         }
-        if matched.is_some() {
-            return None;
-        }
-        matched = Some(slot.id);
-    }
-    frozen.line_index(matched?)?.line_text(line_number)
-}
 
-/// Return whether a frozen `PathId` spells the same components as a legacy scope.
-///
-/// WHAT: compares resolved component text via frozen string access, never the filesystem.
-/// WHY: frozen and transitional tables may issue different `StringId`s for the same spelling,
-/// so only content comparison is sound. Fallible resolution keeps a foreign ID from panicking.
-fn frozen_path_matches_scope(
-    frozen: &FrozenIdentityContext,
-    path: PathId,
-    string_table: &dyn StringTableResolver,
-    scope: &InternedPath,
-) -> bool {
-    let table = frozen.paths();
-    let expected = scope.as_components();
-    if table.depth(path) as usize != expected.len() {
-        return false;
+        self.resolve_span_in_database(span)
     }
-    let mut current = path;
-    for expected_component in expected.iter().rev() {
-        let Some(frozen_component) = table.component(current) else {
-            return false;
-        };
-        let (Some(frozen_text), Some(expected_text)) = (
-            frozen.try_resolve_string(frozen_component),
-            string_table.try_resolve(*expected_component),
-        ) else {
-            return false;
-        };
-        if frozen_text != expected_text {
-            return false;
-        }
-        let Some(parent) = table.parent(current) else {
-            return false;
-        };
-        current = parent;
-    }
-    current == PathId::ROOT
-}
+    fn resolve_span_in_frozen(
+        self,
+        frozen: &'a FrozenIdentityContext,
+        span: SourceSpan,
+    ) -> Option<DiagnosticPrimaryPosition<'a>> {
+        let source = span.source();
+        let slot = frozen.get(source)?;
+        let line_index = frozen.line_index(source)?;
+        let range = span.byte_range(frozen);
+        let start = line_index.position(range.start())?;
+        let end = line_index.position(range.end())?;
+        let line = line_index.line_text(start.line)?;
+        let path_id = frozen.source_logical_path(source)?;
+        let mut scratch = Vec::new();
+        let path = PathBuf::from(frozen.render_path(path_id, &mut scratch));
 
-/// Rebuild the legacy `InternedPath` scope for a frozen source identity.
-///
-/// WHAT: resolves the frozen logical `PathId` into its component IDs without copying source
-/// text or touching the filesystem.
-/// WHY: `DiagnosticPrimaryPosition` still carries an `InternedPath` scope for the renderers
-/// whose resolver migration lands separately; frozen component IDs share the final merged-root
-/// allocation, so the rebuilt scope stays resolvable through either table.
-fn frozen_interned_path(frozen: &FrozenIdentityContext, source: SourceId) -> Option<InternedPath> {
-    let path = frozen.source_logical_path(source)?;
-    let table = frozen.paths();
-    let mut components = Vec::with_capacity(table.depth(path) as usize);
-    table.resolve_components(path, &mut components);
-    Some(InternedPath::from_components(components))
+        Some(DiagnosticPrimaryPosition {
+            source,
+            path,
+            host_path: slot.canonical_os_path.as_deref(),
+            start,
+            end,
+            line,
+        })
+    }
+
+    fn resolve_span_in_database(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
+        let source_database = self.source_database?;
+        let source = span.source();
+        let slot = source_database.get(source)?;
+        let line_index = source_database.line_index(source)?;
+        let range = span.byte_range(source_database);
+        let start = line_index.position(range.start())?;
+        let end = line_index.position(range.end())?;
+        let line = line_index.line_text(start.line)?;
+        let path = source_database
+            .legacy_logical_path(source)
+            .to_path_buf(self.string_table);
+
+        Some(DiagnosticPrimaryPosition {
+            source,
+            path,
+            host_path: slot.canonical_os_path.as_deref(),
+            start,
+            end,
+            line,
+        })
+    }
 }
 
 /// Display-cell tab stop for caret geometry. A tab advances the caret to the next multiple of
@@ -351,24 +216,20 @@ fn advance_display_cells(cells: usize, scalar: char) -> usize {
 }
 
 /// Count the display cells before a primary span's start column on its retained line.
-pub(crate) fn primary_caret_padding(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
+pub(crate) fn primary_caret_padding(position: &DiagnosticPrimaryPosition<'_>, line: &str) -> usize {
     caret_cells(line, position.start.column, position.start.column).0
 }
 
-pub(crate) fn primary_underline_length(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
+pub(crate) fn primary_underline_length(
+    position: &DiagnosticPrimaryPosition<'_>,
+    line: &str,
+) -> usize {
     let end_column = if position.start.line == position.end.line {
         position.end.column
     } else {
         u32::MAX
     };
     caret_cells(line, position.start.column, end_column).1
-}
-
-fn legacy_line_position(line: i32, column: i32) -> LinePosition {
-    LinePosition {
-        line: u32::try_from(line.max(0)).unwrap_or(u32::MAX),
-        column: u32::try_from(column.max(0)).unwrap_or(u32::MAX),
-    }
 }
 
 pub(crate) fn diagnostic_type_name(
@@ -437,134 +298,68 @@ pub(crate) fn type_mismatch_context_name(
     }
 }
 
-/// Render a token as source-facing syntax rather than Rust enum debug output.
+/// Render a compact diagnostic token as source-facing syntax rather than Rust enum debug output.
 ///
 /// WHAT: gives syntax diagnostics one spelling source across terminal, terse, dev-server, and
-/// contextless compiler-error fallback while the last bridge call sites are retired.
-/// WHY: parser diagnostics carry `TokenKind` facts, but user output should show Moth syntax
-/// such as `(` or `name`, not implementation names such as `OpenParenthesis`.
+/// contextless compiler-error fallback.
+/// WHY: durable diagnostics retain only a stable token tag plus one compact payload, so rendering
+/// must not depend on the live tokenizer enum or a source token side store.
 pub(crate) fn token_kind_name(
-    token_kind: &TokenKind,
+    token: &DiagnosticToken,
     string_table: &dyn StringTableResolver,
 ) -> String {
-    match token_kind {
-        TokenKind::ModuleStart => "module start".to_owned(),
-        TokenKind::Eof => "end of file".to_owned(),
-        TokenKind::Export => "`export`".to_owned(),
-        TokenKind::Hash => "`#`".to_owned(),
-        TokenKind::Reactive => "`$`".to_owned(),
-        TokenKind::Arrow => "`->`".to_owned(),
-        TokenKind::Symbol(name) => format!("name `{}`", string_table.resolve(*name)),
-        TokenKind::StyleDirective(name) => {
-            format!("style directive `${}`", string_table.resolve(*name))
+    let descriptor = token.tag().descriptor();
+
+    match descriptor.payload() {
+        TokenDescriptorPayload::Static => descriptor.text().to_owned(),
+        TokenDescriptorPayload::Symbol => {
+            format!(
+                "{} `{}`",
+                descriptor.text(),
+                string_table.resolve(token.string_id())
+            )
         }
-        TokenKind::StringSliceLiteral(value) => {
-            format!("string literal \"{}\"", string_table.resolve(*value))
+        TokenDescriptorPayload::StyleDirective => {
+            format!(
+                "{} `${}`",
+                descriptor.text(),
+                string_table.resolve(token.string_id())
+            )
         }
-        // `TokenKind::Path` now carries only a dense handle into a file-owned
-        // `PathSyntaxTable`; that table is not part of stable diagnostic facts, so
-        // the renderer names the token class without a file-local spelling.
-        TokenKind::Path(_) => "path".to_owned(),
-        TokenKind::NumericLiteral(token) => {
-            let text = string_table.resolve(token.normalized_text);
-            match token.kind {
-                crate::compiler_frontend::numeric_text::token::NumericLiteralKind::WholeNumber => {
-                    format!("integer literal `{text}`")
-                }
-                _ => format!("float literal `{text}`"),
+        TokenDescriptorPayload::StringLiteral => {
+            format!(
+                "{} \"{}\"",
+                descriptor.text(),
+                string_table.resolve(token.string_id())
+            )
+        }
+        TokenDescriptorPayload::NumericLiteral => {
+            let text = string_table.resolve(token.string_id());
+            if token.is_whole_number() {
+                format!("integer literal `{text}`")
+            } else {
+                format!("float literal `{text}`")
             }
         }
-        TokenKind::CharLiteral(value) => format!("character literal `{value}`"),
-        TokenKind::RawStringLiteral(value) => {
-            format!("raw string literal `{}`", string_table.resolve(*value))
+        TokenDescriptorPayload::CharLiteral => {
+            format!("{} `{}`", descriptor.text(), token.char_value())
         }
-        TokenKind::BoolLiteral(value) => format!("boolean literal `{value}`"),
-        TokenKind::OpenCurly => "`{`".to_owned(),
-        TokenKind::CloseCurly => "`}`".to_owned(),
-        TokenKind::TypeParameterBracket => "`|`".to_owned(),
-        TokenKind::Newline => "newline".to_owned(),
-        TokenKind::End => "`;`".to_owned(),
-        TokenKind::StartTemplateBody => "`:`".to_owned(),
-        TokenKind::Comma => "`,`".to_owned(),
-        TokenKind::Dot => "`.`".to_owned(),
-        TokenKind::Colon => "`:`".to_owned(),
-        TokenKind::DoubleColon => "`::`".to_owned(),
-        TokenKind::Assign => "`=`".to_owned(),
-        TokenKind::This => "`this`".to_owned(),
-        TokenKind::Must => "`must`".to_owned(),
-        TokenKind::TraitThis => "`This`".to_owned(),
-        TokenKind::OpenParenthesis => "`(`".to_owned(),
-        TokenKind::CloseParenthesis => "`)`".to_owned(),
-        TokenKind::As => "`as`".to_owned(),
-        TokenKind::Type => "`type`".to_owned(),
-        TokenKind::Of => "`of`".to_owned(),
-        TokenKind::Variadic => "`..`".to_owned(),
-        TokenKind::Mutable => "`~`".to_owned(),
-        TokenKind::DatatypeNone => "`None` type".to_owned(),
-        TokenKind::NoneLiteral => "`none`".to_owned(),
-        TokenKind::DatatypeInt => "`Int`".to_owned(),
-        TokenKind::DatatypeFloat => "`Float`".to_owned(),
-        TokenKind::DatatypeBool => "`Bool`".to_owned(),
-        TokenKind::DatatypeTrue => "`True`".to_owned(),
-        TokenKind::DatatypeFalse => "`False`".to_owned(),
-        TokenKind::DatatypeString => "`String`".to_owned(),
-        TokenKind::DatatypeChar => "`Char`".to_owned(),
-        TokenKind::Bang => "`!`".to_owned(),
-        TokenKind::QuestionMark => "`?`".to_owned(),
-        TokenKind::Negative => "unary `-`".to_owned(),
-        TokenKind::Exponent => "`^`".to_owned(),
-        TokenKind::Multiply => "`*`".to_owned(),
-        TokenKind::Divide => "`/`".to_owned(),
-        TokenKind::Modulus => "`%`".to_owned(),
-        TokenKind::IntDivide => "`//`".to_owned(),
-        TokenKind::ExponentAssign => "`^=`".to_owned(),
-        TokenKind::MultiplyAssign => "`*=`".to_owned(),
-        TokenKind::DivideAssign => "`/=`".to_owned(),
-        TokenKind::ModulusAssign => "`%=`".to_owned(),
-        TokenKind::IntDivideAssign => "`//=`".to_owned(),
-        TokenKind::Add => "`+`".to_owned(),
-        TokenKind::Subtract => "`-`".to_owned(),
-        TokenKind::AddAssign => "`+=`".to_owned(),
-        TokenKind::SubtractAssign => "`-=`".to_owned(),
-        TokenKind::Not => "`not`".to_owned(),
-        TokenKind::Is => "`is`".to_owned(),
-        TokenKind::LessThan => "`<`".to_owned(),
-        TokenKind::LessThanOrEqual => "`<=`".to_owned(),
-        TokenKind::GreaterThan => "`>`".to_owned(),
-        TokenKind::GreaterThanOrEqual => "`>=`".to_owned(),
-        TokenKind::And => "`and`".to_owned(),
-        TokenKind::Or => "`or`".to_owned(),
-        TokenKind::If => "`if`".to_owned(),
-        TokenKind::Else => "`else`".to_owned(),
-        TokenKind::Return => "`return`".to_owned(),
-        TokenKind::ReturnBang => "`return!`".to_owned(),
-        TokenKind::Catch => "`catch`".to_owned(),
-        TokenKind::Then => "`then`".to_owned(),
-        TokenKind::Checked => "`checked`".to_owned(),
-        TokenKind::Async => "`async`".to_owned(),
-        TokenKind::Loop => "`loop`".to_owned(),
-        TokenKind::By => "`by`".to_owned(),
-        TokenKind::Break => "`break`".to_owned(),
-        TokenKind::Continue => "`continue`".to_owned(),
-        TokenKind::ExclusiveRange => "`to`".to_owned(),
-        TokenKind::Ampersand => "`&`".to_owned(),
-        TokenKind::FatArrow => "`=>`".to_owned(),
-        TokenKind::Wildcard => "`_`".to_owned(),
-        TokenKind::Copy => "`copy`".to_owned(),
-        TokenKind::TemplateClose => "`]`".to_owned(),
-        TokenKind::TemplateHead => "`[`".to_owned(),
-        TokenKind::ChannelSend => "`>>`".to_owned(),
-        TokenKind::ChannelReceive => "`<<`".to_owned(),
-        TokenKind::Yield => "`yield`".to_owned(),
-        TokenKind::Cast => "`cast`".to_owned(),
-        TokenKind::CastBang => "`cast!`".to_owned(),
-        TokenKind::Assert => "`assert`".to_owned(),
+        TokenDescriptorPayload::RawStringLiteral => {
+            format!(
+                "{} `{}`",
+                descriptor.text(),
+                string_table.resolve(token.string_id())
+            )
+        }
+        TokenDescriptorPayload::BoolLiteral => {
+            format!("{} `{}`", descriptor.text(), token.bool_value())
+        }
     }
 }
 
 pub(crate) fn expected_token_message(
-    expected: &TokenKind,
-    found: Option<&TokenKind>,
+    expected: &DiagnosticToken,
+    found: Option<&DiagnosticToken>,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let expected = token_kind_name(expected, string_table);
@@ -578,7 +373,7 @@ pub(crate) fn expected_token_message(
 }
 
 pub(crate) fn unexpected_token_message(
-    found: &TokenKind,
+    found: &DiagnosticToken,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let found = token_kind_name(found, string_table);

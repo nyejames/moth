@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_source_location,
+    function_node, make_test_variable, node,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -44,19 +44,19 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
             body: vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     inner,
-                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
+                    Expression::int(1, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(2),
+                None,
             )],
         },
-        test_source_location(1),
+        None,
     );
     let after_declaration = node(
         NodeKind::VariableDeclaration(make_test_variable(
             after,
-            Expression::int(2, test_source_location(4), None, ValueMode::ImmutableOwned),
+            Expression::int(2, None, ValueMode::ImmutableOwned),
         )),
-        test_source_location(4),
+        None,
     );
 
     let start_function = function_node(
@@ -66,7 +66,7 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
             returns: vec![],
         },
         vec![lexical_scope, after_declaration],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);

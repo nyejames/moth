@@ -25,7 +25,6 @@ use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize
 use crate::compiler_frontend::headers::file_parser::parse_headers_in_file;
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
-use crate::compiler_frontend::headers::types::HeaderParseContext;
 pub(crate) use crate::compiler_frontend::headers::types::SourcePreparationDelta;
 pub use crate::compiler_frontend::headers::types::{
     BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
@@ -33,12 +32,11 @@ pub use crate::compiler_frontend::headers::types::{
     LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, PreparedHeaderSyntax,
     RetainedDependencyClause, TopLevelConstFragment,
 };
+use crate::compiler_frontend::headers::types::{HeaderParseContext, HeaderParseFailure};
 // HeaderExportMode is re-exported for focused AST tests that construct Header values with
 // explicit export modes. Production code calls HeaderExportMode::is_public() through the
 // header field, so this re-export is only reached from test modules.
-use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    find_config_qualifier_marker, normalize_source_build_config_contract,
-};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::normalize_source_build_config_contract;
 #[cfg(test)]
 pub use crate::compiler_frontend::headers::types::HeaderExportMode;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -48,7 +46,7 @@ use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_config_file, file_name_is_module_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use std::mem;
 use std::path::Path;
 
@@ -121,7 +119,7 @@ pub fn parse_file_headers_with_table(
         runtime_fragment_offset,
     };
     let file_output = parse_headers_in_file(file_tokens, file_id, &mut parse_context);
-    capture_preparation_spans(file_output, file_id, span_builder)
+    capture_preparation_spans(file_output, file_id)
 }
 
 /// Attach exact primary and related spans to warnings and diagnostics emitted for one source file.
@@ -134,25 +132,24 @@ pub fn parse_file_headers_with_table(
 fn capture_preparation_spans(
     mut file_output: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
     file_id: SourceId,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     match &mut file_output {
         Ok(output) => {
             for warning in &mut output.warnings {
                 warning
-                    .capture_preparation_span(file_id, span_builder)
+                    .capture_preparation_span(file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
         }
         Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
             for warning in &mut error.warnings {
                 warning
-                    .capture_preparation_span(file_id, span_builder)
+                    .capture_preparation_span(file_id)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
             }
             error
                 .diagnostic
-                .capture_preparation_span(file_id, span_builder)
+                .capture_preparation_span(file_id)
                 .map_err(FileFrontendPrepareFailure::Infrastructure)?;
         }
         Err(FileFrontendPrepareFailure::Infrastructure(_)) => {}
@@ -276,23 +273,39 @@ pub fn prepare_header_syntax(
 /// Header preparation has already parsed declaration shells for signatures and record payloads,
 /// while function/start bodies remain token slices. Inspecting both retained representations keeps
 /// illegal nested placements ahead of AST without adding a recursive expression walk.
-pub(crate) fn find_config_qualifier_marker_in_header(
+pub(super) fn find_config_qualifier_marker_in_header(
     header: &Header,
     string_table: &StringTable,
-) -> Option<(SourceLocation, bool)> {
-    let retained_member_marker = match &header.kind {
+) -> Option<(SourceSpan, bool)> {
+    fn marker_in_tokens(
+        tokens: &[crate::compiler_frontend::tokenizer::tokens::Token],
+        file_id: SourceId,
+        string_table: &StringTable,
+    ) -> Option<SourceSpan> {
+        tokens.windows(2).find_map(|pair| {
+            if pair[0].kind == TokenKind::Hash
+                && matches!(
+                    pair[1].kind,
+                    TokenKind::Symbol(name) if string_table.resolve(name) == "Config"
+                )
+            {
+                Some(SourceSpan::new(file_id, pair[0].span))
+            } else {
+                None
+            }
+        })
+    }
+
+    let marker = match &header.kind {
         HeaderKind::Constant { declaration } => {
-            find_config_qualifier_marker(&declaration.initializer_tokens, string_table)
+            marker_in_tokens(&declaration.initializer_tokens, header.tokens.file_id, string_table)
         }
-        HeaderKind::Function { signature, .. } => signature
-            .parameters
-            .iter()
-            .find_map(|parameter| {
-                find_config_qualifier_marker(&parameter.default_tokens, string_table)
-            }),
-        HeaderKind::Struct { fields, .. } => fields
-            .iter()
-            .find_map(|field| find_config_qualifier_marker(&field.default_tokens, string_table)),
+        HeaderKind::Function { signature, .. } => signature.parameters.iter().find_map(|parameter| {
+            marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
+        }),
+        HeaderKind::Struct { fields, .. } => fields.iter().find_map(|field| {
+            marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
+        }),
         HeaderKind::Choice { variants, .. } => variants.iter().find_map(|variant| {
             let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
                 fields,
@@ -300,22 +313,23 @@ pub(crate) fn find_config_qualifier_marker_in_header(
             else {
                 return None;
             };
-            fields
-                .iter()
-                .find_map(|field| find_config_qualifier_marker(&field.default_tokens, string_table))
+            fields.iter().find_map(|field| {
+                marker_in_tokens(&field.default_tokens, header.tokens.file_id, string_table)
+            })
         }),
         HeaderKind::Trait { declaration } => declaration
             .requirements
             .iter()
             .flat_map(|requirement| requirement.signature.parameters.iter())
             .find_map(|parameter| {
-                find_config_qualifier_marker(&parameter.default_tokens, string_table)
+                marker_in_tokens(&parameter.default_tokens, header.tokens.file_id, string_table)
             }),
         _ => None,
     };
 
-    retained_member_marker
-        .or_else(|| find_config_qualifier_marker(&header.tokens.tokens, string_table))
+    marker
+        .or_else(|| marker_in_tokens(&header.tokens.tokens, header.tokens.file_id, string_table))
+        .map(|span| (span, true))
 }
 
 /// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
@@ -344,17 +358,17 @@ fn collect_source_build_config_contracts(
         }
 
         for header in &output.headers {
-            let report_marker = |location: SourceLocation, adjacent: bool| {
+            let report_marker = |span: SourceSpan, adjacent: bool| {
                 if adjacent {
                     CompilerDiagnostic::invalid_config_reason(
                         header.tokens.src_path.name(),
                         InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                        location,
+                        Some(span),
                     )
                 } else {
                     CompilerDiagnostic::common_syntax_mistake(
                         CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                        location,
+                        Some(span),
                     )
                 }
             };
@@ -379,18 +393,20 @@ fn collect_source_build_config_contracts(
                 let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigContractNameInvalid,
-                    header.name_location.clone(),
+                    header.name_span,
                 );
                 capture(output.file_id, &mut diagnostic)
                     .map_err(HeaderPreparationFailure::Infrastructure)?;
                 diagnostics.push(diagnostic);
                 continue;
             };
+            let Some(name_span) = header.name_span else {
+                continue;
+            };
 
             match normalize_source_build_config_contract(
                 name,
-                header.name_location.clone(),
-                SourceSpan::new(output.file_id, declaration.span),
+                name_span,
                 qualifier,
                 &declaration.initializer_tokens,
                 string_table,
@@ -399,7 +415,7 @@ fn collect_source_build_config_contracts(
                 Err(mut diagnostic) => {
                     capture(output.file_id, &mut diagnostic)
                         .map_err(HeaderPreparationFailure::Infrastructure)?;
-                    diagnostics.push(*diagnostic);
+                    diagnostics.push(diagnostic);
                 }
             }
         }
@@ -430,7 +446,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
     project_path_resolver: Option<&ProjectPathResolver>,
     source_files: &SourceDatabase,
     string_table: &mut StringTable,
-) -> Result<BoundModuleHeaders, DiagnosticBag> {
+) -> Result<BoundModuleHeaders, HeaderPreparationFailure> {
     let PreparedHeaderSyntax {
         mut headers,
         source_build_config_contracts,
@@ -455,10 +471,13 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
             source_provider_dependencies,
             string_table,
         )
-        .map_err(|boxed_diagnostic| {
-            let mut bag = DiagnosticBag::new();
-            bag.push(*boxed_diagnostic);
-            bag
+        .map_err(|failure| match failure {
+            HeaderParseFailure::Diagnostic(diagnostic) => {
+                HeaderPreparationFailure::Diagnosed(DiagnosticBag::from(diagnostic))
+            }
+            HeaderParseFailure::Infrastructure(error) => {
+                HeaderPreparationFailure::Infrastructure(error)
+            }
         })?;
     }
 
@@ -470,7 +489,15 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         source_files,
         string_table,
     })
-    .map_err(|messages| DiagnosticBag::from_diagnostics(messages.into_diagnostics()))?;
+    .map_err(|messages| {
+        if let Some(error) = messages.infrastructure_error().cloned() {
+            HeaderPreparationFailure::Infrastructure(error)
+        } else {
+            HeaderPreparationFailure::Diagnosed(DiagnosticBag::from_diagnostics(
+                messages.into_diagnostics(),
+            ))
+        }
+    })?;
 
     canonicalize_local_ordering_hints(
         &mut headers,
@@ -520,7 +547,7 @@ fn validate_prelude_declaration_shells(
         {
             collision_bag.push(CompilerDiagnostic::reserved_builtin_name(
                 name,
-                header.name_location.to_owned(),
+                header.name_span,
             ));
         }
 
@@ -549,7 +576,7 @@ fn validate_prelude_declaration_shells(
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.to_owned(),
+                    parameter.span,
                 ));
             }
         }

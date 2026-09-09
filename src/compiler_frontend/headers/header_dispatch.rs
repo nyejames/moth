@@ -4,9 +4,7 @@
 //! concrete `HeaderKind` payload.
 //! WHY: declaration-kind parsing is separate from per-file token walking and from dependency sorting.
 
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, ErrorType, compiler_error_to_diagnostic,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidConfigReason, InvalidDeclarationReason,
 };
@@ -32,18 +30,20 @@ use super::trait_headers::{
     parse_specialized_conformance_target, parse_trait_conformance, parse_trait_declaration,
     parse_trait_incompatibility,
 };
+use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::headers::ordering_hints::{
     collect_constant_type_hints, collect_named_type_ordering_hint,
 };
 use crate::compiler_frontend::headers::types::{
     Header, HeaderBuildContext, HeaderExportMode, HeaderKind, LocalDeclarationOrderingHint,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::traits::syntax::{
     ConformanceTargetKind, ConformanceTargetSyntax, TraitReferenceSyntax,
 };
@@ -51,12 +51,15 @@ use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
 
-/// Boxed diagnostic result for header dispatch.
+/// Two-lane result for header dispatch.
 ///
-/// WHAT: gives declaration dispatch and its local helpers one small error boundary.
-/// WHY: delegated declaration parsers already return boxed diagnostics, so dispatch can
-///      propagate them directly without unboxing and reboxing between each step.
-type HeaderDispatchResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Typed failure result for header dispatch.
+///
+/// WHAT: gives declaration dispatch and its local helpers one error boundary that keeps
+///       authored-source diagnostics separate from internal compiler-state failures.
+/// WHY: delegated declaration parsers carry both lanes, so dispatch can propagate them directly
+///      without unboxing and reboxing between each step.
+type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 
 // WHAT: classifies one top-level declaration by its leading token and builds the concrete header
 // payload (kind + body token slice + dependency set) that later AST passes consume.
@@ -80,13 +83,13 @@ pub(super) fn create_header(
     declaration_token: &Token,
     export_mode: HeaderExportMode,
     context: &mut HeaderBuildContext<'_>,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<Header> {
-    let name_location = declaration_token.location.clone();
-    let name_span = declaration_token.span;
+    let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
     let Some(declaration_name) = full_name.name() else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
-            name_location,
+            Some(name_span),
         )
         .into());
     };
@@ -100,11 +103,13 @@ pub(super) fn create_header(
 
     if token_stream.current_token_kind() == &TokenKind::Of {
         if !generic_parameters.is_empty() {
-            return Err(Box::new(CompilerDiagnostic::invalid_declaration(
-                InvalidDeclarationReason::GenericTraitsUnsupported,
-                Some(declaration_name),
-                name_location,
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_declaration(
+                    InvalidDeclarationReason::GenericTraitsUnsupported,
+                    Some(declaration_name),
+                    Some(name_span),
+                ),
+            ));
         }
 
         let target = parse_specialized_conformance_target(
@@ -117,8 +122,7 @@ pub(super) fn create_header(
         let conformance = parse_trait_conformance(token_stream, target, context)?;
         kind = HeaderKind::TraitConformance { conformance };
 
-        let conformance_path =
-            conformance_header_path(&full_name, &name_location, context.string_table);
+        let conformance_path = conformance_header_path(&full_name, name_span, context.string_table);
         let header_tokens =
             FileTokens::new_substream(token_stream, conformance_path, token_stream.file_id, body);
 
@@ -127,8 +131,7 @@ pub(super) fn create_header(
             file_role: context.file_role,
             export_mode,
             local_ordering_hints,
-            name_location,
-            name_span,
+            name_span: Some(name_span),
             tokens: header_tokens,
             source_file: context.source_file.to_owned(),
             capacity_references,
@@ -143,39 +146,31 @@ pub(super) fn create_header(
     //      reserved-trait rejection path.
     if token_stream.current_token_kind() == &TokenKind::Must {
         if !generic_parameters.is_empty() {
-            return Err(Box::new(CompilerDiagnostic::invalid_declaration(
-                InvalidDeclarationReason::GenericTraitsUnsupported,
-                Some(declaration_name),
-                name_location,
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_declaration(
+                    InvalidDeclarationReason::GenericTraitsUnsupported,
+                    Some(declaration_name),
+                    Some(name_span),
+                ),
+            ));
         }
 
         let peek = token_stream.peek_next_token().cloned();
 
         if peek == Some(TokenKind::Not) {
-            ensure_trait_name_is_all_caps(
-                declaration_name,
-                name_location.clone(),
-                context.string_table,
-            )?;
+            ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait incompatibility declaration: `Name must not TRAIT, TRAIT`
             token_stream.advance(); // past must
             token_stream.advance(); // past not
-
             let subject = TraitReferenceSyntax {
                 name: declaration_name,
-                location: name_location.clone(),
-                span: declaration_token.span,
+                span: name_span,
             };
             let incompatibility = parse_trait_incompatibility(token_stream, subject, context)?;
             kind = HeaderKind::TraitIncompatibility { incompatibility };
         } else if peek == Some(TokenKind::Colon) {
-            ensure_trait_name_is_all_caps(
-                declaration_name,
-                name_location.clone(),
-                context.string_table,
-            )?;
+            ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
 
             // Trait declaration: `Name must: requirements ;`
             token_stream.advance(); // past must
@@ -186,6 +181,7 @@ pub(super) fn create_header(
                 declaration_token,
                 declaration_name,
                 context,
+                span_builder,
             )?;
 
             // Collect local declaration-ordering hints from requirement signatures.
@@ -198,8 +194,7 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    )
-                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                    )?;
                 }
                 for ret in &requirement.signature.returns {
                     collect_type_ordering_hints(
@@ -209,8 +204,7 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    )
-                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                    )?;
                 }
             }
 
@@ -224,8 +218,7 @@ pub(super) fn create_header(
                 ConformanceTargetSyntax {
                     name: declaration_name,
                     kind: ConformanceTargetKind::Named,
-                    location: name_location.clone(),
-                    span: declaration_token.span,
+                    span: name_span,
                 },
                 context,
             )?;
@@ -235,10 +228,10 @@ pub(super) fn create_header(
 
         let header_path = match kind {
             HeaderKind::TraitConformance { .. } => {
-                conformance_header_path(&full_name, &name_location, context.string_table)
+                conformance_header_path(&full_name, name_span, context.string_table)
             }
             HeaderKind::TraitIncompatibility { .. } => {
-                incompatibility_header_path(&full_name, &name_location, context.string_table)
+                incompatibility_header_path(&full_name, name_span, context.string_table)
             }
             _ => full_name,
         };
@@ -250,8 +243,7 @@ pub(super) fn create_header(
             file_role: context.file_role,
             export_mode,
             local_ordering_hints,
-            name_location,
-            name_span,
+            name_span: Some(name_span),
             tokens: header_tokens,
             source_file: context.source_file.to_owned(),
             capacity_references,
@@ -265,13 +257,13 @@ pub(super) fn create_header(
         TokenKind::TypeParameterBracket => {
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 context.string_table,
             )?;
             emit_header_naming_warning(
                 context.warnings,
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 IdentifierNamingKind::ValueLike,
                 context.string_table,
             );
@@ -281,6 +273,7 @@ pub(super) fn create_header(
                 context.warnings,
                 context.string_table,
                 &full_name,
+                span_builder,
             )?;
 
             // Local declaration-ordering hints: parameter + return type references only.
@@ -292,8 +285,7 @@ pub(super) fn create_header(
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
-                )
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                )?;
             }
 
             for ret in &signature.returns {
@@ -304,8 +296,7 @@ pub(super) fn create_header(
                     context,
                     &mut local_ordering_hints,
                     &mut capacity_references,
-                )
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                )?;
             }
 
             capture_function_body_tokens(token_stream, &mut body, context.string_table)?;
@@ -320,7 +311,7 @@ pub(super) fn create_header(
         TokenKind::TraitThis => {
             return Err(CompilerDiagnostic::invalid_this_usage(
                 crate::compiler_frontend::compiler_messages::InvalidThisUsageReason::OutsideTraitDeclaration,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -331,13 +322,13 @@ pub(super) fn create_header(
             if let Some(TokenKind::TypeParameterBracket) = token_stream.peek_next_token() {
                 ensure_not_keyword_shadow_identifier(
                     declaration_name,
-                    name_location.to_owned(),
+                    Some(name_span),
                     context.string_table,
                 )?;
                 emit_header_naming_warning(
                     context.warnings,
                     declaration_name,
-                    name_location.to_owned(),
+                    Some(name_span),
                     IdentifierNamingKind::TypeLike,
                     context.string_table,
                 );
@@ -351,6 +342,7 @@ pub(super) fn create_header(
                     context.string_table,
                     context.warnings,
                     &full_name,
+                    span_builder,
                 )?;
 
                 // Collect strict type edges from field types only (no default-expression edges).
@@ -363,8 +355,7 @@ pub(super) fn create_header(
                         context,
                         &mut local_ordering_hints,
                         &mut capacity_references,
-                    )
-                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                    )?;
                 }
 
                 kind = HeaderKind::Struct {
@@ -382,19 +373,19 @@ pub(super) fn create_header(
                 return Err(CompilerDiagnostic::invalid_config_reason(
                     Some(declaration_name),
                     InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 context.string_table,
             )?;
             emit_header_naming_warning(
                 context.warnings,
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 IdentifierNamingKind::TopLevelConstant,
                 context.string_table,
             );
@@ -405,6 +396,7 @@ pub(super) fn create_header(
                 context,
                 &mut local_ordering_hints,
                 &mut capacity_references,
+                span_builder,
             )?;
 
             kind = HeaderKind::Constant {
@@ -416,13 +408,13 @@ pub(super) fn create_header(
         TokenKind::DoubleColon => {
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 context.string_table,
             )?;
             emit_header_naming_warning(
                 context.warnings,
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 IdentifierNamingKind::TypeLike,
                 context.string_table,
             );
@@ -432,8 +424,8 @@ pub(super) fn create_header(
                 &full_name,
                 context.string_table,
                 context.warnings,
-            )
-            .map_err(CompilerDiagnostic::from)?;
+                span_builder,
+            )?;
 
             // Collect strict type edges from payload field types.
             for variant in &choice_header {
@@ -449,8 +441,7 @@ pub(super) fn create_header(
                             context,
                             &mut local_ordering_hints,
                             &mut capacity_references,
-                        )
-                        .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                        )?;
                     }
                 }
             }
@@ -464,22 +455,24 @@ pub(super) fn create_header(
         // `as`: type alias declaration `Name as Type`
         TokenKind::As => {
             if !generic_parameters.is_empty() {
-                return Err(Box::new(CompilerDiagnostic::invalid_declaration(
-                    InvalidDeclarationReason::ParameterizedGenericTypeAlias,
-                    Some(declaration_name),
-                    name_location.to_owned(),
-                )));
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_declaration(
+                        InvalidDeclarationReason::ParameterizedGenericTypeAlias,
+                        Some(declaration_name),
+                        Some(name_span),
+                    ),
+                ));
             }
 
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 context.string_table,
             )?;
             emit_header_naming_warning(
                 context.warnings,
                 declaration_name,
-                name_location.to_owned(),
+                Some(name_span),
                 IdentifierNamingKind::TypeLike,
                 context.string_table,
             );
@@ -507,7 +500,7 @@ pub(super) fn create_header(
                 }
             });
             if let Some(error) = selection_error {
-                return Err(Box::new(compiler_error_to_diagnostic(&error)));
+                return Err(error.into());
             }
             collect_capacity_references_in_parsed_ref(&target, &mut capacity_references);
 
@@ -525,8 +518,7 @@ pub(super) fn create_header(
         file_role: context.file_role,
         export_mode,
         local_ordering_hints,
-        name_location,
-        name_span,
+        name_span: Some(name_span),
         tokens: header_tokens,
         source_file: context.source_file.to_owned(),
         capacity_references,
@@ -536,12 +528,12 @@ pub(super) fn create_header(
 fn emit_header_naming_warning(
     warnings: &mut Vec<CompilerDiagnostic>,
     identifier: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     naming_kind: IdentifierNamingKind,
     string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,
 ) {
     if let Some(warning) =
-        naming_warning_for_identifier(identifier, location, naming_kind, string_table)
+        naming_warning_for_identifier(identifier, span, naming_kind, string_table)
     {
         warnings.push(warning);
     }
@@ -656,7 +648,7 @@ fn capture_function_body_tokens(
                 // remapped and rendered through the active string table.
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern(";")),
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -678,17 +670,21 @@ fn create_constant_header_payload(
     context: &mut HeaderBuildContext<'_>,
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<DeclarationSyntax> {
     let Some(declaration_name) = full_name.name() else {
         return Err(internal_header_dispatch_error(
             "Constant header path is missing its declaration name.",
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
-    let declaration_syntax =
-        parse_declaration_syntax(token_stream, declaration_name, context.string_table)?;
-
+    let declaration_syntax = parse_declaration_syntax(
+        token_stream,
+        declaration_name,
+        context.string_table,
+        span_builder,
+    )?;
     // A comma terminates anonymous-record fields, but it cannot terminate a top-level source
     // contract. Keep the shared declaration parser permissive for record fields and reject this
     // malformed source declaration at the header boundary.
@@ -699,7 +695,7 @@ fn create_constant_header_payload(
         return Err(CompilerDiagnostic::invalid_config_reason(
             Some(declaration_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            qualifier.qualifier_location.clone(),
+            qualifier.qualifier_span,
         )
         .into());
     }
@@ -712,15 +708,14 @@ fn create_constant_header_payload(
         context,
         local_ordering_hints,
         capacity_references,
-    )
-    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+    )?;
 
     Ok(declaration_syntax)
 }
 
 fn internal_header_dispatch_error(
     message: &'static str,
-    location: SourceLocation,
-) -> CompilerDiagnostic {
-    CompilerError::new(message, location, ErrorType::Compiler).into()
+    span: Option<SourceSpan>,
+) -> CompilerError {
+    CompilerError::new(message, span, ErrorType::Compiler)
 }

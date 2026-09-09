@@ -16,7 +16,6 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashMap;
 
 /// Classification of a visible name binding.
@@ -54,21 +53,20 @@ pub(crate) enum VisibleNameBinding {
     ReservedCoreCastTraitName,
 }
 
-/// Stored entry for a registered visible name, including the binding and its source location.
+/// Stored entry for a registered visible name, including the binding and its authored span.
 ///
-/// WHY: preserving the original location lets collision diagnostics emit secondary labels
-/// pointing to the first declaration or dependency.
+/// WHY: preserving the original span lets collision diagnostics emit secondary labels pointing
+/// to the first declaration or dependency.
 struct VisibleNameEntry {
     binding: VisibleNameBinding,
-    location: Option<SourceLocation>,
     span: Option<SourceSpan>,
 }
 
 /// Per-file registry of visible names.
 ///
-/// WHAT: maintains a map from local spelling to its binding classification and source location.
-/// WHY: centralizing collision checks prevents drift between same-file declarations,
-/// dependencies, builtins, and prelude symbols.
+/// WHAT: maintains a map from local spelling to its binding classification and authored span.
+/// WHY: centralizing collision checks prevents drift between same-file declarations, dependencies,
+/// builtins, and prelude symbols.
 pub(crate) struct VisibleNameRegistry {
     names: FxHashMap<StringId, VisibleNameEntry>,
 }
@@ -84,8 +82,8 @@ impl VisibleNameRegistry {
     /// shadowed by later declarations, dependencies, aliases, or namespace records.
     ///
     /// WHY: core cast trait names are globally visible without dependencies; treating
-    ///      them as pre-existing bindings lets the normal collision path reject
-    ///      any user-visible spelling that would claim one of those names.
+    /// them as pre-existing bindings lets the normal collision path reject any
+    /// user-visible spelling that would claim one of those names.
     pub(crate) fn reserve_core_cast_trait_names(&mut self, string_table: &mut StringTable) {
         for_each_core_cast_trait_name(|trait_name| {
             let name_id = string_table.intern(trait_name);
@@ -93,80 +91,45 @@ impl VisibleNameRegistry {
                 name_id,
                 VisibleNameEntry {
                     binding: VisibleNameBinding::ReservedCoreCastTraitName,
-                    location: None,
                     span: None,
                 },
             );
         });
     }
 
-    /// Attempt to register a visible name.
+    /// Attempt to register a visible name while retaining its exact authored span.
     ///
-    /// WHY: same target from two sources (e.g., re-binding the same symbol) is harmless.
-    /// Different targets with the same local spelling is a collision.
+    /// WHY: same target from two sources (e.g., re-binding the same symbol) is harmless. Different
+    /// targets with the same local spelling are a collision.
     ///
     /// Returns `Ok(())` when the name is registered or already present with the same target.
     /// Returns `Err` with a structured diagnostic when the name collides with a different target.
-    ///
-    /// The diagnostic is boxed at this registry boundary because every connected
-    /// binding-environment caller already propagates boxed diagnostics. Keeping the same
-    /// error shape lets collisions travel directly to the header accumulation boundary.
-    /// Register a visible name while retaining the exact authored span for collision labels.
-    ///
-    /// The location remains the compatibility bridge for renderers that have not migrated. The
-    /// optional span belongs to the same source identity as that location and is only used when a
-    /// collision diagnostic is produced.
     pub(crate) fn register(
         &mut self,
         local_name: StringId,
         binding: VisibleNameBinding,
-        location: Option<SourceLocation>,
         span: Option<SourceSpan>,
-    ) -> Result<(), Box<CompilerDiagnostic>> {
+    ) -> Result<(), CompilerDiagnostic> {
         if let Some(entry) = self.names.get(&local_name) {
             if can_coexist(&entry.binding, &binding) {
                 return Ok(());
             }
-            let current_location = location
-                .clone()
-                .or_else(|| entry.location.clone())
-                .unwrap_or_default();
-            let current_span = if location.is_some() { span } else { entry.span };
             if matches!(entry.binding, VisibleNameBinding::ReservedCoreCastTraitName) {
                 let mut diagnostic = CompilerDiagnostic::reserved_name_collision(
                     local_name,
                     ReservedNameOwner::CoreTrait,
-                    current_location,
+                    span,
                 );
-                diagnostic.primary_span = current_span;
-                return Err(Box::new(diagnostic));
+                diagnostic.primary_span = span;
+                return Err(diagnostic);
             }
-            let previous_location = if location.is_some() {
-                entry.location.clone()
-            } else {
-                None
-            };
-            let mut diagnostic = diagnostics::dependency_name_collision(
-                local_name,
-                current_location,
-                previous_location,
-            );
-            diagnostic.primary_span = current_span;
-            if let Some(previous_span) = entry.span {
-                if let Some(label) = diagnostic.labels.get_mut(1) {
-                    label.span = Some(previous_span);
-                }
-            }
-            return Err(Box::new(diagnostic));
+            let mut diagnostic =
+                diagnostics::dependency_name_collision(local_name, span, entry.span);
+            diagnostic.primary_span = span;
+            return Err(diagnostic);
         }
-        self.names.insert(
-            local_name,
-            VisibleNameEntry {
-                binding,
-                location,
-                span,
-            },
-        );
+        self.names
+            .insert(local_name, VisibleNameEntry { binding, span });
         Ok(())
     }
 
@@ -297,16 +260,14 @@ pub(crate) fn check_alias_case_warning(
 
     let alias_upper = a.is_uppercase();
     let symbol_upper = s.is_uppercase();
-
     if alias_upper == symbol_upper {
         return None;
     }
-
-    let location = alias.location.clone();
+    let span = Some(alias.span);
 
     Some(CompilerDiagnostic::dependency_alias_case_mismatch(
         alias.name,
         symbol_name,
-        location,
+        span,
     ))
 }

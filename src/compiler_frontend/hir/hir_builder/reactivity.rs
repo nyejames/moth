@@ -17,7 +17,7 @@ use crate::compiler_frontend::hir::reactivity::{
     HirReactiveSource, HirReactiveSourceKind, HirReactiveTemplate, HirReactiveTemplateDependency,
     HirReactiveTemplateParameterDependency, ReactiveSourceId, ReactiveTemplateId,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -26,7 +26,7 @@ impl<'a> HirBuilder<'a> {
         local_id: LocalId,
         source: &ReactiveSource,
         type_id: TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<ReactiveSourceId, CompilerError> {
         let source = HirReactiveSource {
             id: ReactiveSourceId(0),
@@ -34,7 +34,7 @@ impl<'a> HirBuilder<'a> {
             path: source.path.clone(),
             kind: hir_reactive_source_kind(source.kind),
             type_id,
-            location: location.clone(),
+            span: *span,
         };
 
         Ok(self.side_table.bind_reactive_source(source))
@@ -52,17 +52,13 @@ impl<'a> HirBuilder<'a> {
                 .reactive_source_id_for_local(*local_id)
                 .is_none()
         {
-            self.bind_reactive_source_for_local(*local_id, source, value.ty, &expression.location)?;
+            self.bind_reactive_source_for_local(*local_id, source, value.ty, &expression.span)?;
         }
 
         if let Some(metadata) = &expression.reactive_template
             && value.ty == self.type_environment.builtins().string
         {
-            self.bind_reactive_template_metadata_for_value(
-                value.id,
-                metadata,
-                &expression.location,
-            )?;
+            self.bind_reactive_template_metadata_for_value(value.id, metadata, &expression.span)?;
         }
 
         Ok(())
@@ -72,17 +68,17 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value_id: HirValueId,
         metadata: &ReactiveTemplateMetadata,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<ReactiveTemplateId, CompilerError> {
         let mut dependencies = Vec::with_capacity(metadata.subscriptions.len());
         for subscription in &metadata.subscriptions {
             let source =
-                self.resolve_reactive_source_id(&subscription.source, &subscription.location)?;
-            let type_id = self.lower_type_id(subscription.type_id, &subscription.location)?;
+                self.resolve_reactive_source_id(&subscription.source, &subscription.span)?;
+            let type_id = self.lower_type_id(subscription.type_id, &subscription.span)?;
             dependencies.push(HirReactiveTemplateDependency {
                 source,
                 type_id,
-                location: subscription.location.clone(),
+                span: subscription.span,
             });
         }
 
@@ -95,13 +91,13 @@ impl<'a> HirBuilder<'a> {
                         "Reactive template parameter '{}' was not registered as a HIR local",
                         self.symbol_name_for_diagnostics(&dependency.parameter)
                     ),
-                    self.hir_error_location(&dependency.location)
+                    dependency.span
                 );
             };
 
             template_value_parameters.push(HirReactiveTemplateParameterDependency {
                 parameter,
-                location: dependency.location.clone(),
+                span: dependency.span,
             });
         }
 
@@ -111,7 +107,7 @@ impl<'a> HirBuilder<'a> {
             dependencies,
             template_value_parameters,
             template_backed: metadata.template_backed,
-            location: location.clone(),
+            span: *span,
         };
 
         Ok(self.side_table.bind_reactive_template(template))
@@ -120,7 +116,7 @@ impl<'a> HirBuilder<'a> {
     fn resolve_reactive_source_id(
         &self,
         source: &ReactiveSource,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<ReactiveSourceId, CompilerError> {
         if let Some(source_id) = self.side_table.reactive_source_id_for_path(&source.path) {
             return Ok(source_id);
@@ -137,7 +133,7 @@ impl<'a> HirBuilder<'a> {
                 "Reactive template dependency '{}' did not resolve to a HIR reactive source",
                 self.symbol_name_for_diagnostics(&source.path)
             ),
-            self.hir_error_location(location)
+            *span
         )
     }
 }

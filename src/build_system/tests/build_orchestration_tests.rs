@@ -17,13 +17,10 @@ use crate::build_system::output::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, resolve_source_file_path, terse,
-};
+use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };
-use crate::compiler_frontend::utilities::basic::normalize_path;
 use crate::compiler_tests::test_diagnostics::{
     assert_no_infrastructure_errors, assert_output_rejection,
 };
@@ -1027,18 +1024,28 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
         assert!(
             errors
                 .iter()
-                .any(|diagnostic| diagnostic.kind.descriptor().title == "Unknown type name"),
+                .any(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035"),
             "expected the named-type diagnostic to be preserved"
         );
-        let render_context = messages.diagnostic_render_context(0);
-        assert_eq!(
-            resolve_source_file_path(
-                &errors[0].primary_location.scope,
-                render_context.string_table,
-            ),
-            normalize_path(
-                &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize")
+        let source_files = messages
+            .source_database_for_diagnostic(0)
+            .expect("frontend diagnostics should retain their source database");
+        let source_id = source_files
+            .get_by_canonical_path(
+                &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize"),
             )
+            .expect("main source should remain registered")
+            .id;
+        let diagnostic = errors
+            .iter()
+            .find(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035")
+            .expect("named-type diagnostic should be retained");
+        assert_eq!(
+            diagnostic
+                .primary_span
+                .expect("frontend diagnostic should retain its authored span")
+                .source(),
+            source_id,
         );
     }
 }
@@ -1314,8 +1321,8 @@ fn validated_output_settings_reject_canonical_root_aliases() {
     assert_eq!(string_table.resolve(*dev_folder), "dev-alias");
     assert_eq!(string_table.resolve(*release_folder), "release-alias");
     assert_eq!(
-        resolve_source_file_path(&diagnostic.primary_location.scope, &string_table),
-        root.join("config.moth")
+        diagnostic.primary_span, None,
+        "synthetic Config values have no authored source span",
     );
     let rendered = terse::format_terse_diagnostic_with_context(
         diagnostic,
@@ -1355,7 +1362,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     };
     assert_has_config_error(&messages);
     assert!(
-        messages.first_infrastructure_error_for_tests().is_none(),
+        messages.infrastructure_error().is_none(),
         "missing homepage should stay as a typed config diagnostic"
     );
 }
@@ -1962,7 +1969,6 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 project_root: root.clone(),
                 entry_root: entry_root.clone(),
                 owner,
-                setting_location: SourceLocation::default(),
                 setting_span: None,
             }),
             write_mode: WriteMode::AlwaysWrite,

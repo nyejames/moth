@@ -30,7 +30,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     head_prefix_tir_nodes, sequence_children, trim_whitespace_before_loop_control_boundary,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 fn push_text_node(
     store: &mut TemplateIrStore,
@@ -44,7 +43,6 @@ fn push_text_node(
             byte_len: text.len(),
             origin: TemplateSegmentOrigin::Body,
         },
-        SourceLocation::default(),
         None,
     ))
 }
@@ -59,7 +57,6 @@ fn push_template_entry(
         Style::default(),
         kind,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
         None,
     ))
 }
@@ -84,7 +81,6 @@ fn same_store_wrapper_reference_is_normalized_without_materialization() {
     let mut store = TemplateIrStore::new();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
         None,
     ));
     let template_id = push_template_entry(&mut store, root, TemplateType::String);
@@ -96,7 +92,6 @@ fn same_store_wrapper_reference_is_normalized_without_materialization() {
             phase: TemplateTirPhase::Parsed,
             context,
         },
-        location: SourceLocation::default(),
         span: None,
     };
 
@@ -114,7 +109,6 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
     let mut store = TemplateIrStore::new();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
         None,
     ));
     let template_id = push_template_entry(&mut store, root, TemplateType::String);
@@ -127,7 +121,6 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
                 ..TemplateViewContext::default()
             },
         },
-        location: SourceLocation::default(),
         span: None,
     };
     let missing_context_error = wrapper_reference_for_template(&missing_context_template, &store)
@@ -147,7 +140,6 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
             phase: TemplateTirPhase::Parsed,
             context: TemplateViewContext::default(),
         },
-        location: SourceLocation::default(),
         span: None,
     };
     let missing_template_error = wrapper_reference_for_template(&missing_template, &empty_store)
@@ -168,7 +160,6 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
 
     let child_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
         None,
     ));
     let child_template_id = push_template_entry(&mut store, child_root, TemplateType::String);
@@ -180,7 +171,6 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
             reference: parser_reference,
             occurrence_id: parser_occurrence_id,
         },
-        SourceLocation::default(),
         None,
     ));
     let body_node = push_text_node(&mut store, &mut string_table, "body");
@@ -304,7 +294,6 @@ fn trim_whitespace_rejects_every_malformed_reference_branch() {
         TemplateIrNodeKind::Sequence {
             children: vec![TemplateIrNodeId::new(99)],
         },
-        SourceLocation::default(),
         None,
     ));
     let missing_child_error = trim_whitespace_before_loop_control_boundary(

@@ -7,7 +7,6 @@
 //! or textually wrapped source.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::synthetic_content_header::{
@@ -18,10 +17,10 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::collect_symbol_references;
 use std::path::PathBuf;
 
@@ -35,6 +34,7 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 pub(crate) fn prepare_moth_template_file(
     mut file_tokens: FileTokens,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
     let file_id = file_tokens.file_id;
     let token_count = file_tokens.length;
@@ -44,8 +44,13 @@ pub(crate) fn prepare_moth_template_file(
     let content_header = context.content_header(string_table);
     let config_owned_path_syntax_ids = match &content_header.kind {
         HeaderKind::Constant { declaration }
-            if find_config_qualifier_marker(&declaration.initializer_tokens, string_table)
-                .is_some() =>
+            if find_config_qualifier_marker(
+                &declaration.initializer_tokens,
+                string_table,
+                context.file_id,
+                span_builder,
+            )
+            .is_some() =>
         {
             declaration
                 .initializer_tokens
@@ -98,23 +103,17 @@ pub(crate) fn prepare_moth_template_file(
 /// File-local data needed to synthesize the normal constant header.
 ///
 /// Keeping these fields together makes the generated token construction explicit without
-/// threading the same path, location, and interned names through every helper.
+/// threading the same path and interned names through every helper.
 struct MothTemplatePrepareContext {
     source_file: InternedPath,
     file_id: SourceId,
     canonical_os_path: Option<PathBuf>,
     body_tokens: Vec<Token>,
-    synthetic_location: SourceLocation,
     markdown_directive: StringId,
 }
 
 impl MothTemplatePrepareContext {
     fn new(file_tokens: FileTokens, file_id: SourceId, string_table: &mut StringTable) -> Self {
-        let synthetic_location = SourceLocation::new(
-            file_tokens.src_path.clone(),
-            CharPosition::default(),
-            CharPosition::default(),
-        );
         let markdown_directive = string_table.intern(MOTH_TEMPLATE_MARKDOWN_DIRECTIVE);
 
         let body_tokens = file_tokens
@@ -128,7 +127,6 @@ impl MothTemplatePrepareContext {
             file_id,
             canonical_os_path: file_tokens.canonical_os_path,
             body_tokens,
-            synthetic_location,
             markdown_directive,
         }
     }
@@ -138,15 +136,13 @@ impl MothTemplatePrepareContext {
         string_table: &mut StringTable,
     ) -> crate::compiler_frontend::headers::types::Header {
         let initializer_tokens = self.template_initializer_tokens();
-        let initializer_references = collect_symbol_references(&initializer_tokens);
+        let initializer_references = collect_symbol_references(&initializer_tokens, self.file_id);
 
         synthetic_content_header(
             SyntheticContentHeaderInput {
                 source_file: self.source_file.clone(),
                 file_id: self.file_id,
                 canonical_os_path: self.canonical_os_path.clone(),
-                location: self.synthetic_location.clone(),
-                span: LocalSpan::source_start(),
                 initializer_tokens,
                 initializer_references,
             },
@@ -168,7 +164,7 @@ impl MothTemplatePrepareContext {
     }
 
     fn synthetic_token(&self, kind: TokenKind) -> Token {
-        Token::new(kind, self.synthetic_location.clone())
+        Token::new(kind, LocalSpan::source_start())
     }
 }
 

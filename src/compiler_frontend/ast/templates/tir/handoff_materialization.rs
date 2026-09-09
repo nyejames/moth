@@ -49,7 +49,6 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::collections::HashSet;
 
 /// Materializes a prepared runtime slot application from its exact view.
@@ -174,7 +173,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
         let template = self.get_template(view, id)?;
-        let location = template.location.clone();
         let span = template.span;
         let runtime_slot_plan = template.runtime_slot_plan;
         let root = template.root;
@@ -196,11 +194,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             )?)
         };
 
-        Ok(OwnedRuntimeTemplateHandoff {
-            body,
-            location,
-            span,
-        })
+        Ok(OwnedRuntimeTemplateHandoff { body, span })
     }
 
     fn materialize_runtime_slot_application_by_parts(
@@ -225,7 +219,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             wrapper,
             contribution_sources,
             slot_sites,
-            location: slot_plan.location.clone(),
             span: slot_plan.span,
         })
     }
@@ -243,7 +236,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 source: source.source,
                 render_root: self.materialize_node(view, source.render_root, Some(slot_plan_id))?,
                 renders_wrapper_unconditionally: source.renders_wrapper_unconditionally,
-                location: source.location.clone(),
                 span: source.span,
             });
         }
@@ -263,7 +255,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             sites.push(OwnedRuntimeSlotSite {
                 site: site.site,
                 render_root: self.materialize_node(view, site.render_root, Some(slot_plan_id))?,
-                location: site.location.clone(),
                 span: site.span,
             });
         }
@@ -312,7 +303,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
                 Ok(OwnedRuntimeTemplateNode::Sequence {
                     children: owned_children,
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -324,7 +314,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             } => Ok(OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text(self.string_table.resolve(*text).to_owned()),
                 reactive_subscription: view.store().node_reactive_subscription(id)?.cloned(),
-                location: node.location.clone(),
                 span: node.span,
             }),
 
@@ -352,14 +341,12 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     Ok(OwnedRuntimeTemplateNode::Text {
                         text,
                         reactive_subscription: reactive_subscription.clone(),
-                        location: node.location.clone(),
                         span: node.span,
                     })
                 } else {
                     Ok(OwnedRuntimeTemplateNode::DynamicExpression {
                         expression: Box::new(effective_expression),
                         reactive_subscription: reactive_subscription.clone(),
-                        location: node.location.clone(),
                         span: node.span,
                     })
                 }
@@ -375,7 +362,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     reference,
                     active_slot_plan,
                     injection,
-                    node.location.clone(),
                     node.span,
                 )?;
 
@@ -384,7 +370,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         view,
                         &context,
                         child_handoff,
-                        &node.location,
                     )
                 } else {
                     Ok(child_handoff)
@@ -412,7 +397,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                             branch.selector_site_id,
                         )?,
                         body,
-                        location: branch.location.clone(),
                         span: branch.span,
                     });
                 }
@@ -432,7 +416,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     branches: owned_branches,
                     fallback,
                     else_marker: else_marker.clone(),
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -462,7 +445,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     header: self.effective_loop_header(view, header, *header_sites)?,
                     body: Box::new(body_node),
                     aggregate_wrapper,
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -471,7 +453,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
             TemplateIrNodeKind::LoopControl { kind } => Ok(OwnedRuntimeTemplateNode::LoopControl {
                 kind: *kind,
-                location: node.location.clone(),
                 span: node.span,
             }),
 
@@ -496,7 +477,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
                 Ok(OwnedRuntimeTemplateNode::RuntimeSlotSite {
                     site: *site,
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -521,7 +501,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
                 Ok(OwnedRuntimeTemplateNode::RuntimeSlotContributionSource {
                     source: *source,
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -540,16 +519,12 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     return self.materialize_resolved_slot_sources(
                         view,
                         sources,
-                        &node.location,
                         node.span,
                         active_slot_plan,
                     );
                 }
 
-                Ok(OwnedRuntimeTemplateNode::Slot {
-                    location: node.location.clone(),
-                    span: node.span,
-                })
+                Ok(OwnedRuntimeTemplateNode::Slot { span: node.span })
             }
 
             TemplateIrNodeKind::InsertContribution { template } => {
@@ -558,7 +533,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     self.materialize_template(&helper_view, *template, active_slot_plan, None)?;
                 Ok(OwnedRuntimeTemplateNode::ChildTemplate {
                     template: Box::new(helper_handoff),
-                    location: node.location.clone(),
                     span: node.span,
                 })
             }
@@ -760,7 +734,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         reference: &TemplateTirChildReference,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         let child_view = view.structural_child(*reference)?;
@@ -769,7 +742,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             child_view,
             active_slot_plan,
             injection,
-            location,
             span,
         )
     }
@@ -780,7 +752,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         child_view: TirView<'_>,
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
-        location: SourceLocation,
         span: Option<SourceSpan>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         let handoff =
@@ -788,7 +759,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
         Ok(OwnedRuntimeTemplateNode::ChildTemplate {
             template: Box::new(handoff?),
-            location,
             span,
         })
     }
@@ -797,15 +767,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         &mut self,
         view: &TirView<'_>,
         sources: &[TemplateIrId],
-        location: &SourceLocation,
         span: Option<SourceSpan>,
         active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         if sources.is_empty() {
-            return Ok(OwnedRuntimeTemplateNode::Slot {
-                location: location.to_owned(),
-                span,
-            });
+            return Ok(OwnedRuntimeTemplateNode::Slot { span });
         }
 
         if sources.len() == 1 {
@@ -813,7 +779,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 view,
                 &sources[0],
                 active_slot_plan,
-                location,
                 span,
             );
         }
@@ -824,16 +789,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 view,
                 source,
                 active_slot_plan,
-                location,
                 span,
             )?);
         }
 
-        Ok(OwnedRuntimeTemplateNode::Sequence {
-            children,
-            location: location.to_owned(),
-            span,
-        })
+        Ok(OwnedRuntimeTemplateNode::Sequence { children, span })
     }
 
     /// Materializes one resolved slot source into an owned runtime handoff node.
@@ -847,7 +807,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         source: &TemplateIrId,
         active_slot_plan: Option<TemplateSlotPlanId>,
-        location: &SourceLocation,
         span: Option<SourceSpan>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         let source_view = view.resolved_slot_source(*source)?;
@@ -856,7 +815,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             source_view,
             active_slot_plan,
             None,
-            location.to_owned(),
             span,
         )
     }
@@ -871,7 +829,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         context: &TirWrapperContext,
         child_handoff: OwnedRuntimeTemplateNode,
-        child_location: &SourceLocation,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         if context.skip_parent_child_wrappers {
             return Ok(child_handoff);
@@ -902,7 +859,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     view,
                     &wrapper_set.wrappers,
                     child_handoff,
-                    child_location,
                 ),
         }
     }
@@ -949,7 +905,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
-        child_location: &SourceLocation,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
         if wrapper_references.is_empty() {
             return Ok(child_handoff);
@@ -967,7 +922,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         Ok(OwnedRuntimeTemplateNode::ConditionalWrapper {
             child: Box::new(child_handoff),
             wrapper: Box::new(wrapper),
-            location: child_location.to_owned(),
             span: None,
         })
     }
@@ -993,14 +947,9 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 Some((&fill_target_key, &child_handoff)),
             ),
             None => {
-                let wrapper_location = materializer
-                    .effective_node(view, wrapper_root)?
-                    .location
-                    .clone();
                 let wrapper_content = materializer.materialize_node(view, wrapper_root, None)?;
                 Ok(OwnedRuntimeTemplateNode::Sequence {
                     children: vec![wrapper_content, child_handoff],
-                    location: wrapper_location,
                     span: None,
                 })
             }

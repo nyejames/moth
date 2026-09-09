@@ -169,7 +169,6 @@ fn resolve_project_roots(
             return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
                 &config.entry_dir,
                 format!("Failed to canonicalize project root: {error}"),
-                string_table,
             )));
         }
     };
@@ -196,7 +195,6 @@ fn resolve_project_roots(
             return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
                 &entry_root_path,
                 format!("Failed to canonicalize configured entry root: {error}"),
-                string_table,
             )));
         }
     };

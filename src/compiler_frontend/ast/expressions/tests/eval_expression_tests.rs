@@ -25,7 +25,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use std::rc::Rc;
@@ -82,16 +81,14 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     let nodes = vec![
         ExpressionRpnItem::Operand(Expression::structural_string(
             vec![ConstStringPiece::SiteRoot],
-            SourceLocation::default(),
+            None,
         )),
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
-            location: SourceLocation::default(),
             span: None,
         },
         ExpressionRpnItem::Operand(Expression::string_slice(
             string_table.get_or_intern(String::from("?v=1")),
-            SourceLocation::default(),
             None,
             ValueMode::ImmutableOwned,
         )),
@@ -147,17 +144,15 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
         vec![
             ExpressionRpnItem::Operand(Expression::structural_string(
                 vec![ConstStringPiece::SiteRoot],
-                SourceLocation::default(),
+                None,
             )),
             ExpressionRpnItem::Operand(Expression::string_slice(
                 string_table.intern("plain"),
-                SourceLocation::default(),
                 None,
                 ValueMode::ImmutableOwned,
             )),
             ExpressionRpnItem::Operator {
                 operator: Operator::Equality,
-                location: SourceLocation::default(),
                 span: None,
             },
         ]

@@ -36,78 +36,34 @@ impl DiagnosticBag {
         self.diagnostics.push(diagnostic);
     }
 
-    /// Append diagnostics produced after the current contents, preserving order.
-    pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = CompilerDiagnostic>) {
-        self.diagnostics.extend(diagnostics);
-    }
-
-    /// Move every diagnostic out of `other` onto the end of this bag, preserving order.
-    ///
-    /// WHAT: consumes `other` so the same diagnostic is never owned twice.
-    /// WHY: file and module aggregation merge per-file bags into one premerge owner.
-    pub(crate) fn append_bag(&mut self, other: Self) {
-        self.diagnostics.extend(other.into_diagnostics());
-    }
-
-    /// Prepend diagnostics produced before the current contents, preserving order.
-    ///
-    /// WHAT: `prior` diagnostics stay before the existing ones.
-    /// WHY: per-file warnings are emitted before the terminal diagnostic and must keep
-    /// that production order through aggregation.
-    pub(crate) fn prepend_diagnostics(
-        &mut self,
-        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
-    ) {
-        let mut prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
-        if prior_diagnostics.is_empty() {
-            return;
-        }
-
-        prior_diagnostics.append(&mut self.diagnostics);
-        self.diagnostics = prior_diagnostics;
-    }
-
-    /// Move every diagnostic out of `other` ahead of the current contents, preserving order.
-    pub(crate) fn prepend_bag(&mut self, other: Self) {
-        self.prepend_diagnostics(other.into_diagnostics());
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.diagnostics.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.diagnostics.is_empty()
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.diagnostics.iter()
-    }
-
     pub(crate) fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
             .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     }
 
+    #[cfg(test)]
     pub(crate) fn has_warnings(&self) -> bool {
         self.diagnostics
             .iter()
             .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
     }
 
+    #[cfg(test)]
     pub(crate) fn errors(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
         self.diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     }
 
+    #[cfg(test)]
     pub(crate) fn warnings(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
         self.diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
     }
 
+    #[cfg(test)]
     pub(crate) fn diagnostics(&self) -> &[CompilerDiagnostic] {
         &self.diagnostics
     }
@@ -146,10 +102,14 @@ pub(crate) struct PremergeDiagnosticBatch {
     string_table: StringTable,
     render_type_contexts: Vec<RenderTypeContext>,
 }
+
 /// Shared premerge failure lane preserving diagnosed vs infrastructure outcomes.
 ///
-/// WHAT: carries either a move-only diagnosed [`PremergeDiagnosticBatch`] or a typed
-/// infrastructure [`CompilerError`] without constructing `CompilerMessages`.
+/// WHAT: carries a move-only diagnosed [`PremergeDiagnosticBatch`], a typed infrastructure
+/// [`CompilerError`], or both when a source-finalization failure races a semantic failure.
+/// The mixed form exists only for that double-failure tail: the diagnosed batch stays
+/// authoritative for user output while the finish failure stays observable on the outer
+/// infrastructure lane instead of being dropped or fabricated into a user diagnostic.
 /// WHY: premerge producers must return one lane that keeps authored-source rejection
 /// separate from malformed retained state; the final merge boundary owns the single
 /// conversion into `CompilerMessages`.
@@ -157,41 +117,10 @@ pub(crate) struct PremergeDiagnosticBatch {
 pub(crate) enum PremergeFailure {
     Diagnosed(PremergeDiagnosticBatch),
     Infrastructure(CompilerError),
-}
-
-impl PremergeFailure {
-    pub(crate) fn diagnosed(batch: PremergeDiagnosticBatch) -> Self {
-        Self::Diagnosed(batch)
-    }
-
-    pub(crate) fn infrastructure(error: CompilerError) -> Self {
-        Self::Infrastructure(error)
-    }
-
-    pub(crate) fn is_diagnosed(&self) -> bool {
-        matches!(self, Self::Diagnosed(_))
-    }
-
-    pub(crate) fn as_batch(&self) -> Option<&PremergeDiagnosticBatch> {
-        match self {
-            Self::Diagnosed(batch) => Some(batch),
-            Self::Infrastructure(_) => None,
-        }
-    }
-
-    pub(crate) fn as_infrastructure(&self) -> Option<&CompilerError> {
-        match self {
-            Self::Diagnosed(_) => None,
-            Self::Infrastructure(error) => Some(error),
-        }
-    }
-
-    pub(crate) fn into_result(self) -> Result<PremergeDiagnosticBatch, CompilerError> {
-        match self {
-            Self::Diagnosed(batch) => Ok(batch),
-            Self::Infrastructure(error) => Err(error),
-        }
-    }
+    Mixed {
+        batch: PremergeDiagnosticBatch,
+        error: CompilerError,
+    },
 }
 
 impl From<PremergeDiagnosticBatch> for PremergeFailure {
@@ -205,11 +134,13 @@ impl From<CompilerError> for PremergeFailure {
         Self::Infrastructure(error)
     }
 }
+
 impl PremergeFailure {
     /// Convert the premerge lane into the final boundary vessel exactly once.
     ///
-    /// WHAT: moves a diagnosed batch into `CompilerMessages` or wraps an infrastructure
-    /// `CompilerError` without cloning diagnostics.
+    /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries an infrastructure
+    /// `CompilerError` on the outer lane, or carries both for a mixed double-failure,
+    /// without cloning diagnostics.
     /// WHY: only true final build/package/check/benchmark boundaries own this conversion;
     /// intermediate stages return the failure lane itself so `StringId` remap and source
     /// attachment each happen exactly once at the merge boundary.
@@ -217,6 +148,11 @@ impl PremergeFailure {
         match self {
             Self::Diagnosed(batch) => batch.into_messages(),
             Self::Infrastructure(error) => CompilerMessages::from_error_ref(error, string_table),
+            Self::Mixed { batch, error } => {
+                let mut messages = batch.into_messages();
+                messages.set_infrastructure_error(error);
+                messages
+            }
         }
     }
 
@@ -237,13 +173,13 @@ impl PremergeFailure {
     }
 }
 
-/// Classify a deeper stage's mixed boundary vessel into the premerge lane.
+/// Classify a deeper stage's boundary vessel into the premerge lane.
 ///
 /// WHAT: routes a `CompilerMessages` failure through the single
 /// [`ModuleDiagnostics`](super::module_diagnostics::ModuleDiagnostics) classifier: user-facing
-/// failures become a move-only diagnosed batch, infrastructure payloads (and malformed
+/// failures become a move-only diagnosed batch, the outer infrastructure lane (and malformed
 /// sequences) become the typed `CompilerError` lane.
-/// WHY: binding/order/AST/HIR stages still return the mixed vessel; the semantic service
+/// WHY: binding/order/AST/HIR stages still return the legacy vessel; the semantic service
 /// normalizes each one here so `?` carries the classified lane upward without rebuilding a
 /// second vessel per stage. Warning companions of infrastructure failures are discarded by
 /// the classifier because the typed lane aborts the owning compilation.
@@ -275,6 +211,7 @@ impl PremergeDiagnosticBatch {
             render_type_contexts,
         }
     }
+
     pub(crate) fn new(bag: DiagnosticBag, string_table: StringTable) -> Self {
         Self {
             bag,
@@ -285,10 +222,6 @@ impl PremergeDiagnosticBatch {
 
     pub(crate) fn from_bag(bag: DiagnosticBag, string_table: StringTable) -> Self {
         Self::new(bag, string_table)
-    }
-
-    pub(crate) fn empty(string_table: StringTable) -> Self {
-        Self::new(DiagnosticBag::new(), string_table)
     }
 
     pub(crate) fn from_diagnostic(
@@ -305,107 +238,33 @@ impl PremergeDiagnosticBatch {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
     }
 
-    pub(crate) fn push(&mut self, diagnostic: CompilerDiagnostic) {
-        self.bag.push(diagnostic);
+    pub(crate) fn has_errors(&self) -> bool {
+        self.bag.has_errors()
     }
-
-    /// Append later diagnostics, preserving order. Type-context ranges are unaffected.
-    pub(crate) fn extend(&mut self, diagnostics: impl IntoIterator<Item = CompilerDiagnostic>) {
-        self.bag.extend(diagnostics);
-    }
-
-    /// Move every diagnostic and type-context range out of `other` onto the end of this
-    /// batch, preserving order.
+    /// Prepend diagnostics emitted before this batch while preserving retained render ranges.
     ///
-    /// WHAT: consumes `other`; its ranges shift by the current diagnostic count so they
-    /// keep pointing at their own diagnostics.
-    /// WHY: module aggregation merges premerge batches without copying diagnostics.
-    /// The caller must have remapped `other` into this batch's string-table domain first;
-    /// `other`'s table is discarded.
-    pub(crate) fn append_batch(&mut self, mut other: Self) {
-        let shift = self.bag.len();
-        self.bag.append_bag(other.bag_take());
-        for mut context in other.render_type_contexts_take() {
-            context.diagnostic_range.start += shift;
-            context.diagnostic_range.end += shift;
-            self.render_type_contexts.push(context);
-        }
-    }
-
-    /// Prepend earlier diagnostics, preserving order, and shift existing type-context
-    /// ranges forward by the prepended length.
+    /// WHAT: moves the incoming diagnostics in front of this batch and shifts each retained type
+    /// context by their count.
+    /// WHY: preparation warnings are collected before a later diagnosed batch; moving them here
+    /// keeps authored order and avoids cloning diagnostics or their interned IDs.
     pub(crate) fn prepend_diagnostics(
         &mut self,
         prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
     ) {
-        let prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
+        let mut prior_diagnostics = prior_diagnostics.into_iter().collect::<Vec<_>>();
         let shift = prior_diagnostics.len();
+
         if shift == 0 {
             return;
         }
 
-        self.bag.prepend_diagnostics(prior_diagnostics);
-        for context in &mut self.render_type_contexts {
-            context.diagnostic_range.start += shift;
-            context.diagnostic_range.end += shift;
+        prior_diagnostics.append(&mut self.bag.diagnostics);
+        self.bag.diagnostics = prior_diagnostics;
+
+        for type_context in &mut self.render_type_contexts {
+            type_context.diagnostic_range.start += shift;
+            type_context.diagnostic_range.end += shift;
         }
-    }
-
-    /// Move every diagnostic out of `other` ahead of the current contents. See
-    /// [`Self::append_batch`] for the string-table domain contract; `other`'s table is
-    /// discarded and its ranges shift onto the prepended positions.
-    pub(crate) fn prepend_batch(&mut self, mut other: Self) {
-        let shift = other.bag.len();
-
-        for context in &mut self.render_type_contexts {
-            context.diagnostic_range.start += shift;
-            context.diagnostic_range.end += shift;
-        }
-        let mut contexts = other.render_type_contexts_take();
-        contexts.append(&mut self.render_type_contexts);
-        self.render_type_contexts = contexts;
-        self.bag.prepend_bag(other.bag_take());
-    }
-
-    /// Attach one local render type-context range produced alongside these diagnostics.
-    pub(crate) fn push_type_context(&mut self, context: RenderTypeContext) {
-        self.render_type_contexts.push(context);
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.bag.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.bag.is_empty()
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.bag.has_errors()
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
-        self.bag.iter()
-    }
-
-    pub(crate) fn diagnostics(&self) -> &[CompilerDiagnostic] {
-        self.bag.diagnostics()
-    }
-
-    pub(crate) fn bag(&self) -> &DiagnosticBag {
-        &self.bag
-    }
-
-    pub(crate) fn string_table(&self) -> &StringTable {
-        &self.string_table
-    }
-
-    pub(crate) fn string_table_mut(&mut self) -> &mut StringTable {
-        &mut self.string_table
-    }
-
-    pub(crate) fn render_type_contexts(&self) -> &[RenderTypeContext] {
-        &self.render_type_contexts
     }
 
     /// Remap every interned string owned by this batch into the merged global table.
@@ -425,21 +284,6 @@ impl PremergeDiagnosticBatch {
         (self.bag, self.string_table, self.render_type_contexts)
     }
 
-    /// Merge this batch's local string-table delta into the global table and remap once.
-    ///
-    /// WHAT: merges the owned local table delta starting at `base_len` into `global`, then
-    /// remaps every bagged diagnostic and retained type environment through the returned
-    /// remap. Identity merges skip the remap walk.
-    /// WHY: canonical module aggregation merges each module-local delta exactly once before
-    /// the diagnostics enter the boundary table; doing both steps here keeps that single-remap
-    /// contract beside the batch owner instead of scattered across callers.
-    pub(crate) fn merge_delta_into_global(&mut self, global: &mut StringTable, base_len: usize) {
-        let remap = global.merge_delta_from(&self.string_table, base_len);
-        if !remap.is_identity() {
-            self.remap_string_ids(&remap);
-        }
-    }
-
     /// Consume the batch into the final boundary vessel, preserving type-context ranges.
     ///
     /// WHAT: moves the owned diagnostics, string table and render type contexts into
@@ -451,28 +295,11 @@ impl PremergeDiagnosticBatch {
         let (bag, string_table, render_type_contexts) = self.into_parts();
         CompilerMessages {
             diagnostics: bag.into_diagnostics(),
+            infrastructure_error: None,
             string_table,
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts,
         }
-    }
-
-    /// Consume the batch into the final vessel with its source database attached.
-    pub(crate) fn into_messages_with_source(
-        self,
-        source_database: Arc<SourceDatabase>,
-    ) -> CompilerMessages {
-        let mut messages = self.into_messages();
-        messages.set_source_database(source_database);
-        messages
-    }
-
-    fn bag_take(&mut self) -> DiagnosticBag {
-        std::mem::take(&mut self.bag)
-    }
-
-    fn render_type_contexts_take(&mut self) -> Vec<RenderTypeContext> {
-        std::mem::take(&mut self.render_type_contexts)
     }
 }

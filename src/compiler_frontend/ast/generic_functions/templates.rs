@@ -11,7 +11,7 @@ use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use std::fmt;
 use std::sync::Arc;
 
@@ -112,5 +112,5 @@ pub(crate) struct GenericFunctionTemplate {
     /// ordinary facts; generated templates use the `Materialised` variant, which owns the
     /// compact facts for its tokens.
     pub(crate) body_tokens: Option<GenericFunctionBody>,
-    pub(crate) declaration_location: SourceLocation,
+    pub(crate) declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
 }

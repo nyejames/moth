@@ -310,7 +310,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     id: local_path,
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        Default::default(),
                         None,
                         type_id,
                         diagnostic_type,
@@ -471,7 +470,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             fields.push(FieldDefinition {
                 name: field_path.clone(),
                 type_id: field_type_id,
-                location: Default::default(),
                 span: None,
             });
             let default_value = match &field.folded_default {
@@ -480,7 +478,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
                 None => Expression::new(
                     ExpressionKind::NoValue,
-                    Default::default(),
                     None,
                     field_type_id,
                     diagnostic_type_spelling(field_type_id, &self.type_environment),
@@ -535,7 +532,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     fields.push(FieldDefinition {
                         name: nominal_path.join_str(&field.name, string_table),
                         type_id: field_type_id,
-                        location: Default::default(),
                         span: None,
                     });
                 }
@@ -547,7 +543,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 name: string_table.intern(&variant.name),
                 tag,
                 payload,
-                location: Default::default(),
                 span: None,
             });
         }

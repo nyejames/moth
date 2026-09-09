@@ -272,8 +272,8 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
         .expect_err("conflicting directives should fail bootstrap");
 
     assert_eq!(messages.error_count(), 1);
-    let (_error_type, message, _location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("directive conflict should be wrapped for rendering");
-    assert!(message.contains("cannot override") || message.contains("already exists"));
+    assert!(error.msg.contains("cannot override") || error.msg.contains("already exists"));
 }

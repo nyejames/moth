@@ -256,12 +256,6 @@ impl InternedPath {
             .all(|(a, b)| a == b)
     }
 
-    /// Render with the platform-native path separator.
-    /// Use this only for diagnostics and filesystem-adjacent display.
-    pub(crate) fn to_native_string(&self, string_table: &dyn StringTableResolver) -> String {
-        self.to_path_buf(string_table).to_string_lossy().to_string()
-    }
-
     /// Render with forward slashes so string output is deterministic across OSes.
     /// This is the preferred renderer for compiler logic, snapshots, and tests.
     pub(crate) fn to_portable_string(&self, string_table: &dyn StringTableResolver) -> String {

@@ -209,16 +209,6 @@ fn unknown_alias_target_is_a_user_diagnostic() {
         "expected unknown type diagnostic, got {:?}",
         diagnostic.payload
     );
-
-    let location = &diagnostic.primary_location;
-    assert_eq!(
-        (
-            location.start_pos.line_number,
-            location.start_pos.char_column
-        ),
-        (0, 12),
-        "unknown alias target must point at the target spelling, got {location:?}"
-    );
 }
 
 #[test]

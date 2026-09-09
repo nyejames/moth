@@ -17,20 +17,18 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement,
 };
 
-/// Boxed diagnostic result for the connected trait-requirement matching family.
+/// Result for the connected trait-requirement matching family.
 ///
-/// Requirement lookup and signature validation recurse through one owner and
-/// propagate directly into the already boxed evidence-validation boundary.
-/// Boxing here keeps each local `Result` small without changing accumulation
-/// or rendered diagnostic ownership.
-type RequirementValidationResult<T = ()> = Result<T, Box<CompilerDiagnostic>>;
+/// Requirement lookup and signature validation keep diagnosed failures as plain
+/// `CompilerDiagnostic` values through the evidence-validation boundary.
+type RequirementValidationResult<T = ()> = Result<T, CompilerDiagnostic>;
 
 pub(super) struct ImplementationMethod<'a> {
     pub(super) entry: &'a ReceiverMethodEntry,
@@ -42,7 +40,7 @@ pub(super) struct RequirementValidationContext<'a, 'strings> {
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) target_name: StringId,
     pub(super) trait_name: StringId,
-    pub(super) conformance_location: SourceLocation,
+    pub(super) conformance_span: Option<SourceSpan>,
     pub(super) string_table: &'strings mut StringTable,
 }
 
@@ -69,7 +67,7 @@ pub(super) fn validate_requirements(
                 InvalidTraitConformanceReason::MissingMethod {
                     requirement_name: requirement.name,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_label(requirement, context.string_table),
             )
         })?;
@@ -156,7 +154,7 @@ fn validate_requirement_signature(
             InvalidTraitConformanceReason::ReceiverMutabilityMismatch {
                 requirement_name: requirement.name,
             },
-            context.conformance_location.clone(),
+            context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
         )
         .into());
@@ -189,7 +187,7 @@ fn validate_parameters(
                 expected: requirement.parameters.len(),
                 found: method_parameters.len(),
             },
-            context.conformance_location.clone(),
+            context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
         )
         .into());
@@ -209,7 +207,7 @@ fn validate_parameters(
                     requirement_name: requirement.name,
                     parameter_index: index + 1,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
             )
             .into());
@@ -227,7 +225,7 @@ fn validate_parameters(
                     expected_type,
                     found_type: actual.value.type_id,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
             )
             .into());
@@ -253,7 +251,7 @@ fn validate_returns(
                 expected: requirement.returns.len(),
                 found: method_returns.len(),
             },
-            context.conformance_location.clone(),
+            context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
         )
         .into());
@@ -268,7 +266,7 @@ fn validate_returns(
                     requirement_name: requirement.name,
                     return_index: index + 1,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
             )
             .into());
@@ -288,7 +286,7 @@ fn validate_returns(
                     ),
                     found_type: method.receiver_type_id,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
             )
             .into());
@@ -306,7 +304,7 @@ fn validate_returns(
                     expected_type,
                     found_type: actual_type,
                 },
-                context.conformance_location.clone(),
+                context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
             )
             .into());

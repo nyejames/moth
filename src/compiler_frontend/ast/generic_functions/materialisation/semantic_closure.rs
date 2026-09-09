@@ -1,6 +1,6 @@
 //! Closed semantic inputs selected for one retained generic materialisation.
 
-use super::frozen_syntax::{StableSourceLocation, materialise_path, stable_path};
+use super::frozen_syntax::{materialise_path, stable_path};
 use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
     intern_materialisation_type_blueprint,
@@ -63,14 +63,14 @@ pub(super) struct StableLocalConstant {
     pub(super) local_path: Box<[String]>,
     pub(super) type_identity: CanonicalTypeIdentity,
     pub(super) value: PublicFoldedValue,
-    pub(super) location: StableSourceLocation,
+    pub(super) span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
 pub(super) struct StableLocalAlias {
     pub(super) local_path: Box<[String]>,
     pub(super) target_type_identity: CanonicalTypeIdentity,
-    pub(super) declaration_location: StableSourceLocation,
+    pub(super) declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
@@ -79,7 +79,7 @@ struct StablePrivateTrait {
     name: String,
     canonical_path: Box<[String]>,
     source_file: Box<[String]>,
-    declaration_location: StableSourceLocation,
+    declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
     requirements: Box<[StablePrivateTraitRequirement]>,
 }
 
@@ -89,7 +89,7 @@ struct StablePrivateTraitRequirement {
     receiver_mutable: bool,
     parameters: Box<[StablePrivateTraitParameter]>,
     returns: Box<[StablePrivateTraitReturn]>,
-    location: StableSourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
@@ -97,14 +97,14 @@ struct StablePrivateTraitParameter {
     name: Box<[String]>,
     value_mode: ValueMode,
     parameter_type: StableTraitTypeBlueprint,
-    location: StableSourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
 struct StablePrivateTraitReturn {
     return_type: StableTraitTypeBlueprint,
     channel: ReturnChannel,
-    location: StableSourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
@@ -118,7 +118,7 @@ struct StablePrivateEvidence {
     target_type_identity: CanonicalTypeIdentity,
     trait_identity: CanonicalTraitIdentity,
     source_file: Box<[String]>,
-    declaration_location: StableSourceLocation,
+    declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
     requirements: Box<[StablePrivateEvidenceRequirement]>,
 }
 
@@ -225,8 +225,7 @@ pub(super) fn install_private_semantic_closure(
                             template_ir_store,
                             string_table,
                         )?,
-                        location: parameter.location.materialise(string_table),
-                        span: None,
+                        span: parameter.span,
                     })
                 })
                 .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -245,20 +244,17 @@ pub(super) fn install_private_semantic_closure(
                             string_table,
                         )?,
                         channel: returned.channel,
-                        location: returned.location.materialise(string_table),
+                        span: returned.span,
                     })
                 })
                 .collect::<Result<Vec<_>, CompilerError>>()?;
-            let location = stable_requirement.location.materialise(string_table);
             requirements.push(ResolvedTraitRequirement {
                 id: requirement_id,
                 name: string_table.intern(&stable_requirement.name),
-                name_location: location.clone(),
                 receiver,
                 parameters,
                 returns,
-                location,
-                span: None,
+                span: stable_requirement.span,
             });
         }
         let canonical_path = materialise_path(&stable_trait.canonical_path, string_table);
@@ -270,7 +266,7 @@ pub(super) fn install_private_semantic_closure(
             source_file,
             this_type,
             requirements,
-            declaration_location: stable_trait.declaration_location.materialise(string_table),
+            declaration_span: stable_trait.declaration_span,
             visibility: TraitVisibility::Source { exported: false },
         };
         let lookups = Rc::make_mut(&mut environment.lookups);
@@ -345,9 +341,7 @@ pub(super) fn install_private_semantic_closure(
             target_type_id,
             trait_id,
             source_file: materialise_path(&stable_evidence.source_file, string_table),
-            declaration_location: stable_evidence
-                .declaration_location
-                .materialise(string_table),
+            declaration_span: stable_evidence.declaration_span,
             requirements,
         };
         let lookups = Rc::make_mut(&mut environment.lookups);
@@ -404,7 +398,7 @@ impl ModuleMaterialisationPreparation {
                 local_path: stable_path(path, &self.string_table),
                 type_identity,
                 value,
-                location: StableSourceLocation::capture(&metadata.location, &self.string_table),
+                span: metadata.span,
             });
         }
         constants.sort_by(|left, right| left.local_path.cmp(&right.local_path));
@@ -423,10 +417,7 @@ impl ModuleMaterialisationPreparation {
                 Ok(StableLocalAlias {
                     local_path: stable_path(path, &self.string_table),
                     target_type_identity,
-                    declaration_location: StableSourceLocation::capture(
-                        &alias.declaration_location,
-                        &self.string_table,
-                    ),
+                    declaration_span: alias.declaration_span,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -470,10 +461,7 @@ impl ModuleMaterialisationPreparation {
                                     parameter.type_id,
                                     definition.this_type,
                                 )?,
-                                location: StableSourceLocation::capture(
-                                    &parameter.location,
-                                    &self.string_table,
-                                ),
+                                span: parameter.span,
                             })
                         })
                         .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -487,10 +475,7 @@ impl ModuleMaterialisationPreparation {
                                     definition.this_type,
                                 )?,
                                 channel: returned.channel,
-                                location: StableSourceLocation::capture(
-                                    &returned.location,
-                                    &self.string_table,
-                                ),
+                                span: returned.span,
                             })
                         })
                         .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -503,10 +488,7 @@ impl ModuleMaterialisationPreparation {
                         receiver_mutable,
                         parameters,
                         returns,
-                        location: StableSourceLocation::capture(
-                            &requirement.location,
-                            &self.string_table,
-                        ),
+                        span: requirement.span,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -515,10 +497,7 @@ impl ModuleMaterialisationPreparation {
                 name: self.string_table.resolve(definition.name).to_owned(),
                 canonical_path: stable_path(&definition.canonical_path, &self.string_table),
                 source_file: stable_path(&definition.source_file, &self.string_table),
-                declaration_location: StableSourceLocation::capture(
-                    &definition.declaration_location,
-                    &self.string_table,
-                ),
+                declaration_span: definition.declaration_span,
                 requirements,
             });
         }
@@ -589,10 +568,7 @@ impl ModuleMaterialisationPreparation {
                 target_type_identity,
                 trait_identity,
                 source_file: stable_path(&definition.source_file, &self.string_table),
-                declaration_location: StableSourceLocation::capture(
-                    &definition.declaration_location,
-                    &self.string_table,
-                ),
+                declaration_span: definition.declaration_span,
                 requirements,
             });
         }

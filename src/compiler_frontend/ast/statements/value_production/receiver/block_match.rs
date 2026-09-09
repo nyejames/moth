@@ -28,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input for the block single-predicate body parser after `if` has been consumed.
 pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
@@ -37,7 +37,6 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
-    pub(super) location: SourceLocation,
     pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
 }
@@ -56,9 +55,8 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         type_interner,
         target,
         string_table,
-        location,
-        span,
         classification,
+        span,
     } = input;
 
     let header = match try_parse_single_predicate_header(SinglePredicateHeaderInput {
@@ -80,7 +78,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
     {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()));
     }
@@ -94,7 +92,6 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         string_table,
         scrutinee: header.scrutinee,
         pattern: header.pattern,
-        location,
         span,
     }))
 }
@@ -108,7 +105,6 @@ struct BlockValueMatchParseInput<'a, 'b> {
     string_table: &'a mut StringTable,
     scrutinee: Expression,
     pattern: MatchPattern,
-    location: SourceLocation,
     span: Option<SourceSpan>,
 }
 
@@ -126,7 +122,6 @@ fn parse_block_value_match(
         string_table,
         scrutinee,
         pattern,
-        location,
         span,
     } = input;
 
@@ -150,7 +145,7 @@ fn parse_block_value_match(
     }];
     let default = Some(bodies.else_body);
 
-    validate_value_match_completeness(&arms, default.as_deref(), &location)?;
+    validate_value_match_completeness(&arms, default.as_deref(), span)?;
 
     if needs_slot_inference {
         return Ok(ParsedReceiverValue::NeedsSlotInference {
@@ -159,7 +154,7 @@ fn parse_block_value_match(
                 arms,
                 default,
                 exhaustiveness: MatchExhaustiveness::HasDefault,
-                location,
+                span,
                 result_type_ids: Vec::new(),
             }),
             span,
@@ -171,7 +166,7 @@ fn parse_block_value_match(
         default.as_deref(),
         &expected_result_type_ids,
         type_interner,
-        &location,
+        span,
         receiver_kind,
     )?;
     let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
@@ -182,7 +177,7 @@ fn parse_block_value_match(
             arms,
             default,
             exhaustiveness: MatchExhaustiveness::HasDefault,
-            location,
+            span,
             result_type_ids,
         },
         span,

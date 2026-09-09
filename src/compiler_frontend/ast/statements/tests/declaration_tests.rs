@@ -158,18 +158,9 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
         diagnostic.primary_span,
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, expected_span))
     );
-    assert_eq!(diagnostic.primary_location.start_byte, duplicate_start);
+    assert_eq!(diagnostic.labels.len(), 1);
     assert_eq!(
-        diagnostic.primary_location.end_byte,
-        duplicate_start + "value".len() as u32
-    );
-    assert_eq!(diagnostic.labels.len(), 2);
-    assert_eq!(
-        diagnostic.labels[0].location, diagnostic.primary_location,
-        "the primary legacy label must remain the duplicate declaration"
-    );
-    assert_eq!(
-        diagnostic.labels[1].message,
+        diagnostic.labels[0].message,
         Some(DiagnosticLabelMessage::PreviousDeclaration)
     );
 }
@@ -459,25 +450,22 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             .position(|token| token.kind == TokenKind::Symbol(name))
             .unwrap()
             + 1;
-        let declaration = parse_declaration_syntax(&mut tokens, name, &mut strings)
+        let declaration = parse_declaration_syntax(&mut tokens, name, &mut strings, &mut builder)
             .expect("the authored declaration must produce its shell");
         let expected_start = source.rfind("value ").unwrap() as u32 + "value ".len() as u32;
         let expected_range = (
             expected_start,
             expected_start + expected_anchor.len() as u32,
         );
-        let range = declaration.span.resolve_with(builder.resolver());
+        let declaration_span = declaration
+            .span
+            .expect("the authored declaration must retain its source span");
+        assert_eq!(declaration_span.source(), file_id);
+        let range = declaration_span.resolve_with(builder.resolver_for(file_id));
         assert_eq!(
             (range.start(), range.end()),
             expected_range,
             "target {target}"
-        );
-        assert_eq!(
-            (
-                declaration.location.start_byte,
-                declaration.location.end_byte
-            ),
-            expected_range
         );
         assert!(
             !builder.is_empty(),
@@ -497,8 +485,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         let initializer = super::declaration_initializer_stream(
             &source_path.append(name),
             declaration.initializer_tokens,
-            &declaration.location,
-            declaration.span,
             &tokens.path_syntax,
             &context,
         )
@@ -515,6 +501,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             expected_range,
             "target {target}"
         );
-        assert_eq!(terminator.location, declaration.location);
+        let terminator_span = SourceSpan::new(file_id, terminator.span);
+        assert_eq!(terminator_span, declaration_span);
     }
 }

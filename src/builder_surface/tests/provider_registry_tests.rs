@@ -16,7 +16,6 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
@@ -99,8 +98,7 @@ fn fixture_js_runtime_asset(
         ),
         canonical_source_path,
         asset_kind: "js".to_owned(),
-        authored_import_location: SourceLocation::default(),
-        authored_import_span: None,
+        source_span: None,
     }
 }
 
@@ -229,7 +227,6 @@ fn dummy_provider_resolves_import_with_all_fields() {
         logical_source_path: PortableResourcePath::from_portable_spelling("dummy.js".to_owned())
             .expect("fixture logical path should be portable"),
         canonical_source_path: PathBuf::from("/test/dummy.js"),
-        source_location: SourceLocation::default(),
         source_span: None,
     };
 

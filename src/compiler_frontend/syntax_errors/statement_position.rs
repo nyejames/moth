@@ -21,7 +21,7 @@ pub(crate) fn check_statement_common_mistake(
     token: &TokenKind,
     token_stream: &FileTokens,
 ) -> Option<CompilerDiagnostic> {
-    let location = token_stream.current_location();
+    let location = token_stream.current_span();
 
     match token {
         // `//` is integer division; comments use `--`
@@ -53,7 +53,7 @@ pub(crate) fn check_mistaken_keyword_symbol(
     string_table: &StringTable,
 ) -> Option<CompilerDiagnostic> {
     let name = string_table.resolve(symbol_id);
-    let location = token_stream.current_location();
+    let location = token_stream.current_span();
 
     match name {
         "fn" | "function" | "def" => Some(common_syntax_mistake(

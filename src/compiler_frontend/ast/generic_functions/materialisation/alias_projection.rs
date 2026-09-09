@@ -32,10 +32,9 @@ impl ModuleMaterialisationPreparation {
                         path.to_string(&self.string_table),
                         error.msg,
                     ),
-                    alias.declaration_location.clone(),
+                    alias.declaration_span,
                     ErrorType::Compiler,
                 )
-                .with_render_context(self.string_table.clone())
             })
     }
 }
@@ -67,7 +66,6 @@ pub(super) fn restore_generated_local_alias(
         id: local_path.clone(),
         value: Expression::new(
             ExpressionKind::NoValue,
-            Default::default(),
             None,
             type_id,
             diagnostic_type_spelling(type_id, &environment.type_environment),
@@ -85,7 +83,7 @@ pub(super) fn restore_generated_local_alias(
         ResolvedTypeAlias {
             diagnostic_type: diagnostic_type_spelling(type_id, &environment.type_environment),
             target_type_id: type_id,
-            declaration_location: alias.declaration_location.materialise(string_table),
+            declaration_span: alias.declaration_span,
         },
     );
     Rc::make_mut(&mut lookups.declaration_semantics).register_materialised_value(local_path);

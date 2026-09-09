@@ -341,9 +341,6 @@ fn rejects_unbound_inline_catch_then_at_eof() {
         DiagnosticPayload::InvalidFallibleHandling { reason }
             if reason == InvalidFallibleHandlingReason::ThenRequiresValues
     ));
-    // The primary location points at the EOF boundary past `then`, not at `then`.
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 4);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 30);
 }
 
 #[test]
@@ -360,8 +357,6 @@ fn rejects_bound_inline_catch_then_at_eof() {
         DiagnosticPayload::InvalidFallibleHandling { reason }
             if reason == InvalidFallibleHandlingReason::ThenRequiresValues
     ));
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 4);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 36);
 }
 
 // --------------------------

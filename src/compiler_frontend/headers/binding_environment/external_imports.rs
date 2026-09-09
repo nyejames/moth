@@ -9,15 +9,13 @@ use super::BindingEnvironmentError;
 use super::{BindingEnvironmentBuilder, FileVisibility, VisibleNameBinding, VisibleNameRegistry};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
-/// Boxed diagnostic result for external import registration.
+/// Result for external import registration.
 ///
-/// WHAT: gives external import registration one small error boundary.
-/// WHY: local-name derivation is already boxed, so registration can propagate it directly
-///      and adapt the plain visible-name registry once.
+/// Diagnosed failures remain plain `CompilerDiagnostic` values and
+/// infrastructure failures remain typed in `BindingEnvironmentError`.
 type ExternalImportResult<T> = Result<T, BindingEnvironmentError>;
 
 /// Registration facts for one external symbol binding.
@@ -29,7 +27,7 @@ type ExternalImportResult<T> = Result<T, BindingEnvironmentError>;
 pub(super) struct ExternalImportInput<'a> {
     pub(super) symbol_name: StringId,
     pub(super) local_name: StringId,
-    pub(super) source_location: &'a SourceLocation,
+    pub(super) source_span: Option<SourceSpan>,
     pub(super) local_alias: Option<&'a DependencyAlias>,
     pub(super) symbol_id: ExternalSymbolId,
 }
@@ -44,34 +42,31 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let ExternalImportInput {
             symbol_name,
             local_name,
-            source_location,
+            source_span,
             local_alias,
             symbol_id,
         } = input;
 
-        let local_name_location = local_alias.map_or(source_location, |alias| &alias.location);
-        ensure_not_keyword_shadow_identifier(
-            local_name,
-            local_name_location.clone(),
-            self.string_table,
-        )?;
+        let local_name_span = local_alias.map_or(source_span, |alias| Some(alias.span));
+        ensure_not_keyword_shadow_identifier(local_name, local_name_span, self.string_table)?;
 
         self.emit_alias_case_warning_if_needed(local_alias, symbol_name);
 
         registry.register(
             local_name,
             VisibleNameBinding::ExternalImport { symbol_id },
-            Some(local_name_location.clone()),
-            None,
+            local_name_span,
         )?;
 
         file_visibility
             .visible_external_symbols
             .insert(local_name, symbol_id);
 
-        file_visibility
-            .visible_external_symbol_locations
-            .insert(local_name, local_name_location.clone());
+        if let Some(span) = local_name_span {
+            file_visibility
+                .visible_external_symbol_spans
+                .insert(local_name, span);
+        }
 
         Ok(())
     }

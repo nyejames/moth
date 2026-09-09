@@ -97,29 +97,19 @@ fn multi_file_declarations_are_aggregated() {
             &mut span_builder,
         )
         .expect("source should prepare");
-        (output, span_builder)
+        output
     };
-    let (entry_output, entry_span_builder) = prepare_file("[runtime1]\n", &entry_path, entry_id);
-    let (helper_output, helper_span_builder) = prepare_file(
+    let entry_output = prepare_file("[runtime1]\n", &entry_path, entry_id);
+    let helper_output = prepare_file(
         "helper_func || -> Int:\n    return 1\n;\n",
         &helper_path,
         helper_id,
     );
 
-    let mut retained_span_builders = [
-        (entry_output.file_id, entry_span_builder),
-        (helper_output.file_id, helper_span_builder),
-    ];
     let prepared_syntax = prepare_header_syntax(
         &mut [entry_output, helper_output],
         &mut string_table,
-        &mut |source, diagnostic| {
-            let (_, builder) = retained_span_builders
-                .iter_mut()
-                .find(|(file_id, _)| *file_id == source)
-                .expect("prepared source retains its original span builder");
-            diagnostic.capture_preparation_span(source, builder)
-        },
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     )
     .expect("header syntax should prepare");
     let headers = bind_module_headers(

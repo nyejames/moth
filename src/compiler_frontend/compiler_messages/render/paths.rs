@@ -1,12 +1,11 @@
-//! Path and source-position display helpers for diagnostic rendering.
+//! Path display helpers for diagnostic rendering.
 //!
-//! WHAT: converts canonical/interned paths and raw source positions into user-facing display text.
-//! WHY: diagnostics should centralize filesystem-adjacent rendering at the render boundary.
+//! WHAT: converts explicit host paths into stable user-facing relative text.
+//! WHY: source diagnostics already carry their path through an attached source identity context;
+//! only infrastructure errors need a direct host-path display helper.
 
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTableResolver;
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn relative_display_path_from_root(scope: &Path, root: &Path) -> String {
     let normalized_scope = normalize_path(scope);
@@ -17,46 +16,4 @@ pub(crate) fn relative_display_path_from_root(scope: &Path, root: &Path) -> Stri
         .unwrap_or(&normalized_scope);
 
     portable_path_text(display_path)
-}
-
-pub(crate) fn resolved_display_path(
-    scope: &InternedPath,
-    string_table: &dyn StringTableResolver,
-) -> String {
-    let source_file = resolve_source_file_path(scope, string_table);
-
-    match std::env::current_dir() {
-        Ok(dir) => relative_display_path_from_root(&source_file, &dir),
-        Err(err) => {
-            eprintln!(
-                "Compiler failed to determine the current directory for diagnostic display. {err}"
-            );
-            portable_path_text(&source_file)
-        }
-    }
-}
-
-pub(crate) fn resolve_source_file_path(
-    scope: &InternedPath,
-    string_table: &dyn StringTableResolver,
-) -> PathBuf {
-    let mut source_file = normalize_path(&scope.to_path_buf(string_table));
-
-    // Header diagnostics use a synthetic "file.moth/header_name.header" scope so the terminal and
-    // dev-server error pages both need to strip that suffix back to the original source file.
-    if source_file
-        .file_name()
-        .and_then(|file_name| file_name.to_str())
-        .is_some_and(|file_name| file_name.ends_with(".header"))
-    {
-        source_file = match source_file.parent() {
-            Some(parent) => parent.to_path_buf(),
-            None => source_file,
-        };
-    }
-
-    match std::fs::canonicalize(&source_file) {
-        Ok(canonical_path) => normalize_path(&canonical_path),
-        Err(_) => source_file,
-    }
 }

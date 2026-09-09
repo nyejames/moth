@@ -5,37 +5,31 @@
 //! WHY: keeps the JS scanner isolated from compiler-stage boundaries so later phases
 //!      (provider wiring, registry insertion) can decide how to map parsed data.
 
-/// A source position inside a JS file.
+/// A byte range inside a JS file.
 ///
-/// WHAT: byte-offset + line/column tracking for every parsed construct so the parser
-///       can emit diagnostics that point at exact JS source locations.
-/// WHY: parser-local spans avoid needing full `SourceLocation` integration in this slice.
+/// Parser-owned spans deliberately retain only byte offsets. The provider layer
+/// decides whether a parsed construct can be associated with a compiler source
+/// span; parser-local line/column state is not durable provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsSourceSpan {
     pub byte_start: usize,
     pub byte_end: usize,
-    pub line: usize,
-    pub column: usize,
 }
 
 impl JsSourceSpan {
-    /// Creates a zero-width span at the given position.
-    pub fn at(byte: usize, line: usize, column: usize) -> Self {
+    /// Creates a zero-width span at the given byte position.
+    pub fn at(byte: usize) -> Self {
         Self {
             byte_start: byte,
             byte_end: byte,
-            line,
-            column,
         }
     }
 
     /// Creates a span covering a byte range.
-    pub fn range(byte_start: usize, byte_end: usize, line: usize, column: usize) -> Self {
+    pub fn range(byte_start: usize, byte_end: usize) -> Self {
         Self {
             byte_start,
             byte_end,
-            line,
-            column,
         }
     }
 }

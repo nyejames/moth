@@ -167,7 +167,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut type_resolution_context,
                 string_table,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
             collect_type_parameter_ids_from_declarations(
@@ -192,9 +192,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 generic_parameters,
                 &used_generic_parameters,
                 &header.tokens.src_path,
-                &header.name_location,
+                header.name_span,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             // ---------------------------------
             //  Update declaration table
@@ -281,7 +281,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         })
         .map_err(|error| match error {
             ReceiverMethodCatalogError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             ReceiverMethodCatalogError::Infrastructure(error) => {
                 self.error_messages(*error, string_table)
@@ -396,7 +396,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         return Err(self.diagnostic_messages(
                             CompilerDiagnostic::invalid_receiver_declaration(
                                 InvalidReceiverDeclarationReason::DuplicateVisibleMethod,
-                                visible_method.location.clone(),
+                                visible_method.span,
                             ),
                             string_table,
                         ));
@@ -431,7 +431,7 @@ fn build_generic_function_template(
         generic_parameter_owner: None,
         generic_parameter_list_id,
         signature: signature.to_owned(),
-        declaration_location: header.name_location.to_owned(),
+        declaration_span: header.name_span,
         body_tokens: Some(GenericFunctionBody::source(header.tokens.to_owned())),
     }
 }

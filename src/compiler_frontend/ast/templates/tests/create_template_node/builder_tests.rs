@@ -1,7 +1,7 @@
 use super::*;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidTemplateDirectiveReason,
+    DiagnosticPayload, DiagnosticToken, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
@@ -77,7 +77,7 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
         }
         payload => panic!("expected unknown directive payload, found {payload:?}"),
     }
-    assert!(fallback_error.primary_location.start_pos.char_column > 0);
+    assert!(fallback_error.primary_span.is_some());
 }
 
 #[test]
@@ -241,9 +241,8 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     let error = expect_template_diagnostic(error);
     assert!(matches!(
         &error.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Comma,
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if *found == DiagnosticToken::from(TokenKind::Comma)
     ));
 }
 

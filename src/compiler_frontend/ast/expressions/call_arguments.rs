@@ -24,7 +24,6 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidBuiltinCallReason, InvalidCallShapeReason,
     InvalidGenericInstantiationReason,
@@ -175,7 +174,7 @@ fn parse_call_arguments_inner(
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::MissingParentheses,
                 Some(member_name),
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
@@ -187,7 +186,7 @@ fn parse_call_arguments_inner(
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::TakesNoArguments,
                 Some(member_name),
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
@@ -203,7 +202,7 @@ fn parse_call_arguments_inner(
         return Err(CompilerDiagnostic::expected_token(
             TokenKind::OpenParenthesis,
             Some(token_stream.current_token_kind().to_owned()),
-            token_stream.current_location(),
+            current_span(token_stream),
         )
         .into());
     }
@@ -229,7 +228,7 @@ fn parse_call_arguments_inner(
             break;
         }
 
-        let argument_location = token_stream.current_location();
+        let argument_span = current_span(token_stream);
 
         reject_simple_generic_argument_type_ascription(token_stream, syntax_context)?;
 
@@ -246,7 +245,7 @@ fn parse_call_arguments_inner(
             {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::Mutable,
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
@@ -255,14 +254,15 @@ fn parse_call_arguments_inner(
             TokenKind::Symbol(name)
                 if token_stream.peek_next_token() == Some(&TokenKind::Assign) =>
             {
-                let target_location = token_stream.current_location();
-                let target_span = token_stream.tokens[token_stream.index].span;
-                let target_source_span = Some(SourceSpan::new(token_stream.file_id, target_span));
+                let target_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
                 let target_name = *name;
                 token_stream.advance();
                 token_stream.advance();
                 token_stream.skip_newlines();
-                Some((target_name, target_location, target_source_span))
+                Some((target_name, target_span))
             }
 
             // Parenthesized names like `(name) = expr` are not supported.
@@ -281,7 +281,7 @@ fn parse_call_arguments_inner(
             {
                 return Err(CompilerDiagnostic::unexpected_token(
                     TokenKind::OpenParenthesis,
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
@@ -289,16 +289,16 @@ fn parse_call_arguments_inner(
             _ => None,
         };
 
-        let parameter_slot = slot_router.route(named_target.as_ref(), argument_location.clone())?;
+        let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
 
-        let (access_mode, marker_location) =
-            if token_stream.current_token_kind() == &TokenKind::Mutable {
-                let marker_location = token_stream.current_location();
-                token_stream.advance();
-                (CallAccessMode::Mutable, Some(marker_location))
-            } else {
-                (CallAccessMode::Shared, None)
-            };
+        let (access_mode, marker_span) = if token_stream.current_token_kind() == &TokenKind::Mutable
+        {
+            let marker_span = current_span(token_stream);
+            token_stream.advance();
+            (CallAccessMode::Mutable, marker_span)
+        } else {
+            (CallAccessMode::Shared, None)
+        };
 
         // A named target or access mode without a following value is an error.
         if token_stream.current_token_kind() == &TokenKind::Comma
@@ -306,7 +306,7 @@ fn parse_call_arguments_inner(
         {
             return Err(CompilerDiagnostic::unexpected_token(
                 token_stream.current_token_kind().to_owned(),
-                token_stream.current_location(),
+                current_span(token_stream),
             )
             .into());
         }
@@ -351,20 +351,15 @@ fn parse_call_arguments_inner(
         );
         let value = create_expression_with_trailing_newline_policy(input)?;
 
-        // `CallArgument::location` is the value-expression location. The named-parameter token
-        // stays in `target_location`, and the authored `~` marker (when present) stays in
-        // `marker_location`, so diagnostics can point at whichever source the author must change.
-        let value_location = value.location.clone();
-        let argument = if let Some((name, target_location, _target_span)) = named_target {
-            CallArgument::named(value, name, access_mode, value_location, target_location)
+        // Preserve the value-expression span, named-parameter span, and authored `~` marker span
+        // independently so diagnostics can point at whichever source the author must change.
+        let value_span = value.span;
+        let argument = if let Some((name, target_span)) = named_target {
+            CallArgument::named(value, name, access_mode, value_span, target_span)
         } else {
-            CallArgument::positional(value, access_mode, value_location)
+            CallArgument::positional(value, access_mode, value_span)
         };
-        let argument = if let Some(marker_location) = marker_location {
-            argument.with_marker_location(marker_location)
-        } else {
-            argument
-        };
+        let argument = argument.with_marker_span(marker_span);
         let argument = if let Some(parameter_slot) = parameter_slot {
             argument.with_parameter_slot(parameter_slot)
         } else {
@@ -384,7 +379,7 @@ fn parse_call_arguments_inner(
             _ => {
                 return Err(CompilerDiagnostic::unexpected_token(
                     token_stream.current_token_kind().to_owned(),
-                    token_stream.current_location(),
+                    current_span(token_stream),
                 )
                 .into());
             }
@@ -462,8 +457,8 @@ impl<'a> ParameterSlotRouter<'a> {
 
     fn route(
         &mut self,
-        named_target: Option<&(StringId, SourceLocation, Option<SourceSpan>)>,
-        argument_location: SourceLocation,
+        named_target: Option<&(StringId, Option<SourceSpan>)>,
+        argument_span: Option<SourceSpan>,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         let Some(expectations) = self.expectations else {
             if named_target.is_some() {
@@ -475,7 +470,7 @@ impl<'a> ParameterSlotRouter<'a> {
             return Ok(None);
         };
 
-        if let Some((target_name, target_location, target_span)) = named_target {
+        if let Some((target_name, target_span)) = named_target {
             self.saw_named_argument = true;
 
             match self.argument_syntax {
@@ -483,7 +478,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         callee_name,
-                        target_location.clone(),
+                        *target_span,
                     )
                     .into());
                 }
@@ -492,7 +487,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     return Err(CompilerDiagnostic::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
                         member_name,
-                        target_location.clone(),
+                        *target_span,
                     )
                     .into());
                 }
@@ -505,12 +500,12 @@ impl<'a> ParameterSlotRouter<'a> {
                                 known_parameters: known_parameter_names(expectations),
                             },
                             callee_name,
-                            target_location.clone(),
+                            *target_span,
                         )
                         .into());
                     };
 
-                    self.mark_slot_occupied(slot, target_location.clone(), *target_span)?;
+                    self.mark_slot_occupied(slot, *target_span)?;
                     return Ok(Some(ParameterSlot::new(slot)));
                 }
             }
@@ -520,7 +515,7 @@ impl<'a> ParameterSlotRouter<'a> {
             return Err(CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::PositionalAfterNamed,
                 self.callee_name(),
-                argument_location,
+                argument_span,
             )
             .into());
         }
@@ -544,7 +539,7 @@ impl<'a> ParameterSlotRouter<'a> {
                     expected_count: expectations.len(),
                 },
                 callee_name,
-                argument_location,
+                argument_span,
             )
             .into());
         }
@@ -558,8 +553,7 @@ impl<'a> ParameterSlotRouter<'a> {
     fn mark_slot_occupied(
         &mut self,
         slot: usize,
-        location: SourceLocation,
-        source_span: Option<SourceSpan>,
+        span: Option<SourceSpan>,
     ) -> Result<(), ExpressionParseError> {
         let parameter_name = self
             .expectations
@@ -571,15 +565,14 @@ impl<'a> ParameterSlotRouter<'a> {
         };
 
         if occupied_slots[slot] {
-            let mut diagnostic = CompilerDiagnostic::invalid_call_shape(
+            let diagnostic = CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::DuplicateArgument {
                     parameter_name,
                     parameter_index: slot,
                 },
                 callee_name,
-                location,
+                span,
             );
-            diagnostic.primary_span = source_span;
             return Err(diagnostic.into());
         }
 
@@ -622,12 +615,10 @@ fn reject_simple_generic_argument_type_ascription(
     Err(CompilerDiagnostic::invalid_generic_instantiation(
         function_name,
         InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        type_token.location.clone(),
+        Some(SourceSpan::new(token_stream.file_id, type_token.span)),
     )
     .into())
 }
-
-/// Recognize the narrow `identity(42 Int)`-style foreign syntax before the expression parser
 /// tries to parse the type keyword as another expression.
 ///
 /// This deliberately stays small: broader type-looking symbol recovery would be speculative in
@@ -667,3 +658,9 @@ fn starts_simple_value_with_attached_type(token_stream: &FileTokens) -> bool {
 #[cfg(test)]
 #[path = "tests/function_call_tests.rs"]
 mod function_call_tests;
+fn current_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
+}

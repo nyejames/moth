@@ -11,12 +11,13 @@ use crate::build_system::output::{
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
     NameNamespace, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
@@ -201,7 +202,6 @@ fn test_output_plan(
             builder: BuilderKind::Html,
             profile,
         },
-        setting_location: SourceLocation::default(),
         setting_span: None,
     })
 }
@@ -217,11 +217,11 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
     }
 }
 
-fn unused_variable_warning(name: StringId, location: SourceLocation) -> CompilerDiagnostic {
+fn unused_variable_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
     CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
         DiagnosticSeverity::Warning,
-        location,
+        span,
         DiagnosticPayload::UnusedName { name },
     )
 }
@@ -229,11 +229,11 @@ fn unused_variable_warning(name: StringId, location: SourceLocation) -> Compiler
 fn unknown_name_error(
     name: StringId,
     namespace: NameNamespace,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::new(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
-        location,
+        span,
         DiagnosticPayload::UnknownName { name, namespace },
     )
 }
@@ -258,7 +258,7 @@ impl BackendBuilder for WarningBuilder {
             cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
                 string_table.get_or_intern("x".to_string()),
-                SourceLocation::default(),
+                None,
             )],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
@@ -398,7 +398,7 @@ impl BackendBuilder for FailingValidationBuilder {
         Err(CompilerDiagnostic::invalid_config_reason(
             Some(string_table.intern("fake_config_error")),
             InvalidConfigReason::UnsupportedScalarValue,
-            SourceLocation::default(),
+            None,
         )
         .into())
     }
@@ -464,23 +464,20 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         _flags: &[Flag],
         string_table: &mut StringTable,
     ) -> Result<Project, CompilerMessages> {
-        let homepage = project_compilation
+        project_compilation
             .modules()
             .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
             .expect("directory build should discover homepage module");
-        let docs_page = project_compilation
+        project_compilation
             .modules()
             .find(|module| module.metadata.entry_point.ends_with("src/docs/@page.moth"))
             .expect("directory build should discover docs module");
 
-        let warning = unused_variable_warning(
-            string_table.get_or_intern("x".to_string()),
-            SourceLocation::from_path(&docs_page.metadata.entry_point, string_table),
-        );
+        let warning = unused_variable_warning(string_table.get_or_intern("x".to_string()), None);
         let error = unknown_name_error(
             string_table.get_or_intern("homepage diagnostic".to_string()),
             NameNamespace::Value,
-            SourceLocation::from_path(&homepage.metadata.entry_point, string_table),
+            None,
         );
 
         Err(CompilerMessages::from_diagnostics(

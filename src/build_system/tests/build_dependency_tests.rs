@@ -6,7 +6,7 @@ use super::*;
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -215,11 +215,7 @@ fn deferred_canvas_output_path(project: &Project) -> String {
 
 /// Read one deferred resource through the shared registry, as the central writer does.
 #[track_caller]
-fn deferred_resource_text(
-    project: &mut Project,
-    relative_path: &str,
-    string_table: &mut StringTable,
-) -> String {
+fn deferred_resource_text(project: &mut Project, relative_path: &str) -> String {
     let source_id = project
         .deferred_resources
         .iter()
@@ -229,7 +225,7 @@ fn deferred_resource_text(
 
     let bytes = project
         .resource_inputs
-        .read_source(source_id, string_table)
+        .read_source(source_id)
         .unwrap_or_else(|error| {
             panic!("deferred resource '{relative_path}' should read from its source: {error:?}")
         });
@@ -768,11 +764,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
 
     let mut result = result;
     let canvas_output_path = deferred_canvas_output_path(&result.project);
-    let canvas_asset = deferred_resource_text(
-        &mut result.project,
-        &canvas_output_path,
-        &mut result.string_table,
-    );
+    let canvas_asset = deferred_resource_text(&mut result.project, &canvas_output_path);
 
     let outputs = BuiltOutputs::index(&result.project);
     assert!(
@@ -846,11 +838,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     .expect("reachable @html canvas helper should build through generated glue");
 
     let canvas_output_path = deferred_canvas_output_path(&result.project);
-    let canvas_asset = deferred_resource_text(
-        &mut result.project,
-        &canvas_output_path,
-        &mut result.string_table,
-    );
+    let canvas_asset = deferred_resource_text(&mut result.project, &canvas_output_path);
 
     let outputs = BuiltOutputs::index(&result.project);
     assert!(
@@ -912,25 +900,11 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
     assert_eq!(warnings.len(), 1);
 
     assert_eq!(
-        normalize_path(
-            &errors[0]
-                .primary_location
-                .scope
-                .to_path_buf(&messages.string_table)
-        ),
-        normalize_path(
-            &fs::canonicalize(src_dir.join("@page.moth")).expect("homepage should canonicalize")
-        )
+        errors[0].primary_span, None,
+        "path-only backend diagnostics are spanless",
     );
     assert_eq!(
-        normalize_path(
-            &warnings[0]
-                .primary_location
-                .scope
-                .to_path_buf(&messages.string_table)
-        ),
-        normalize_path(
-            &fs::canonicalize(docs_dir.join("@page.moth")).expect("docs page should canonicalize")
-        )
+        warnings[0].primary_span, None,
+        "path-only backend warnings are spanless",
     );
 }

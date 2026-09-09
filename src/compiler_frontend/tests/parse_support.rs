@@ -11,7 +11,6 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCompileTimePathReason,
 };
@@ -80,15 +79,15 @@ fn test_file_value_resolution_services(
             }
             PreparedFileReferenceClass::ContentSource
             | PreparedFileReferenceClass::ResourceFile => ResolvedFileReferenceOutcome::Diagnostic(
-                Box::new(CompilerDiagnostic::invalid_compile_time_path(
+                CompilerDiagnostic::invalid_compile_time_path(
                     path_syntax
                         .try_path(reference.path_syntax)
                         .expect("prepared reference should point into its path table")
                         .root
                         .clone(),
                     InvalidCompileTimePathReason::MissingTarget,
-                    reference.location.clone(),
-                )),
+                    Some(reference.span),
+                ),
             ),
         };
 
@@ -115,7 +114,7 @@ fn test_file_value_resolution_services(
 
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(AstBuildResult, StringTable), Box<CompilerDiagnostic>> {
+) -> Result<(AstBuildResult, StringTable), CompilerDiagnostic> {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
@@ -179,7 +178,7 @@ pub(crate) fn parse_single_file_ast_build_result(
         &mut string_table,
         &mut |source, diagnostic| {
             assert_eq!(source, source_file_id);
-            diagnostic.capture_preparation_span(source, &mut span_builder)
+            diagnostic.capture_preparation_span(source)
         },
     )
     .map_err(|failure| {
@@ -189,16 +188,10 @@ pub(crate) fn parse_single_file_ast_build_result(
                 panic!("single-file test aggregation hit infrastructure failure: {error:?}")
             }
         };
-        Box::new(
-            bag.into_diagnostics()
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| {
-                    compiler_error_to_diagnostic(&CompilerError::compiler_error(
-                        "unknown header syntax preparation error",
-                    ))
-                }),
-        )
+        bag.into_diagnostics()
+            .into_iter()
+            .next()
+            .expect("header syntax preparation failed without a diagnostic")
     })?;
 
     let headers = bind_module_headers(
@@ -210,32 +203,28 @@ pub(crate) fn parse_single_file_ast_build_result(
         &crate::compiler_frontend::source::SourceDatabase::empty(),
         &mut string_table,
     )
-    .map_err(|bag| {
-        Box::new(
-            bag.into_diagnostics()
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| {
-                    compiler_error_to_diagnostic(&CompilerError::compiler_error(
-                        "unknown header binding error",
-                    ))
-                }),
-        )
+    .map_err(|failure| {
+        let bag = match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => bag,
+            HeaderPreparationFailure::Infrastructure(error) => {
+                panic!("single-file test binding hit infrastructure failure: {error:?}")
+            }
+        };
+        bag.into_diagnostics()
+            .into_iter()
+            .next()
+            .expect("header binding failed without a diagnostic")
     })?;
 
     let sorted =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .map_err(|bag| {
-                Box::new(
-                    bag.into_diagnostics()
-                        .into_iter()
-                        .next()
-                        .unwrap_or_else(|| {
-                            compiler_error_to_diagnostic(&CompilerError::compiler_error(
-                                "unknown dependency sorting error",
-                            ))
-                        }),
-                )
+            .map_err(|failure| {
+                failure
+                    .into_messages(&string_table)
+                    .into_diagnostics()
+                    .into_iter()
+                    .next()
+                    .expect("dependency sorting failed without a diagnostic")
             })?;
 
     let entry_path = InternedPath::from_single_str("@page.moth", &mut string_table);
@@ -267,7 +256,12 @@ pub(crate) fn parse_single_file_ast_build_result(
     )
     .map_err(|messages| {
         if let Some(diagnostic) = messages.first_error() {
-            Box::new(diagnostic.clone())
+            diagnostic.clone()
+        } else if let Some(error) = messages.infrastructure_error() {
+            panic!(
+                "frontend parsing failed with infrastructure error: {}",
+                error.msg
+            )
         } else {
             panic!("frontend parsing failed without an error diagnostic")
         }
@@ -278,7 +272,7 @@ pub(crate) fn parse_single_file_ast_build_result(
 
 pub(crate) fn parse_single_file_ast_result(
     source: &str,
-) -> Result<(Ast, StringTable), Box<CompilerDiagnostic>> {
+) -> Result<(Ast, StringTable), CompilerDiagnostic> {
     parse_single_file_ast_build_result(source)
         .map(|(build_result, string_table)| (build_result.ast, string_table))
 }
@@ -290,7 +284,7 @@ pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, StringTable) {
 pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilerDiagnostic {
     match parse_single_file_ast_result(source) {
         Ok(_) => panic!("source should fail during frontend parsing"),
-        Err(diagnostic) => *diagnostic,
+        Err(diagnostic) => diagnostic,
     }
 }
 
@@ -307,7 +301,7 @@ pub(crate) fn tokenize_source_for_test(
     module_path: &std::path::Path,
     tokenizer_entry_mode: TokenizerEntryMode,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<FileTokens, Box<CompilerDiagnostic>> {
+) -> Result<FileTokens, CompilerDiagnostic> {
     CompilerFrontend::tokenize_source(
         frontend.source_files.as_ref(),
         frontend.style_directives,

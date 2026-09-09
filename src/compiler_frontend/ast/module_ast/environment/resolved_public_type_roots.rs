@@ -18,8 +18,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -200,7 +199,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "active-root function signature",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -229,7 +227,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "active-root nominal type handle",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -241,7 +238,6 @@ pub(crate) fn build_resolved_public_type_roots(
                         missing_public_root_fact(
                             "active-root struct field declarations",
                             path,
-                            &header.name_location,
                             string_table,
                         )
                     })?;
@@ -256,7 +252,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "active-root nominal type handle",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -272,7 +267,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "active-root transparent alias",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -289,7 +283,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "active-root constant declaration",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -335,7 +328,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "re-exported function signature",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -364,7 +356,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "re-exported nominal type handle",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -376,7 +367,6 @@ pub(crate) fn build_resolved_public_type_roots(
                         missing_public_root_fact(
                             "re-exported struct field declarations",
                             path,
-                            &header.name_location,
                             string_table,
                         )
                     })?;
@@ -391,7 +381,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "re-exported nominal type handle",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -407,7 +396,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "re-exported transparent alias",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -424,7 +412,6 @@ pub(crate) fn build_resolved_public_type_roots(
                     return Err(missing_public_root_fact(
                         "re-exported constant declaration",
                         path,
-                        &header.name_location,
                         string_table,
                     ));
                 };
@@ -463,7 +450,6 @@ pub(crate) fn build_resolved_public_type_roots(
             return Err(missing_public_root_fact(
                 "receiver method function signature",
                 path,
-                &header.name_location,
                 string_table,
             ));
         };
@@ -481,7 +467,6 @@ pub(crate) fn build_resolved_public_type_roots(
             return Err(missing_public_root_fact(
                 "receiver method catalog entry",
                 path,
-                &header.name_location,
                 string_table,
             ));
         };
@@ -698,23 +683,17 @@ fn nominal_receiver_path(receiver: &ReceiverKey) -> Option<&InternedPath> {
     }
 }
 
-/// Build the located internal error for a public root fact that was never published.
+/// Build an internal error for a public root fact that was never published.
 ///
-/// WHY: these are AST invariant failures rather than user diagnostics, but each one names a real
-/// declaration. Carrying its declaration location keeps the report pointing at that line instead
-/// of the start of the file, and one constructor keeps the wording consistent across root kinds.
+/// These are AST invariant failures rather than user diagnostics, so they use the infrastructure
+/// error lane without retaining source-location provenance.
 fn missing_public_root_fact(
     description: &str,
     path: &InternedPath,
-    location: &SourceLocation,
     string_table: &StringTable,
 ) -> CompilerError {
-    CompilerError::new(
-        format!(
-            "Public {description} '{}' was not published before root-table construction.",
-            path.to_string(string_table)
-        ),
-        location.clone(),
-        ErrorType::Compiler,
-    )
+    CompilerError::compiler_error(format!(
+        "Public {description} '{}' was not published before root-table construction.",
+        path.to_string(string_table)
+    ))
 }

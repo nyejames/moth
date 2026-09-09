@@ -51,19 +51,26 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::source::SourceDatabase;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, FileTokens, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-
+fn synthetic_source_span(start: u32, end: u32) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(start, end - start, &mut span_builder)
+            .expect("synthetic test span should fit"),
+    )
+}
 #[test]
 fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token() {
     // Unknown names in a template head should produce a structured UnknownName
@@ -103,8 +110,6 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
         &source[range.start() as usize..range.end() as usize],
         "unknown_name"
     );
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -132,8 +137,6 @@ fn reactive_head_unknown_source_retains_exact_multibyte_span() {
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (3, 5));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -190,8 +193,6 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
         &source[range.start() as usize..range.end() as usize],
         target
     );
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -208,7 +209,6 @@ fn template_head_expression_preserves_infrastructure_failure() {
             phase: TemplateTirPhase::Parsed,
             context: TemplateViewContext::default(),
         },
-        location: token_stream.current_location(),
         span: None,
     };
     let declaration = Declaration {
@@ -236,8 +236,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut build_state = TemplateBuildState::new();
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
-        token_stream.current_location(),
-        None,
+        Some(token_stream.current_span()),
     );
 
     let error = match parse_template_head(
@@ -292,8 +291,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let mut build_state = TemplateBuildState::new();
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
-        token_stream.current_location(),
-        None,
+        Some(token_stream.current_span()),
     );
 
     let error = match parse_template_head(
@@ -355,12 +353,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let content_string = string_table.intern("resolved head content");
     let content_declaration = Declaration {
         id: content_path,
-        value: Expression::string_slice(
-            content_string,
-            SourceLocation::default(),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::string_slice(content_string, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -502,8 +495,6 @@ fn template_head_extensionless_path_retains_exact_span() {
         &source[range.start() as usize..range.end() as usize],
         target
     );
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -529,7 +520,6 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
             phase: TemplateTirPhase::Parsed,
             context: TemplateViewContext::default(),
         },
-        location: token_stream.current_location(),
         span: None,
     };
     let declaration = Declaration {
@@ -651,7 +641,6 @@ fn const_required_template_head_folds_const_record_instance_field() {
         fields: vec![FieldDefinition {
             name: field_path.clone(),
             type_id: string_type_id,
-            location: SourceLocation::default(),
             span: None,
         }]
         .into_boxed_slice(),
@@ -661,7 +650,6 @@ fn const_required_template_head_folds_const_record_instance_field() {
 
     let field_value = Expression::string_slice(
         string_table.intern("green"),
-        SourceLocation::default(),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -673,7 +661,6 @@ fn const_required_template_head_folds_const_record_instance_field() {
             binding_span: None,
             config_qualifier: None,
         }],
-        SourceLocation::default(),
         None,
         ValueMode::ImmutableOwned,
         true,
@@ -740,7 +727,6 @@ fn source_authored_template_option_capture_if_suffix_reaches_ast() {
         id: token_stream.src_path.append(maybe_name),
         value: Expression::new(
             ExpressionKind::NoValue,
-            token_stream.current_location(),
             None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
@@ -749,7 +735,7 @@ fn source_authored_template_option_capture_if_suffix_reaches_ast() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, SourceLocation::default());
+    context.add_var(declaration, None);
 
     let template = Template::new_with_type_interner(
         &mut token_stream,
@@ -795,7 +781,6 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         id: token_stream.src_path.append(maybe_name),
         value: Expression::new(
             ExpressionKind::NoValue,
-            token_stream.current_location(),
             None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
@@ -804,7 +789,7 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, SourceLocation::default());
+    context.add_var(declaration, None);
 
     let diagnostic = Template::new_with_type_interner(
         &mut token_stream,
@@ -948,8 +933,6 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
         (expected_start, expected_start + 1)
     );
     assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
-    assert_eq!(diagnostic.primary_location.start_byte, range.start());
-    assert_eq!(diagnostic.primary_location.end_byte, range.end());
 }
 
 #[test]
@@ -1130,7 +1113,6 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         id: token_stream.src_path.append(maybe_name),
         value: Expression::new(
             ExpressionKind::NoValue,
-            token_stream.current_location(),
             None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
@@ -1139,7 +1121,7 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, SourceLocation::default());
+    context.add_var(declaration, None);
 
     let diagnostic = Template::new_with_type_interner(
         &mut token_stream,
@@ -1880,7 +1862,6 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
         id: scope.append(keep_going_name),
         value: Expression::new(
             ExpressionKind::NoValue,
-            token_stream.current_location(),
             None,
             builtin_type_ids::BOOL,
             DataType::Bool,
@@ -2012,12 +1993,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let show_banner = string_table.intern("show_banner");
     let declaration = Declaration {
         id: token_stream.src_path.append(show_banner),
-        value: Expression::bool(
-            true,
-            token_stream.current_location(),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -2052,12 +2028,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let imported_path = flags_scope.append(show_banner);
     let declaration = Declaration {
         id: imported_path.clone(),
-        value: Expression::bool(
-            true,
-            token_stream.current_location(),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -2245,12 +2216,7 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     let show_item = string_table.intern("show_item");
     let declaration = Declaration {
         id: token_stream.src_path.append(show_item),
-        value: Expression::bool(
-            true,
-            token_stream.current_location(),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -2413,7 +2379,6 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
             id: token_stream.src_path.append(keep_going),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                token_stream.current_location(),
                 None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
@@ -2422,7 +2387,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let diagnostic = Template::new_const_required_with_type_interner(
@@ -2465,7 +2430,6 @@ fn const_required_template_loop_reports_non_const_collection_source() {
             id: token_stream.src_path.append(items),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                token_stream.current_location(),
                 None,
                 collection_type_id,
                 DataType::collection(DataType::StringSlice),
@@ -2474,7 +2438,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let diagnostic = Template::new_const_required_with_type_interner(
@@ -2515,7 +2479,6 @@ fn const_required_template_loop_reports_non_const_body() {
             id: token_stream.src_path.append(value),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                token_stream.current_location(),
                 None,
                 builtin_type_ids::STRING,
                 DataType::StringSlice,
@@ -2524,7 +2487,7 @@ fn const_required_template_loop_reports_non_const_body() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let diagnostic = Template::new_const_required_with_type_interner(
@@ -2696,7 +2659,6 @@ fn const_required_template_option_capture_present_folds_then_branch() {
     let capture_path = context_scope.append(capture_name);
     let present_value = Expression::string_slice(
         string_table.intern("Priya"),
-        SourceLocation::default(),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -2737,7 +2699,6 @@ fn const_required_template_option_capture_absent_folds_else_branch() {
         string_type_id,
         DataType::StringSlice,
         &mut type_environment,
-        SourceLocation::default(),
         None,
     );
 
@@ -2777,7 +2738,6 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let option_string_type_id = type_environment.intern_option(string_type_id);
     let present_value = Expression::string_slice(
         string_table.intern("Priya"),
-        token_stream.current_location(),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -2826,7 +2786,6 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
         string_type_id,
         DataType::StringSlice,
         &mut type_environment,
-        token_stream.current_location(),
         None,
     );
     let declaration = Declaration {
@@ -2871,7 +2830,6 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         id: token_stream.src_path.append(maybe_name),
         value: Expression::new(
             ExpressionKind::NoValue,
-            token_stream.current_location(),
             None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
@@ -2880,7 +2838,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         binding_span: None,
         config_qualifier: None,
     };
-    context.add_var(declaration, SourceLocation::default());
+    context.add_var(declaration, None);
 
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -2916,7 +2874,6 @@ fn const_required_template_if_rejects_runtime_local_condition() {
             id: token_stream.src_path.append(show_banner),
             value: Expression::new(
                 ExpressionKind::NoValue,
-                token_stream.current_location(),
                 None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
@@ -2925,7 +2882,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
             binding_span: None,
             config_qualifier: None,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let diagnostic =
@@ -2984,14 +2941,13 @@ fn const_required_option_capture_template_with_direct_tir(
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Template {
-    let location = SourceLocation::default();
+    let span = None;
 
     let capture_reference = Expression::reference_with_type_id(
         capture_path.clone(),
         DataType::StringSlice,
         inner_type_id,
-        location.clone(),
-        None,
+        span,
         ValueMode::ImmutableOwned,
         ConstRecordState::RuntimeValue,
     );
@@ -3005,28 +2961,19 @@ fn const_required_option_capture_template_with_direct_tir(
         let mut store = store_handle.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
 
-        let hello_node = builder.push_text_node(
-            hello_id,
-            "Hello ".len(),
-            TemplateSegmentOrigin::Body,
-            location.clone(),
-        );
+        let hello_node =
+            builder.push_text_node(hello_id, "Hello ".len(), TemplateSegmentOrigin::Body, span);
         let capture_node = builder.push_dynamic_expression_node(
             capture_reference,
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            span,
         );
-        let branch_body =
-            builder.push_sequence_node(vec![hello_node, capture_node], location.clone());
+        let branch_body = builder.push_sequence_node(vec![hello_node, capture_node], span);
 
-        let guest_node = builder.push_text_node(
-            guest_id,
-            "Guest".len(),
-            TemplateSegmentOrigin::Body,
-            location.clone(),
-        );
-        let fallback_body = builder.push_sequence_node(vec![guest_node], location.clone());
+        let guest_node =
+            builder.push_text_node(guest_id, "Guest".len(), TemplateSegmentOrigin::Body, span);
+        let fallback_body = builder.push_sequence_node(vec![guest_node], span);
 
         let selector = TemplateBranchSelector::OptionPresentCapture {
             scrutinee,
@@ -3034,24 +2981,18 @@ fn const_required_option_capture_template_with_direct_tir(
                 name: capture_name,
                 binding_path: capture_path,
                 inner_type_id,
-                location: location.clone(),
-                binding_location: location.clone(),
+                span,
                 binding_span: None,
             }),
         };
         let branch = TemplateIrBranch::new(
             selector,
             branch_body,
-            location.clone(),
-            None,
+            span,
             builder.store.next_expression_site_id(),
         );
-        let branch_chain_root = builder.push_branch_chain_node(
-            vec![branch],
-            Some(fallback_body),
-            None,
-            location.clone(),
-        );
+        let branch_chain_root =
+            builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, span);
 
         let summary = TemplateIrSummary {
             estimated_output_bytes: "Hello ".len() + "Guest".len(),
@@ -3068,7 +3009,7 @@ fn const_required_option_capture_template_with_direct_tir(
             Style::default(),
             TemplateType::String,
             summary,
-            location,
+            span,
         )
     };
 
@@ -3080,7 +3021,6 @@ fn const_required_option_capture_template_with_direct_tir(
             phase: TemplateTirPhase::Composed,
             context,
         },
-        location: SourceLocation::default(),
         span: None,
     }
 }
@@ -3130,8 +3070,7 @@ fn parse_control_flow_template_after_body_parse(
 
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
-        token_stream.current_location(),
-        None,
+        Some(token_stream.current_span()),
     );
 
     let parsed_head = parse_template_head(
@@ -3164,7 +3103,7 @@ fn parse_control_flow_template_after_body_parse(
     )
     .expect("template body should parse");
 
-    let location = construction_context.location().to_owned();
+    let span = construction_context.span();
     let tir_reference = construction_context
         .finish(
             build_state.style.clone(),
@@ -3175,8 +3114,7 @@ fn parse_control_flow_template_after_body_parse(
 
     let template = Template {
         tir_reference,
-        location,
-        span: None,
+        span,
     };
 
     (template, context, string_table)
@@ -3252,8 +3190,7 @@ fn parse_runtime_template_without_validation(
 
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
-        token_stream.current_location(),
-        None,
+        Some(token_stream.current_span()),
     );
 
     let parsed_head = parse_template_head(
@@ -3291,15 +3228,14 @@ fn parse_runtime_template_without_validation(
     // focused tests call the view-based runtime validator directly.
     let style = build_state.style.to_owned();
     let kind = build_state.kind.to_owned();
-    let location = construction_context.location().to_owned();
+    let span = construction_context.span();
     let tir_reference = construction_context
         .finish(style, kind, TemplateTirPhase::Parsed)
         .expect("parsed template TIR is finite");
 
     let template = Template {
         tir_reference,
-        location,
-        span: None,
+        span,
     };
 
     (template, context, string_table)
@@ -3391,23 +3327,12 @@ fn const_required_template_if_validates_branch_condition_through_tir_view_overla
     let site_id = find_first_branch_selector_site_id(&template, &store)
         .expect("parsed const-required branch should have a selector site");
 
-    let override_location = SourceLocation::new(
-        template.location.scope.clone(),
-        CharPosition {
-            line_number: 99,
-            char_column: 1,
-        },
-        CharPosition {
-            line_number: 99,
-            char_column: 5,
-        },
-    );
+    let override_span = synthetic_source_span(99, 103);
     let runtime_condition = Expression::reference_with_type_id(
         InternedPath::from_single_str("runtime_condition", &mut string_table),
         DataType::Bool,
         builtin_type_ids::BOOL,
-        override_location.clone(),
-        None,
+        Some(override_span),
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
@@ -3426,7 +3351,7 @@ fn const_required_template_if_validates_branch_condition_through_tir_view_overla
         &error,
         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
     );
-    assert_eq!(error.primary_location, override_location);
+    assert_eq!(error.primary_span, Some(override_span));
 }
 
 #[test]
@@ -3441,23 +3366,9 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
     let site_id = find_first_loop_header_site_id(&template, &store)
         .expect("parsed const-required conditional loop should have a header site");
 
-    let override_location = SourceLocation::new(
-        template.location.scope.clone(),
-        CharPosition {
-            line_number: 99,
-            char_column: 1,
-        },
-        CharPosition {
-            line_number: 99,
-            char_column: 5,
-        },
-    );
-    let const_true_condition = Expression::bool(
-        true,
-        override_location.clone(),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let override_span = synthetic_source_span(99, 103);
+    let const_true_condition =
+        Expression::bool(true, Some(override_span), ValueMode::ImmutableOwned);
 
     install_expression_overlay_on_template(
         &mut template,
@@ -3478,7 +3389,7 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
         &error,
         InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
     );
-    assert_eq!(error.primary_location, override_location);
+    assert_eq!(error.primary_span, Some(override_span));
 }
 
 #[test]
@@ -3544,7 +3455,6 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             InternedPath::from_single_str("runtime_condition", &mut string_table),
             DataType::Bool,
             builtin_type_ids::BOOL,
-            SourceLocation::default(),
             None,
             ValueMode::ImmutableReference,
             ConstRecordState::RuntimeValue,
@@ -3562,7 +3472,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
         }
     };
 
-    let location = SourceLocation::default();
+    let location = None;
     let recursive_template_id = {
         let store_handle = context.template_ir_store();
         let mut store = store_handle.borrow_mut();
@@ -3601,7 +3511,6 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             phase: TemplateTirPhase::Finalized,
             context: const_context,
         },
-        location,
         span: None,
     };
 
@@ -3643,8 +3552,8 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
     );
 
     let store = context.template_ir_store.borrow();
-    let expected_location = find_first_branch_location(&template, &store)
-        .expect("runtime branch should have a stable source location");
+    let expected_span = find_first_branch_span(&template, &store)
+        .expect("runtime branch should have a stable source span");
 
     let error = validate_runtime_template_control_flow_slot_artifacts(&template, &store)
         .expect_err("TirView path should report the escaped insert in the branch body");
@@ -3656,7 +3565,7 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
         &diagnostic,
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
     );
-    assert_eq!(diagnostic.primary_location, expected_location);
+    assert_eq!(diagnostic.primary_span, Some(expected_span));
 }
 
 #[test]
@@ -3698,7 +3607,7 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
         );
     }
 
-    let location = SourceLocation::default();
+    let location = None;
     let child_reference = TemplateTirChildReference::new(
         child_template.tir_reference.root,
         child_template.tir_reference.phase,
@@ -3726,7 +3635,6 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
             phase: TemplateTirPhase::Finalized,
             context: parent_context,
         },
-        location,
         span: None,
     };
 
@@ -3812,27 +3720,24 @@ fn find_branch_selector_site_id_in_subtree(
     }
 }
 
-fn find_first_branch_location(
-    template: &Template,
-    store: &TemplateIrStore,
-) -> Option<SourceLocation> {
+fn find_first_branch_span(template: &Template, store: &TemplateIrStore) -> Option<SourceSpan> {
     let reference = &template.tir_reference;
     let template_ir = store.get_template(reference.root)?;
-    find_branch_location_in_subtree(store, template_ir.root)
+    find_branch_span_in_subtree(store, template_ir.root)
 }
 
-fn find_branch_location_in_subtree(
+fn find_branch_span_in_subtree(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
-) -> Option<SourceLocation> {
+) -> Option<SourceSpan> {
     let node = store.get_node(node_id)?;
     match &node.kind {
         TemplateIrNodeKind::BranchChain { branches, .. } => {
-            branches.first().map(|branch| branch.location.clone())
+            branches.first().and_then(|branch| branch.span)
         }
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
-            .find_map(|child| find_branch_location_in_subtree(store, *child)),
+            .find_map(|child| find_branch_span_in_subtree(store, *child)),
         _ => None,
     }
 }

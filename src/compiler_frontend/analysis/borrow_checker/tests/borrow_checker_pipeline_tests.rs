@@ -49,18 +49,20 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::reference(
+                    Expression::reference_with_type_id(
                         x.clone(),
                         DataType::Int,
+                        builtin_type_ids::INT,
                         test_source_location(2),
                         ValueMode::MutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     ),
                 )),
                 test_source_location(2),
@@ -78,7 +80,7 @@ fn frontend_check_borrows_propagates_failures() {
                 test_source_location(3),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -128,7 +130,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     counter.clone(),
-                    Expression::int(0, test_source_location(1), None, ValueMode::MutableOwned),
+                    Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -140,17 +142,12 @@ fn successful_borrow_report_can_be_stored_on_module() {
                         builtin_type_ids::INT,
                         test_source_location(2),
                     ),
-                    value: Expression::int(
-                        1,
-                        test_source_location(2),
-                        None,
-                        ValueMode::ImmutableOwned,
-                    ),
+                    value: Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
                 },
                 test_source_location(2),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(

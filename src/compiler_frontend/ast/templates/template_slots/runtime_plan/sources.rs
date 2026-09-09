@@ -61,9 +61,9 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
     for target in schema.ordered_slot_keys(string_table) {
         for node_id in contributions.nodes_for_slot(&target) {
             let id = RuntimeSlotContributionSourceId(sources.len());
-            let (source_location, source_span) = store
+            let source_span = store
                 .get_node(*node_id)
-                .map(|node| (node.location.clone(), node.span))
+                .map(|node| node.span)
                 .ok_or_else(|| {
                     crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
                         "TIR runtime slot planning: contribution node was not present in the store.",
@@ -88,7 +88,6 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                     target: target.clone(),
                     render_root,
                     renders_wrapper_unconditionally,
-                    location: source_location,
                     span: source_span,
                 },
                 shape,

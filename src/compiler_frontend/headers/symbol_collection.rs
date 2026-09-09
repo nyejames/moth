@@ -24,7 +24,7 @@ use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFail
 use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, Header, HeaderExportMode, HeaderKind,
 };
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -61,20 +61,17 @@ pub(super) fn build_module_symbols(
                 continue;
             }
 
-            // Mutation: canonical OS paths are project-derived inputs that must be interned
-            // before downstream stages can use them as InternedPath values.
+            // Header source paths are already the compiler's logical source identity. Keep that
+            // identity in the module map instead of deriving a second filesystem path spelling.
             module_symbols.canonical_source_by_symbol_path.insert(
                 header.tokens.src_path.to_owned(),
-                header.canonical_source_file(string_table),
+                header.source_file.clone(),
             );
-            module_symbols.declaration_locations_by_symbol_path.insert(
-                header.tokens.src_path.to_owned(),
-                header.name_location.to_owned(),
-            );
-            module_symbols.declaration_spans_by_symbol_path.insert(
-                header.tokens.src_path.to_owned(),
-                SourceSpan::new(file_output.file_id, header.name_span),
-            );
+            if let Some(name_span) = header.name_span {
+                module_symbols
+                    .declaration_spans_by_symbol_path
+                    .insert(header.tokens.src_path.to_owned(), name_span);
+            }
 
             register_header_symbol(&mut module_symbols, header, string_table);
         }
@@ -115,18 +112,16 @@ fn validate_declared_name(
 
     let symbol_name_text = string_table.resolve(symbol_name).to_owned();
 
-    if let Err(diagnostic) = ensure_not_keyword_shadow_identifier(
-        symbol_name,
-        header.name_location.to_owned(),
-        string_table,
-    ) {
-        return Some(*diagnostic);
+    if let Err(diagnostic) =
+        ensure_not_keyword_shadow_identifier(symbol_name, header.name_span, string_table)
+    {
+        return Some(diagnostic);
     }
 
     if is_reserved_builtin_symbol(&symbol_name_text) {
         return Some(CompilerDiagnostic::reserved_builtin_name(
             symbol_name,
-            header.name_location.to_owned(),
+            header.name_span,
         ));
     }
 
@@ -134,7 +129,7 @@ fn validate_declared_name(
         return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
-            header.name_location.to_owned(),
+            header.name_span,
         ));
     }
 
@@ -156,7 +151,7 @@ pub(super) fn is_receiver_method_candidate(
         return false;
     };
 
-    first_parameter.id.name_str(string_table) == Some("this")
+    first_parameter.id.name_str(string_table) == Some("This")
 }
 
 /// Extract the parsed receiver type name from a receiver-method candidate.

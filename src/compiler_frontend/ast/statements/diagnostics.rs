@@ -12,24 +12,16 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidStatementPositionReason,
 };
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Attach the exact authored range of the current token when this stream has a source identity.
-///
-/// Statement dispatch still carries the legacy location for the interval migration bridge, but
-/// the token's local span is the authoritative byte range while its file-owned source identity is
-/// available.
 fn with_current_token_span(
     token_stream: &FileTokens,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
     if diagnostic.primary_span.is_none() {
-        diagnostic.primary_span = Some(SourceSpan::new(
-            token_stream.file_id,
-            token_stream.current_token().span,
-        ));
+        diagnostic.primary_span = Some(token_stream.current_span());
     }
 
     diagnostic
@@ -45,60 +37,60 @@ pub(crate) fn unexpected_statement_token(
     _string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
     let token_kind = token_stream.current_token_kind();
-    let location = token_stream.current_location();
+    let span = Some(token_stream.current_span());
     let diagnostic = match token_kind {
         TokenKind::Comma => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedComma,
-            location,
+            span,
         ),
 
         TokenKind::CloseParenthesis => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedCloseParenthesis,
-            location,
+            span,
         ),
 
         TokenKind::CloseCurly => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedCloseCurly,
-            location,
+            span,
         ),
 
         // The `|` token is only valid in type-parameter position, not as a statement.
         TokenKind::TypeParameterBracket => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedPipe,
-            location,
+            span,
         ),
 
         TokenKind::Arrow => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedArrow,
-            location,
+            span,
         ),
 
         TokenKind::Wildcard => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedWildcard,
-            location,
+            span,
         ),
 
         // `type` in statement position looks like an attempt to declare a generic parameter.
         TokenKind::Type => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::GenericParameterOutsideDeclarationHeader,
-            location,
+            span,
         ),
 
         TokenKind::Of => CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::UnexpectedOf,
-            location,
+            span,
         ),
 
         TokenKind::Must | TokenKind::TraitThis => {
             if let Some(keyword) = reserved_trait_keyword(token_kind) {
-                reserved_trait_keyword_error(keyword, location)
+                reserved_trait_keyword_error(keyword, span)
             } else {
                 // Invariant: Must and TraitThis are always reserved trait keywords.
-                CompilerDiagnostic::unexpected_token(token_kind.to_owned(), location)
+                CompilerDiagnostic::unexpected_token(token_kind.to_owned(), span)
             }
         }
 
-        _ => CompilerDiagnostic::unexpected_token(token_kind.to_owned(), location),
+        _ => CompilerDiagnostic::unexpected_token(token_kind.to_owned(), span),
     };
 
     with_current_token_span(token_stream, diagnostic)
@@ -133,7 +125,7 @@ pub(crate) fn unexpected_scope_close(
 
     with_current_token_span(
         token_stream,
-        CompilerDiagnostic::invalid_statement_position(reason, token_stream.current_location()),
+        CompilerDiagnostic::invalid_statement_position(reason, Some(token_stream.current_span())),
     )
 }
 

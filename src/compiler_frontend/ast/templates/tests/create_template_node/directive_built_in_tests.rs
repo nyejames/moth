@@ -149,7 +149,7 @@ fn const_html_template_emits_sanitation_warnings() {
 }
 
 #[test]
-fn html_validation_warnings_keep_non_default_locations() {
+fn html_validation_warnings_keep_authored_spans() {
     let style_directives = html_project_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[$html:\n<script>alert(1)</script>\n<a href=\"javascript:bad()\">x</a>\n<div onclick=\"run()\"></div>\n]",
@@ -161,8 +161,8 @@ fn html_validation_warnings_keep_non_default_locations() {
     assert!(
         warnings
             .iter()
-            .all(|warning| !is_default_error_location(&warning.primary_location)),
-        "html warnings should keep meaningful source locations"
+            .all(|warning| warning.primary_span.is_some()),
+        "html warnings should keep authored source spans"
     );
 }
 

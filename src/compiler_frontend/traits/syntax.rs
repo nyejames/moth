@@ -9,35 +9,35 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Parsed trait declaration shell: `TRAIT must: requirements ;`
 #[derive(Clone, Debug)]
 pub struct TraitDeclarationSyntax {
     pub name: StringId,
-    pub name_location: SourceLocation,
+    pub name_span: SourceSpan,
     pub requirements: Vec<TraitRequirementSyntax>,
-    pub span: LocalSpan,
+    #[allow(dead_code)] // Retained for deferred trait declaration diagnostics.
+    pub span: SourceSpan,
 }
 
 /// One method requirement inside a trait block.
 #[derive(Clone, Debug)]
 pub struct TraitRequirementSyntax {
     pub name: StringId,
-    pub name_location: SourceLocation,
+    #[allow(dead_code)] // Retained for deferred trait requirement diagnostics.
+    pub name_span: SourceSpan,
     pub signature: FunctionSignatureSyntax,
-    pub span: LocalSpan,
+    pub span: SourceSpan,
 }
 
 /// Reference to a trait name in a conformance list.
 #[derive(Clone, Debug)]
 pub struct TraitReferenceSyntax {
     pub name: StringId,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: SourceSpan,
 }
 
 /// Target type in a conformance declaration.
@@ -45,8 +45,7 @@ pub struct TraitReferenceSyntax {
 pub struct ConformanceTargetSyntax {
     pub name: StringId,
     pub kind: ConformanceTargetKind,
-    pub location: SourceLocation,
-    pub span: LocalSpan,
+    pub span: SourceSpan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,11 +75,10 @@ pub struct TraitIncompatibilitySyntax {
 }
 
 impl TraitDeclarationSyntax {
-    /// Remap every interned string owned by this trait declaration into the merged global string table.
+    /// Remap every interned string owned by this trait declaration.
     // Called when merging per-file frontend outputs into the module-wide compilation.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.name_location.remap_string_ids(remap);
         for requirement in &mut self.requirements {
             requirement.remap_string_ids(remap);
         }
@@ -95,26 +93,13 @@ impl TraitDeclarationSyntax {
         }
         Ok(())
     }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        self.name_location.rebind_source_identity(logical_path);
-        for requirement in &mut self.requirements {
-            requirement.rebind_source_identity(logical_path, provisional_source_file)?;
-        }
-        Ok(())
-    }
 }
 
 impl TraitRequirementSyntax {
-    /// Remap every interned string owned by this requirement into the merged global string table.
+    /// Remap every interned string owned by this requirement.
     // Called when merging per-file frontend outputs into the module-wide compilation.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.name_location.remap_string_ids(remap);
         self.signature.remap_string_ids(remap);
     }
 
@@ -125,59 +110,31 @@ impl TraitRequirementSyntax {
         self.signature
             .validate_required_source_prefixes(provisional_source_file)
     }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        self.name_location.rebind_source_identity(logical_path);
-        self.signature
-            .rebind_source_identity(logical_path, provisional_source_file)?;
-        Ok(())
-    }
 }
 
 impl TraitReferenceSyntax {
     /// Remap the trait reference name into the merged global string table.
-    // Called when merging per-file frontend outputs into the module-wide compilation.
+    // Called when merging per-file frontend outputs before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
 impl ConformanceTargetSyntax {
     /// Remap the target type name into the merged global string table.
-    // Called when merging per-file frontend outputs into the module-wide compilation.
+    // Called when merging per-file frontend outputs before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
 impl TraitConformanceSyntax {
     /// Remap every interned string owned by this conformance into the merged global string table.
-    // Called when merging per-file frontend outputs into the module-wide compilation.
+    // Called when merging per-file frontend outputs before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.target.remap_string_ids(remap);
         for trait_ref in &mut self.traits {
             trait_ref.remap_string_ids(remap);
-        }
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.target.rebind_source_identity(logical_path);
-        for trait_ref in &mut self.traits {
-            trait_ref.rebind_source_identity(logical_path);
         }
     }
 }
@@ -185,18 +142,11 @@ impl TraitConformanceSyntax {
 impl TraitIncompatibilitySyntax {
     /// Remap every interned string owned by this incompatibility declaration into the merged
     /// global string table.
-    // Called when merging per-file frontend outputs into the module-wide compilation.
+    // Called when merging per-file frontend outputs before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.subject.remap_string_ids(remap);
         for trait_ref in &mut self.incompatible_traits {
             trait_ref.remap_string_ids(remap);
-        }
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.subject.rebind_source_identity(logical_path);
-        for trait_ref in &mut self.incompatible_traits {
-            trait_ref.rebind_source_identity(logical_path);
         }
     }
 }

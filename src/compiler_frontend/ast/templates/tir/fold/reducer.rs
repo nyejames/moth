@@ -41,7 +41,6 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::type_coercion::string::{
     FoldedStringPiece, fold_expression_kind_to_string,
 };
@@ -699,7 +698,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 expression_to_fold,
                 output_state,
                 fold_context,
-                &node.location,
+                node.span,
                 fold_input,
             )
         }
@@ -828,7 +827,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 output_state,
                 fold_context,
                 fold_input,
-                &node.location,
+                node.span,
                 insertion,
             )
         }
@@ -893,7 +892,7 @@ fn fold_tir_dynamic_expression(
     expression: &Expression,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
-    location: &SourceLocation,
+    expression_span: Option<crate::compiler_frontend::source::SourceSpan>,
     fold_input: &FoldTraversalInput<'_, '_>,
 ) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
     let store = fold_input.view.store();
@@ -974,7 +973,7 @@ fn fold_tir_dynamic_expression(
 
         None => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
-            location.to_owned(),
+            expression_span,
         )
         .into()),
     }

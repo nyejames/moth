@@ -11,7 +11,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::ids::{TraitId, TraitRequirementId};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -30,11 +29,9 @@ pub(crate) enum TraitVisibility {
 pub(crate) struct ResolvedTraitRequirement {
     pub(crate) id: TraitRequirementId,
     pub(crate) name: StringId,
-    pub(crate) name_location: SourceLocation,
     pub(crate) receiver: TraitReceiverRequirement,
     pub(crate) parameters: Vec<ResolvedTraitParameter>,
     pub(crate) returns: Vec<ResolvedTraitReturn>,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -47,22 +44,21 @@ pub(crate) enum TraitReceiverRequirement {
 
 /// One non-receiver requirement parameter.
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // Parameter names/locations remain available for precise diagnostics.
+#[allow(dead_code)] // Parameter names and spans remain available for precise diagnostics.
 pub(crate) struct ResolvedTraitParameter {
     pub(crate) name: InternedPath,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
 }
 
 /// One requirement return slot.
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // Return locations remain available for precise diagnostics.
+#[allow(dead_code)] // Return spans remain available for precise diagnostics.
 pub(crate) struct ResolvedTraitReturn {
     pub(crate) type_id: TypeId,
     pub(crate) channel: ReturnChannel,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Complete resolved trait definition.
@@ -75,6 +71,6 @@ pub(crate) struct ResolvedTraitDefinition {
     pub(crate) source_file: InternedPath,
     pub(crate) this_type: TypeId,
     pub(crate) requirements: Vec<ResolvedTraitRequirement>,
-    pub(crate) declaration_location: SourceLocation,
+    pub(crate) declaration_span: Option<SourceSpan>,
     pub(crate) visibility: TraitVisibility,
 }

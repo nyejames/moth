@@ -489,7 +489,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         match error {
             TemplateNormalizationError::Diagnostic(diagnostic) => {
                 CompilerMessages::from_diagnostic_with_warnings(
-                    *diagnostic,
+                    diagnostic,
                     warnings.to_owned(),
                     string_table,
                 )
@@ -510,7 +510,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         match error {
             ConstValueStoreError::Diagnostic(diagnostic) => {
                 CompilerMessages::from_diagnostic_with_warnings(
-                    *diagnostic,
+                    diagnostic,
                     warnings.to_owned(),
                     string_table,
                 )
@@ -537,9 +537,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 signature,
                 start_function_path.is_some_and(|start_path| start_path == path),
             );
-            if let Some(diagnostic) =
-                validate_function_body_terminality(body, policy, node.location.clone())
-            {
+            if let Some(diagnostic) = validate_function_body_terminality(body, policy, node.span) {
                 return Err(CompilerMessages::from_diagnostic_with_warnings(
                     diagnostic,
                     warnings.to_owned(),

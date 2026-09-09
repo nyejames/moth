@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     convert_tir_tree_to_active_slot_plan, copy_tir_subtree_with_active_slot_plan,
     record_tir_copy_counters,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -45,7 +45,6 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     schema: &TirSlotSchema,
     routed: &TirSlotContributions,
     string_table: &StringTable,
-    location: &SourceLocation,
     span: Option<SourceSpan>,
 ) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, TemplateError> {
     let wrapper_root = store
@@ -87,7 +86,6 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     )?;
 
     let slot_plan = TemplateSlotPlan {
-        location: location.clone(),
         span,
         contribution_sources: sources.into_iter().map(|source| source.source).collect(),
         slot_sites,

@@ -152,7 +152,7 @@ fn config_empty_error(
         .into()
 }
 
-/// WHAT: creates typed config diagnostics with precise setting locations when available.
+/// WHAT: creates typed config diagnostics with precise authored spans when available.
 /// WHY: project setting parsers should keep user-facing config errors out of `CompilerError`.
 fn config_value_error(
     config: &Config,

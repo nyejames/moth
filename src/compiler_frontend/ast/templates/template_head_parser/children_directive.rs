@@ -26,7 +26,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Typed result for the connected `$children` directive family.
 type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -58,18 +58,16 @@ pub(super) fn parse_children_style_directive(
                 ..
             }
         ) {
-            let mut replacement = CompilerDiagnostic::invalid_template_directive(
+            let replacement = CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                diagnostic.primary_location.clone(),
+                diagnostic.primary_span,
             );
-            replacement.primary_span = diagnostic.primary_span;
-            Box::new(replacement)
+            replacement
         } else {
             diagnostic
         }
     }))?;
-    let argument_location = directive_argument.location.clone();
     let argument_span = directive_argument.span;
 
     // The wrapper must be fully known at compile time; runtime expressions
@@ -85,7 +83,7 @@ pub(super) fn parse_children_style_directive(
             CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern("children")),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                argument_location.clone(),
+                argument_span,
             ),
             argument_span,
         )
@@ -120,7 +118,7 @@ pub(super) fn parse_children_style_directive(
                     CompilerDiagnostic::invalid_template_directive(
                         Some(string_table.intern("children")),
                         InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                        argument_location.clone(),
+                        argument_span,
                     ),
                     argument_span,
                 )
@@ -135,20 +133,16 @@ pub(super) fn parse_children_style_directive(
                 .map_err(TemplateError::from)?
         }
 
-        ExpressionKind::StringSlice(value) => normalize_string_child_wrapper_reference(
-            value,
-            argument_location.clone(),
-            argument_span,
-            context,
-            string_table,
-        )?,
+        ExpressionKind::StringSlice(value) => {
+            normalize_string_child_wrapper_reference(value, argument_span, context, string_table)?
+        }
 
         _ => {
             return Err(with_argument_span(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(string_table.intern("children")),
                     InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                    argument_location,
+                    argument_span,
                 ),
                 argument_span,
             )
@@ -166,22 +160,13 @@ pub(super) fn parse_children_style_directive(
 /// parser TIR store and returns the durable module-local reference.
 fn normalize_string_child_wrapper_reference(
     value: StringId,
-    argument_location: SourceLocation,
     argument_span: Option<SourceSpan>,
     context: &ScopeContext,
     string_table: &StringTable,
 ) -> Result<TemplateWrapperReference, TemplateError> {
-    let mut construction_context = TemplateConstructionContext::new(
-        context.template_ir_store.clone(),
-        argument_location.clone(),
-        argument_span,
-    );
-    construction_context.record_text(
-        value,
-        string_table.resolve(value).len(),
-        argument_location.clone(),
-        argument_span,
-    );
+    let mut construction_context =
+        TemplateConstructionContext::new(context.template_ir_store.clone(), argument_span);
+    construction_context.record_text(value, string_table.resolve(value).len(), argument_span);
 
     let reference = construction_context.finish(
         Style::default(),

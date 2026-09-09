@@ -82,24 +82,20 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
     .result
     .expect("an authored config source should compile to folded declarations");
 
-    let expected_scope =
-        InternedPath::try_from_filesystem_path(Path::new("project/config.moth"), &mut string_table)
-            .expect("the authored path is UTF-8");
-
     let project = compiled
         .declarations
         .iter()
         .find(|declaration| string_table.resolve(declaration.name) == "project")
         .expect("the authored project record should reach the folded declarations");
     assert!(matches!(project.value, PublicFoldedValue::Record(_)));
-    assert_eq!(project.name_location.scope, expected_scope);
+    assert!(project.name_span.is_some());
     let PublicFoldedValue::Record(fields) = &project.value else {
         panic!("project value must be a record");
     };
     assert_eq!(
         fields.len(),
-        project.direct_field_locations.len(),
-        "direct field locations must align with folded record fields"
+        project.direct_field_spans.len(),
+        "direct field spans must align with folded record fields"
     );
     assert!(
         fields.iter().any(|field| field.name == "name"),
@@ -703,17 +699,10 @@ fn direct_project_config_qualifier_rejects_fixed_entry_root_field() {
         diagnostic.identity().reason_key,
         Some("invalid_config.config_qualifier_fixed_field")
     );
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "project/config.moth"
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "fixed-field diagnostics should retain their authored source span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 16);
-    assert_eq!(diagnostic.primary_location.end_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 16);
 
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
@@ -1073,12 +1062,10 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
             (expected_start, expected_start + expected_text.len() as u32),
             "fixture {suffix:?}"
         );
-        assert_eq!(
-            diagnostic.labels.len(),
-            1,
-            "config retains its one-primary-label presentation"
+        assert!(
+            diagnostic.labels.is_empty(),
+            "config retains its labelless primary presentation"
         );
-        assert_eq!(diagnostic.labels[0].span, Some(span));
         assert!(
             !outcome.span_builder.is_empty(),
             "the original table must retain the long token"

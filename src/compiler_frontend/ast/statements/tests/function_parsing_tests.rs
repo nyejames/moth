@@ -292,11 +292,6 @@ value = box.show()\n";
         diagnostic.primary_span,
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, member_span))
     );
-    assert_eq!(diagnostic.primary_location.start_byte, member_start);
-    assert_eq!(
-        diagnostic.primary_location.end_byte,
-        member_start + "show".len() as u32
-    );
 }
 
 #[test]

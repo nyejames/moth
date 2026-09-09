@@ -22,17 +22,16 @@ use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_te
 use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::prepare_single_file;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
 use crate::compiler_frontend::public_interface::{
-    DirectExportSeed, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
-    PublicSemanticInterface, SourceProviderDependency, SourceProviderDependencySet,
-    build_direct_export_seed, build_public_source_nominal_origin_index,
-    build_public_source_trait_origin_index,
+    DirectExportSeed, PublicExportDiagnosticProvenance, PublicSemanticInterface,
+    SourceProviderDependency, SourceProviderDependencySet, build_direct_export_seed,
+    build_public_source_nominal_origin_index, build_public_source_trait_origin_index,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -76,6 +75,9 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
         .id;
     for header in &mut headers.headers {
         header.tokens.file_id = file_id;
+        header.name_span = header
+            .name_span
+            .map(|span| SourceSpan::new(file_id, span.local()));
     }
 
     let source_module_origins =
@@ -164,6 +166,9 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
             .id;
         for mut header in output.headers {
             header.tokens.file_id = file_id;
+            header.name_span = header
+                .name_span
+                .map(|span| SourceSpan::new(file_id, span.local()));
             headers.push(header);
         }
     }
@@ -179,16 +184,29 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
     }
 }
 
-fn location_scope_components(
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
-    string_table: &StringTable,
-) -> Vec<String> {
-    location
-        .scope
-        .as_components()
+fn authored_span(source: &str, public_name: &str) -> Option<SourceSpan> {
+    let (headers, mut string_table) = parse_single_file_headers_with_table(source);
+    let file_path = PathBuf::from("src/@page.moth");
+    let source_files = SourceDatabase::build(
+        std::iter::once(file_path.clone()),
+        &file_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source file table should build for authored span");
+    let file_id = source_files
+        .get_by_canonical_path(&file_path)
+        .expect("authored span source file should exist")
+        .id;
+    headers
+        .headers
         .iter()
-        .map(|component| string_table.resolve(*component).to_owned())
-        .collect()
+        .find(|header| header.tokens.src_path.name_str(&string_table) == Some(public_name))
+        .and_then(|header| {
+            header
+                .name_span
+                .map(|span| SourceSpan::new(file_id, span.local()))
+        })
 }
 
 fn binding_for<'a>(seed: &'a DirectExportSeed, public_name: &str) -> &'a ExportBinding {
@@ -276,15 +294,13 @@ fn directly_defined_public_exports_get_export_bindings_with_exact_category() {
 
 #[test]
 fn directly_defined_public_exports_retain_authored_diagnostic_provenance() {
-    let seed = build_seed("export:\n    alpha #= 1\n;\n");
+    let source = "export:\n    alpha #= 1\n;\n";
+    let seed = build_seed(source);
 
     assert_eq!(seed.export_diagnostic_provenance().len(), 1);
     let provenance = &seed.export_diagnostic_provenance()[0];
     assert_eq!(provenance.public_name, "alpha");
-    assert_eq!(provenance.location.start_line, 1);
-    assert_eq!(provenance.location.start_column, 5);
-    assert_eq!(provenance.location.end_line, 1);
-    assert!(provenance.location.end_column > provenance.location.start_column);
+    assert_eq!(provenance.span, authored_span(source, "alpha"));
 }
 
 #[test]
@@ -303,7 +319,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         .expect("the private re-export target should have a header");
     let target_path = target_header.tokens.src_path.clone();
     let target_source = target_header.source_file.clone();
-    let expected_location = target_header.name_location.clone();
+    let expected_span = target_header.name_span;
 
     fixture
         .module_symbols
@@ -343,24 +359,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         .iter()
         .find(|entry| entry.public_name == "PublicValue")
         .expect("same-module re-export should retain target provenance");
-    assert_eq!(
-        provenance.location.scope_components,
-        location_scope_components(&expected_location, &fixture.string_table)
-    );
-    assert_eq!(
-        (
-            provenance.location.start_line,
-            provenance.location.start_column,
-            provenance.location.end_line,
-            provenance.location.end_column,
-        ),
-        (
-            expected_location.start_pos.line_number,
-            expected_location.start_pos.char_column,
-            expected_location.end_pos.line_number,
-            expected_location.end_pos.char_column,
-        )
-    );
+    assert_eq!(provenance.span, expected_span);
 }
 
 #[test]
@@ -389,13 +388,7 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         )],
         export_diagnostic_provenance: vec![PublicExportDiagnosticProvenance {
             public_name: "Imported".to_owned(),
-            location: PublicDiagnosticLocation {
-                scope_components: vec!["provider".to_owned(), "@mod.moth".to_owned()],
-                start_line: 20,
-                start_column: 4,
-                end_line: 20,
-                end_column: 12,
-            },
+            span: None,
         }],
         binding_exports: Vec::new(),
         declarations: Vec::new(),
@@ -445,17 +438,8 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
         .find(|entry| entry.public_name == "PublicImported")
         .expect("provider re-export should retain provider provenance under the alias");
     assert_eq!(
-        provenance.location.scope_components,
-        vec!["provider".to_owned(), "@mod.moth".to_owned()]
-    );
-    assert_eq!(
-        (
-            provenance.location.start_line,
-            provenance.location.start_column,
-            provenance.location.end_line,
-            provenance.location.end_column,
-        ),
-        (20, 4, 20, 12)
+        provenance.span, None,
+        "synthetic provider fixtures carry no authored source span",
     );
 }
 

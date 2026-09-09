@@ -30,8 +30,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use std::collections::HashSet;
 
@@ -116,7 +116,7 @@ struct PreparationWalk {
     visiting_slot_plans: HashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
-    const_diagnostic: Option<Box<CompilerDiagnostic>>,
+    const_diagnostic: Option<CompilerDiagnostic>,
 }
 
 struct PreparationFacts {
@@ -220,7 +220,7 @@ impl PreparationWalk {
 
     fn record_const_diagnostic(&mut self, diagnostic: CompilerDiagnostic) {
         if self.const_diagnostic.is_none() {
-            self.const_diagnostic = Some(Box::new(diagnostic));
+            self.const_diagnostic = Some(diagnostic);
         }
     }
 }
@@ -593,7 +593,7 @@ impl PreparationWalk {
                             .const_required_branch_selector(
                                 view,
                                 &branch_selector,
-                                &node.location,
+                                node.span,
                                 loop_binding_paths,
                                 role,
                             )?;
@@ -618,7 +618,7 @@ impl PreparationWalk {
                                 self.record_const_diagnostic(
                                     CompilerDiagnostic::invalid_template_structure(
                                         InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                        node.location.clone(),
+                                        node.span,
                                     ),
                                 );
                             }
@@ -638,7 +638,7 @@ impl PreparationWalk {
                                 self.record_const_diagnostic(
                                     CompilerDiagnostic::invalid_template_structure(
                                         InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                        node.location.clone(),
+                                        node.span,
                                     ),
                                 );
                             }
@@ -657,7 +657,7 @@ impl PreparationWalk {
                     let effective_header =
                         effective_loop_header_for_view(view, header, *header_sites)?;
                     let mut facts =
-                        self.walk_loop_header(view, &effective_header, &node.location, role)?;
+                        self.walk_loop_header(view, &effective_header, node.span, role)?;
                     let body_binding_paths =
                         loop_body_const_evaluation_bindings(&effective_header, loop_binding_paths);
                     let body_facts = self.walk_node(*body, view, &body_binding_paths, role)?;
@@ -667,7 +667,7 @@ impl PreparationWalk {
                         self.record_const_diagnostic(
                             CompilerDiagnostic::invalid_template_structure(
                                 InvalidTemplateStructureReason::TemplateLoopBodyNotConst,
-                                node.location.clone(),
+                                node.span,
                             ),
                         );
                     }
@@ -984,7 +984,7 @@ impl PreparationWalk {
         &mut self,
         view: &TirView<'_>,
         selector: &TemplateBranchSelector,
-        fallback_location: &SourceLocation,
+        fallback_span: Option<SourceSpan>,
         loop_binding_paths: &[InternedPath],
         role: &PreparationTraversalRole,
     ) -> Result<(Vec<InternedPath>, bool, PreparationFacts), TemplateError> {
@@ -1001,7 +1001,7 @@ impl PreparationWalk {
                 } else {
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-                        condition.location.clone(),
+                        condition.span.or(fallback_span),
                     ))
                 }
             }
@@ -1029,14 +1029,9 @@ impl PreparationWalk {
                     collect_option_capture_binding_path(pattern, &mut branch_binding_paths);
                     Ok(())
                 } else {
-                    let location = if scrutinee.location == SourceLocation::default() {
-                        fallback_location.clone()
-                    } else {
-                        scrutinee.location.clone()
-                    };
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-                        location,
+                        scrutinee.span.or(fallback_span),
                     ))
                 }
             }
@@ -1061,7 +1056,7 @@ impl PreparationWalk {
         &mut self,
         view: &TirView<'_>,
         header: &TemplateLoopHeader,
-        loop_location: &SourceLocation,
+        loop_span: Option<SourceSpan>,
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let mut facts = PreparationFacts::const_value();
@@ -1080,15 +1075,12 @@ impl PreparationWalk {
                     ExpressionKind::Bool(true) => {
                         Some(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
-                            condition_location_or_loop_location(
-                                diagnostic_condition,
-                                loop_location,
-                            ),
+                            condition_span_or_loop_span(diagnostic_condition, loop_span),
                         ))
                     }
                     _ => Some(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
-                        condition_location_or_loop_location(diagnostic_condition, loop_location),
+                        condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
                 }
             }
@@ -1107,7 +1099,7 @@ impl PreparationWalk {
                 (!header_const).then(|| {
                     CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        loop_location.clone(),
+                        loop_span,
                     )
                 })
             }
@@ -1118,7 +1110,7 @@ impl PreparationWalk {
                 (!header_const).then(|| {
                     CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
-                        iterable.location.clone(),
+                        iterable.span.or(loop_span),
                     )
                 })
             }
@@ -1214,13 +1206,9 @@ fn missing_overlay_dimension_error(
     ))
 }
 
-fn condition_location_or_loop_location(
+fn condition_span_or_loop_span(
     condition: &Expression,
-    loop_location: &SourceLocation,
-) -> SourceLocation {
-    if condition.location == SourceLocation::default() {
-        loop_location.clone()
-    } else {
-        condition.location.clone()
-    }
+    loop_span: Option<SourceSpan>,
+) -> Option<SourceSpan> {
+    condition.span.or(loop_span)
 }

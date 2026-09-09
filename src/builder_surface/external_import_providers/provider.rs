@@ -7,7 +7,6 @@
 
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry, ExternalTypeId,
 };
@@ -78,10 +77,9 @@ impl From<&str> for ExternalFileExtension {
 
 /// Input facts passed to a provider when resolving a single external import.
 ///
-/// WHAT: carries the import path, the portable logical source identity, the canonical
-///       filesystem location, and the source location so the provider can parse the file,
-///       build stable package identities, and emit diagnostics that point back to the
-///       Moth source that requested the import.
+/// WHAT: carries the import path, the portable logical source identity, and the canonical
+///       filesystem location. A source span is retained when the request came from authored
+///       source so provider diagnostics can point back to the requesting Moth import.
 /// WHY: context structs avoid long parameter lists and keep the trait stable.
 #[derive(Debug, Clone)]
 pub struct ExternalImportRequest {
@@ -96,9 +94,7 @@ pub struct ExternalImportRequest {
     pub(crate) logical_source_path: PortableResourcePath,
     /// Canonical absolute path to the external source file.
     pub canonical_source_path: PathBuf,
-    /// Legacy source location of the import statement in the requesting Moth file.
-    pub source_location: SourceLocation,
-    /// Exact authored source span of the import statement, when the request has a source owner.
+    /// Exact authored source span of the import statement, when source-owned.
     pub source_span: Option<SourceSpan>,
 }
 
@@ -173,10 +169,8 @@ pub struct RuntimeAssetIdentity {
     /// General asset category used by backends to decide emission strategy.
     /// Examples: `"js"`, `"wit"`, `"rust"`.
     pub asset_kind: String,
-    /// Legacy authored location of the import that requested the asset, for conflict diagnostics.
-    pub authored_import_location: SourceLocation,
     /// Exact authored span of the import that requested the asset, when source-owned.
-    pub authored_import_span: Option<SourceSpan>,
+    pub source_span: Option<SourceSpan>,
 }
 
 /// A runtime module import required by an external resolved import.

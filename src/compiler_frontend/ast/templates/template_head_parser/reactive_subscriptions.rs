@@ -29,7 +29,8 @@ type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
 
 /// Parses and validates a `$(source)` template subscription.
 ///
-/// The token stream enters on `TokenKind::Reactive` and exits on the token after the closing `)`.
+/// The token stream enters on `TokenKind::Reactive` and exits on the token after
+/// the closing `)`.
 pub(super) fn parse_reactive_subscription(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -37,17 +38,20 @@ pub(super) fn parse_reactive_subscription(
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
 ) -> ReactiveSubscriptionResult<()> {
-    let subscription_location = token_stream.current_location();
-    let subscription_span = token_stream.current_token().span;
+    let subscription_token_span = token_stream.current_token().span;
+    let subscription_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        subscription_token_span,
+    ));
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
         return Err(with_token_span(
             token_stream,
-            subscription_span,
+            subscription_token_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
-                subscription_location,
+                subscription_span,
             ),
         )
         .into());
@@ -60,7 +64,7 @@ pub(super) fn parse_reactive_subscription(
                 token_stream,
                 CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::ReactiveSubscriptionEmpty,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 ),
             )
             .into());
@@ -73,15 +77,15 @@ pub(super) fn parse_reactive_subscription(
                 token_stream,
                 CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 ),
             )
             .into());
         }
     };
 
-    let source_location = token_stream.current_location();
-    let source_span = token_stream.current_token().span;
+    let source_token_span = token_stream.current_token().span;
+    let source_span = Some(SourceSpan::new(token_stream.file_id, source_token_span));
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
@@ -93,7 +97,10 @@ pub(super) fn parse_reactive_subscription(
 
         return Err(with_current_token_span(
             token_stream,
-            CompilerDiagnostic::invalid_template_structure(reason, token_stream.current_location()),
+            CompilerDiagnostic::invalid_template_structure(
+                reason,
+                Some(token_stream.current_span()),
+            ),
         )
         .into());
     }
@@ -101,8 +108,8 @@ pub(super) fn parse_reactive_subscription(
     let Some(reference) = context.get_reference(&source_name) else {
         return Err(with_token_span(
             token_stream,
-            source_span,
-            CompilerDiagnostic::unexpected_token(TokenKind::Symbol(source_name), source_location),
+            source_token_span,
+            CompilerDiagnostic::unexpected_token(TokenKind::Symbol(source_name), source_span),
         )
         .into());
     };
@@ -110,10 +117,10 @@ pub(super) fn parse_reactive_subscription(
     let Some(source) = reference.value.reactive_source.clone() else {
         return Err(with_token_span(
             token_stream,
-            source_span,
+            source_token_span,
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource,
-                source_location,
+                source_span,
             ),
         )
         .into());
@@ -123,8 +130,7 @@ pub(super) fn parse_reactive_subscription(
         reference.id.to_owned(),
         reference.value.diagnostic_type.to_owned(),
         reference.value.type_id,
-        source_location,
-        Some(SourceSpan::new(token_stream.file_id, source_span)),
+        source_span,
         reference.value.value_mode.to_owned(),
         reference.value.const_record_state,
     )
@@ -138,8 +144,7 @@ pub(super) fn parse_reactive_subscription(
             type_environment,
             construction_context,
         },
-        &subscription_location,
-        Some(SourceSpan::new(token_stream.file_id, subscription_span)),
+        subscription_span,
         string_table,
     )?;
 
@@ -148,14 +153,14 @@ pub(super) fn parse_reactive_subscription(
 }
 
 /// Attach the authored span for a reactive-head syntax diagnostic.
-///
-/// Reactive parsing retains the legacy locations for compatibility with the interval bridge,
-/// while the token stream still owns the exact source identity and local byte range.
 fn with_current_token_span(
     token_stream: &FileTokens,
-    diagnostic: CompilerDiagnostic,
+    mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
-    with_token_span(token_stream, token_stream.current_token().span, diagnostic)
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(token_stream.current_span());
+    }
+    diagnostic
 }
 
 fn with_token_span(

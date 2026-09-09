@@ -570,7 +570,6 @@ impl ModulePreparationContext<'_> {
         Self::merge_file_preparation_chunks(
             string_table,
             preparation_chunks,
-            source_spans,
             module_file_count,
             base_len,
         )
@@ -586,7 +585,6 @@ impl ModulePreparationContext<'_> {
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
         mut preparation_chunks: Vec<FilePreparationChunk>,
-        source_spans: &mut SourceSpanBuilders<'_>,
         module_file_count: usize,
         base_len: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
@@ -685,7 +683,7 @@ impl ModulePreparationContext<'_> {
                             ..
                         } = error;
                         warnings.extend(file_warnings);
-                        diagnostics.push(*diagnostic);
+                        diagnostics.push(diagnostic);
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                         return Err(PremergeFailure::Infrastructure(error));
@@ -729,12 +727,7 @@ impl ModulePreparationContext<'_> {
         let prepared = match prepare_header_syntax(
             &mut filled_outputs,
             string_table,
-            &mut |source, diagnostic| {
-                let mut builder = source_spans.take_span_builder(source);
-                let result = diagnostic.capture_preparation_span(source, &mut builder);
-                source_spans.retain_span_builder(source, builder);
-                result
-            },
+            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
         ) {
             Ok(prepared) => prepared,
             Err(bag) => {
@@ -1048,10 +1041,7 @@ impl ModuleSyntaxDiscovery<'_> {
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
-    pub(super) fn finish(
-        mut self,
-        source_spans: &mut SourceSpanBuilders<'_>,
-    ) -> Result<PreparedModule, PremergeFailure> {
+    pub(super) fn finish(mut self) -> Result<PreparedModule, PremergeFailure> {
         let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
@@ -1068,13 +1058,8 @@ impl ModuleSyntaxDiscovery<'_> {
             prepare_header_syntax(
                 &mut prepared_outputs,
                 &mut self.string_table,
-                &mut |source, diagnostic| {
-                    let mut builder = source_spans.take_span_builder(source);
-                    let result = diagnostic.capture_preparation_span(source, &mut builder);
-                    source_spans.retain_span_builder(source, builder);
-                    result
-                }
-            ),
+                &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            )
         ) {
             Ok(prepared_header_syntax) => prepared_header_syntax,
             Err(bag) => {

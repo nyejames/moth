@@ -392,9 +392,9 @@ fn resolve_tir_chain_layer(
 
     let resolved_fill_node_ids = resolve_tir_chain_items(store, &layer.fill_items, layers, inputs)?;
 
-    let (original_location, original_span) = store
+    let original_span = store
         .get_node(original_node_id)
-        .map(|node| (node.location.to_owned(), node.span))
+        .map(|node| node.span)
         .ok_or_else(|| {
             internal_compiler_error(
                 "TIR head-chain composition: original wrapper node ID was not present in the store.",
@@ -406,7 +406,6 @@ fn resolve_tir_chain_layer(
         layer.wrapper_reference,
         &layer.layout,
         resolved_fill_node_ids,
-        original_location.clone(),
         original_span,
         inputs.string_table,
         inputs.allow_runtime_plans,
@@ -418,7 +417,6 @@ fn resolve_tir_chain_layer(
             reference: resolved,
             occurrence_id,
         },
-        original_location,
-        None,
+        original_span,
     )))
 }

@@ -86,7 +86,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     if token_stream.current_token_kind() != &TokenKind::Else {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfMissingElse,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }

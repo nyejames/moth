@@ -19,10 +19,10 @@ Priorities:
 
 ### Diagnostics
 
-- Use `CompilerDiagnostic` for normal user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics.
+- Use plain `CompilerDiagnostic` values for normal user-facing source, config, import, syntax, type, rule, borrow and deferred-feature diagnostics.
 - Use `CompilerError` only for internal compiler, filesystem, backend, dev-server and tooling infrastructure failures.
 - Diagnostic payloads and reason enums should carry typed `DiagnosticPayload` facts and stable diagnostic codes, not pre-rendered prose.
-- Include a `SourceLocation` in every user-facing diagnostic and preserve source labels wherever they add useful context.
+- Include an exact `SourceSpan` when authored source owns the diagnostic and preserve source labels wherever they add useful context.
 - Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned `DataType` values or formatted type names.
 - Use `DiagnosticBag` for stage-local accumulation and `CompilerMessages` only at build/render boundaries.
 
@@ -228,14 +228,14 @@ Prefer named types and straightforward flow:
     pub(crate) struct DependencyResolution {
         pub(crate) target: ResolvedDependencyTarget,
         pub(crate) local_name: StringId,
-        pub(crate) location: SourceLocation,
+        pub(crate) span: Option<SourceSpan>,
     }
 ]
 
 Instead of:
 
 [codeblock, $code("rust"):
-    Result<(ResolvedDependencyTarget, StringId, SourceLocation), CompilerError>
+    Result<(ResolvedDependencyTarget, StringId, SourceSpan), CompilerDiagnostic>
 ]
 
 A few more lines are fine when the result is easier to inspect and harder to misuse.
@@ -270,7 +270,7 @@ The diagnostic lane rules above apply to every local error boundary.
 
 - New user-facing diagnostics must use typed `CompilerDiagnostic` constructors in `compiler_diagnostic.rs`. Do not add `CompilerError` variants for syntax, type, rule, import, borrow or config failures.
 - Use `return_compiler_error!` only for internal compiler bugs or broken invariants.
-- When a local `Result` boundary carrying `CompilerDiagnostic` or `CompilerError` triggers `result_large_err`, box the payload inside that boundary enum or use a stage-local boxed diagnostic result alias.
+- Keep diagnosed failures as plain `CompilerDiagnostic` values at local `Result` boundaries; keep infrastructure failures in their typed `CompilerError` lane. Do not box the common diagnostic or add a lint-specific local workaround.
 - Keep `DiagnosticBag` and `CompilerMessages` owning plain `CompilerDiagnostic` values at accumulation and render/build boundaries.
 - Prefer `Option<CompilerDiagnostic>` over `Result<(), CompilerDiagnostic>` for predicate-only validators that report one diagnostic or continue.
 - Prefer explicit loops when iterator closures would infer `Result<_, CompilerDiagnostic>`.

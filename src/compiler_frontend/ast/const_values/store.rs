@@ -32,7 +32,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 
@@ -93,13 +92,13 @@ pub(crate) enum ConstTemplateValue {
 /// User-facing or infrastructure failure while constructing the module store.
 #[derive(Debug)]
 pub(crate) enum ConstValueStoreError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for ConstValueStoreError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        Self::Diagnostic(Box::new(diagnostic))
+        Self::Diagnostic(diagnostic)
     }
 }
 
@@ -120,7 +119,6 @@ pub(crate) struct ConstValueMetadata {
     pub(crate) type_id: TypeId,
     pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
-    pub(crate) location: SourceLocation,
     pub(crate) span: Option<SourceSpan>,
     pub(crate) reactive_source: Option<ReactiveSource>,
     pub(crate) reactive_template: Option<ReactiveTemplateMetadata>,
@@ -133,17 +131,14 @@ pub(crate) struct ConstValueMetadata {
 
 /// A named field in a folded record or choice payload.
 ///
-/// WHAT: keeps authored field order, the folded value id, and the field's declaration
-/// location. `location` preserves declaration provenance for diagnostics after folding;
-/// it is not remapped because the store is consumed before the module-wide string remap.
+/// WHAT: keeps authored field order and the folded value id.
+///
+/// Public folded values remain location-free; exact source spans are retained on the value
+/// metadata where they are available.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValueField {
     pub(crate) name: InternedPath,
     pub(crate) value: ConstValueId,
-    /// Field initializer location for diagnostic projection after folding. Public folded
-    /// values remain location-free; config projection copies this into a parallel field-source
-    /// table instead of attaching it to [`PublicFoldedValue`].
-    pub(crate) location: SourceLocation,
 }
 
 /// A folded `String` value: plain text or an ordered sequence of structural pieces.
@@ -429,7 +424,6 @@ impl ConstValueStore {
             stored_fields.push(ConstValueField {
                 name: field.id.clone(),
                 value,
-                location: field.value.location.clone(),
             });
         }
 
@@ -552,7 +546,6 @@ impl ConstValueStore {
                                 type_environment,
                                 template_builder,
                             )?,
-                            location: field.value.location.clone(),
                         })
                     })
                     .collect::<Result<Vec<_>, ConstValueStoreError>>()?;
@@ -638,7 +631,6 @@ impl ConstValueStore {
             type_id: expression.type_id,
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
-            location: expression.location.clone(),
             span: expression.span,
             reactive_source: expression.reactive_source.clone(),
             reactive_template: expression.reactive_template.clone(),
@@ -973,7 +965,6 @@ impl ConstValueStore {
 
         let mut expression = Expression::new(
             kind,
-            value.metadata.location.clone(),
             value.metadata.span,
             value.metadata.type_id,
             value.metadata.diagnostic_type.clone(),

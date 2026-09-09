@@ -140,14 +140,14 @@ fn rejects_invalid_helper_export_policy() {
         &type_environment,
     )
     .expect_err("invalid helper policy should fail");
-    let (error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
-        error_type,
+        &error.error_type,
         &ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
-    assert!(message.contains("moth_str_ptr"));
+    assert!(error.msg.contains("moth_str_ptr"));
 }
 
 #[test]
@@ -210,14 +210,14 @@ fn rejects_unsupported_wasm_feature_flags() {
         &type_environment,
     )
     .expect_err("unsupported feature toggle should fail");
-    let (error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
-        error_type,
+        &error.error_type,
         &ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
-    assert!(message.contains("use_wasm_gc"));
+    assert!(error.msg.contains("use_wasm_gc"));
 }
 
 #[test]
@@ -256,14 +256,14 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         &type_environment,
     )
     .expect_err("unsupported cfg strategy should fail");
-    let (error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
-        error_type,
+        &error.error_type,
         &ErrorType::Backend(BackendErrorType::WasmGeneration)
     );
-    assert!(message.contains("dispatcher-loop"));
+    assert!(error.msg.contains("dispatcher-loop"));
 }
 
 #[test]

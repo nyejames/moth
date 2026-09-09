@@ -61,12 +61,12 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 ///      order instead of failing closed.
 #[derive(Debug)]
 pub(super) enum BindingEnvironmentError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Internal(CompilerError),
 }
 
-impl From<Box<CompilerDiagnostic>> for BindingEnvironmentError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
+impl From<CompilerDiagnostic> for BindingEnvironmentError {
+    fn from(diagnostic: CompilerDiagnostic) -> Self {
         Self::Diagnostic(diagnostic)
     }
 }
@@ -135,7 +135,7 @@ pub(crate) fn prepare_binding_environment(
             Ok(()) => {}
             Err(BindingEnvironmentError::Diagnostic(diagnostic)) => {
                 return Err(CompilerMessages::from_diagnostic(
-                    *diagnostic,
+                    diagnostic,
                     builder.string_table.clone(),
                 ));
             }

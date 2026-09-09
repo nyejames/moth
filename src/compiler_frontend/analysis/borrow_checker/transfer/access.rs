@@ -16,7 +16,6 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
     LocalMode, OptionalTransferStatus, ReactiveInvalidationFact, ReactiveInvalidationKind,
     ReactivePlaceWriteKind, StatementBorrowFact, TerminatorBorrowFact, ValueAccessClassification,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
@@ -49,8 +48,7 @@ struct SharedReadEnv<'a, 'module> {
     state: &'a BorrowState,
     block_id: BlockId,
     tracker: &'a mut StatementAccessTracker,
-    location: SourceLocation,
-    span: Option<SourceSpan>,
+    location: Option<SourceSpan>,
     current_order: i32,
     stats: &'a mut BlockTransferStats,
     value_fact_buffer: &'a mut ValueFactBuffer,
@@ -64,7 +62,7 @@ struct AccessCheckContext<'a, 'module> {
     state: &'a BorrowState,
     block_id: BlockId,
     tracker: &'a mut StatementAccessTracker,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     stats: &'a mut BlockTransferStats,
     actor_index_hint: Option<usize>,
@@ -96,7 +94,7 @@ struct AssignTransferContext<'a, 'module> {
     current_order: i32,
     tracker: &'a mut StatementAccessTracker,
     value_fact_buffer: &'a mut ValueFactBuffer,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     stats: &'a mut BlockTransferStats,
 }
@@ -464,7 +462,7 @@ fn mutable_argument_roots(
     layout: &FunctionLayout,
     state: &BorrowState,
     expression: &HirExpression,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<RootSet, BorrowCheckError> {
@@ -510,7 +508,7 @@ fn direct_value_provenance_from_expression(
     layout: &FunctionLayout,
     state: &BorrowState,
     expression: &HirExpression,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<DirectValueProvenance>, BorrowCheckError> {
@@ -616,7 +614,7 @@ fn roots_for_place(
     layout: &FunctionLayout,
     state: &BorrowState,
     place: &HirPlace,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<RootSet, BorrowCheckError> {
@@ -637,8 +635,7 @@ fn roots_for_place(
             if local_state.mode.is_definitely_uninit() {
                 return Err(diagnostics.use_of_uninitialized_local(
                     diagnostics.local_place(layout.local_ids[local_index]),
-                    location,
-                    span,
+                    span.or(location),
                 ));
             }
 
@@ -658,7 +655,7 @@ fn roots_for_place(
 fn record_shared_reads_in_place_indices(
     env: &mut SharedReadEnv<'_, '_>,
     place: &HirPlace,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
     match place {
@@ -678,7 +675,7 @@ fn record_shared_reads_in_place_indices(
 fn record_shared_reads_in_expression(
     env: &mut SharedReadEnv<'_, '_>,
     expression: &HirExpression,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
@@ -696,19 +693,17 @@ fn record_shared_reads_in_expression(
         }
 
         HirExpressionKind::Load(place) => {
-            let value_location = env
+            let value_span = env
                 .context
                 .diagnostics
-                .value_error_location(expression.id, location.clone());
-            // Preserve the authored expression span; generated values stay spanless.
-            let value_span = expression.span;
-            record_shared_reads_in_place_indices(env, place, value_location.clone(), roots)?;
+                .value_error_span(expression.id, expression.span.or(location));
+            record_shared_reads_in_place_indices(env, place, value_span, roots)?;
 
             let place_roots = roots_for_place(
                 env.layout,
                 env.state,
                 place,
-                value_location.clone(),
+                value_span,
                 value_span,
                 &env.context.diagnostics,
             )?;
@@ -719,7 +714,7 @@ fn record_shared_reads_in_expression(
                 state: env.state,
                 block_id: env.block_id,
                 tracker: env.tracker,
-                location: value_location,
+                location: value_span,
                 span: value_span,
                 stats: env.stats,
                 actor_index_hint,
@@ -730,19 +725,17 @@ fn record_shared_reads_in_expression(
         }
 
         HirExpressionKind::Copy(place) => {
-            let value_location = env
+            let value_span = env
                 .context
                 .diagnostics
-                .value_error_location(expression.id, location.clone());
-            // Preserve the authored expression span; generated values stay spanless.
-            let value_span = expression.span;
-            record_shared_reads_in_place_indices(env, place, value_location.clone(), roots)?;
+                .value_error_span(expression.id, expression.span.or(location));
+            record_shared_reads_in_place_indices(env, place, value_span, roots)?;
 
             let place_roots = roots_for_place(
                 env.layout,
                 env.state,
                 place,
-                value_location.clone(),
+                value_span,
                 value_span,
                 &env.context.diagnostics,
             )?;
@@ -753,7 +746,7 @@ fn record_shared_reads_in_expression(
                 state: env.state,
                 block_id: env.block_id,
                 tracker: env.tracker,
-                location: value_location.clone(),
+                location: value_span,
                 span: value_span,
                 stats: env.stats,
                 actor_index_hint,
@@ -833,7 +826,7 @@ fn collect_expression_roots(
     state: &BorrowState,
     expression: &HirExpression,
     out: &mut RootSet,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     _span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<(), BorrowCheckError> {
@@ -1047,7 +1040,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
     expression: &HirExpression,
     block_id: BlockId,
     current_order: i32,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     aggregate_context: &mut AggregateTransferContext<'_, '_>,
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
@@ -1244,7 +1237,7 @@ fn transfer_aggregate_child(
     expression: &HirExpression,
     block_id: BlockId,
     current_order: i32,
-    location: SourceLocation,
+    location: Option<SourceSpan>,
     aggregate_context: &mut AggregateTransferContext<'_, '_>,
 ) -> Result<(), BorrowCheckError> {
     let diagnostics = aggregate_context.diagnostics;

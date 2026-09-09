@@ -33,8 +33,8 @@ use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::source_tree_index::SourceTreeIndex;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashMap;
 
@@ -158,11 +158,11 @@ pub(crate) struct ProjectModuleGraph {
     entry_modules: Vec<ModuleId>,
     facade: Option<ModuleId>,
     dependencies: ProjectModuleDependencies,
-    // Retained authored source location for each inserted provider-before-consumer edge,
+    // Retained authored source span for each inserted provider-before-consumer edge,
     // keyed by the (provider, consumer) `ModuleId` pair. Only the first observation in
     // deterministic merge order is retained; duplicate observations are idempotent for the edge
     // and never overwrite retained provenance. Provenance is never used for edge identity.
-    edge_source_locations: BTreeMap<(ModuleId, ModuleId), SourceLocation>,
+    edge_source_spans: BTreeMap<(ModuleId, ModuleId), Option<SourceSpan>>,
 }
 
 impl ProjectModuleGraph {
@@ -202,7 +202,7 @@ impl ProjectModuleGraph {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
             },
-            edge_source_locations: BTreeMap::new(),
+            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -260,7 +260,7 @@ impl ProjectModuleGraph {
                 dependency_providers,
                 provider_consumers,
             },
-            edge_source_locations: BTreeMap::new(),
+            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -305,7 +305,7 @@ impl ProjectModuleGraph {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
             },
-            edge_source_locations: BTreeMap::new(),
+            edge_source_spans: BTreeMap::new(),
         }
     }
 
@@ -476,7 +476,7 @@ impl ProjectModuleGraph {
     /// WHAT: the one-time construction-to-completion transition. Construction `BTreeSet` storage
     ///       is converted to sorted `Vec<ModuleId>` storage for both provider and consumer
     ///       adjacency in lockstep, and the dependency state becomes `Frozen`. The retained
-    ///       authored edge locations are unaffected.
+    ///       authored edge spans are unaffected.
     /// WHY: compile-wave scheduling reads only the frozen adjacency so the graph keeps one
     ///      complete adjacency representation. Completing an already-completed graph is a
     ///      mutation after completion and reports an internal [`CompilerError`] rather than
@@ -511,41 +511,43 @@ impl ProjectModuleGraph {
         Ok(())
     }
 
-    /// Insert one resolved structural dependency edge and retain its authored location.
+    /// Insert one resolved structural dependency edge and retain its authored source span.
     ///
     /// WHAT: the production edge-insertion path maps already-resolved `ModuleId`
     ///       identities to the low-level [`add_dependency_edge`] inserter and, for a newly
-    ///       inserted edge, retains the exact authored `SourceLocation`
-    ///       carried by the dependency reference. Duplicate observations are
-    ///       idempotent for the edge and never overwrite retained provenance; provenance is
-    ///       never used for edge identity.
+    ///       inserted edge, retains the exact authored `SourceSpan` carried by the dependency
+    ///       reference. Duplicate observations are idempotent for the edge and never overwrite
+    ///       retained provenance; provenance is never used for edge identity.
     /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method so
     ///      the graph stays the single owner of both edge adjacency and retained provenance.
     pub(crate) fn add_resolved_dependency_edge(
         &mut self,
         provider: ModuleId,
         consumer: ModuleId,
-        authored_location: SourceLocation,
+        authored_span: Option<SourceSpan>,
     ) -> Result<DependencyEdgeOutcome, CompilerError> {
         let outcome = self.add_dependency_edge(provider, consumer)?;
         if outcome == DependencyEdgeOutcome::Inserted {
-            self.edge_source_locations
-                .insert((provider, consumer), authored_location);
+            self.edge_source_spans
+                .insert((provider, consumer), authored_span);
         }
         Ok(outcome)
     }
 
-    /// The retained authored source location for one provider-before-consumer edge, if present.
+    /// The retained authored source span for one provider-before-consumer edge, if present.
     ///
-    /// Focused graph-invariant tests use this to verify that exact authored source locations
+    /// Focused graph-invariant checks use this to verify that exact authored source spans
     /// survive direct edge insertion.
     #[cfg(test)]
-    pub(crate) fn edge_source_location(
+    pub(crate) fn edge_source_span(
         &self,
         provider: ModuleId,
         consumer: ModuleId,
-    ) -> Option<&SourceLocation> {
-        self.edge_source_locations.get(&(provider, consumer))
+    ) -> Option<SourceSpan> {
+        self.edge_source_spans
+            .get(&(provider, consumer))
+            .copied()
+            .flatten()
     }
 
     /// Whether a provider-before-consumer dependency edge is currently present.
