@@ -5,8 +5,9 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, display_column_number, display_line_number, primary_underline_length,
-    relative_display_path_from_root, render_payload, resolve_source_file_path,
+    DiagnosticRenderContext, display_column_number, display_line_number, primary_caret_padding,
+    primary_underline_length, relative_display_path_from_root, render_payload,
+    resolve_source_file_path,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -66,7 +67,7 @@ fn render_source_frame(
     }
 
     // Underline the primary span with carets.
-    let underline_start = primary_position.start.column as usize;
+    let underline_start = primary_caret_padding(&primary_position, source_line);
     let underline_length = primary_underline_length(&primary_position, source_line);
     let padding = " ".repeat(underline_start);
     let underlines = "^".repeat(underline_length);

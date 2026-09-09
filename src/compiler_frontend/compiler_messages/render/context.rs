@@ -9,6 +9,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId};
+use unicode_width::UnicodeWidthChar;
 
 /// Exact primary source position used by the renderer boundary.
 ///
@@ -135,16 +136,60 @@ impl<'a> DiagnosticRenderContext<'a> {
     }
 }
 
-pub(crate) fn primary_underline_length(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
-    let length = if position.start.line == position.end.line {
-        position.end.column.saturating_sub(position.start.column) as usize
-    } else {
-        line.chars()
-            .count()
-            .saturating_sub(position.start.column as usize)
-    };
+/// Display-cell tab stop for caret geometry. A tab advances the caret to the next multiple of
+/// this width, matching common terminal emulators and browsers.
+pub(crate) const RENDER_TAB_STOP_CELLS: usize = 8;
 
-    length.max(1)
+/// Convert one retained source line plus scalar-column span bounds into caret geometry.
+///
+/// WHAT: walks the line's scalars from its start, counting display cells: a tab advances to the
+/// next [`RENDER_TAB_STOP_CELLS`] multiple and every other scalar contributes its Unicode width
+/// (combining marks 0, wide CJK 2, unassigned or control scalars 0). Returns the padding cells
+/// before `start_column` and the underline cells covering `start_column..end_column`.
+/// WHY: scalar columns misplace carets behind tabs and wide characters, while tooling columns
+/// (UTF-16) and scalar source offsets stay separate concerns owned by `LineIndex`. Only this
+/// render boundary knows display cells.
+pub(crate) fn caret_cells(line: &str, start_column: u32, end_column: u32) -> (usize, usize) {
+    let start = start_column as usize;
+    let end = end_column.max(start_column) as usize;
+    let mut cells = 0usize;
+    let mut padding = None;
+    let mut underline_end = None;
+    for (index, scalar) in line.chars().enumerate() {
+        if index == start {
+            padding = Some(cells);
+        }
+        if index == end {
+            underline_end = Some(cells);
+            break;
+        }
+        cells = advance_display_cells(cells, scalar);
+    }
+    let padding = padding.unwrap_or(cells);
+    let underline_end = underline_end.unwrap_or(cells);
+    (padding, underline_end.saturating_sub(padding).max(1))
+}
+
+fn advance_display_cells(cells: usize, scalar: char) -> usize {
+    if scalar == '\t' {
+        cells + RENDER_TAB_STOP_CELLS - cells % RENDER_TAB_STOP_CELLS
+    } else {
+        cells + UnicodeWidthChar::width(scalar).unwrap_or(0)
+    }
+}
+
+/// Count the display cells before a primary span's start column on its retained line.
+pub(crate) fn primary_caret_padding(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
+    caret_cells(line, position.start.column, position.start.column).0
+}
+
+pub(crate) fn primary_underline_length(position: &DiagnosticPrimaryPosition, line: &str) -> usize {
+    let end_column = if position.start.line == position.end.line {
+        position.end.column
+    } else {
+        u32::MAX
+    };
+    caret_cells(line, position.start.column, end_column).1
 }
 
 fn legacy_line_position(line: i32, column: i32) -> LinePosition {

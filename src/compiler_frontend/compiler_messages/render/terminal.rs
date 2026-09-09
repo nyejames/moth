@@ -5,8 +5,8 @@
 
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, diagnostic_type_name, display_column_number, display_line_number,
-    primary_underline_length, relative_display_path_from_root, render_payload,
-    resolve_source_file_path,
+    primary_caret_padding, primary_underline_length, relative_display_path_from_root,
+    render_payload, resolve_source_file_path,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
@@ -77,7 +77,7 @@ pub(crate) fn print_diagnostic_with_context(
         say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
         print!("{}", " ".repeat(display_line.to_string().len() + 4));
 
-        let underline_start = primary_position.start.column as usize;
+        let underline_start = primary_caret_padding(&primary_position, line);
         print!("{}", " ".repeat(underline_start));
         let underline_length = primary_underline_length(&primary_position, line);
         say!(Red "^".repeat(underline_length));

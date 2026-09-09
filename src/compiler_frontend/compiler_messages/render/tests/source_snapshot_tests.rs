@@ -338,6 +338,126 @@ fn renderers_underline_half_open_reanchored_span_exactly() {
     );
 }
 
+#[test]
+fn renderers_expand_a_preceding_tab_to_the_configured_stop_for_carets() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id, mut location) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "a\tb\n",
+        &mut string_table,
+    );
+    location.start_pos = CharPosition {
+        line_number: 27,
+        char_column: 2,
+    };
+    location.end_pos = CharPosition {
+        line_number: 27,
+        char_column: 2,
+    };
+
+    let name = string_table.intern("b");
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, location);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // `b` sits at byte 2: one scalar column behind it is a tab, which occupies cells 1..8.
+    let local_span = LocalSpan::exact(2, 1, &mut span_builder).expect("span should fit inline");
+    diagnostic.primary_span = Some(SourceSpan::new(source_id, local_span));
+
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+    let position = context.primary_position(&diagnostic);
+    assert_eq!(position.start.column, 2);
+    assert_eq!(primary_underline_length(&position, "a\tb"), 1);
+
+    let rendered =
+        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    assert!(
+        rendered.contains(r#"class="source-caret">        ^</span>"#),
+        "caret must start after eight display cells: {rendered}"
+    );
+}
+
+#[test]
+fn renderers_count_a_wide_cjk_scalar_as_two_cells_for_carets() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id, mut location) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "あx\n",
+        &mut string_table,
+    );
+    location.start_pos = CharPosition {
+        line_number: 27,
+        char_column: 1,
+    };
+    location.end_pos = CharPosition {
+        line_number: 27,
+        char_column: 1,
+    };
+
+    let name = string_table.intern("x");
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, location);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // `あ` occupies bytes 0..3 and two display cells; `x` sits at byte 3.
+    let local_span = LocalSpan::exact(3, 1, &mut span_builder).expect("span should fit inline");
+    diagnostic.primary_span = Some(SourceSpan::new(source_id, local_span));
+
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+    let position = context.primary_position(&diagnostic);
+    assert_eq!(position.start.column, 1);
+    assert_eq!(primary_underline_length(&position, "あx"), 1);
+
+    let rendered =
+        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    assert!(
+        rendered.contains(r#"class="source-caret">  ^</span>"#),
+        "caret must start after two display cells: {rendered}"
+    );
+}
+
+#[test]
+fn renderers_count_a_combining_mark_as_zero_cells_for_carets() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id, mut location) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "éx\n",
+        &mut string_table,
+    );
+    location.start_pos = CharPosition {
+        line_number: 27,
+        char_column: 2,
+    };
+    location.end_pos = CharPosition {
+        line_number: 27,
+        char_column: 2,
+    };
+
+    let name = string_table.intern("x");
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, location);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // `e` plus the combining acute occupy bytes 0..3 but one display cell; `x` sits at byte 3.
+    let local_span = LocalSpan::exact(3, 1, &mut span_builder).expect("span should fit inline");
+    diagnostic.primary_span = Some(SourceSpan::new(source_id, local_span));
+
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+    let position = context.primary_position(&diagnostic);
+    assert_eq!(position.start.column, 2);
+    assert_eq!(primary_underline_length(&position, "éx"), 1);
+
+    let rendered =
+        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    assert!(
+        rendered.contains(r#"class="source-caret"> ^</span>"#),
+        "caret must start after one display cell: {rendered}"
+    );
+}
+
 /// A compilation-root primary span names no physical source, so its render position carries no
 /// source identity even when a loaded snapshot is attached, and the renderers keep omitting a
 /// physical source frame for it.
