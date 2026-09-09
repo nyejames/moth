@@ -24,7 +24,9 @@ fn root_has_no_parent_and_zero_depth() {
 fn builder_exposes_current_table_before_consuming_freeze() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let path = builder.intern_portable_path("shared/prefix", &mut string_table);
+    let path = builder
+        .try_intern_portable_path("shared/prefix", &mut string_table)
+        .unwrap();
 
     assert_eq!(builder.paths().depth(path), 2);
     let parent = builder
@@ -44,9 +46,15 @@ fn append_reuses_children_and_adds_distinct_components_once() {
     let second_component = string_table.intern("second");
     let mut builder = PathInternerBuilder::new();
 
-    let first = builder.intern_child(PathId::ROOT, first_component);
-    let reused = builder.intern_child(PathId::ROOT, first_component);
-    let second = builder.intern_child(PathId::ROOT, second_component);
+    let first = builder
+        .try_intern_child(PathId::ROOT, first_component)
+        .unwrap();
+    let reused = builder
+        .try_intern_child(PathId::ROOT, first_component)
+        .unwrap();
+    let second = builder
+        .try_intern_child(PathId::ROOT, second_component)
+        .unwrap();
     let table = builder.freeze();
 
     assert_eq!(first, reused);
@@ -59,8 +67,12 @@ fn append_reuses_children_and_adds_distinct_components_once() {
 fn shared_prefixes_have_one_node_per_unique_path() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let abc = builder.intern_portable_path("a/b/c", &mut string_table);
-    let abd = builder.intern_portable_path("a/b/d", &mut string_table);
+    let abc = builder
+        .try_intern_portable_path("a/b/c", &mut string_table)
+        .unwrap();
+    let abd = builder
+        .try_intern_portable_path("a/b/d", &mut string_table)
+        .unwrap();
     let table = builder.freeze();
 
     let ab = table.parent(abc).expect("c should have a parent");
@@ -76,9 +88,15 @@ fn shared_prefixes_have_one_node_per_unique_path() {
 fn identical_complete_paths_are_equal_but_prefixes_are_not() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let first_path = builder.intern_portable_path("same/path", &mut string_table);
-    let second_path = builder.intern_portable_path("same/path", &mut string_table);
-    let prefix = builder.intern_portable_path("same", &mut string_table);
+    let first_path = builder
+        .try_intern_portable_path("same/path", &mut string_table)
+        .unwrap();
+    let second_path = builder
+        .try_intern_portable_path("same/path", &mut string_table)
+        .unwrap();
+    let prefix = builder
+        .try_intern_portable_path("same", &mut string_table)
+        .unwrap();
 
     assert_eq!(first_path, second_path);
     assert_ne!(first_path, prefix);
@@ -88,9 +106,15 @@ fn identical_complete_paths_are_equal_but_prefixes_are_not() {
 fn parent_walking_reaches_root_in_order() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let a = builder.intern_portable_path("a", &mut string_table);
-    let ab = builder.intern_portable_path("a/b", &mut string_table);
-    let abc = builder.intern_portable_path("a/b/c", &mut string_table);
+    let a = builder
+        .try_intern_portable_path("a", &mut string_table)
+        .unwrap();
+    let ab = builder
+        .try_intern_portable_path("a/b", &mut string_table)
+        .unwrap();
+    let abc = builder
+        .try_intern_portable_path("a/b/c", &mut string_table)
+        .unwrap();
     let table = builder.freeze();
 
     assert_eq!(table.parent(abc), Some(ab));
@@ -103,10 +127,18 @@ fn parent_walking_reaches_root_in_order() {
 fn rendering_is_portable_and_empty_paths_are_empty() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let path = builder.intern_portable_path("styles/docs/navbar", &mut string_table);
-    let root = builder.intern_portable_path("", &mut string_table);
-    let slash = builder.intern_portable_path("/", &mut string_table);
-    let trailing_separator = builder.intern_portable_path("styles/docs/navbar/", &mut string_table);
+    let path = builder
+        .try_intern_portable_path("styles/docs/navbar", &mut string_table)
+        .unwrap();
+    let root = builder
+        .try_intern_portable_path("", &mut string_table)
+        .unwrap();
+    let slash = builder
+        .try_intern_portable_path("/", &mut string_table)
+        .unwrap();
+    let trailing_separator = builder
+        .try_intern_portable_path("styles/docs/navbar/", &mut string_table)
+        .unwrap();
     let table = builder.freeze();
     let mut scratch = Vec::new();
     let rendered = table.render_portable(path, &string_table, &mut scratch);
@@ -132,8 +164,12 @@ fn rendering_is_portable_and_empty_paths_are_empty() {
 fn component_resolution_reuses_scratch_without_stale_entries() {
     let mut string_table = StringTable::new();
     let mut builder = PathInternerBuilder::new();
-    let long_path = builder.intern_portable_path("a/b/c", &mut string_table);
-    let short_path = builder.intern_portable_path("x", &mut string_table);
+    let long_path = builder
+        .try_intern_portable_path("a/b/c", &mut string_table)
+        .unwrap();
+    let short_path = builder
+        .try_intern_portable_path("x", &mut string_table)
+        .unwrap();
     let table = builder.freeze();
     let a = string_table.intern("a");
     let b = string_table.intern("b");
@@ -147,4 +183,24 @@ fn component_resolution_reuses_scratch_without_stale_entries() {
     );
     assert_eq!(table.resolve_components(short_path, &mut scratch), &[x]);
     assert_eq!(scratch, vec![x]);
+}
+
+#[test]
+fn path_id_try_from_index_spans_the_full_compact_domain() {
+    assert_eq!(PathId::try_from_index(0), Some(PathId::ROOT));
+
+    let last_index = u32::MAX as usize - 1;
+    assert_eq!(
+        PathId::try_from_index(last_index).map(PathId::index),
+        Some(last_index)
+    );
+
+    // One past the last usable index is authored table exhaustion, reported fallibly instead
+    // of wrapping the identity or panicking.
+    assert_eq!(PathId::try_from_index(u32::MAX as usize), None);
+    assert_eq!(
+        PathId::try_from_index(u32::MAX as usize + 1),
+        None,
+        "indexes beyond the u32 domain must be rejected without a lossy cast"
+    );
 }

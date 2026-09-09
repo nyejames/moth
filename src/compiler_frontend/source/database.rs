@@ -20,10 +20,12 @@ use super::span::{ExtendedSpanBuilder, ExtendedSpanTable};
 use super::{SourceId, SourceKind, SourceProvenance, SourceRecord, SourceRegistrationIndex};
 #[cfg(test)]
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder, PathTable};
+use crate::compiler_frontend::symbols::path_interner::{
+    PathId, PathInternError, PathInternerBuilder, PathTable,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
@@ -187,9 +189,7 @@ impl SourceDatabase {
                 let path_id = self
                     .path_interner
                     .try_intern_filesystem_path(&logical.path, string_table)
-                    .map_err(|NonUtf8PathComponent { path }| {
-                        non_utf8_logical_path_error(&path, string_table)
-                    })?;
+                    .map_err(|error| map_path_intern_error(error, string_table))?;
                 Ok((canonical, kind, path_id))
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -202,7 +202,7 @@ impl SourceDatabase {
                 )));
             }
 
-            self.push_slot(canonical, path_id, kind);
+            self.push_slot(canonical, path_id, kind)?;
         }
 
         Ok(())
@@ -499,9 +499,7 @@ impl SourceDatabase {
         let path_id = self
             .path_interner
             .try_intern_filesystem_path(&logical.path, string_table)
-            .map_err(|NonUtf8PathComponent { path }| {
-                non_utf8_logical_path_error(&path, string_table)
-            })?;
+            .map_err(|error| map_path_intern_error(error, string_table))?;
 
         if let Some(slot) = self.get_by_canonical_path(&canonical_path) {
             if slot.logical_path != path_id {
@@ -534,17 +532,22 @@ impl SourceDatabase {
             }
             return Ok(slot.id);
         }
-        Ok(self.push_slot(canonical_path, path_id, kind))
+        self.push_slot(canonical_path, path_id, kind)
     }
 
     /// Append one slot and return the identity its position assigns.
+    ///
+    /// Authored registration must stay fallible: a project supplying more sources than the
+    /// compact identity table can address aborts deterministically with the typed
+    /// source-capacity failure instead of wrapping an index or panicking.
     fn push_slot(
         &mut self,
         canonical_path: PathBuf,
         logical_path: PathId,
         kind: SourceKind,
-    ) -> SourceId {
-        let id = SourceId::from_index(self.slots.len());
+    ) -> Result<SourceId, CompilerError> {
+        let id = SourceId::try_from_index(self.slots.len())
+            .ok_or_else(|| identity_table_capacity_error("source identity slots"))?;
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.slots.push(SourceSlot {
             id,
@@ -554,7 +557,7 @@ impl SourceDatabase {
             provenance: SourceProvenance::AuthoredPhysical,
             load: SourceLoadStatus::Pending,
         });
-        id
+        Ok(id)
     }
 
     /// Resolve one physical source slot.
@@ -861,6 +864,29 @@ fn non_utf8_logical_path_error(
         ),
         string_table,
     )
+}
+
+/// Authored exhaustion of a compact identity table is a deterministic source failure: the
+/// project supplied more entries than the four-byte table can address, so compilation aborts
+/// with this typed capacity diagnostic instead of wrapping an index or panicking.
+fn identity_table_capacity_error(table: &'static str) -> CompilerError {
+    CompilerError::compiler_error(format!(
+        "this compilation needs more than u32::MAX {table}, but its compact identity table \
+         cannot address another entry"
+    ))
+    .with_error_type(ErrorType::File)
+}
+
+/// Translate one path-interning outcome into the owning database's failure lane: strict
+/// UTF-8 violations keep their existing file error, while compact-domain exhaustion
+/// becomes the typed source-capacity failure.
+fn map_path_intern_error(error: PathInternError, string_table: &mut StringTable) -> CompilerError {
+    match error {
+        PathInternError::NonUtf8(NonUtf8PathComponent { path }) => {
+            non_utf8_logical_path_error(&path, string_table)
+        }
+        PathInternError::TableFull => identity_table_capacity_error("logical path nodes"),
+    }
 }
 
 fn logical_path_for_single_file_mode(canonical_file: &Path, source_root: &Path) -> PathBuf {

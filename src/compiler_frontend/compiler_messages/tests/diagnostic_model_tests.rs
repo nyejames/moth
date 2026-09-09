@@ -3343,8 +3343,9 @@ fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
     assert_eq!(diagnostic.labels[1].span, Some(foreign_span));
     assert_eq!(diagnostic.labels[1].location, foreign_location);
 
-    // Exhaustion can leave the primary uncaptured while a related range still fits inline.
-    // Discovery must use the file owner's identity even when that primary carrier is absent.
+    // A not-yet-captured diagnostic can carry an uncaptured primary while a related range
+    // already fits inline. Discovery must use the file owner's identity even when that
+    // primary carrier is absent.
     diagnostic.primary_span = None;
     diagnostic.rebind_source_identity(Some(final_source), source, &rebound_path);
     assert_eq!(diagnostic.primary_span, None);

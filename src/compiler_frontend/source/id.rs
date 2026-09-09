@@ -16,14 +16,24 @@ impl SourceId {
     /// no snapshot, so a lookup for physical source text still finds nothing.
     pub const COMPILATION_ROOT: Self = Self(NonZeroU32::new(1).unwrap());
 
-    /// Convert a zero-based source-record index into its non-zero identity.
+    /// Convert a proven-in-range index into its non-zero identity.
+    ///
+    /// Callers must have proven the index comes from a table the compiler sized. Authored
+    /// registration goes through [`Self::try_from_index`], which reports exhaustion instead of
+    /// panicking.
+    #[cfg(test)]
     pub(crate) fn from_index(index: usize) -> Self {
-        let index = u32::try_from(index)
-            .expect("source database cannot contain more than u32::MAX records");
-        let raw = index
-            .checked_add(1)
-            .expect("source database index must leave room for the non-zero identity");
-        Self(NonZeroU32::new(raw).expect("source identities are always non-zero"))
+        Self::try_from_index(index).expect("source index is inside the compact identity domain")
+    }
+
+    /// Convert a zero-based source-record index into its non-zero identity when it fits.
+    ///
+    /// `None` reports authored table exhaustion: the compact identity table cannot address
+    /// another entry, so the owning database surfaces a typed source-capacity failure.
+    pub(crate) fn try_from_index(index: usize) -> Option<Self> {
+        let index = u32::try_from(index).ok()?;
+        let raw = index.checked_add(1)?;
+        Some(Self(NonZeroU32::new(raw)?))
     }
 
     /// Return the zero-based source-record index addressed by this identity.

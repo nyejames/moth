@@ -655,7 +655,9 @@ impl CompilerError {
         }
     }
 
-    /// Span exhaustion shares the existing source-size failure lane until Phase 5 reclassifies it.
+    /// Span exhaustion shares the existing source-size failure lane until Phase 5 reclassifies
+    /// it. Exhaustion is terminal for the producing stage: the error's location carries the
+    /// offending exact range, so diagnostics are never published with a silently dropped span.
     pub(crate) fn source_span_capacity(error: SpanCapacityError, location: SourceLocation) -> Self {
         let (message, error_type) = match error.reason() {
             SpanCapacityReason::ExtendedTableFull => (

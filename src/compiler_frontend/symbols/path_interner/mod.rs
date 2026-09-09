@@ -20,6 +20,6 @@ mod id;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use builder::PathInternerBuilder;
+pub(crate) use builder::{PathInternError, PathInternerBuilder};
 pub(crate) use frozen::PathTable;
 pub(crate) use id::PathId;

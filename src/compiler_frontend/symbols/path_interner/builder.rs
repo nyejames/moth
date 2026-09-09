@@ -46,12 +46,14 @@ impl PathInternerBuilder {
     }
 
     /// Intern one component below `parent`, reusing an existing child when present.
-    pub fn intern_child(&mut self, parent: PathId, component: StringId) -> PathId {
+    ///
+    /// `None` reports authored exhaustion of the compact path-node domain.
+    pub fn try_intern_child(&mut self, parent: PathId, component: StringId) -> Option<PathId> {
         match self.lookup.entry((parent, component)) {
-            Entry::Occupied(entry) => *entry.get(),
+            Entry::Occupied(entry) => Some(*entry.get()),
             Entry::Vacant(entry) => {
-                let child = self.table.append_child(parent, component);
-                *entry.insert(child)
+                let child = self.table.try_append_child(parent, component)?;
+                Some(*entry.insert(child))
             }
         }
     }
@@ -59,23 +61,25 @@ impl PathInternerBuilder {
     /// Intern a filesystem path using the exact component semantics shared with `InternedPath`.
     ///
     /// Filesystem components are validated as strict UTF-8 before their string IDs enter the
-    /// table. No separator normalization or spelling rewrite is performed here.
+    /// table. No separator normalization or spelling rewrite is performed here. Exhaustion of
+    /// the compact path-node domain is reported so the owning database can surface the typed
+    /// source-capacity failure.
     pub fn try_intern_filesystem_path(
         &mut self,
         path: &Path,
         string_table: &mut StringTable,
-    ) -> Result<PathId, NonUtf8PathComponent> {
+    ) -> Result<PathId, PathInternError> {
         let mut logical_path = PathId::ROOT;
         for component in path.components() {
-            let component_str =
-                component
-                    .as_os_str()
-                    .to_str()
-                    .ok_or_else(|| NonUtf8PathComponent {
-                        path: path.to_path_buf(),
-                    })?;
+            let component_str = component.as_os_str().to_str().ok_or_else(|| {
+                PathInternError::NonUtf8(NonUtf8PathComponent {
+                    path: path.to_path_buf(),
+                })
+            })?;
             let component_id = string_table.intern(component_str);
-            logical_path = self.intern_child(logical_path, component_id);
+            logical_path = self
+                .try_intern_child(logical_path, component_id)
+                .ok_or(PathInternError::TableFull)?;
         }
         Ok(logical_path)
     }
@@ -88,21 +92,23 @@ impl PathInternerBuilder {
     /// Backslashes are ordinary component text because this API accepts portable logical spelling
     /// rather than a filesystem path.
     #[allow(dead_code)] // Phase 2 migrates semantic path producers to this table.
-    pub fn intern_portable_path(
+    pub fn try_intern_portable_path(
         &mut self,
         spelling: &str,
         string_table: &mut StringTable,
-    ) -> PathId {
+    ) -> Result<PathId, PathInternError> {
         if spelling.is_empty() {
-            return PathId::ROOT;
+            return Ok(PathId::ROOT);
         }
 
         let mut path = PathId::ROOT;
         for component in spelling.split('/') {
             let component_id = string_table.intern(component);
-            path = self.intern_child(path, component_id);
+            path = self
+                .try_intern_child(path, component_id)
+                .ok_or(PathInternError::TableFull)?;
         }
-        path
+        Ok(path)
     }
 
     /// Freeze the append-only table into lookup-only path storage.
@@ -110,4 +116,16 @@ impl PathInternerBuilder {
     pub fn freeze(self) -> PathTable {
         self.table
     }
+}
+
+/// Failure to intern one path in the build-lifetime table.
+///
+/// Authored interning must never panic: a project that exhausts the compact path-node domain
+/// reaches the deterministic source-capacity lane through [`PathInternError::TableFull`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PathInternError {
+    /// A filesystem component is not strict UTF-8.
+    NonUtf8(NonUtf8PathComponent),
+    /// The build-lifetime table cannot address another node.
+    TableFull,
 }

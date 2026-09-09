@@ -94,7 +94,9 @@ pub struct ResolvedByteRange {
 /// An exact range that cannot be encoded as a `LocalSpan`.
 ///
 /// The caller maps this onto the source-size / source-complexity diagnostic lane. This type
-/// only names the offending range and why packing failed.
+/// only names the offending range and why packing failed. Exhaustion of the extended table
+/// ([`SpanCapacityReason::ExtendedTableFull`]) is terminal for the producing stage: the exact
+/// range must survive in the mapped diagnostic and never be silently dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpanCapacityError {
     start: u32,
@@ -107,7 +109,8 @@ pub struct SpanCapacityError {
 pub enum SpanCapacityReason {
     /// `start + length` is not representable as a `u32` end offset.
     EndUnrepresentable,
-    /// The source's extended table cannot address another entry.
+    /// The source's extended table cannot address another entry. Exhaustion is terminal for
+    /// the producing stage; the failing exact range must surface in the mapped diagnostic.
     ExtendedTableFull,
 }
 

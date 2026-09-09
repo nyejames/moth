@@ -33,6 +33,29 @@ fn source_id_uses_the_non_zero_option_niche() {
 }
 
 #[test]
+fn source_id_try_from_index_spans_the_full_compact_domain() {
+    assert_eq!(
+        SourceId::try_from_index(0),
+        Some(SourceId::COMPILATION_ROOT)
+    );
+
+    let last_index = u32::MAX as usize - 1;
+    assert_eq!(
+        SourceId::try_from_index(last_index).map(SourceId::index),
+        Some(last_index)
+    );
+
+    // One past the last usable identity is authored table exhaustion, reported fallibly
+    // instead of wrapping the identity or panicking.
+    assert_eq!(SourceId::try_from_index(u32::MAX as usize), None);
+    assert_eq!(
+        SourceId::try_from_index(u32::MAX as usize + 1),
+        None,
+        "indexes beyond the u32 domain must be rejected without a lossy cast"
+    );
+}
+
+#[test]
 fn registered_physical_sources_carry_the_kind_named_by_their_extension() {
     let moth_path = PathBuf::from("/project/main.moth");
     let template_path = PathBuf::from("/project/page.mtf");
@@ -1511,7 +1534,10 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     assert_eq!(error.reason(), SpanCapacityReason::ExtendedTableFull);
 
     // The real exhausted table must keep token construction failures in preparation's
-    // infrastructure lane, while capture cannot replace an already-produced diagnosis.
+    // infrastructure lane. The lexer diagnoses the unterminated literal before token
+    // construction, then capture hits the exhausted table and aborts terminally: the
+    // diagnosis is replaced by the capacity failure carrying the offending exact range,
+    // so no span is silently dropped.
     let source = format!("\"{}\"", "x".repeat(1023));
     let path = Path::new("capacity.moth");
     let mut strings = StringTable::new();
@@ -1554,25 +1580,16 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
         &mut strings,
         &mut malformed_builder,
     )
-    .expect_err("the unterminated literal diagnoses before token construction");
-    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
-        panic!("capture exhaustion must preserve the original diagnosis");
+    .expect_err("capture must abort terminally when the source's span table is exhausted");
+    // The unterminated literal is diagnosed before token construction; capture then hits the
+    // exhausted table and aborts terminally. The diagnosis is not published spanless: the
+    // infrastructure failure carries the offending exact range instead.
+    let FileFrontendPrepareFailure::Infrastructure(error) = failure else {
+        panic!("capture exhaustion must surface the terminal capacity failure");
     };
-    assert_eq!(error.file_id, malformed_id);
-    assert_eq!(
-        error.diagnostic.kind,
-        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
-    );
-    assert_eq!(
-        error.diagnostic.primary_location.scope,
-        sources.legacy_logical_path(malformed_id)
-    );
-    assert_eq!(error.diagnostic.primary_location.start_byte, 0);
-    assert_eq!(
-        error.diagnostic.primary_location.end_byte,
-        malformed_source.len() as u32
-    );
-    assert_eq!(error.diagnostic.primary_span, None);
+    assert_eq!(error.error_type, ErrorType::File);
+    assert_eq!(error.location.start_byte, 0);
+    assert_eq!(error.location.end_byte, malformed_source.len() as u32);
     assert_eq!(malformed_builder.len(), last_usable_index as usize + 1);
 }
 

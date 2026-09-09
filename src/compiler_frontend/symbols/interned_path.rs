@@ -33,7 +33,7 @@ pub struct InternedPath {
 ///      offending path through its correct diagnostic lane.
 /// WHY: stage-independent conversion must not guess the error channel. The
 ///      caller decides whether this is a `CompilerError` or a `CompilerDiagnostic`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NonUtf8PathComponent {
     /// The filesystem path whose component could not be represented as UTF-8.
     pub(crate) path: PathBuf,

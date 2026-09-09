@@ -544,8 +544,10 @@ pub fn tokenize(
             Ok(token) => token,
             Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
                 // Every lexical failure crosses this boundary while its original source
-                // builder is live. Capture preserves the diagnostic on table exhaustion;
-                // invalid producer ranges retain the existing infrastructure error lane.
+                // builder is live. Extended-table exhaustion is terminal: capture returns
+                // the capacity failure carrying the exact range, replacing the produced
+                // diagnostic; invalid producer ranges retain the existing infrastructure
+                // error lane.
                 if let Err(error) =
                     diagnostic.capture_preparation_span(file_id, stream.extended_span_builder)
                 {

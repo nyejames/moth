@@ -30,9 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityReason,
-};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -1867,7 +1865,10 @@ impl CompilerDiagnostic {
     // ------------------------------------------------------------------
 
     /// Capture one file's preparation diagnostics while its original builder is live.
+    /// Every uncaptured range is encoded exactly once against that source's own builder.
     /// Related ranges from another source must already carry their own explicit span.
+    /// Extended-table exhaustion is terminal: the returned failure names the offending exact
+    /// range, and no captured diagnostic is published with a silently dropped span.
     /// This private interval bridge ends with `SourceLocation` in slice 1H.
     pub(crate) fn capture_preparation_span(
         &mut self,
@@ -1883,7 +1884,11 @@ impl CompilerDiagnostic {
                 ));
             }
         } else {
-            self.primary_span = encode_preparation_span(&self.primary_location, source, builder)?;
+            self.primary_span = Some(encode_preparation_span(
+                &self.primary_location,
+                source,
+                builder,
+            )?);
         }
 
         for label in &mut self.labels {
@@ -1900,7 +1905,7 @@ impl CompilerDiagnostic {
             label.span = if label.location == self.primary_location {
                 self.primary_span
             } else {
-                encode_preparation_span(&label.location, source, builder)?
+                Some(encode_preparation_span(&label.location, source, builder)?)
             };
         }
         Ok(())
@@ -1948,13 +1953,15 @@ impl CompilerDiagnostic {
     }
 }
 
-/// Encode retained producer bounds without guessing an end or replacing an existing diagnosis
-/// when the source's extended table is exhausted.
+/// Encode retained producer bounds without guessing an end.
+///
+/// Exhaustion of the source's extended table is terminal for this diagnostic's span: the
+/// returned failure carries the exact offending range, so capture never silently drops it.
 fn encode_preparation_span(
     location: &SourceLocation,
     source: SourceId,
     builder: &mut ExtendedSpanBuilder,
-) -> Result<Option<SourceSpan>, CompilerError> {
+) -> Result<SourceSpan, CompilerError> {
     let length = location
         .end_byte
         .checked_sub(location.start_byte)
@@ -1965,11 +1972,9 @@ fn encode_preparation_span(
                 ErrorType::Compiler,
             )
         })?;
-    match LocalSpan::exact(location.start_byte, length, builder) {
-        Ok(local) => Ok(Some(SourceSpan::new(source, local))),
-        Err(error) if error.reason() == SpanCapacityReason::ExtendedTableFull => Ok(None),
-        Err(error) => Err(CompilerError::source_span_capacity(error, location.clone())),
-    }
+    let local = LocalSpan::exact(location.start_byte, length, builder)
+        .map_err(|error| CompilerError::source_span_capacity(error, location.clone()))?;
+    Ok(SourceSpan::new(source, local))
 }
 
 impl From<DiagnosticBag> for CompilerDiagnostic {

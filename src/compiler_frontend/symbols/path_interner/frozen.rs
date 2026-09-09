@@ -34,19 +34,22 @@ impl PathTable {
     }
 
     /// Append one child node and return its complete-path identity.
-    pub(super) fn append_child(&mut self, parent: PathId, component: StringId) -> PathId {
-        let parent_depth = self.depth(parent);
-        let child = PathId::from_index(self.nodes.len());
-        let child_depth = parent_depth
-            .checked_add(1)
-            .expect("path depth must fit in u32");
+    ///
+    /// `None` reports authored exhaustion of the compact path-node domain.
+    pub(super) fn try_append_child(
+        &mut self,
+        parent: PathId,
+        component: StringId,
+    ) -> Option<PathId> {
+        let child = PathId::try_from_index(self.nodes.len())?;
+        let child_depth = self.depth(parent).checked_add(1)?;
 
         self.nodes.push(PathNode {
             parent: Some(parent),
             component,
         });
         self.depths.push(child_depth);
-        child
+        Some(child)
     }
 
     /// Return the parent path, or `None` for the root.

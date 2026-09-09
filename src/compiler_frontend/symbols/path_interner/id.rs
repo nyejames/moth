@@ -19,14 +19,14 @@ impl PathId {
     /// The empty logical path at the root of the table.
     pub const ROOT: Self = Self(NonZeroU32::new(1).unwrap());
 
-    /// Convert a zero-based path-node index into its non-zero table identity.
-    pub(super) fn from_index(index: usize) -> Self {
-        let index =
-            u32::try_from(index).expect("path table cannot contain more than u32::MAX nodes");
-        let raw = index
-            .checked_add(1)
-            .expect("path table index must leave room for the root identity");
-        Self(NonZeroU32::new(raw).expect("path identities are always non-zero"))
+    /// Convert a zero-based path-node index into its non-zero identity when it fits.
+    ///
+    /// `None` reports authored table exhaustion: the build-lifetime path table cannot address
+    /// another node, so the owning database surfaces a typed source-capacity failure.
+    pub(super) fn try_from_index(index: usize) -> Option<Self> {
+        let index = u32::try_from(index).ok()?;
+        let raw = index.checked_add(1)?;
+        Some(Self(NonZeroU32::new(raw)?))
     }
 
     /// Return the zero-based node index addressed by this identity.
