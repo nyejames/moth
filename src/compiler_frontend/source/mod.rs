@@ -39,9 +39,19 @@ mod span;
 mod span_encoding;
 
 #[cfg(test)]
-pub(crate) mod test_support;
+#[path = "tests/database_tests.rs"]
+mod database_tests;
 #[cfg(test)]
-mod tests;
+#[path = "tests/line_index_tests.rs"]
+mod line_index_tests;
+#[cfg(test)]
+#[path = "tests/render_bridge_tests.rs"]
+mod render_bridge_tests;
+#[cfg(test)]
+#[path = "tests/span_tests.rs"]
+mod span_tests;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub(crate) use database::{SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders};
 pub(crate) use id::SourceId;

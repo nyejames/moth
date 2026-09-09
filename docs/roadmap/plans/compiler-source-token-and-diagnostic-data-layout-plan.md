@@ -1272,10 +1272,16 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   unavailable (subagent provider quota exhausted); the change passed `cargo fmt`,
   `git diff --check`, `cargo check -p moth` and the full library suite (5,021). R9 is the next
   active gate.
-- [ ] **R9 — migration-debt cleanup:** remove impl-wide dead-code allowances from span APIs, keep
-  only narrowly named deferred-consumer allowances, leave local `_unspanned` wrappers until 1H
-  deletes the location bridge, and split the broad `source/tests.rs` owner into focused database,
-  span, line-index and render-bridge modules with minimal `cfg(test)` helpers.
+- [x] **R9 — migration-debt cleanup:** accepted in `<R9-COMMIT>`. Impl-wide dead-code allowances
+  are narrowed to per-method `#[allow(dead_code)]` on deferred-consumer span, table and line-index
+  APIs (first callers land in slices 1D3/1D4/1E/1F; each allowance names its unreached callers),
+  and `source/tests.rs` (2,331 lines, git history preserved in `database_tests.rs`) is split into
+  focused `database_tests`, `span_tests`, `line_index_tests` and `render_bridge_tests` modules
+  wired with `#[path]` from `source/mod.rs`, sharing one `test_support::database_with_retained_text`
+  helper. Test parity holds (63 = 63) and the change passed `cargo fmt`, `git diff --check`,
+  `cargo check -p moth --tests` with zero warnings and the full library suite (5,021).
+  Independent audit was unavailable (subagent provider quota exhausted). The R10 prerequisites are
+  the next active gates before the remaining 1D/1E/1F/1G/1H completion slices.
 - [ ] **R10a — diagnostic identity ownership (Phase 4 prerequisite):** make stable reason keys part
   of the final diagnostic schema rather than an interim compiler-owned payload convention.
 - [ ] **R10b — draft/durable type separation (Phase 4 prerequisite):** define distinct draft and

@@ -1,7 +1,7 @@
 //! Lazy line and column conversion over one retained UTF-8 snapshot.
-// Line and column conversions are exercised by tests before slice 1E migrates byte-offset
-// renderers; `utf16_column` waits for the deferred LSP-facing consumer.
-#![allow(dead_code)]
+//!
+//! Scalar columns feed terminal and HTML carets; `utf16_column` stays reserved for the
+//! deferred LSP-facing consumer.
 
 use std::ops::Range;
 
@@ -41,6 +41,7 @@ impl<'a> LineIndex<'a> {
         Self { text, line_starts }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn line_count(self) -> u32 {
         self.line_starts.len() as u32
     }
@@ -101,6 +102,7 @@ impl<'a> LineIndex<'a> {
 
     /// Return the UTF-16 column for an LSP-facing conversion only; terminal and source rendering
     /// must use [`Self::position`] and its Unicode-scalar column instead.
+    #[allow(dead_code)]
     pub(crate) fn utf16_column(self, offset: u32) -> Option<u32> {
         let (_, line_text, authored_offset) = self.line_and_authored_offset(offset)?;
         let mut column = 0u32;

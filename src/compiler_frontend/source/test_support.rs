@@ -7,7 +7,7 @@
 //! is compiled only for tests and does not add a production source-construction API.
 
 use super::span::ExtendedSpanResolver;
-use super::{ExtendedSpanBuilder, LocalSpan, SourceId};
+use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::{Path, PathBuf};
@@ -72,6 +72,31 @@ impl TestSourceContext {
     pub(crate) fn preparation_parts(&mut self) -> (&mut StringTable, &mut ExtendedSpanBuilder) {
         (&mut self.string_table, &mut self.span_builder)
     }
+}
+
+/// Build a one-source database with `text` retained, for tests that resolve against a snapshot.
+///
+/// WHY: line ranges, line text, span resolution and render bridges all need the same loaded
+/// record shape; sharing one constructor keeps those suites asserting behavior instead of
+/// rebuilding registration scaffolding.
+pub(crate) fn database_with_retained_text(text: &str) -> (SourceDatabase, SourceId) {
+    let source_path = PathBuf::from("/project/main.moth");
+    let mut string_table = StringTable::new();
+    let mut database = SourceDatabase::build(
+        std::iter::once(&source_path),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+    let source_id = database
+        .get_by_canonical_path(&source_path)
+        .expect("source should be registered")
+        .id;
+    database
+        .retain_text(source_id, text.to_owned())
+        .expect("source text should be retained");
+    (database, source_id)
 }
 
 #[cfg(test)]
