@@ -82,15 +82,15 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-Arrived at `fa5a2e75d`, accepting R3: preparation label ownership follows span identity —
-  capture stamps unspanned labels with the producer source and rebinding inspects each
-  label's existing span `SourceId`, so distinct sources sharing one display path rebind
-  independently. R1b/R2 stay accepted in `dc9f36532`/`c4eeaf1c9`. R4 is the next active gate.
+Arrived at `472ad7400`, accepting R4: database-backed compilation-root resolution accepts
+  only the exact empty range `[0, 0)` and rejects every other root range as a compiler
+  invariant, while renderers keep omitting a physical source frame. R1b/R2/R3 stay accepted
+  in `dc9f36532`/`c4eeaf1c9`/`fa5a2e75d`. R5 is the next active gate.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Worktree: clean at the R3 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R4 is next; no other implementation slice is active while the review-derived gates are worked.
-- Continuation order: complete the remaining review-derived Phase 1 correction steps (R4-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
+- Worktree: clean at the R4 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R5 is next; no other implementation slice is active while the review-derived gates are worked.
+- Continuation order: complete the remaining review-derived Phase 1 correction steps (R5-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
@@ -442,6 +442,21 @@ VALIDATION_STATE:
   recording) is accepted in `f308f91e5`; R1b–R9 remain open correction gates, and R10a–R10d are
   recorded as later-phase prerequisites. No implementation changes were made while this review
   was reconciled; the branch is paused at the documented checkpoint.
+- R1b compact-capacity candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  source (77), path-interner (10) and diagnostic-model (80) suites passed. Two independent
+  audits found only corrections that were applied and revalidated; full `just validate`
+  remains reserved for Phase 1 closeout.
+- R2 source-qualified resolution candidate: `cargo fmt --all`, `git diff --check`,
+  `cargo check -p moth`, source (78), header preparation (180), diagnostic-model (80),
+  template-node (301) and full library (5,012) suites passed. The independent audit is clean.
+- R3 span-identity ownership candidate: `cargo fmt --all`, `git diff --check`,
+  `cargo check -p moth`, diagnostic-model (82), source (78), preparation (62),
+  create-project-modules (310) and full library (5,014) suites passed. The independent audit
+  found only test-strength corrections that were applied and revalidated.
+- R4 compilation-root candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
+  source (80), render (14) and full library (5,017) suites passed. The independent audit could
+  not run (provider usage-limit then policy errors, no review occurred); parent Slice review
+  is the acceptance review for this bounded change.
 - 1G1 assignment payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, diagnostic-model (80), assignment mutation (9), collection assignment
   (57), fallible-handling assignment (38) and header/config regression (1) passed. The independent
@@ -1219,9 +1234,10 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   Source-local capture inherits the producer `SourceId`; rebinding inspects each existing
   label span's `SourceId`, with a regression for distinct source IDs sharing one logical
   display path.
-- [ ] **R4 — compilation-root span contract:** make database-backed resolution of the reserved
-  compilation-root `SourceSpan` accept only the exact empty range `[0, 0)`. Reject non-empty root
-  ranges as compiler invariants, while renderers continue omitting a physical source frame.
+- [x] **R4 — compilation-root span contract:** accepted in `472ad7400`. Database-backed
+  resolution of the reserved compilation-root `SourceSpan` accepts only the exact empty range
+  `[0, 0)`; non-empty root ranges are compiler invariants, while renderers keep omitting a
+  physical source frame.
 - [ ] **R5 — cold canonical path storage:** move `SourceSlot::canonical_os_path` to the accepted
   cold `Option<Box<Path>>` representation, then measure the row. Remove incidental exact
   `SourceSlot`/`SourceRecord` size assertions from correctness tests while retaining hard layout
