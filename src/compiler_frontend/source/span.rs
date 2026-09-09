@@ -6,9 +6,11 @@
 //!       scanning source or guessing ends. Inline packing covers the common case; rare long or
 //!       late ranges pay for one table entry.
 //!
-//! Producers that still append to a source's builder use the resolver-taking `*_with` operations.
-//! Consumers use the unqualified record and database operations after the builder is installed
-//! into a frozen [`super::SourceRecord`]. This module does not convert bytes to lines or columns.
+//! Producers append to one source's builder and resolve their own local spans through its bare
+//! resolver. Consumers use the record and database operations after the builder is installed into
+//! a frozen [`super::SourceRecord`]. A global [`SourceSpan`] operation accepts only a resolver
+//! qualified for the span's own source and rejects every other pairing as a compiler bug. This
+//! module does not convert bytes to lines or columns.
 //!
 
 use super::span_encoding::{
@@ -42,6 +44,10 @@ const _: () = assert!(size_of::<ExtendedSpan>() == 8);
 pub struct LocalSpan(NonZeroU32);
 
 /// Exact byte range in one identified source.
+///
+/// The source identity is what makes resolution checkable: a global span may only resolve through
+/// a resolver qualified for [`SourceSpan::source`], and every `*_with` operation rejects another
+/// pairing instead of silently reading a wrong table row.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SourceSpan {
@@ -73,6 +79,10 @@ pub struct ExtendedSpanTable {
 }
 
 /// Borrowed view of extended entries used to resolve spans without freezing a live builder.
+///
+/// A resolver is either bare, for the source-local [`LocalSpan`] work of the source that owns the
+/// entries, or qualified through [`Self::for_source`], required by every global [`SourceSpan`]
+/// operation.
 #[derive(Clone, Copy, Debug)]
 pub struct ExtendedSpanResolver<'a> {
     /// A live builder and a frozen table both present their entries here. Absent means the
@@ -280,11 +290,23 @@ impl SourceSpan {
         self.local
     }
 
+    /// Resolve through a resolver qualified for this span's own source.
+    ///
+    /// # Panics
+    /// Panics when the resolver claims a different source or claims none: a global span may
+    /// never resolve through another source's extended table, because that reads a row of
+    /// foreign source bytes.
     pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
+        self.reject_foreign_resolver(resolver);
         self.local.resolve_with(resolver)
     }
 
+    /// Emptiness through a resolver qualified for this span's own source.
+    ///
+    /// # Panics
+    /// Panics under the same wrong-source pairing as [`Self::resolve_with`].
     pub fn is_empty_with(self, resolver: ExtendedSpanResolver<'_>) -> bool {
+        self.reject_foreign_resolver(resolver);
         self.local.is_empty_with(resolver)
     }
 
@@ -355,11 +377,16 @@ impl SourceSpan {
     /// whether an insertion point lies inside a range, boundaries included.
     ///
     /// Ranges from different sources never overlap.
+    ///
+    /// # Panics
+    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
+    /// still return `false` without resolving anything.
     pub fn overlaps_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
         if self.source != other.source {
             return false;
         }
 
+        self.reject_foreign_resolver(resolver);
         let left = self.local.resolve_with(resolver);
         let right = other.local.resolve_with(resolver);
         let shared_start = left.start().max(right.start());
@@ -371,11 +398,16 @@ impl SourceSpan {
     /// `self` contains `other` when both share a source and `other`'s range lies inside `self`.
     ///
     /// Ranges from different sources are never containment, even when the byte ranges coincide.
+    ///
+    /// # Panics
+    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
+    /// still return `false` without resolving anything.
     pub fn contains_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
         if self.source != other.source {
             return false;
         }
 
+        self.reject_foreign_resolver(resolver);
         let left = self.local.resolve_with(resolver);
         let right = other.local.resolve_with(resolver);
 
@@ -383,9 +415,14 @@ impl SourceSpan {
     }
 
     /// Deterministic display order: source identity, then start, then end.
+    ///
+    /// # Panics
+    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
+    /// order by identity without resolving anything.
     pub fn source_order_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> Ordering {
         match self.source.cmp(&other.source) {
             Ordering::Equal => {
+                self.reject_foreign_resolver(resolver);
                 let left = self.local.resolve_with(resolver);
                 let right = other.local.resolve_with(resolver);
 
@@ -397,6 +434,28 @@ impl SourceSpan {
             order => order,
         }
     }
+
+    /// Reject a resolver that does not claim this span's source.
+    ///
+    /// WHY: the span's local indexes were encoded against its own source's table; a foreign or
+    /// unqualified resolver would return a row of different source bytes. This is a compiler
+    /// invariant failure, not a recoverable condition.
+    fn reject_foreign_resolver(self, resolver: ExtendedSpanResolver<'_>) {
+        match resolver.source_identity {
+            Some(identity) if identity == self.source => {}
+            Some(identity) => panic!(
+                "span from source identity {} cannot resolve through source identity {}; \
+                 this is a compiler bug",
+                self.source.index(),
+                identity.index()
+            ),
+            None => panic!(
+                "span from source identity {} resolved through an unqualified resolver; \
+                 global spans require resolver_for(source); this is a compiler bug",
+                self.source.index()
+            ),
+        }
+    }
 }
 
 impl ExtendedSpanBuilder {
@@ -406,11 +465,22 @@ impl ExtendedSpanBuilder {
         }
     }
 
+    /// The bare resolver for this builder's own source-local work.
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
         ExtendedSpanResolver {
             entries: Some(&self.entries),
             source_identity: None,
         }
+    }
+
+    /// The resolver qualified for `source`, required by global [`SourceSpan`] operations.
+    ///
+    /// WHY: a builder belongs to one source while it produces spans; qualifying at the builder
+    /// names that source once instead of at every operation. Producers resolve their own local
+    /// spans, so the qualified form first reaches compilation with the consumer migrations.
+    #[allow(dead_code)]
+    pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
+        self.resolver().for_source(source)
     }
 
     pub fn freeze(self) -> ExtendedSpanTable {
@@ -442,11 +512,19 @@ impl ExtendedSpanTable {
         self.entries.is_empty()
     }
 
+    /// The bare resolver for this table's own source-local work.
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
         ExtendedSpanResolver {
             entries: Some(&self.entries),
             source_identity: None,
         }
+    }
+
+    /// The resolver qualified for `source`, required by global [`SourceSpan`] operations.
+    ///
+    /// The table is installed on a record whose source is known at the install site.
+    pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
+        self.resolver().for_source(source)
     }
 }
 
@@ -477,6 +555,18 @@ impl<'a> ExtendedSpanResolver<'a> {
             None => panic!(
                 "extended span builder for {source} was never installed; this is a compiler bug"
             ),
+        }
+    }
+
+    /// Qualify this resolver as belonging to `source`.
+    ///
+    /// WHY: a global [`SourceSpan`] names its source, so the resolver that serves it must claim
+    /// the same one. Qualification turns the wrong-source pairing into a deterministic compiler
+    /// invariant failure at the operation instead of a silent wrong-row read.
+    pub fn for_source(self, source: SourceId) -> Self {
+        Self {
+            source_identity: Some(source),
+            ..self
         }
     }
 }

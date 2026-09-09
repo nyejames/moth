@@ -252,7 +252,8 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         .primary_span
         .expect("aggregation captures its primary span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let marker_range = primary_span.resolve_with(span_builder.resolver());
+    let marker_range =
+        primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert!(marker_range.start() >= 4 * 1024 * 1024);
     assert_eq!(
         &source[marker_range.start() as usize..marker_range.end() as usize],
@@ -326,7 +327,7 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
             .primary_span
             .expect("aggregation retains primary source span");
         assert_eq!(span.source(), SourceId::from_index(index + 1));
-        let range = span.resolve_with(builders[index].resolver());
+        let range = span.resolve_with(builders[index].resolver_for(span.source()));
         assert_eq!(
             &sources[index][range.start() as usize..range.end() as usize],
             "#"
@@ -360,7 +361,7 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
             .span
             .expect("per-file preparation captures related labels");
         assert_eq!(span.source(), context.source_id);
-        let range = span.resolve_with(spans.resolver());
+        let range = span.resolve_with(spans.resolver_for(span.source()));
         assert_eq!(
             &source[range.start() as usize..range.end() as usize],
             expected
@@ -404,7 +405,7 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
         .diagnostic
         .primary_span
         .expect("per-file producer captures joined clause");
-    let range = span.resolve_with(spans.resolver());
+    let range = span.resolve_with(spans.resolver_for(span.source()));
     assert_eq!(span.source(), SourceId::from_index(3));
     assert_eq!(range.start() as usize, source.find("import").unwrap());
     assert_eq!(range.end() as usize, source.find('}').unwrap() + 1);
@@ -439,7 +440,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
         .expect("tokenized source should retain the long string literal")
         .span;
-    let expected_range = long_span.resolve_with(span_builder.resolver());
+    let expected_range = long_span.resolve_with(span_builder.resolver_for(source_id));
 
     let error = match parse_file_headers_with_table(
         &mut file_tokens,
@@ -458,7 +459,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     };
 
     assert_eq!(error.file_id, source_id);
-    let retained_range = long_span.resolve_with(span_builder.resolver());
+    let retained_range = long_span.resolve_with(span_builder.resolver_for(source_id));
     assert_eq!(retained_range, expected_range);
     assert_eq!(
         source.get(retained_range.start() as usize..retained_range.end() as usize),
@@ -1630,7 +1631,7 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
         .primary_span
         .expect("generic-bound diagnostics should retain their token span");
     assert_eq!(span.source(), source_id);
-    let range = span.resolve_with(span_builder.resolver());
+    let range = span.resolve_with(span_builder.resolver_for(source_id));
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],
         long_bound
@@ -1760,7 +1761,7 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
             })
             .expect("header syntax should aggregate");
 
-        let resolver = span_builder.resolver();
+        let resolver = span_builder.resolver_for(source_id);
         let header_range = header_name_span.resolve_with(resolver);
         assert_eq!(
             source.get(header_range.start() as usize..header_range.end() as usize),

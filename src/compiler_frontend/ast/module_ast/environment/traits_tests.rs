@@ -500,7 +500,7 @@ fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
 
     let empty_span_builder = ExtendedSpanBuilder::new();
-    let resolver = empty_span_builder.resolver();
+    let resolver = empty_span_builder.resolver_for(SourceId::COMPILATION_ROOT);
     let primary_range = primary_span.resolve_with(resolver);
     assert_eq!(
         &source[primary_range.start() as usize..primary_range.end() as usize],
@@ -514,7 +514,8 @@ fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
         .expect("previous requirement label should retain its exact span");
     assert_eq!(first_span.source(), SourceId::COMPILATION_ROOT);
     let first_span_builder = ExtendedSpanBuilder::new();
-    let first_range = first_span.resolve_with(first_span_builder.resolver());
+    let first_range =
+        first_span.resolve_with(first_span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(
         &source[first_range.start() as usize..first_range.end() as usize],
         "render"
@@ -531,7 +532,7 @@ fn conformance_target_diagnostic_retains_exact_target_span() {
     assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
 
     let span_builder = ExtendedSpanBuilder::new();
-    let range = target_span.resolve_with(span_builder.resolver());
+    let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "Int");
     assert_eq!(
         diagnostic.primary_location.start_pos.line_number, 2,
@@ -549,7 +550,7 @@ fn unknown_trait_reference_diagnostic_retains_exact_reference_span() {
     assert_eq!(trait_span.source(), SourceId::COMPILATION_ROOT);
 
     let span_builder = ExtendedSpanBuilder::new();
-    let range = trait_span.resolve_with(span_builder.resolver());
+    let range = trait_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],
         "UNKNOWN"

@@ -6,12 +6,13 @@ use super::{
     span::{SourceSpan, SpanJoinError},
 };
 
+use std::cmp::Ordering;
+
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
-use crate::compiler_frontend::compiler_messages::{DiagnosticKind, SyntaxDiagnosticKind};
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::pipeline::CompilerFrontend;
@@ -1381,8 +1382,9 @@ fn database_span_operations_match_live_resolvers_and_reject_cross_source_pairs()
     let first_inner = SourceSpan::new(first_id, inner_local);
     let live_outer_range = outer_local.resolve_with(first_builder.resolver());
     let live_inner_range = inner_local.resolve_with(first_builder.resolver());
-    let live_overlap = first_outer.overlaps_with(first_inner, first_builder.resolver());
-    let live_containment = first_outer.contains_with(first_inner, first_builder.resolver());
+    let live_overlap = first_outer.overlaps_with(first_inner, first_builder.resolver_for(first_id));
+    let live_containment =
+        first_outer.contains_with(first_inner, first_builder.resolver_for(first_id));
     let first_table = first_builder.freeze();
 
     let mut second_builder = ExtendedSpanBuilder::new();
@@ -1667,7 +1669,7 @@ fn same_source_join_keeps_the_identity_and_covers_an_extended_operand() {
     let joined = extended
         .join(inline, &mut builder)
         .expect("same-source join");
-    let resolver = builder.resolver();
+    let resolver = builder.resolver_for(source);
     let range = joined.resolve_with(resolver);
 
     assert_eq!(joined.source(), source);
@@ -1689,6 +1691,71 @@ fn cross_source_overlap_and_containment_are_false_when_byte_ranges_coincide() {
     assert!(!right.contains_with(left, resolver));
 }
 
+/// A global span must never resolve through another source's extended table.
+///
+/// The foreign table here is deliberately long enough to serve the span's extended index: the
+/// rejection must come from the source-identity check, not from an index-bounds accident. The
+/// wrong pairing is a compiler bug even when the row it would return happens to exist.
+#[test]
+fn source_span_rejects_resolution_through_another_sources_resolver() {
+    let mut first_builder = ExtendedSpanBuilder::new();
+    let first_span = SourceSpan::new(
+        SourceId::from_index(1),
+        LocalSpan::exact(5_000, 2_000, &mut first_builder).expect("first extended span"),
+    );
+
+    let mut second_builder = ExtendedSpanBuilder::new();
+    let _second_row = LocalSpan::exact(7, 3, &mut second_builder).expect("second source's own row");
+    let foreign_resolver = second_builder.resolver_for(SourceId::from_index(2));
+    let bare_resolver = second_builder.resolver();
+
+    let foreign_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        first_span.resolve_with(foreign_resolver);
+    }))
+    .expect_err("a global span must not resolve through another source's resolver");
+    let foreign_message = compiler_bug_panic_message(foreign_panic);
+    assert!(
+        foreign_message.contains(&SourceId::from_index(1).index().to_string())
+            && foreign_message.contains(&SourceId::from_index(2).index().to_string())
+            && foreign_message.contains("compiler bug"),
+        "the wrong-source rejection should name both identities as a compiler bug: {foreign_message}"
+    );
+
+    let bare_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        first_span.resolve_with(bare_resolver);
+    }))
+    .expect_err("a global span must not resolve through an unqualified resolver");
+    let bare_message = compiler_bug_panic_message(bare_panic);
+    assert!(
+        bare_message.contains("unqualified") && bare_message.contains("compiler bug"),
+        "the unqualified rejection should require resolver_for(source): {bare_message}"
+    );
+
+    let own_range = first_span.resolve_with(first_builder.resolver_for(SourceId::from_index(1)));
+    assert_eq!(
+        (own_range.start(), own_range.end()),
+        (5_000, 7_000),
+        "the same-source qualified resolver must keep resolving its own table"
+    );
+
+    let empty_builder = ExtendedSpanBuilder::new();
+    let second = SourceSpan::new(SourceId::from_index(2), LocalSpan::source_start());
+    let empty_foreign = empty_builder.resolver_for(SourceId::from_index(3));
+    assert!(
+        !first_span.overlaps_with(second, empty_foreign),
+        "cross-source operands still answer false without resolving"
+    );
+    assert!(
+        !first_span.contains_with(second, empty_foreign),
+        "cross-source operands still answer false without resolving"
+    );
+    assert_eq!(
+        first_span.source_order_with(second, empty_foreign),
+        Ordering::Less,
+        "cross-source operands still order by identity without resolving"
+    );
+}
+
 #[test]
 fn source_order_sorts_by_source_then_start_then_end() {
     let mut builder = ExtendedSpanBuilder::new();
@@ -1703,16 +1770,25 @@ fn source_order_sorts_by_source_then_start_then_end() {
         SourceSpan::new(SourceId::from_index(1), early_long),
         SourceSpan::new(SourceId::from_index(1), early_short),
     ];
-    let resolver = builder.resolver();
-    spans.sort_by(|left, right| left.source_order_with(*right, resolver));
+    let first = builder.resolver_for(SourceId::from_index(1));
+    let second = builder.resolver_for(SourceId::from_index(2));
+    spans.sort_by(|left, right| left.source_order_with(*right, first));
+
+    let resolve = |span: SourceSpan| {
+        if span.source() == SourceId::from_index(1) {
+            span.resolve_with(first)
+        } else {
+            span.resolve_with(second)
+        }
+    };
 
     assert_eq!(
-        spans.map(|span| (span.source(), span.resolve_with(resolver))),
+        spans.map(|span| (span.source(), resolve(span))),
         [
-            (SourceId::from_index(1), early_short.resolve_with(resolver)),
-            (SourceId::from_index(1), early_long.resolve_with(resolver)),
-            (SourceId::from_index(1), later.resolve_with(resolver)),
-            (SourceId::from_index(2), other_source.resolve_with(resolver)),
+            (SourceId::from_index(1), early_short.resolve_with(first)),
+            (SourceId::from_index(1), early_long.resolve_with(first)),
+            (SourceId::from_index(1), later.resolve_with(first)),
+            (SourceId::from_index(2), other_source.resolve_with(second)),
         ]
     );
 }
@@ -1732,7 +1808,7 @@ fn spans_in_one_source_overlap_only_where_they_share_a_byte() {
     let straddling = span(5, 10, &mut builder);
     let adjacent = span(10, 5, &mut builder);
     let nested = span(2, 3, &mut builder);
-    let resolver = builder.resolver();
+    let resolver = builder.resolver_for(source);
 
     assert!(first.overlaps_with(straddling, resolver));
     assert!(straddling.overlaps_with(first, resolver));
@@ -1768,7 +1844,7 @@ fn an_empty_span_is_contained_but_overlaps_nothing() {
         source,
         LocalSpan::insertion_point(10, &mut builder).expect("insertion point on the end"),
     );
-    let resolver = builder.resolver();
+    let resolver = builder.resolver_for(source);
 
     for point in [interior, on_start, on_end] {
         assert!(!range.overlaps_with(point, resolver));
@@ -1794,7 +1870,7 @@ fn containment_is_directional_and_reflexive_within_one_source() {
         source,
         LocalSpan::exact(5, 10, &mut builder).expect("straddling"),
     );
-    let resolver = builder.resolver();
+    let resolver = builder.resolver_for(source);
 
     assert!(outer.contains_with(inner, resolver));
     assert!(!inner.contains_with(outer, resolver));

@@ -107,7 +107,7 @@ fn assert_exact_marker_span(
         .primary_span
         .expect("else boundary diagnostic should retain its exact marker span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(
         (range.start(), range.end()),
         (marker_start as u32, marker_end as u32)
@@ -129,7 +129,7 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
         .primary_span
         .expect("unexpected body token should retain its exact span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(range.start(), 2);
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
@@ -151,7 +151,7 @@ fn orphan_template_break_retains_exact_marker_span() {
         .primary_span
         .expect("orphan loop control should retain its exact marker span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (11, 16));
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],
@@ -175,7 +175,7 @@ fn orphan_template_else_retains_exact_multibyte_marker_span() {
         .primary_span
         .expect("orphan template else should retain its exact marker span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (7, 11));
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],

@@ -2834,11 +2834,11 @@ fn borrow_conflict_labels_preserve_order_and_cross_source_ranges_after_remap_and
     let primary_range = shared.labels[0]
         .span
         .unwrap()
-        .resolve_with(primary_builder.resolver());
+        .resolve_with(primary_builder.resolver_for(rebound_source));
     let existing_range = shared.labels[1]
         .span
         .unwrap()
-        .resolve_with(existing_builder.resolver());
+        .resolve_with(existing_builder.resolver_for(existing_source));
     assert_eq!((primary_range.start(), primary_range.end()), (40, 48));
     assert_eq!((existing_range.start(), existing_range.end()), (11, 18));
 }
@@ -3247,7 +3247,7 @@ fn preparation_capture_reuses_extended_primary_and_related_spans() {
     assert_eq!(diagnostic.labels[0].span, Some(primary_span));
     assert_eq!(diagnostic.labels[1].span, Some(related_span));
     for (span, start, end) in [(primary_span, 10, 2410), (related_span, 3000, 5400)] {
-        let range = span.resolve_with(builder.resolver());
+        let range = span.resolve_with(builder.resolver_for(source));
         assert_eq!((range.start(), range.end()), (start, end));
     }
 }
@@ -3360,6 +3360,6 @@ fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
     let range = diagnostic.labels[1]
         .span
         .unwrap()
-        .resolve_with(frozen_foreign.resolver());
+        .resolve_with(frozen_foreign.resolver_for(foreign_source));
     assert_eq!((range.start(), range.end()), (100, 2500));
 }

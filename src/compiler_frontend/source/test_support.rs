@@ -63,8 +63,9 @@ impl TestSourceContext {
         &mut self.span_builder
     }
 
+    /// The resolver qualified for this context's source, as global spans need.
     pub(crate) fn span_resolver(&self) -> ExtendedSpanResolver<'_> {
-        self.span_builder.resolver()
+        self.span_builder.resolver_for(self.source_id)
     }
 
     /// Borrow the two mutable producer-owned tables together for tokenization/preparation calls.

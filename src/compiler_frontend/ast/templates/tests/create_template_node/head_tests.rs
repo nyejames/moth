@@ -96,7 +96,7 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
         .primary_span
         .expect("expression parser diagnostics should retain the authored symbol span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (1, 13));
     assert_eq!(
         &source[range.start() as usize..range.end() as usize],
@@ -128,7 +128,7 @@ fn reactive_head_unknown_source_retains_exact_multibyte_span() {
         .primary_span
         .expect("unknown reactive source should retain its exact source span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (3, 5));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
     assert_eq!(diagnostic.primary_location.start_byte, range.start());
@@ -175,7 +175,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
         .primary_span
         .expect("incompatible head item should retain its exact source span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let target = format!("${long_directive_name}");
     let expected_start = source
         .find(&target)
@@ -480,7 +480,7 @@ fn template_head_extensionless_path_retains_exact_span() {
         .primary_span
         .expect("path-value diagnostics should retain the authored path span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let target = "@docs/intro";
     let expected_start = source
         .find(target)
@@ -919,7 +919,7 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
         .primary_span
         .expect("the suffix separator should retain its exact source span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     let expected_start = source
         .find(',')
         .expect("the fixture should contain a comma") as u32;

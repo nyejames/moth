@@ -208,7 +208,7 @@ fn optional_slot_target_invalid_symbol_retains_exact_multibyte_span() {
         .primary_span
         .expect("slot target diagnostics should retain the offending token span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver());
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!((range.start(), range.end()), (7, 9));
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
     assert_eq!(diagnostic.primary_location.start_byte, range.start());

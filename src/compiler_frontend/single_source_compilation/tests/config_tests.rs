@@ -1066,7 +1066,7 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
             .primary_span
             .expect("preparation must retain the primary source span");
         assert_eq!(span.source(), file_id);
-        let range = span.resolve_with(outcome.span_builder.resolver());
+        let range = span.resolve_with(outcome.span_builder.resolver_for(file_id));
         let expected_start = source.rfind(expected_text).unwrap() as u32;
         assert_eq!(
             (range.start(), range.end()),
