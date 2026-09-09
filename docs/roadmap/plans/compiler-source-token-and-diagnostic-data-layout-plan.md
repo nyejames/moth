@@ -912,7 +912,7 @@ The frozen table owns nodes and depths only; the child map lives and dies with t
 - [x] **1B3 — traversal and synthetic sources:** directory/packages pre-register inventory IDs.
   Synthetic single-file and recursive direct-template traversal normalize private provisional
   identities once before publication. Authored provenance and deterministic late deltas remain.
-- [ ] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot
+- [x] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot. Reconciled without code change: `SourceSlot` carries no text, loaded records are dense (`database.rs` slots/loaded/failure arrays), the lifecycle is monotonic (R1a/R6), authored `FileTokens` always carry `Some(file_id)` with `None` confined to materialised generics (1F5), line starts finalize at retain, and canonical dedup/conflict rejection is pinned by 1B7 tests. The remaining frozen identity/render boundary is 1F work.
 - [x] **1B5 — module inputs and worker ownership:** ordered candidate IDs, canonical file/chunk merge checks, per-source deltas, original live builder retention and final table installation are delivered. Move-only diagnostic bags and the complete frozen identity context remain 1F work.
 - [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
 - [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
@@ -957,7 +957,7 @@ reopening files; until 1F migrates them to source identity, per-diagnostic-range
 preserve package ownership and ambiguous display-path matches omit a frame rather than select the
 wrong file. The direct-template API retains its finalized per-document source context with
 warnings and diagnosed outcomes.
-1B4 remains open for the final mutable/frozen lifecycle and selected-source loading policy;
+1B4 is reconciled (see the slice entry); the final frozen identity/render boundary remains 1F work.
 1B6 is delivered (facade and module semantic context borrow immutable services). Individual
 mutation-test results and delivery history remain in Git.
 
@@ -1152,8 +1152,8 @@ Each checked batch below is an independent accepted agent slice. Split a batch b
 before coding when it cannot reach focused green validation in one context. Do not accept a commit with
 a public boundary supporting both location models.
 
-- [ ] **1E1 — headers and ordering:** header/dependency/declaration-shell records, module symbols, dependency edges and sorted headers
-- [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests
+- [ ] **1E1 — headers and ordering:** header/dependency/declaration-shell records, module symbols, dependency edges and sorted headers. Owns the header-side location-only state found in reconciliation: `PublicExportCollector.seen_names` (duplicate-export diagnostics).
+- [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests. Owns the semantic location-only state found in reconciliation: semantic `ChoiceVariant`/`ChoiceVariantPayload` locations and `BuildConfigQualifierSyntax.qualifier_location` (consumed via declaration shells into AST nodes).
 - [ ] **1E3 — templates:** template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata
 - [ ] **1E4 — backend-facing frontend:** HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation
 - [ ] **1E5 — orchestration and support:** project config, Stage 0, build-system diagnostics, source adapters, compiler test helpers and direct location constructors
@@ -1299,7 +1299,7 @@ steps above; they are not reopened as parallel frameworks.
 
 ### Phase 1 external review checkpoint
 
-- [ ] complete the remaining 1D, 1E, 1F, 1G and 1H slices and reconcile the open 1B4 lifecycle gate
+- [ ] complete the remaining 1D, 1E, 1F, 1G and 1H slices (the open 1B4 lifecycle gate is reconciled; its frozen identity/render tail is 1F work)
 - [ ] complete Phase 1's independent final reviews and required measurement/validation gates
 - [ ] commit final corrections and closeout, verify the checkpoint sequence and worktree state
 - [ ] pause for external user review before starting Phase 2
