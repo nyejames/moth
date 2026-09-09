@@ -82,15 +82,15 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-Arrived at `472ad7400`, accepting R4: database-backed compilation-root resolution accepts
-  only the exact empty range `[0, 0)` and rejects every other root range as a compiler
-  invariant, while renderers keep omitting a physical source frame. R1b/R2/R3 stay accepted
-  in `dc9f36532`/`c4eeaf1c9`/`fa5a2e75d`. R5 is the next active gate.
+Arrived at `b862ce300`, accepting R5: `SourceSlot::canonical_os_path` is the accepted cold
+  `Option<Box<Path>>` representation, shrinking the registration row from 48 to 40 bytes
+  with zero-copy boundary moves. R1b/R2/R3/R4 stay accepted in
+  `dc9f36532`/`c4eeaf1c9`/`fa5a2e75d`/`472ad7400`. R6 is the next active gate.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Worktree: clean at the R4 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R5 is next; no other implementation slice is active while the review-derived gates are worked.
-- Continuation order: complete the remaining review-derived Phase 1 correction steps (R5-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
+- Worktree: clean at the R5 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R6 is next; no other implementation slice is active while the review-derived gates are worked.
+- Continuation order: complete the remaining review-derived Phase 1 correction steps (R6-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
@@ -457,6 +457,10 @@ VALIDATION_STATE:
   source (80), render (14) and full library (5,017) suites passed. The independent audit could
   not run (provider usage-limit then policy errors, no review occurred); parent Slice review
   is the acceptance review for this bounded change.
+- R5 cold-path candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and
+  the full library suite (5,016) passed. `SourceSlot` measures 40 bytes (was 48) and
+  `SourceRecord` stays 48. The independent audit could not run (provider rate limits, no
+  review occurred); parent Slice review is the acceptance review for this bounded change.
 - 1G1 assignment payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
   `cargo check -p moth`, diagnostic-model (80), assignment mutation (9), collection assignment
   (57), fallible-handling assignment (38) and header/config regression (1) passed. The independent
@@ -1238,10 +1242,10 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   resolution of the reserved compilation-root `SourceSpan` accepts only the exact empty range
   `[0, 0)`; non-empty root ranges are compiler invariants, while renderers keep omitting a
   physical source frame.
-- [ ] **R5 — cold canonical path storage:** move `SourceSlot::canonical_os_path` to the accepted
-  cold `Option<Box<Path>>` representation, then measure the row. Remove incidental exact
-  `SourceSlot`/`SourceRecord` size assertions from correctness tests while retaining hard layout
-  assertions and observed measurements in benchmark evidence.
+- [x] **R5 — cold canonical path storage:** accepted in `b862ce300`. `SourceSlot::canonical_os_path`
+  is the cold `Option<Box<Path>>` representation; the row measures 40 bytes (was 48).
+  Incidental exact `SourceSlot`/`SourceRecord` size assertions are removed from correctness
+  tests; hard layout assertions and observed measurements stay in benchmark evidence.
 - [ ] **R6 — consuming source freeze:** make 1F1's final boundary consume directly owned mutable
   source construction state into lookup-only storage, drop `canonical_to_id` and path reverse
   lookup state when no frozen consumer needs them, and put the completed `FrozenIdentityContext`
