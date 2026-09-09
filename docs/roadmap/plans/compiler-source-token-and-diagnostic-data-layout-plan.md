@@ -1254,11 +1254,15 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   for 1F1's `FrozenIdentityContext` decision. A `should_panic` test pins freeze rejection of an
   outstanding transient share; `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full
   library suite (5,017) pass. R7 is the next active gate.
-- [ ] **R7 — cross-context related diagnostic sites:** before 1H, choose and test one explicit
-  representation for rare cross-domain related sites (a context-qualified cold site or a portable
-  resolved site), or encode and test an invariant that forbids them. Same-domain labels stay
-  compact; raw `SourceSpan`s from one project/package identity table must never be interpreted in
-  another merely because they are secondary labels.
+- [x] **R7 — cross-context related diagnostic sites:** accepted in `f98b7c42f`. Related sites stay
+  portable `SourceLocation`s with an optional explicit `SourceSpan` naming its own table; span
+  identity governs rebinding and renderers use portable secondary coordinates, so a foreign-table
+  span is never interpreted in another table. Production never creates cross-table secondaries
+  (both explicit-span sites use the current file's source); same-domain labels stay compact. The
+  new test pins a foreign-span secondary rendering from its portable location. Independent audit
+  was unavailable (subagent provider quota exhausted); the additive-test-only change passed
+  `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full library suite (5,018).
+  R8 is the next active gate.
 - [ ] **R8 — renderer display-cell coordinates:** keep scalar source offsets and UTF-16 tooling
   units distinct from terminal/HTML display width. Derive caret padding from the retained line and
   exact byte prefix with a documented tab-stop and Unicode-width policy, and add regressions for a
