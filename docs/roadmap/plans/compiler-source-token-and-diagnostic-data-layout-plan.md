@@ -82,15 +82,15 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-Arrived at `dc9f36532`, accepting R1b: compact identity and span capacity are fallible at
-  their real owners, authored exhaustion is a deterministic typed capacity failure, capture
-  exhaustion is terminal carrying the exact range, and compiler-produced impossible
-  overflow stays a compiler failure. R2 is the next active gate.
+Arrived at `c4eeaf1c9`, accepting R2: global `SourceSpan` operations accept only resolvers
+  qualified for the span's own source and reject foreign or unqualified pairings as compiler
+  invariants, while bare resolvers remain for source-local `LocalSpan` work. R1b stays
+  accepted in `dc9f36532`. R3 is the next active gate.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Worktree: clean at the R1b record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R2 is next; no other implementation slice is active while the review-derived gates are worked.
-- Continuation order: complete the remaining review-derived Phase 1 correction steps (R2-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
+- Worktree: clean at the R2 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R3 is next; no other implementation slice is active while the review-derived gates are worked.
+- Continuation order: complete the remaining review-derived Phase 1 correction steps (R3-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
@@ -1210,10 +1210,10 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   capture exhaustion is terminal and carries the offending exact range instead of silently
   losing the span. Compiler-produced impossible overflow remains a compiler failure. Bounded
   ID/span boundary tests require no multi-billion-byte allocation.
-- [ ] **R2 — source-qualified live span resolution:** replace global `SourceSpan` live-builder
-  operations that accept an unqualified resolver with a source-qualified view, or delete
-  production-unused `*_with` variants. Validate `span.source()` against the resolver source and
-  reject a wrong-source extended row; keep bare resolvers only for source-local `LocalSpan` work.
+- [x] **R2 — source-qualified live span resolution:** accepted in `c4eeaf1c9`. Global `SourceSpan`
+  live-builder operations accept only a source-qualified resolver view and validate
+  `span.source()` against the resolver source, rejecting a wrong-source extended row as a
+  compiler invariant; bare resolvers remain for source-local `LocalSpan` work.
 - [ ] **R3 — explicit source ownership during capture/rebinding:** remove legacy logical-path
   equality from preparation label ownership decisions. A source-local capture may inherit its
   producer `SourceId`; after aggregation, an unspanned related authored site from another source
