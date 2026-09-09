@@ -48,6 +48,8 @@ impl DiagnosticLabel {
         }
     }
 
+    /// Restamp an owned label to a new source identity. The caller proves span-level
+    /// ownership before calling: only labels belonging to the previous source arrive here.
     pub(crate) fn rebind_source_identity(&mut self, source: SourceId, logical_path: &InternedPath) {
         if let Some(span) = &mut self.span {
             *span = SourceSpan::new(source, span.local());

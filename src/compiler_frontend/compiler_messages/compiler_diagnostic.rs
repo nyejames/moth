@@ -1866,7 +1866,9 @@ impl CompilerDiagnostic {
 
     /// Capture one file's preparation diagnostics while its original builder is live.
     /// Every uncaptured range is encoded exactly once against that source's own builder.
-    /// Related ranges from another source must already carry their own explicit span.
+    /// Unspanned labels inherit the producing source unconditionally: capture stamps only
+    /// its own producer's sites, so a related range from another source must already carry
+    /// its own explicit span before capture.
     /// Extended-table exhaustion is terminal: the returned failure names the offending exact
     /// range, and no captured diagnostic is published with a silently dropped span.
     /// This private interval bridge ends with `SourceLocation` in slice 1H.
@@ -1895,13 +1897,6 @@ impl CompilerDiagnostic {
             if label.span.is_some() {
                 continue;
             }
-            if label.location.scope != self.primary_location.scope {
-                return Err(CompilerError::new(
-                    "preparation label from another source requires its own source span",
-                    label.location.clone(),
-                    ErrorType::Compiler,
-                ));
-            }
             label.span = if label.location == self.primary_location {
                 self.primary_span
             } else {
@@ -1929,6 +1924,12 @@ impl CompilerDiagnostic {
         self.payload.remap_string_ids(remap);
     }
 
+    /// Rebind this diagnostic from one source identity to another.
+    ///
+    /// Label ownership follows span identity: a label carrying a span belongs to the
+    /// previous source only when its span names it. An unspanned label carries no
+    /// counter-evidence and follows the diagnostic. Distinct sources sharing one logical
+    /// display path therefore rebind independently.
     pub(crate) fn rebind_source_identity(
         &mut self,
         previous_source: Option<SourceId>,
@@ -1938,7 +1939,7 @@ impl CompilerDiagnostic {
         for label in &mut self.labels {
             let belongs_to_source = match label.span {
                 Some(span) => Some(span.source()) == previous_source,
-                None => label.location.scope == self.primary_location.scope,
+                None => true,
             };
             if belongs_to_source {
                 label.rebind_source_identity(source, logical_path);

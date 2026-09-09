@@ -3301,7 +3301,7 @@ fn preparation_capture_rejects_a_changed_primary_source_domain() {
 }
 
 #[test]
-fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
+fn preparation_capture_stamps_unspanned_labels_with_the_producer_source() {
     let mut strings = StringTable::new();
     let path = InternedPath::from_single_str("main.moth", &mut strings);
     let foreign_path = InternedPath::from_single_str("other.moth", &mut strings);
@@ -3321,12 +3321,10 @@ fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
         .labels
         .push(DiagnosticLabel::secondary(foreign_location.clone(), None));
     let mut builder = ExtendedSpanBuilder::new();
-    let error = diagnostic
+    diagnostic
         .capture_preparation_span(source, &mut builder)
-        .expect_err("foreign source identity cannot be inferred from the primary");
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert_eq!(error.location, foreign_location);
-    assert_eq!(diagnostic.labels[1].span, None);
+        .expect("source-local capture inherits the producer source");
+    assert_eq!(diagnostic.labels[1].span.unwrap().source(), source);
 
     let mut foreign_builder = ExtendedSpanBuilder::new();
     let foreign_span = SourceSpan::new(
@@ -3353,8 +3351,8 @@ fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
     assert_eq!(diagnostic.labels[1].span, Some(foreign_span));
     assert_eq!(
         builder.len(),
-        0,
-        "foreign spans stay in their original source table"
+        1,
+        "the stamped producer row lives in the producer table; the foreign span stays in its own table"
     );
     let frozen_foreign = foreign_builder.freeze();
     let range = diagnostic.labels[1]
@@ -3362,4 +3360,70 @@ fn preparation_capture_requires_and_preserves_a_foreign_labels_source_owner() {
         .unwrap()
         .resolve_with(frozen_foreign.resolver_for(foreign_source));
     assert_eq!((range.start(), range.end()), (100, 2500));
+}
+
+#[test]
+fn preparation_rebind_follows_span_identity_for_shared_display_paths() {
+    let mut strings = StringTable::new();
+    let shared = InternedPath::from_single_str("main.moth", &mut strings);
+    let rebound_path = InternedPath::from_single_str("final.moth", &mut strings);
+    let producer_a = SourceId::from_index(1);
+    let producer_b = SourceId::from_index(2);
+    let final_id = SourceId::from_index(3);
+
+    // Two labels share one logical display path but name different source identities.
+    let mut builder_a = ExtendedSpanBuilder::new();
+    let mut builder_b = ExtendedSpanBuilder::new();
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(location(shared.clone()));
+    diagnostic.labels.push(DiagnosticLabel::secondary(
+        SourceLocation::with_byte_range(
+            shared.clone(),
+            Default::default(),
+            Default::default(),
+            11,
+            18,
+        ),
+        None,
+    ));
+    diagnostic
+        .capture_preparation_span(producer_a, &mut builder_a)
+        .unwrap();
+    assert_eq!(diagnostic.labels[0].span.unwrap().source(), producer_a);
+
+    diagnostic.labels[1].span = Some(SourceSpan::new(
+        producer_b,
+        LocalSpan::exact(11, 7, &mut builder_b).unwrap(),
+    ));
+    diagnostic.rebind_source_identity(Some(producer_a), final_id, &rebound_path);
+    assert_eq!(diagnostic.labels[0].span.unwrap().source(), final_id);
+    assert_eq!(diagnostic.labels[0].location.scope, rebound_path);
+    assert_eq!(diagnostic.labels[1].span.unwrap().source(), producer_b);
+    assert_eq!(diagnostic.labels[1].location.scope, shared);
+
+    // A rebind naming another previous identity must not silently adopt the stamped
+    // label, while the label that genuinely belongs to that identity still transitions.
+    // A scope-equality or unconditional-rebind bug would move labels[0] here and fail.
+    let other_path = InternedPath::from_single_str("second.moth", &mut strings);
+    let other_final = SourceId::from_index(4);
+    diagnostic.rebind_source_identity(Some(producer_b), other_final, &other_path);
+    assert_eq!(diagnostic.labels[0].span.unwrap().source(), final_id);
+    assert_eq!(diagnostic.labels[0].location.scope, rebound_path);
+    assert_eq!(diagnostic.labels[1].span.unwrap().source(), other_final);
+    assert_eq!(diagnostic.labels[1].location.scope, other_path);
+}
+
+#[test]
+fn preparation_rebind_normalizes_unspanned_labels_without_a_previous_source() {
+    let mut strings = StringTable::new();
+    let path = InternedPath::from_single_str("main.moth", &mut strings);
+    let new_path = InternedPath::from_single_str("final.moth", &mut strings);
+    let new_id = SourceId::from_index(3);
+
+    // Traversal-failure diagnostics reach rebinding spanless with no previous identity
+    // (source_discovery normalization). Their labels must still follow the diagnostic.
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(location(path));
+    diagnostic.rebind_source_identity(None, new_id, &new_path);
+    assert_eq!(diagnostic.labels[0].span, None);
+    assert_eq!(diagnostic.labels[0].location.scope, new_path);
+    assert_eq!(diagnostic.primary_location.scope, new_path);
 }
