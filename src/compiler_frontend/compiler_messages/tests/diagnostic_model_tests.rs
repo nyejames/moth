@@ -3363,6 +3363,50 @@ fn preparation_capture_stamps_unspanned_labels_with_the_producer_source() {
 }
 
 #[test]
+fn foreign_table_secondary_label_renders_from_its_portable_location() {
+    let mut strings = StringTable::new();
+    let primary_path = InternedPath::from_single_str("main.moth", &mut strings);
+    let foreign_path = InternedPath::from_single_str("other.moth", &mut strings);
+    let foreign_source = SourceId::from_index(9);
+    let foreign_location = SourceLocation::with_byte_range(
+        foreign_path,
+        CharPosition {
+            line_number: 6,
+            char_column: 2,
+        },
+        CharPosition {
+            line_number: 6,
+            char_column: 8,
+        },
+        100,
+        2500,
+    );
+    let mut foreign_builder = ExtendedSpanBuilder::new();
+    let foreign_span = SourceSpan::new(
+        foreign_source,
+        LocalSpan::exact(100, 2400, &mut foreign_builder).unwrap(),
+    );
+    let mut diagnostic = CompilerDiagnostic::unterminated_string_literal(location(primary_path));
+    let mut related = DiagnosticLabel::secondary(
+        foreign_location,
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
+    );
+    related.span = Some(foreign_span);
+    diagnostic.labels.push(related);
+
+    let labels = terminal::format_label_messages_with_context(
+        &diagnostic,
+        DiagnosticRenderContext::new(&strings),
+    );
+    assert_eq!(
+        labels,
+        vec!["info: 7:3 - previous declaration here".to_owned()],
+        "a foreign-table secondary must render from its portable location, never resolved against another table: {labels:?}"
+    );
+    assert_eq!(diagnostic.labels[1].span, Some(foreign_span));
+}
+
+#[test]
 fn preparation_rebind_follows_span_identity_for_shared_display_paths() {
     let mut strings = StringTable::new();
     let shared = InternedPath::from_single_str("main.moth", &mut strings);
