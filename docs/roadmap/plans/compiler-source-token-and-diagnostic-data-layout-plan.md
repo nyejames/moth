@@ -1246,11 +1246,14 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   is the cold `Option<Box<Path>>` representation; the row measures 40 bytes (was 48).
   Incidental exact `SourceSlot`/`SourceRecord` size assertions are removed from correctness
   tests; hard layout assertions and observed measurements stay in benchmark evidence.
-- [ ] **R6 — consuming source freeze:** make 1F1's final boundary consume directly owned mutable
-  source construction state into lookup-only storage, drop `canonical_to_id` and path reverse
-  lookup state when no frozen consumer needs them, and put the completed `FrozenIdentityContext`
-  behind `Arc` only after that consume. Ordinary readers borrow `&SourceDatabase`; the transitional
-  Arc-backed builder is not the terminal freeze owner.
+- [x] **R6 — consuming source freeze:** accepted in `ab090fcb5`. Construction state enters owned
+  through `SourceDatabaseBuilder::new` and leaves owned through `finish`; terminal publish `Arc`s
+  are minted after the consume. The interior builder `Arc` stays the transient share handle for
+  boundary compilation and Stage 0 facts, dropped before the freeze. `canonical_to_id` and the
+  path interner are retained: frozen consumers still resolve canonical paths, so the drop waits
+  for 1F1's `FrozenIdentityContext` decision. A `should_panic` test pins freeze rejection of an
+  outstanding transient share; `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full
+  library suite (5,017) pass. R7 is the next active gate.
 - [ ] **R7 — cross-context related diagnostic sites:** before 1H, choose and test one explicit
   representation for rare cross-domain related sites (a context-qualified cold site or a portable
   resolved site), or encode and test an invariant that forbids them. Same-domain labels stay
