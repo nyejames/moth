@@ -310,9 +310,46 @@ impl SourceSpan {
         self.local.is_empty_with(resolver)
     }
 
+    /// Resolve against the database that owns this span's source identity.
+    ///
+    /// The reserved compilation root owns no record, so its spans resolve without a lookup and
+    /// only through its exact empty range; every other identity resolves through its own loaded
+    /// record, and an unresolvable extended row names that source as a compiler bug.
     pub fn byte_range(self, sources: &SourceDatabase) -> ResolvedByteRange {
+        if self.source == SourceId::COMPILATION_ROOT {
+            return self.resolve_compilation_root_range();
+        }
+
         let source = sources.source_record(self.source);
         self.local.resolve_from_record(source, self.source)
+    }
+
+    /// Resolve the one range the reserved compilation root can resolve against the database.
+    ///
+    /// # Panics
+    /// Panics for any root range other than the exact empty `[0, 0)`. The root owns no snapshot
+    /// and no extended table, so a non-empty root span names bytes no source owns. That range is
+    /// a proven-impossible misuse: a compiler invariant failure, never a silent wrong
+    /// resolution.
+    fn resolve_compilation_root_range(self) -> ResolvedByteRange {
+        match decode_logical(self.local.logical_word()) {
+            DecodedSpan::Inline {
+                start: 0,
+                length: 0,
+            } => ResolvedByteRange::from_start_length(0, 0),
+            DecodedSpan::Inline { start, length } => panic!(
+                "span on compilation root source identity {} resolves only the exact empty \
+                 range [0, 0), not [{start}, {}); this is a compiler bug",
+                self.source.index(),
+                start + length
+            ),
+            DecodedSpan::Extended { index } => panic!(
+                "span on compilation root source identity {} names extended row {index}, but the \
+                 root owns no extended-span table; only the exact empty range [0, 0) resolves on \
+                 the root; this is a compiler bug",
+                self.source.index()
+            ),
+        }
     }
 
     pub fn start(self, sources: &SourceDatabase) -> u32 {
@@ -328,8 +365,9 @@ impl SourceSpan {
             return false;
         }
 
-        let source = sources.source_record(self.source);
-        self.overlaps_with(other, record_resolver(source, Some(self.source)))
+        let left = self.byte_range(sources);
+        let right = other.byte_range(sources);
+        left.start().max(right.start()) < left.end().min(right.end())
     }
 
     pub fn contains(self, other: Self, sources: &SourceDatabase) -> bool {
@@ -337,8 +375,9 @@ impl SourceSpan {
             return false;
         }
 
-        let source = sources.source_record(self.source);
-        self.contains_with(other, record_resolver(source, Some(self.source)))
+        let outer = self.byte_range(sources);
+        let inner = other.byte_range(sources);
+        outer.start() <= inner.start() && outer.end() >= inner.end()
     }
 
     /// Smallest span covering both inputs.

@@ -73,11 +73,16 @@ impl<'a> DiagnosticRenderContext<'a> {
     /// Resolve a diagnostic's primary span into renderer columns while its source snapshot is
     /// still available. SourceSpan ranges are half-open; legacy locations are converted to the
     /// same exclusive-end shape so caret lengths remain one calculation in every renderer.
+    ///
+    /// The reserved compilation root owns no snapshot, so its spans never enter the retained
+    /// branch and renderers keep omitting a physical source frame for them; the legacy location
+    /// remains their fallback shape.
     pub(crate) fn primary_position(
         self,
         diagnostic: &CompilerDiagnostic,
     ) -> DiagnosticPrimaryPosition {
         if let Some(span) = diagnostic.primary_span
+            && span.source() != SourceId::COMPILATION_ROOT
             && let Some(source_database) = self.source_database
             && let Some(line_index) = source_database.line_index(span.source())
         {
@@ -110,6 +115,11 @@ impl<'a> DiagnosticRenderContext<'a> {
         }
     }
 
+    /// Borrow the retained line behind a resolved primary position, or `None` when no snapshot
+    /// is available.
+    ///
+    /// A compilation-root primary position carries no source identity, so it looks its line up
+    /// through the legacy logical path and yields `None` when the root has no frame to render.
     pub(crate) fn retained_source_line_for_primary(
         self,
         position: &DiagnosticPrimaryPosition,

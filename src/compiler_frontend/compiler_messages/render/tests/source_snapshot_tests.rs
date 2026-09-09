@@ -337,3 +337,59 @@ fn renderers_underline_half_open_reanchored_span_exactly() {
         "the multibyte final scalar must not add an extra caret: {rendered}"
     );
 }
+
+/// A compilation-root primary span names no physical source, so its render position carries no
+/// source identity even when a loaded snapshot is attached, and the renderers keep omitting a
+/// physical source frame for it.
+///
+/// The legacy location here has the empty scope a project-wide root diagnostic carries. If the
+/// root span ever leaked into the retained-snapshot branch, the attached snapshot's line index
+/// would produce a frame; instead the legacy location remains the fallback shape.
+#[test]
+fn compilation_root_primary_spans_render_without_a_physical_source_frame() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, _, _) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "snapshot text\n",
+        &mut string_table,
+    );
+
+    let name = string_table.intern("project_wide");
+    let mut diagnostic = CompilerDiagnostic::unknown_value_name(name, SourceLocation::default());
+    diagnostic.primary_span = Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::source_start(),
+    ));
+
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    let position = context.primary_position(&diagnostic);
+    assert_eq!(
+        position.source, None,
+        "the root has no physical source identity"
+    );
+    assert!(
+        position.scope.as_components().is_empty(),
+        "the root diagnostic keeps its legacy location scope"
+    );
+
+    let terse = format_terse_diagnostic_with_context(&diagnostic, context);
+    assert!(
+        !terse.contains("main.moth"),
+        "the root span must not resolve through the attached snapshot's path: {terse}"
+    );
+
+    let rendered =
+        render_diagnostics_html_with_context(&[diagnostic], temporary_directory.path(), context);
+    assert!(
+        !rendered.contains("snapshot text"),
+        "the compilation root must not render a physical source frame: {rendered}"
+    );
+    assert!(
+        !rendered.contains("source-caret"),
+        "the compilation root must not emit a caret row: {rendered}"
+    );
+}

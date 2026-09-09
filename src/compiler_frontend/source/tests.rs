@@ -1348,6 +1348,67 @@ fn database_span_reads_reject_missing_source_records() {
 }
 
 #[test]
+fn compilation_root_span_resolves_only_its_exact_empty_range() {
+    let source_path = PathBuf::from("/project/main.moth");
+    let mut string_table = StringTable::new();
+    let database = SourceDatabase::build(
+        std::iter::once(&source_path),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+
+    let root = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+    let range = root.byte_range(&database);
+    assert_eq!((range.start(), range.end()), (0, 0));
+    assert_eq!(root.start(&database), 0);
+    assert_eq!(root.end(&database), 0);
+    assert!(root.contains(root, &database));
+}
+
+#[test]
+fn non_empty_compilation_root_spans_fail_loudly_as_compiler_bugs() {
+    let database = SourceDatabase::empty();
+    let mut builder = ExtendedSpanBuilder::new();
+
+    for local in [
+        LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
+        LocalSpan::insertion_point(7, &mut builder).expect("non-zero empty root span"),
+        LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended root span"),
+    ] {
+        let span = SourceSpan::new(SourceId::COMPILATION_ROOT, local);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            span.byte_range(&database);
+        }))
+        .expect_err("a non-empty compilation-root span must not resolve silently");
+        let message = compiler_bug_panic_message(panic);
+
+        assert!(
+            message.contains("compilation root")
+                && message.contains(&SourceId::COMPILATION_ROOT.index().to_string())
+                && message.contains("compiler bug"),
+            "the root range rejection should name the identity as a compiler bug: {message}"
+        );
+    }
+
+    // The rejection must come from the span contract itself, not from a record lookup accident.
+    let non_empty = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
+    );
+    let overlap_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        non_empty.overlaps(non_empty, &database);
+    }))
+    .expect_err("a non-empty root span must fail the same way through overlaps");
+    let message = compiler_bug_panic_message(overlap_panic);
+    assert!(
+        message.contains("compilation root") && message.contains("compiler bug"),
+        "overlaps must route through the same root span contract: {message}"
+    );
+}
+
+#[test]
 fn database_span_operations_match_live_resolvers_and_reject_cross_source_pairs() {
     let first_path = PathBuf::from("/project/first.moth");
 

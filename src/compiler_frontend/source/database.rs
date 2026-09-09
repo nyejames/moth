@@ -438,7 +438,9 @@ impl SourceDatabase {
 
     /// Resolve the loaded record addressed by a source identity for frozen span consumers.
     ///
-    /// Missing, pending, failed and reserved-root identities are compiler bugs at this boundary.
+    /// The reserved compilation root is not resolved here: its database-backed span resolution
+    /// is the contract in [`span.rs`](super::span) and needs no record. Missing, pending, failed
+    /// and root identities remain compiler bugs at this boundary.
     pub(super) fn source_record(&self, id: SourceId) -> &SourceRecord {
         let slot = self.slots.get(id.index()).unwrap_or_else(|| {
             panic!(
@@ -450,7 +452,8 @@ impl SourceDatabase {
         if slot.provenance == SourceProvenance::CompilationRoot {
             panic!(
                 "source identity {} is the compilation root and has no loaded source record; \
-                 this is a compiler bug",
+                 the root resolves only the exact empty span range [0, 0) through the span \
+                 module, never a record; this is a compiler bug",
                 id.index()
             );
         }
@@ -629,6 +632,9 @@ fn compilation_root_slot() -> SourceSlot {
         load: SourceLoadStatus::Pending,
     }
 }
+
+/// The reserved compilation-root slot keeps no snapshot and never loads. Its database-backed
+/// span resolution accepts only the exact empty range `[0, 0)` and is owned by the span module.
 
 /// Exclusive source ownership until all preparation and semantic producers have finished.
 ///

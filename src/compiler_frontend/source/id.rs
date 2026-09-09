@@ -14,6 +14,10 @@ impl SourceId {
     /// Identity every database reserves at index 0, for a token stream whose text belongs to the
     /// whole compilation rather than to any registered file. The record itself owns no path and
     /// no snapshot, so a lookup for physical source text still finds nothing.
+    ///
+    /// Database-backed resolution of a root span accepts only the exact empty range `[0, 0)` and
+    /// rejects every other range as a compiler invariant failure; the span module owns that
+    /// contract, and renderers keep omitting a physical source frame for it.
     pub const COMPILATION_ROOT: Self = Self(NonZeroU32::new(1).unwrap());
 
     /// Convert a proven-in-range index into its non-zero identity.
