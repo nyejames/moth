@@ -1272,7 +1272,7 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   unavailable (subagent provider quota exhausted); the change passed `cargo fmt`,
   `git diff --check`, `cargo check -p moth` and the full library suite (5,021). R9 is the next
   active gate.
-- [x] **R9 — migration-debt cleanup:** accepted in `<R9-COMMIT>`. Impl-wide dead-code allowances
+- [x] **R9 — migration-debt cleanup:** accepted in `1e209c3b5`. Impl-wide dead-code allowances
   are narrowed to per-method `#[allow(dead_code)]` on deferred-consumer span, table and line-index
   APIs (first callers land in slices 1D3/1D4/1E/1F; each allowance names its unreached callers),
   and `source/tests.rs` (2,331 lines, git history preserved in `database_tests.rs`) is split into
