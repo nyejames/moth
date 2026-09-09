@@ -1263,10 +1263,15 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   was unavailable (subagent provider quota exhausted); the additive-test-only change passed
   `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full library suite (5,018).
   R8 is the next active gate.
-- [ ] **R8 — renderer display-cell coordinates:** keep scalar source offsets and UTF-16 tooling
-  units distinct from terminal/HTML display width. Derive caret padding from the retained line and
-  exact byte prefix with a documented tab-stop and Unicode-width policy, and add regressions for a
-  preceding tab, a wide CJK character and a combining sequence.
+- [x] **R8 — renderer display-cell coordinates:** accepted in `a7283c9c6`. Scalar source offsets
+  (`LineIndex::position`), UTF-16 tooling columns (`utf16_column`) and terminal/HTML display cells
+  are three separate units: caret padding and underline length now derive from the retained line
+  via display-cell geometry (tab advances to the next multiple of 8; other scalars use Unicode
+  width, combining 0, wide CJK 2), shared by the terminal and dev-server renderers. Regressions
+  cover a preceding tab, a wide CJK scalar and a combining mark. Independent audit was
+  unavailable (subagent provider quota exhausted); the change passed `cargo fmt`,
+  `git diff --check`, `cargo check -p moth` and the full library suite (5,021). R9 is the next
+  active gate.
 - [ ] **R9 — migration-debt cleanup:** remove impl-wide dead-code allowances from span APIs, keep
   only narrowly named deferred-consumer allowances, leave local `_unspanned` wrappers until 1H
   deletes the location bridge, and split the broad `source/tests.rs` owner into focused database,
