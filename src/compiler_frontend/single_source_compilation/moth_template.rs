@@ -407,7 +407,7 @@ pub(crate) fn compile_moth_template_source(
             let mut source_database_warnings = preparation_warnings;
             source_database_warnings.append(&mut warnings);
             let source_database = match source_builder.finish() {
-                Ok(source_database) => source_database,
+                Ok(source_database) => Arc::new(source_database),
                 Err(error) => {
                     return Err(CompilerMessages::from_error_with_warnings(
                         error,
@@ -581,7 +581,7 @@ fn attach_finalized_source_database(
 ) -> CompilerMessages {
     match source_builder.finish() {
         Ok(source_files) => {
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             messages
         }
         Err(error) => CompilerMessages::from_error_with_warnings(

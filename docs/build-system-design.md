@@ -611,8 +611,9 @@ canonical and check-only preparation appends to the same source-local table.
 
 Source identity finalization and span-table finalization are separate boundaries. The live source
 owner survives all canonical and check-only producers. Private AST lookup handles end before the
-owner regains exclusive access to its existing `Arc<SourceDatabase>` and installs each table once.
-Only then may outcomes retain that source context for rendering. Package interfaces can publish
+owner consumes its transient `Arc<SourceDatabase>` via unwrap into owned lookup storage and
+installs each table once. Only then is the terminal publish `Arc` minted, and only then may
+outcomes retain that source context for rendering. Package interfaces can publish
 earlier; their source lookup context waits for the package's remaining check-only producers.
 
 Prepared syntax may contain:

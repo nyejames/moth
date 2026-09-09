@@ -58,7 +58,6 @@ use rustc_hash::FxHashMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
 use std::sync::Arc;
 
 use super::file_reference_resolution::{
@@ -702,7 +701,7 @@ fn finish_discovery_source_owner(
 ) -> CompilerMessages {
     match source_builder.finish() {
         Ok(source_files) => {
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             messages
         }
         Err(error) => CompilerMessages::from_error_with_warnings(
@@ -1987,19 +1986,13 @@ pub(super) fn load_missing_source_paths_with_registered_paths_for_test(
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             return Err(messages);
         }
     };
     let source_files = source_owner
         .finish()
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let source_files = Arc::try_unwrap(source_files).map_err(|_| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("test source owner remained shared after loading"),
-            string_table,
-        )
-    })?;
     let mut input_slots = (0..source_paths.len())
         .map(|_| None)
         .collect::<Vec<Option<PreparedSourceInput>>>();

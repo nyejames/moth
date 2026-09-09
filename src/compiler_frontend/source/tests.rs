@@ -1201,6 +1201,15 @@ fn source_finalization_rejects_a_checked_out_span_builder() {
 }
 
 #[test]
+#[should_panic(expected = "source context escaped before span finalization")]
+fn source_finalization_rejects_an_outstanding_transient_share() {
+    let (database, _source_id) = database_with_retained_text("source snapshot");
+    let builder = SourceDatabaseBuilder::new(database);
+    let _transient = Arc::clone(builder.sources());
+    let _ = builder.finish();
+}
+
+#[test]
 fn installing_extended_spans_twice_is_a_compiler_bug() {
     let (mut database, source_id) = database_with_retained_text("source snapshot");
     database

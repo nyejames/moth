@@ -531,7 +531,12 @@ pub(crate) fn compile_directory_frontend(
     let mut project_sources = SourceDatabaseBuilder::new(
         project_source_files
             .take()
-            .unwrap_or_else(|| Arc::new(SourceDatabase::empty())),
+            .map(|cached| {
+                Arc::try_unwrap(cached).expect(
+                    "source registration changed while snapshots were shared; this is a compiler bug",
+                )
+            })
+            .unwrap_or_else(SourceDatabase::empty),
     );
     let result = (|| {
         project_sources
@@ -602,11 +607,11 @@ pub(crate) fn compile_directory_frontend(
                 string_table,
             ) {
                 let mut messages = CompilerMessages::from_error_ref(error, string_table);
-                messages.set_source_database(
+                messages.set_source_database(Arc::new(
                     package_sources
                         .finish()
                         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                );
+                ));
                 return Err(messages);
             }
             let (package_source_files, mut package_source_spans) = package_sources.split();
@@ -633,9 +638,9 @@ pub(crate) fn compile_directory_frontend(
                 ) {
                     Ok(module_waves) => module_waves,
                     Err(mut messages) => {
-                        messages.set_source_database(package_sources.finish().map_err(
+                        messages.set_source_database(Arc::new(package_sources.finish().map_err(
                             |error| CompilerMessages::from_error_ref(error, string_table),
-                        )?);
+                        )?));
                         return Err(messages);
                     }
                 };
@@ -655,11 +660,11 @@ pub(crate) fn compile_directory_frontend(
                     )),
                     string_table,
                 );
-                messages.set_source_database(
+                messages.set_source_database(Arc::new(
                     package_sources
                         .finish()
                         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                );
+                ));
                 return Err(messages);
             };
             source_package_inventories.push(SourcePackageModuleInventory {
@@ -765,11 +770,11 @@ pub(crate) fn compile_directory_frontend(
                     string_table,
                 ) {
                     let inventory = source_package_inventories.swap_remove(index);
-                    messages.set_source_database(
+                    messages.set_source_database(Arc::new(
                         inventory.source_files.finish().map_err(|error| {
                             CompilerMessages::from_error_ref(error, string_table)
                         })?,
-                    );
+                    ));
                     return Err(messages);
                 }
             }
@@ -943,9 +948,9 @@ pub(crate) fn compile_directory_frontend(
                 match result {
                     Ok(value) => value,
                     Err(mut messages) => {
-                        messages.set_source_database(source_files.finish().map_err(|error| {
-                            CompilerMessages::from_error_ref(error, string_table)
-                        })?);
+                        messages.set_source_database(Arc::new(source_files.finish().map_err(
+                            |error| CompilerMessages::from_error_ref(error, string_table),
+                        )?));
                         return Err(messages);
                     }
                 };
@@ -1023,9 +1028,11 @@ pub(crate) fn compile_directory_frontend(
                     )?;
                 Ok((package_id, package_transient_messages))
             })();
-            let finalized = source_files
-                .finish()
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let finalized = Arc::new(
+                source_files
+                    .finish()
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+            );
             let (package_id, mut check_only_messages) = result.map_err(|mut messages| {
                 messages.set_source_database(Arc::clone(&finalized));
                 messages
@@ -1086,9 +1093,11 @@ pub(crate) fn compile_directory_frontend(
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
     })();
-    let finalized = project_sources
-        .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let finalized = Arc::new(
+        project_sources
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+    );
     *project_source_files = Some(Arc::clone(&finalized));
     match result {
         Ok(mut compilation) => {

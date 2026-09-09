@@ -414,14 +414,13 @@ fn discover_modules_for_test_with_resource_inputs(
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             return Err(messages);
         }
     };
     let source_files = source_owner
         .finish()
         .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-    let source_files = Arc::try_unwrap(source_files).expect("fixture source context is exclusive");
     Ok((schedule, resource_inputs, source_files))
 }
 
@@ -506,7 +505,7 @@ fn discover_modules_for_test_with_providers(
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             Err(messages)
         }
     }
@@ -1538,7 +1537,6 @@ fn discover_modules_and_graph_for_test(
     let source_files = source_owner
         .finish()
         .expect("discovery source tables should finalize");
-    let source_files = Arc::try_unwrap(source_files).expect("fixture source context is exclusive");
 
     (
         modules,

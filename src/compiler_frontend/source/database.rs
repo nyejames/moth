@@ -642,6 +642,11 @@ fn compilation_root_slot() -> SourceSlot {
 /// allocate no builder, and a split borrow lets producers read snapshots without sharing mutation.
 /// Semantic Stage 0 facts may hold private immutable snapshot handles during a call. All such
 /// handles must be released before finalization recovers exclusive ownership and installs tables.
+///
+/// Construction state enters owned through [`SourceDatabaseBuilder::new`] and leaves owned
+/// through [`SourceDatabaseBuilder::finish`]. The interior `Arc` is only the transient share
+/// handle that boundary compilation clones for retained Stage 0 facts; every such clone is
+/// dropped before the freeze, and the terminal publish `Arc` is minted after the consume.
 #[derive(Debug)]
 pub(crate) struct SourceDatabaseBuilder {
     sources: Arc<SourceDatabase>,
@@ -656,9 +661,14 @@ enum SpanBuilderState {
 }
 
 impl SourceDatabaseBuilder {
-    pub(crate) fn new(sources: impl Into<Arc<SourceDatabase>>) -> Self {
+    /// Take exclusive construction ownership of one registered database.
+    ///
+    /// WHY: an `Arc` into construction would smuggle outstanding snapshots past the freeze.
+    /// Callers holding a previously published `Arc` resolve exclusivity explicitly with
+    /// `Arc::try_unwrap` before calling this.
+    pub(crate) fn new(sources: SourceDatabase) -> Self {
         Self {
-            sources: sources.into(),
+            sources: Arc::new(sources),
             live_builders: Vec::new(),
         }
     }
@@ -688,10 +698,16 @@ impl SourceDatabaseBuilder {
         self.split().1.retain_span_builder(source, builder);
     }
 
-    /// Freeze returned builders once; an outstanding producer is an ownership bug.
-    pub(crate) fn finish(mut self) -> Result<Arc<SourceDatabase>, CompilerError> {
+    /// Freeze every returned builder and consume construction state into lookup-only storage.
+    ///
+    /// WHY: the terminal publish `Arc` must be minted after this consume, never shared out of
+    /// the builder. `canonical_to_id` and the path interner stay with the frozen database:
+    /// frozen consumers still resolve canonical paths (notably the missing-source loader and
+    /// message renderers), so dropping that reverse lookup waits for 1F1's `FrozenIdentityContext`
+    /// decision. An outstanding transient share is an ownership bug.
+    pub(crate) fn finish(mut self) -> Result<SourceDatabase, CompilerError> {
         self.sync_loaded_records();
-        let sources = Arc::get_mut(&mut self.sources)
+        let mut sources = Arc::try_unwrap(self.sources)
             .expect("source context escaped before span finalization; this is a compiler bug");
         for slot_index in 0..sources.slots.len() {
             let slot = &sources.slots[slot_index];
@@ -720,7 +736,7 @@ impl SourceDatabaseBuilder {
             };
             sources.install_extended_spans(source, builder.freeze())?;
         }
-        Ok(self.sources)
+        Ok(sources)
     }
 
     fn sync_loaded_records(&mut self) {

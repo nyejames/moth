@@ -48,6 +48,7 @@ use crate::projects::html_project::moth_template::input::MothTemplateSourceUnit;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The project-local package identity of one direct-template compilation request.
 ///
@@ -592,7 +593,7 @@ fn finish_source_owner(
 ) -> CompilerMessages {
     match source_builder.finish() {
         Ok(source_files) => {
-            messages.set_source_database(source_files);
+            messages.set_source_database(Arc::new(source_files));
             messages
         }
         Err(install_error) => CompilerMessages::from_error_with_warnings(

@@ -614,9 +614,11 @@ fn compile_single_file_frontend_with_target(
         .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
     })();
-    let finalized = source_owner
-        .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let finalized = Arc::new(
+        source_owner
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+    );
     *project_source_files = Some(Arc::clone(&finalized));
     match result {
         Ok(SingleFileFrontendResult::Project(mut compilation)) => {

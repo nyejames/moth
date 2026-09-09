@@ -1002,6 +1002,29 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             .retain_text(source_id, source.to_owned())
             .expect("test source snapshot should be retained");
     }
+    // R6 gives every builder its own exclusive database: rebuild the same deterministic
+    // registration for the span owner below instead of sharing the frontend handle. Identical
+    // inputs keep source identities aligned across both tables.
+    let mut span_owner_sources = SourceDatabase::build(
+        &[&canonical_a, &canonical_b, &canonical_c],
+        &canonical_a,
+        None,
+        &mut string_table,
+    )
+    .expect("span owner source table should build");
+    for (path, source) in [
+        (&canonical_a, "alpha = 1\n#[hello]\n[runtime]\n"),
+        (&canonical_b, "Beta #= 2\n"),
+        (&canonical_c, "Gamma #= 3\n"),
+    ] {
+        let source_id = span_owner_sources
+            .get_by_canonical_path(path)
+            .expect("span owner source should have a registered identity")
+            .id;
+        span_owner_sources
+            .retain_text(source_id, source.to_owned())
+            .expect("span owner source snapshot should be retained");
+    }
     let source_files = Arc::new(source_files);
 
     let module_table_size_before = string_table.len();
@@ -1048,7 +1071,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             &mut span_builder_c,
         ),
     ];
-    let mut span_owners = SourceDatabaseBuilder::new(Arc::clone(frontend.source_files));
+    let mut span_owners = SourceDatabaseBuilder::new(span_owner_sources);
     span_owners.retain_span_builder(
         frontend
             .source_files
@@ -1265,6 +1288,25 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             .retain_text(source_id, source.clone())
             .expect("test source snapshot should be retained");
     }
+    // R6 gives every builder its own exclusive database: rebuild the same deterministic
+    // registration for the span owner below instead of sharing the frontend handle. Identical
+    // inputs keep source identities aligned across both tables.
+    let mut span_owner_sources = SourceDatabase::build(
+        canonical_paths.iter().map(PathBuf::as_path),
+        &entry_file_path,
+        None,
+        &mut string_table,
+    )
+    .expect("span owner source table should build");
+    for (canonical, source) in canonical_paths.iter().zip(&sources) {
+        let source_id = span_owner_sources
+            .get_by_canonical_path(canonical)
+            .expect("span owner source should have a registered identity")
+            .id;
+        span_owner_sources
+            .retain_text(source_id, source.clone())
+            .expect("span owner source snapshot should be retained");
+    }
     let source_files = Arc::new(source_files);
 
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1291,7 +1333,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             input
         })
         .collect::<Vec<PreparedSourceInput>>();
-    let mut span_owners = SourceDatabaseBuilder::new(Arc::clone(&source_files));
+    let mut span_owners = SourceDatabaseBuilder::new(span_owner_sources);
     for (source_id, builder) in builders {
         span_owners.retain_span_builder(source_id, builder);
     }
@@ -1741,7 +1783,7 @@ fn assert_malformed_chunks_rejected(
     expected_fragment: &str,
 ) {
     let mut string_table = StringTable::new();
-    let mut source_owner = SourceDatabaseBuilder::new(Arc::new(SourceDatabase::empty()));
+    let mut source_owner = SourceDatabaseBuilder::new(SourceDatabase::empty());
 
     let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
