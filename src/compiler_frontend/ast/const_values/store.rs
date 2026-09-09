@@ -28,6 +28,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::paths::module_resources::ResourceId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -120,6 +121,7 @@ pub(crate) struct ConstValueMetadata {
     pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) reactive_source: Option<ReactiveSource>,
     pub(crate) reactive_template: Option<ReactiveTemplateMetadata>,
     pub(crate) const_record_state: ConstRecordState,
@@ -637,6 +639,7 @@ impl ConstValueStore {
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
             location: expression.location.clone(),
+            span: expression.span,
             reactive_source: expression.reactive_source.clone(),
             reactive_template: expression.reactive_template.clone(),
             const_record_state: expression.const_record_state,
@@ -919,6 +922,7 @@ impl ConstValueStore {
                             id: field.name.clone(),
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
+                            binding_span: None,
                             config_qualifier: None,
                         })
                     })
@@ -943,6 +947,7 @@ impl ConstValueStore {
                             id: field.name.clone(),
                             value: self
                                 .expression_for_store_value(field.value, template_builder)?,
+                            binding_span: None,
                             config_qualifier: None,
                         })
                     })
@@ -960,15 +965,16 @@ impl ConstValueStore {
                 value: Box::new(self.expression_for_store_value(*child, template_builder)?),
                 to_type: value.metadata.type_id,
             },
-            ConstValuePayload::OptionNone => ExpressionKind::OptionNone,
             ConstValuePayload::Template { template, .. } => {
                 template_builder(template, &value.metadata)?
             }
+            ConstValuePayload::OptionNone => ExpressionKind::OptionNone,
         };
 
         let mut expression = Expression::new(
             kind,
             value.metadata.location.clone(),
+            value.metadata.span,
             value.metadata.type_id,
             value.metadata.diagnostic_type.clone(),
             value.metadata.value_mode.clone(),

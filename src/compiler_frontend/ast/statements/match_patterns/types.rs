@@ -7,6 +7,7 @@
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -29,8 +30,12 @@ pub struct ParsedChoicePayloadCapture {
     pub binding_name: StringId,
     pub field_index: usize,
     pub type_id: TypeId,
+    /// Location/span of the declared payload field name in the pattern.
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
+    /// Location/span of the actual local binding (`as` alias or field name).
     pub binding_location: SourceLocation,
+    pub binding_span: Option<SourceSpan>,
 }
 
 /// Resolved payload capture for a choice-variant match pattern.
@@ -42,7 +47,12 @@ pub struct ChoicePayloadCapture {
     pub field_index: usize,
     pub type_id: TypeId,
     pub binding_path: InternedPath,
+    /// Location/span of the declared payload field name in the pattern.
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
+    /// Location/span of the actual local binding (`as` alias or field name).
+    pub binding_location: SourceLocation,
+    pub binding_span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +91,7 @@ pub enum MatchPattern {
         inner_type_id: TypeId,
         location: SourceLocation,
         binding_location: SourceLocation,
+        binding_span: Option<SourceSpan>,
     },
 
     Relational {
@@ -94,6 +105,7 @@ pub enum MatchPattern {
         tag: usize,
         captures: Vec<ChoicePayloadCapture>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 }
 
@@ -112,13 +124,13 @@ impl MatchPattern {
     }
 }
 
-/// Result of parsing a choice-variant pattern in a match arm.
 pub struct ParsedChoicePattern {
     pub nominal_path: InternedPath,
     pub variant: StringId,
     pub tag: usize,
     pub captures: Vec<ParsedChoicePayloadCapture>,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Relational operators allowed in match patterns.

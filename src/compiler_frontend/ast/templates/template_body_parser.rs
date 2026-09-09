@@ -20,14 +20,14 @@ use crate::compiler_frontend::ast::templates::template_body_sentinels::{
     ensure_else_boundary_after_sentinel, ensure_loop_control_boundary_after_sentinel,
     ensure_loop_control_boundary_before_sentinel, first_line_has_meaningful_text,
     handle_direct_else_marker, inline_else_diagnostic, loop_control_marker_close_index,
-    loop_control_marker_location, malformed_loop_control_reason, orphan_loop_control_diagnostic,
-    remap_else_if_inline_diagnostic, with_direct_else_marker_span,
+    loop_control_marker_location, loop_control_marker_source_span, malformed_loop_control_reason,
+    orphan_loop_control_diagnostic, remap_else_if_inline_diagnostic, with_direct_else_marker_span,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBodyParseMode, TemplateBranchSelector, TemplateControlFlowValidationMode,
-    TemplateIfBodyParseInput, TemplateLoopBodyParseInput, TemplateLoopControlKind,
-    inline_source_consts_for_const_required_if_condition,
+    TemplateElseMarker, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
+    TemplateLoopControlKind, inline_source_consts_for_const_required_if_condition,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateConstructionContext, TemplateIrBranch, TemplateIrNodeId, TemplateIrNodeKind,
@@ -224,19 +224,22 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
     ) -> BodyParseResult<TemplateBodyBoundary> {
         // The tokenizer only allows for strings, templates or slots inside the template body.
         let mut last_known_location = self.token_stream.current_location();
+        let mut last_known_span = current_token_source_span(self.token_stream);
         while self.token_stream.index < self.token_stream.tokens.len() {
             add_ast_counter(AstCounter::TemplateBodyTokenVisits, 1);
             last_known_location = self.token_stream.current_location();
+            last_known_span = current_token_source_span(self.token_stream);
 
             // Match by reference to avoid cloning the token kind on every iteration.
             // Only the error fallback arm needs an owned clone for the diagnostic payload.
             match self.token_stream.current_token_kind() {
                 TokenKind::Eof => {
-                    return Err(CompilerDiagnostic::unexpected_end_of_file(
+                    let mut diagnostic = CompilerDiagnostic::unexpected_end_of_file(
                         Some(self.close_bracket_id),
                         self.token_stream.current_location(),
-                    )
-                    .into());
+                    );
+                    diagnostic.primary_span = last_known_span;
+                    return Err(diagnostic.into());
                 }
 
                 TokenKind::TemplateClose => {
@@ -295,13 +298,13 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                         add_ast_counter(AstCounter::TemplateTextBytesParsed, byte_len);
                     }
                     let location = self.token_stream.current_location();
-                    construction_context.record_text(*content, byte_len, location);
+                    construction_context.record_text(*content, byte_len, location, last_known_span);
                 }
 
                 TokenKind::Newline => {
                     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                     let location = self.token_stream.current_location();
-                    construction_context.record_text(self.newline_id, 1, location);
+                    construction_context.record_text(self.newline_id, 1, location, last_known_span);
                 }
 
                 found => {
@@ -310,9 +313,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                         found.clone(),
                         current_token.location.clone(),
                     );
-                    if let Some(source) = self.token_stream.file_id {
-                        diagnostic.primary_span = Some(SourceSpan::new(source, current_token.span));
-                    }
+                    diagnostic.primary_span = last_known_span;
                     return Err(diagnostic.into());
                 }
             }
@@ -320,11 +321,12 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             self.token_stream.advance();
         }
 
-        Err(CompilerDiagnostic::unexpected_end_of_file(
+        let mut diagnostic = CompilerDiagnostic::unexpected_end_of_file(
             Some(self.close_bracket_id),
             last_known_location,
-        )
-        .into())
+        );
+        diagnostic.primary_span = last_known_span;
+        Err(diagnostic.into())
     }
 
     /// Parses an `[if]` body and any `[else if]` / `[else]` followers into a
@@ -346,17 +348,23 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         let mut branch_selector = input.selector;
         let mut branch_context = input.then_context;
         let mut branch_location = input.location.clone();
+        let mut branch_span = input.span;
         let mut branch_starts_after_else_if = false;
-        let mut fallback_tir_body = None;
+        let mut fallback_tir_body: Option<TemplateIrNodeId> = None;
+        let mut fallback_else_marker: Option<TemplateElseMarker> = None;
 
         // -------------------
         //  Parse branch bodies
         // -------------------
 
         let opening_location = construction_context.location().to_owned();
+        let opening_span = construction_context.span();
         loop {
-            let mut branch_construction_context =
-                tir_only_body_construction_context(&opening_location, &branch_context);
+            let mut branch_construction_context = tir_only_body_construction_context(
+                &opening_location,
+                opening_span,
+                &branch_context,
+            );
             let parse_input = BodyParseInput {
                 context: &branch_context,
                 build_state,
@@ -384,6 +392,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                 branch_selector.clone(),
                 branch_body_node_id,
                 branch_location.clone(),
+                branch_span,
                 selector_site_id,
             ));
 
@@ -406,6 +415,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                     branch_selector = parsed_else_if.selector;
                     branch_context = parsed_else_if.branch_context;
                     branch_location = location;
+                    branch_span = source.map(|source| SourceSpan::new(source, span));
                     branch_starts_after_else_if = true;
                 }
 
@@ -414,9 +424,14 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                     span,
                     source,
                 } => {
+                    let fallback_marker = TemplateElseMarker {
+                        location: location.clone(),
+                        span: source.map(|source| SourceSpan::new(source, span)),
+                    };
                     let fallback_branch = self.parse_fallback_branch(
                         build_state,
                         &opening_location,
+                        opening_span,
                         &input.else_context,
                         control_context,
                         location,
@@ -424,6 +439,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                         source,
                     )?;
                     fallback_tir_body = Some(fallback_branch.body_node_id);
+                    fallback_else_marker = Some(fallback_marker);
                     break;
                 }
 
@@ -433,14 +449,12 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             }
         }
 
-        // -----------------------
-        //  Finalize branch chain
-        // -----------------------
-
         construction_context.record_branch_chain(
             branch_tir_branches,
             fallback_tir_body,
+            fallback_else_marker,
             input.location.clone(),
+            input.span,
         );
 
         Ok(())
@@ -456,6 +470,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         &mut self,
         build_state: &TemplateBuildState,
         opening_location: &SourceLocation,
+        opening_span: Option<SourceSpan>,
         fallback_context: &ScopeContext,
         control_context: TemplateBodyControlContext,
         location: SourceLocation,
@@ -471,7 +486,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         )?;
 
         let mut else_construction_context =
-            tir_only_body_construction_context(opening_location, fallback_context);
+            tir_only_body_construction_context(opening_location, opening_span, fallback_context);
         let parse_input = BodyParseInput {
             context: fallback_context,
             build_state,
@@ -582,8 +597,12 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         control_context: TemplateBodyControlContext,
     ) -> BodyParseResult<()> {
         let loop_location_snapshot = construction_context.location().to_owned();
-        let mut body_construction_context =
-            tir_only_body_construction_context(&loop_location_snapshot, &input.body_context);
+        let loop_span_snapshot = construction_context.span();
+        let mut body_construction_context = tir_only_body_construction_context(
+            &loop_location_snapshot,
+            loop_span_snapshot,
+            &input.body_context,
+        );
         let parse_input = BodyParseInput {
             context: &input.body_context,
             build_state,
@@ -599,7 +618,7 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             body_construction_context,
         )?;
 
-        construction_context.record_loop(input.header, body_node_id, input.location);
+        construction_context.record_loop(input.header, body_node_id, input.location, input.span);
 
         Ok(())
     }
@@ -669,8 +688,8 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
             // A stored named insert is authored as a binding, then referenced
             // through a nested `[...]` body template. Flatten only the
             // insert-only carrier so the immediate wrapper owns routing.
-            for (template_id, location) in contributions {
-                construction_context.record_insert_contribution(template_id, location);
+            for (template_id, location, span) in contributions {
+                construction_context.record_insert_contribution(template_id, location, span);
             }
         } else {
             match &child_kind {
@@ -716,12 +735,16 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
                     inherited_direct_child_wrappers,
                     input.build_state.child_wrappers.to_owned(),
                     input.build_state.style.skip_parent_child_wrappers,
+                    child_template.span,
                 );
 
                 // Slot definitions are recorded exclusively in parser TIR
                 // through `record_slot`.
-                construction_context
-                    .record_slot(slot_placeholder, child_template.location.clone())?;
+                construction_context.record_slot(
+                    slot_placeholder,
+                    child_template.location.clone(),
+                    child_template.span,
+                )?;
                 return Ok(());
             }
         }
@@ -740,11 +763,12 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         marker: &DirectLoopControlMarker,
     ) -> BodyParseResult<()> {
         if input.build_state.style.suppress_child_templates {
-            return Err(CompilerDiagnostic::invalid_template_structure(
+            let mut diagnostic = CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateLoopControlInLiteralBody,
                 loop_control_marker_location(marker).clone(),
-            )
-            .into());
+            );
+            diagnostic.primary_span = loop_control_marker_source_span(marker);
+            return Err(diagnostic.into());
         }
 
         if !input.control_context.accepts_loop_control() {
@@ -758,10 +782,13 @@ impl<'a, 'types> TemplateBodyParser<'a, 'types> {
         ensure_loop_control_boundary_before_sentinel(self.token_stream, marker, self.string_table)?;
 
         construction_context.trim_trailing_whitespace(self.string_table);
-
         let kind = loop_control_kind(marker);
         let location = loop_control_marker_location(marker).clone();
-        construction_context.record_loop_control(kind, location.clone());
+        construction_context.record_loop_control(
+            kind,
+            location,
+            loop_control_marker_source_span(marker),
+        );
 
         self.token_stream.index = close_index;
         self.token_stream.advance();
@@ -781,6 +808,7 @@ fn record_parser_tir_child_template(
         child_reference,
         TemplateSegmentOrigin::Body,
         child_template.location.clone(),
+        child_template.span,
     );
 }
 
@@ -790,10 +818,12 @@ fn record_parser_tir_insert_contribution(
 ) {
     let child_template_id = child_template.tir_reference.root;
 
-    construction_context
-        .record_insert_contribution(child_template_id, child_template.location.clone());
+    construction_context.record_insert_contribution(
+        child_template_id,
+        child_template.location.clone(),
+        child_template.span,
+    );
 }
-
 fn loop_control_kind(marker: &DirectLoopControlMarker) -> TemplateLoopControlKind {
     match marker {
         DirectLoopControlMarker::Break { .. } => TemplateLoopControlKind::Break,
@@ -875,9 +905,16 @@ enum InheritedChildWrapperPolicy {
 
 fn tir_only_body_construction_context(
     location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &ScopeContext,
 ) -> TemplateConstructionContext {
-    TemplateConstructionContext::new(context.template_ir_store.clone(), location.to_owned())
+    TemplateConstructionContext::new(context.template_ir_store.clone(), location.to_owned(), span)
+}
+fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
 }
 
 fn body_sentinel_target<'a>(
@@ -972,10 +1009,13 @@ fn consume_balanced_brackets_as_literal_text(
     string_table: &mut StringTable,
     text_ids: LiteralTemplateTextIds,
 ) {
+    let source = token_stream.file_id;
+
     // Emit the opening bracket as literal text.
     add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
     let location = token_stream.current_location();
-    construction_context.record_text(text_ids.open_bracket_id, 1, location);
+    let span = current_token_source_span(token_stream);
+    construction_context.record_text(text_ids.open_bracket_id, 1, location, span);
     token_stream.advance();
 
     let _ = consume_balanced_template_region(
@@ -987,6 +1027,7 @@ fn consume_balanced_brackets_as_literal_text(
                     text_ids.open_bracket_id,
                     1,
                     token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
                 );
             }
 
@@ -996,6 +1037,7 @@ fn consume_balanced_brackets_as_literal_text(
                     text_ids.close_bracket_id,
                     1,
                     token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
                 );
             }
 
@@ -1005,12 +1047,22 @@ fn consume_balanced_brackets_as_literal_text(
                 {
                     add_ast_counter(AstCounter::TemplateTextBytesParsed, byte_len);
                 }
-                construction_context.record_text(*content, byte_len, token.location.clone());
+                construction_context.record_text(
+                    *content,
+                    byte_len,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::Newline => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
-                construction_context.record_text(text_ids.newline_id, 1, token.location.clone());
+                construction_context.record_text(
+                    text_ids.newline_id,
+                    1,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::Symbol(id) | TokenKind::StyleDirective(id) => {
@@ -1023,31 +1075,56 @@ fn consume_balanced_brackets_as_literal_text(
                 let literal = format!("{prefix}{name}");
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, literal.len());
                 let literal_id = string_table.intern(&literal);
-                construction_context.record_text(literal_id, literal.len(), token.location.clone());
+                construction_context.record_text(
+                    literal_id,
+                    literal.len(),
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::StartTemplateBody | TokenKind::Colon => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let colon_id = string_table.intern(":");
-                construction_context.record_text(colon_id, 1, token.location.clone());
+                construction_context.record_text(
+                    colon_id,
+                    1,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::Comma => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let comma_id = string_table.intern(",");
-                construction_context.record_text(comma_id, 1, token.location.clone());
+                construction_context.record_text(
+                    comma_id,
+                    1,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::OpenParenthesis => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let paren_id = string_table.intern("(");
-                construction_context.record_text(paren_id, 1, token.location.clone());
+                construction_context.record_text(
+                    paren_id,
+                    1,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             TokenKind::CloseParenthesis => {
                 add_ast_counter(AstCounter::TemplateTextBytesParsed, 1);
                 let paren_id = string_table.intern(")");
-                construction_context.record_text(paren_id, 1, token.location.clone());
+                construction_context.record_text(
+                    paren_id,
+                    1,
+                    token.location.clone(),
+                    Some(SourceSpan::new(source, token.span)),
+                );
             }
 
             _ => {}

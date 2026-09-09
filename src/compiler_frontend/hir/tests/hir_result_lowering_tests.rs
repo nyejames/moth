@@ -51,6 +51,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             location.clone(),
@@ -135,6 +136,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -150,6 +152,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location.clone(),
+        None,
     );
 
     let forward_function = function_node(
@@ -298,6 +301,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location.clone(),
+        None,
     );
 
     let forward_function = function_node(
@@ -399,6 +403,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -414,6 +419,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location.clone(),
+        None,
     );
 
     let forward_function = function_node(
@@ -545,9 +551,10 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                 Expression::string_slice(
                     string_table.intern("ok"),
                     location.clone(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
-                Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(2, location.clone(), None, ValueMode::ImmutableOwned),
             ]),
             location.clone(),
         )],
@@ -562,6 +569,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location.clone(),
+        None,
     );
 
     let forward_function = function_node(
@@ -722,6 +730,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -760,6 +769,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location.clone(),
+        None,
     );
     let outer_call = Expression::function_call_with_typed_arguments(
         consume_name.clone(),
@@ -771,6 +781,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         vec![builtin_type_ids::STRING],
         &mut expression_types,
         location.clone(),
+        None,
     );
 
     let forward_function = function_node(
@@ -905,6 +916,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
             NodeKind::Return(vec![Expression::int(
                 41,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -923,6 +935,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
             runtime_operand_item(Expression::int(
                 1,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             runtime_operator_item(Operator::Add, location.clone()),
@@ -1042,6 +1055,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             location.clone(),
@@ -1102,6 +1116,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -1166,6 +1181,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             location.clone(),
@@ -1249,10 +1265,11 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned),
                 Expression::string_slice(
                     string_table.intern("value"),
                     location.clone(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
             ]),

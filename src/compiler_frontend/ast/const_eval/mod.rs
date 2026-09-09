@@ -23,6 +23,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::compiler_frontend::source::SourceSpan;
+
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
@@ -198,7 +200,10 @@ pub fn constant_fold(
     // replaced by the value it folded to. Nothing here copies an `Expression`.
     for item in output_stack {
         // Operands move straight onto the stack; only operators need inspection.
-        let ExpressionRpnItem::Operator { operator, location } = &item else {
+        let ExpressionRpnItem::Operator {
+            operator, location, ..
+        } = &item
+        else {
             stack.push(item);
             continue;
         };
@@ -308,6 +313,7 @@ fn fold_unary_operator(
         (Operator::Not, ExpressionKind::Bool(value)) => Expression::bool(
             !value,
             expression.location.clone(),
+            expression.span,
             expression.value_mode.to_owned(),
         ),
 
@@ -319,6 +325,7 @@ fn fold_unary_operator(
             Expression::int(
                 negated,
                 expression.location.clone(),
+                expression.span,
                 expression.value_mode.to_owned(),
             )
         }
@@ -329,6 +336,7 @@ fn fold_unary_operator(
                 _ => return Ok(None),
             },
             expression.location.clone(),
+            expression.span,
             expression.value_mode.to_owned(),
         ),
 
@@ -396,6 +404,7 @@ pub fn fold_compile_time_expression(
                     expression.type_id,
                     expression.diagnostic_type.to_owned(),
                     expression.location.clone(),
+                    expression.span,
                 )),
                 _ => Ok(Expression::handled_result_with_type_id(
                     folded_value,
@@ -403,6 +412,7 @@ pub fn fold_compile_time_expression(
                     expression.type_id,
                     expression.diagnostic_type.to_owned(),
                     expression.location.clone(),
+                    expression.span,
                 )),
             }
         }
@@ -492,7 +502,8 @@ fn fold_resolved_cast(
                 Ok(folded_literal) => {
                     let Some(mut folded_expression) = builtin_cast_expression_from_literal(
                         &folded_literal,
-                        &folded_source.location,
+                        &original_expression.location,
+                        original_expression.span,
                         string_table,
                     ) else {
                         return Ok(original_expression.to_owned());
@@ -693,32 +704,38 @@ fn builtin_cast_literal_from_expression(
 fn builtin_cast_expression_from_literal(
     literal: &BuiltinCastLiteral,
     location: &SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Option<Expression> {
     match literal {
         BuiltinCastLiteral::Bool(value) => Some(Expression::bool(
             *value,
             location.clone(),
+            span,
             ValueMode::ImmutableOwned,
         )),
         BuiltinCastLiteral::Int(value) => Some(Expression::int(
             *value,
             location.clone(),
+            span,
             ValueMode::ImmutableOwned,
         )),
         BuiltinCastLiteral::Float(value) => Some(Expression::float(
             *value,
             location.clone(),
+            span,
             ValueMode::ImmutableOwned,
         )),
         BuiltinCastLiteral::String(value) => Some(Expression::string_slice(
             string_table.get_or_intern(value.to_owned()),
             location.clone(),
+            span,
             ValueMode::ImmutableOwned,
         )),
         BuiltinCastLiteral::Char(value) => Some(Expression::char(
             *value,
             location.clone(),
+            span,
             ValueMode::ImmutableOwned,
         )),
         BuiltinCastLiteral::Error { .. } => None,
@@ -896,97 +913,82 @@ impl Expression {
 
             // Integer operations use checked i32 arithmetic so compile-time folding stays
             // equivalent to the Alpha runtime `Int` contract.
-            (ExpressionKind::Int(lhs_val), ExpressionKind::Int(rhs_val)) => {
-                match op {
-                    Operator::Add | Operator::Subtract | Operator::Multiply => {
-                        checked_int_binary_result(
-                            *lhs_val,
-                            *rhs_val,
-                            op,
-                            string_table,
-                            &self.location,
-                        )?
-                    }
-                    Operator::Divide => {
-                        if *rhs_val == 0 {
-                            divide_by_zero_error(string_table, &self.location)?
-                        } else {
-                            checked_float_result(
-                                f64::from(*lhs_val) / f64::from(*rhs_val),
-                                op,
-                                string_table,
-                                &self.location,
-                            )?
-                        }
-                    }
-                    Operator::IntDivide => {
-                        if *rhs_val == 0 {
-                            divide_by_zero_error(string_table, &self.location)?
-                        } else {
-                            checked_int_binary_result(
-                                *lhs_val,
-                                *rhs_val,
-                                op,
-                                string_table,
-                                &self.location,
-                            )?
-                        }
-                    }
-                    Operator::Modulus => {
-                        if *rhs_val == 0 {
-                            divide_by_zero_error(string_table, &self.location)?
-                        } else {
-                            checked_int_binary_result(
-                                *lhs_val,
-                                *rhs_val,
-                                op,
-                                string_table,
-                                &self.location,
-                            )?
-                        }
-                    }
-                    Operator::Exponent => {
-                        if *rhs_val < 0 {
-                            return Err(compile_time_evaluation_diagnostic(
-                                CompileTimeEvaluationErrorReason::InvalidExponent,
-                                Some(op.to_str().to_string()),
-                                string_table,
-                                &self.location,
-                            ));
-                        }
-                        checked_int_binary_result(
-                            *lhs_val,
-                            *rhs_val,
-                            op,
-                            string_table,
-                            &self.location,
-                        )?
-                    }
-
-                    // Logical operations with integer operands
-                    Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
-                    Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
-                    Operator::GreaterThan => ExpressionKind::Bool(lhs_val > rhs_val),
-                    Operator::GreaterThanOrEqual => ExpressionKind::Bool(lhs_val >= rhs_val),
-                    Operator::LessThan => ExpressionKind::Bool(lhs_val < rhs_val),
-                    Operator::LessThanOrEqual => ExpressionKind::Bool(lhs_val <= rhs_val),
-
-                    Operator::Range => ExpressionKind::Range(
-                        Box::new(Expression::int(
-                            *lhs_val,
-                            self.location.to_owned(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                        Box::new(Expression::int(
-                            *rhs_val,
-                            self.location.to_owned(),
-                            ValueMode::ImmutableOwned,
-                        )),
-                    ),
-
-                    _ => invalid_operator_for_compile_time_type(op, string_table, &self.location)?,
+            (ExpressionKind::Int(lhs_val), ExpressionKind::Int(rhs_val)) => match op {
+                Operator::Add | Operator::Subtract | Operator::Multiply => {
+                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, &self.location)?
                 }
-            }
+                Operator::Divide => {
+                    if *rhs_val == 0 {
+                        divide_by_zero_error(string_table, &self.location)?
+                    } else {
+                        checked_float_result(
+                            f64::from(*lhs_val) / f64::from(*rhs_val),
+                            op,
+                            string_table,
+                            &self.location,
+                        )?
+                    }
+                }
+                Operator::IntDivide => {
+                    if *rhs_val == 0 {
+                        divide_by_zero_error(string_table, &self.location)?
+                    } else {
+                        checked_int_binary_result(
+                            *lhs_val,
+                            *rhs_val,
+                            op,
+                            string_table,
+                            &self.location,
+                        )?
+                    }
+                }
+                Operator::Modulus => {
+                    if *rhs_val == 0 {
+                        divide_by_zero_error(string_table, &self.location)?
+                    } else {
+                        checked_int_binary_result(
+                            *lhs_val,
+                            *rhs_val,
+                            op,
+                            string_table,
+                            &self.location,
+                        )?
+                    }
+                }
+                Operator::Exponent => {
+                    if *rhs_val < 0 {
+                        return Err(compile_time_evaluation_diagnostic(
+                            CompileTimeEvaluationErrorReason::InvalidExponent,
+                            Some(op.to_str().to_string()),
+                            string_table,
+                            &self.location,
+                        ));
+                    }
+                    checked_int_binary_result(*lhs_val, *rhs_val, op, string_table, &self.location)?
+                }
+                Operator::Equality => ExpressionKind::Bool(lhs_val == rhs_val),
+                Operator::NotEqual => ExpressionKind::Bool(lhs_val != rhs_val),
+                Operator::GreaterThan => ExpressionKind::Bool(lhs_val > rhs_val),
+                Operator::GreaterThanOrEqual => ExpressionKind::Bool(lhs_val >= rhs_val),
+                Operator::LessThan => ExpressionKind::Bool(lhs_val < rhs_val),
+                Operator::LessThanOrEqual => ExpressionKind::Bool(lhs_val <= rhs_val),
+                Operator::Range => ExpressionKind::Range(
+                    Box::new(Expression::int(
+                        *lhs_val,
+                        self.location.to_owned(),
+                        self.span,
+                        ValueMode::ImmutableOwned,
+                    )),
+                    Box::new(Expression::int(
+                        *rhs_val,
+                        rhs.location.to_owned(),
+                        rhs.span,
+                        ValueMode::ImmutableOwned,
+                    )),
+                ),
+
+                _ => invalid_operator_for_compile_time_type(op, string_table, &self.location)?,
+            },
 
             // Mixed Int/Float operations promote the i32 operand to Float, then require a finite
             // f64 result.
@@ -1146,13 +1148,13 @@ impl Expression {
         let mut result_expression = Expression::new(
             kind,
             self.location.to_owned(),
+            self.span,
             type_id_hint_for_diagnostic_type(&result_type),
             result_type,
             value_mode,
         )
         .with_regular_division_provenance(contains_regular_division);
         result_expression.synthetic_interface_provenance = folded_provenance;
-
         Ok(OperatorFoldOutcome::Folded(result_expression))
     }
 }

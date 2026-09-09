@@ -172,6 +172,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value_mode: parameter.value_mode.clone(),
                 type_id,
                 location: Default::default(),
+                span: None,
             });
         }
 
@@ -194,6 +195,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             parameters,
             returns,
             location: Default::default(),
+            span: None,
         })
     }
 

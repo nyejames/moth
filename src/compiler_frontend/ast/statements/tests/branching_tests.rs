@@ -411,9 +411,15 @@ fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
     let literal = MatchPattern::Literal(Expression::int(
         2,
         test_source_location(1),
+        None,
         ValueMode::ImmutableOwned,
     ));
-    let guard = Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned);
+    let guard = Expression::bool(
+        true,
+        test_source_location(2),
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
     assert!(

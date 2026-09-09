@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -51,7 +52,7 @@ pub fn parse_choice_variant_pattern(
     }
 
     let choice_name_display = choice_display_name(choice_nominal_path, string_table);
-    let (variant_name, variant_location) = parse_variant_name(
+    let (variant_name, variant_location, variant_span) = parse_variant_name(
         token_stream,
         match_context,
         choice_nominal_path,
@@ -85,6 +86,7 @@ pub fn parse_choice_variant_pattern(
         tag: variant_index,
         captures,
         location: variant_location,
+        span: variant_span,
     })
 }
 
@@ -138,6 +140,10 @@ fn parse_choice_pattern_captures(
                 }
 
                 let capture_location = token_stream.current_location();
+                let capture_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
 
                 // Wildcards are not yet supported in choice payload position.
                 if token_stream.current_token_kind() == &TokenKind::Wildcard {
@@ -164,12 +170,16 @@ fn parse_choice_pattern_captures(
 
                 let mut binding_name = field_name;
                 let mut binding_location = capture_location.clone();
+                let mut binding_span = capture_span;
 
                 // Parse optional `as <local_binding>` rename syntax.
                 if token_stream.current_token_kind() == &TokenKind::As {
                     token_stream.advance();
                     binding_location = token_stream.current_location();
-
+                    binding_span = Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    ));
                     let after_as_token = token_stream.current_token_kind().to_owned();
                     binding_name = match after_as_token {
                         TokenKind::Symbol(name) => {
@@ -243,7 +253,9 @@ fn parse_choice_pattern_captures(
                     field_index,
                     type_id: field_decl.value.type_id,
                     location: capture_location,
+                    span: capture_span,
                     binding_location,
+                    binding_span,
                 });
 
                 // Advance past the separator or detect the end of the capture list.
@@ -322,12 +334,16 @@ fn parse_variant_name(
     choice_nominal_path: &InternedPath,
     _choice_name_display: &str,
     _string_table: &StringTable,
-) -> ChoicePatternResult<(StringId, SourceLocation)> {
+) -> ChoicePatternResult<(StringId, SourceLocation, Option<SourceSpan>)> {
     let leading_token = token_stream.current_token_kind().to_owned();
 
     match leading_token {
         TokenKind::Symbol(first_name) => {
             let first_location = token_stream.current_location();
+            let first_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             token_stream.advance();
 
             if token_stream.current_token_kind() == &TokenKind::DoubleColon {
@@ -349,8 +365,12 @@ fn parse_variant_name(
                 match token_stream.current_token_kind().to_owned() {
                     TokenKind::Symbol(qualified_variant_name) => {
                         let qualified_location = token_stream.current_location();
+                        let qualified_span = Some(SourceSpan::new(
+                            token_stream.file_id,
+                            token_stream.current_token().span,
+                        ));
                         token_stream.advance();
-                        Ok((qualified_variant_name, qualified_location))
+                        Ok((qualified_variant_name, qualified_location, qualified_span))
                     }
                     _ => Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::ExpectedVariantNameAfterQualifier,
@@ -360,7 +380,7 @@ fn parse_variant_name(
                     ))),
                 }
             } else {
-                Ok((first_name, first_location))
+                Ok((first_name, first_location, first_span))
             }
         }
 

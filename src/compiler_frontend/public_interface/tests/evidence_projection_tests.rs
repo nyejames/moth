@@ -79,6 +79,7 @@ fn trait_definition(
                     location: SourceLocation::default(),
                 }],
                 location: SourceLocation::default(),
+                span: None,
             },
         )
         .collect();
@@ -1052,6 +1053,7 @@ fn evidence_rejects_core_trait_without_classifier() {
                 location: SourceLocation::default(),
             }],
             location: SourceLocation::default(),
+            span: None,
         }],
         declaration_location: SourceLocation::default(),
         visibility: TraitVisibility::Core,

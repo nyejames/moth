@@ -21,13 +21,14 @@ use crate::builder_surface::config_schema::{
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
+    CompilerDiagnostic, DiagnosticLabel, InvalidConfigReason, InvalidOutputFolderReason,
 };
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
 };
 use crate::compiler_frontend::keywords::is_valid_identifier;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{
     Config, HtmlSectionConfig, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
@@ -100,6 +101,7 @@ pub(super) fn validate_and_apply_config_declarations(
                         expected: string_table.intern("a record value"),
                     },
                     declaration.location.clone(),
+                    declaration.span,
                 ));
             }
             continue;
@@ -130,6 +132,7 @@ pub(super) fn validate_and_apply_config_declarations(
                         expected: string_table.intern("a record value"),
                     },
                     declaration.location.clone(),
+                    declaration.span,
                 ));
             }
             continue;
@@ -142,8 +145,8 @@ pub(super) fn validate_and_apply_config_declarations(
                     key: declaration.name,
                 },
                 declaration.name_location.clone(),
+                declaration.name_span,
             ));
-            continue;
         }
 
         // Unregistered top-level constants are private folding helpers of any value shape.
@@ -158,6 +161,7 @@ pub(super) fn validate_and_apply_config_declarations(
                 .first()
                 .map(|declaration| declaration.location.clone())
                 .unwrap_or_else(|| config.setting_location_or_config_file("project", string_table)),
+            None,
         ));
     }
 
@@ -169,6 +173,7 @@ pub(super) fn validate_and_apply_config_declarations(
                     section: string_table.intern(section.name),
                 },
                 config.setting_location_or_config_file(section.name, string_table),
+                None,
             ));
         }
     }
@@ -245,6 +250,7 @@ fn validate_and_apply_project_record(
         project_schema.root(),
         &declaration.value,
         Some(&declaration.direct_field_locations),
+        Some(&declaration.direct_field_spans),
     ) && let Err(apply_errors) = apply_project_record_fields(config, fields, string_table)
     {
         errors.extend(apply_errors);
@@ -270,14 +276,20 @@ fn apply_project_record_fields(
                 config
                     .setting_locations
                     .insert(field.name.clone(), field.location.clone());
+                if let Some(span) = field.span {
+                    config.setting_spans.insert(field.name.clone(), span);
+                } else {
+                    config.setting_spans.remove(&field.name);
+                }
             }
+
             _ => {}
         }
 
         match (field.name.as_str(), field.value) {
             ("name", ValidatedConfigValue::String(value)) => {
                 if let Err(diagnostic) =
-                    assign_project_name(config, value, &field.location, string_table)
+                    assign_project_name(config, value, &field.location, field.span, string_table)
                 {
                     errors.push(diagnostic);
                 }
@@ -285,7 +297,7 @@ fn apply_project_record_fields(
 
             ("entry_root", ValidatedConfigValue::String(value)) => {
                 if let Err(mut diagnostics) =
-                    assign_entry_root(config, value, &field.location, string_table)
+                    assign_entry_root(config, value, &field.location, field.span, string_table)
                 {
                     errors.append(&mut diagnostics);
                 }
@@ -307,10 +319,10 @@ fn apply_project_record_fields(
                 match validate_template_const_loop_iteration_limit(
                     value,
                     &field.location,
+                    field.span,
                     string_table,
                 ) {
                     Ok(limit) => config.template_const_loop_iteration_limit = limit,
-
                     Err(mut limit_errors) => errors.append(&mut limit_errors),
                 }
             }
@@ -322,6 +334,7 @@ fn apply_project_record_fields(
                     type_identity: preserved.type_identity,
                     value: preserved.value,
                     location: preserved.location,
+                    span: preserved.span.or(field.span),
                 });
             }
 
@@ -340,6 +353,7 @@ fn assign_project_name(
     config: &mut Config,
     value: String,
     location: &SourceLocation,
+    field_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<(), CompilerDiagnostic> {
     if value.is_empty() || !is_valid_identifier(&value) {
@@ -350,6 +364,7 @@ fn assign_project_name(
                 expected: string_table.intern("a valid Moth project identifier"),
             },
             location.clone(),
+            field_span,
         ));
     }
 
@@ -386,6 +401,7 @@ fn validate_and_apply_named_section(
         section.schema.root(),
         &declaration.value,
         Some(&declaration.direct_field_locations),
+        Some(&declaration.direct_field_spans),
     ) && section.name == "html"
     {
         apply_html_section_fields(config, fields, &location)?;
@@ -419,9 +435,11 @@ fn apply_html_section_fields(
 fn apply_html_section_field(
     config: &mut Config,
     field: ValidatedRecordField,
-    location: &SourceLocation,
+    _location: &SourceLocation,
 ) -> Result<(), CompilerError> {
     let name = field.name;
+    let field_location = field.location;
+    let field_span = field.span;
     match (name.as_str(), field.value) {
         ("origin", ValidatedConfigValue::String(text)) => {
             config.html_section.origin = Some(text);
@@ -472,7 +490,14 @@ fn apply_html_section_field(
         }
     }
 
-    config.setting_locations.insert(name, location.clone());
+    config
+        .setting_locations
+        .insert(name.clone(), field_location);
+    if let Some(span) = field_span {
+        config.setting_spans.insert(name, span);
+    } else {
+        config.setting_spans.remove(&name);
+    }
     Ok(())
 }
 
@@ -518,13 +543,12 @@ enum ValidatedConfigValue {
     /// An open-record field retained without a compiler-owned schema leaf.
     Preserved(Box<PreservedConfigField>),
 }
-
-/// Canonical type, folded value and initializer location for one open project field.
 #[derive(Debug, PartialEq, Eq)]
 struct PreservedConfigField {
     type_identity: CanonicalTypeIdentity,
     value: PublicFoldedValue,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 /// One validated field of a record value, in authored field order.
@@ -533,6 +557,7 @@ struct ValidatedRecordField {
     name: String,
     value: ValidatedConfigValue,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 /// The outcome of checking one folded value against its field shape.
@@ -545,11 +570,33 @@ enum ValueCheck {
     Reported,
 }
 
+/// Push one shape-failure diagnostic underlining the authored field's exact span.
+///
+/// The span-aware twin of [`push_shape_failure`]: the recursive record walk calls it with the
+/// authored field's retained span so mismatch and domain diagnostics underline the authored
+/// field instead of falling back to the declaration location. Schema defaults keep the plain
+/// helper because they own no authored span.
+fn push_spanned_shape_failure(
+    diagnostics: &mut ValueDiagnosticContext<'_>,
+    key: Option<StringId>,
+    shape: &ConfigFieldShape,
+    field: &ConfigSchemaField,
+    field_span: Option<SourceSpan>,
+) {
+    diagnostics.errors.push(config_diagnostic(
+        key,
+        shape_failure_reason(shape, field, diagnostics.string_table),
+        diagnostics.location.clone(),
+        field_span,
+    ));
+}
+
 /// Validate one folded value against one field shape and extract its validated value.
 ///
 /// Shape mismatches and closed-domain violations return [`ValueCheck::Mismatch`] so the caller
 /// reports the owning field's reason; nested record policy failures push their diagnostics
-/// directly and return [`ValueCheck::Reported`].
+/// directly and return [`ValueCheck::Reported`]. No authored field span is available here, so
+/// failure diagnostics keep the declaration location without a span.
 fn validate_value(
     view: &ConfigSchemaView<'_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
@@ -557,6 +604,22 @@ fn validate_value(
     shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
     value: &PublicFoldedValue,
+) -> ValueCheck {
+    validate_value_with_span(view, diagnostics, key, shape, field, value, None)
+}
+
+/// Span-aware core of [`validate_value`].
+///
+/// `field_span` is the authored field's retained span when the caller owns one; schema
+/// defaults and nested collection elements pass `None` so no diagnostic gains fake provenance.
+fn validate_value_with_span(
+    view: &ConfigSchemaView<'_>,
+    diagnostics: &mut ValueDiagnosticContext<'_>,
+    key: Option<StringId>,
+    shape: &ConfigFieldShape,
+    field: &ConfigSchemaField,
+    value: &PublicFoldedValue,
+    field_span: Option<SourceSpan>,
 ) -> ValueCheck {
     match shape {
         ConfigFieldShape::String => match extract_string_value(value) {
@@ -592,22 +655,22 @@ fn validate_value(
         },
 
         ConfigFieldShape::Record(node_id) => {
-            validate_record_fields(view, diagnostics, *node_id, value, None)
+            validate_record_fields(view, diagnostics, *node_id, value, None, None)
         }
 
         ConfigFieldShape::Collection(element) => {
-            validate_collection(view, diagnostics, key, element, field, value)
+            validate_collection(view, diagnostics, key, element, field, value, field_span)
         }
 
         ConfigFieldShape::Optional(inner) => match value {
             PublicFoldedValue::OptionNone => ValueCheck::Valid(ValidatedConfigValue::OptionNone),
 
             PublicFoldedValue::OptionSome(present) => {
-                validate_value(view, diagnostics, key, inner, field, present)
+                validate_value_with_span(view, diagnostics, key, inner, field, present, field_span)
             }
 
             // A bare value is accepted as a present optional.
-            _ => validate_value(view, diagnostics, key, inner, field, value),
+            _ => validate_value_with_span(view, diagnostics, key, inner, field, value, field_span),
         },
     }
 }
@@ -621,6 +684,7 @@ fn validate_collection(
     element_shape: &ConfigFieldShape,
     field: &ConfigSchemaField,
     value: &PublicFoldedValue,
+    field_span: Option<SourceSpan>,
 ) -> ValueCheck {
     let PublicFoldedValue::Collection(elements) = value else {
         return ValueCheck::Mismatch;
@@ -628,10 +692,18 @@ fn validate_collection(
 
     let mut values = Vec::with_capacity(elements.len());
     for element_value in elements {
-        match validate_value(view, diagnostics, key, element_shape, field, element_value) {
+        match validate_value_with_span(
+            view,
+            diagnostics,
+            key,
+            element_shape,
+            field,
+            element_value,
+            None,
+        ) {
             ValueCheck::Valid(validated) => values.push(validated),
             ValueCheck::Mismatch => {
-                push_shape_failure(diagnostics, key, element_shape, field);
+                push_spanned_shape_failure(diagnostics, key, element_shape, field, field_span);
                 return ValueCheck::Reported;
             }
 
@@ -644,25 +716,30 @@ fn validate_collection(
 
 /// Validate one record value against one schema node, field by field.
 ///
-/// Known authored fields validate against their schema fields; unknown names follow the node's
-/// [`UnknownFieldPolicy`]. Omitted required fields are rejected, and omitted optional fields
-/// with a schema default contribute that default to the validated record.
 fn validate_record_fields(
     view: &ConfigSchemaView<'_>,
     diagnostics: &mut ValueDiagnosticContext<'_>,
     node_id: ConfigSchemaNodeId,
     value: &PublicFoldedValue,
     field_locations: Option<&[SourceLocation]>,
+    field_spans: Option<&[Option<SourceSpan>]>,
 ) -> ValueCheck {
     let PublicFoldedValue::Record(authored_fields) = value else {
         return ValueCheck::Mismatch;
     };
     let field_locations = field_locations.filter(|locations| !locations.is_empty());
+    let field_spans = field_spans.filter(|spans| !spans.is_empty());
     debug_assert!(
         field_locations
             .map(|locations| locations.len() == authored_fields.len())
             .unwrap_or(true),
         "direct field locations must align with folded record fields"
+    );
+    debug_assert!(
+        field_spans
+            .map(|spans| spans.len() == authored_fields.len())
+            .unwrap_or(true),
+        "direct field spans must align with folded record fields"
     );
 
     let node = view.schema.node(node_id);
@@ -675,31 +752,42 @@ fn validate_record_fields(
             .and_then(|locations| locations.get(index))
             .cloned()
             .unwrap_or_else(|| diagnostics.location.clone());
-
+        let field_span = field_spans
+            .and_then(|spans| spans.get(index))
+            .copied()
+            .flatten();
         match view.field_indexes.lookup(node_id, &authored_field.name) {
             Some(field_id) => {
                 let field = view.schema.field(field_id);
                 let field_key = diagnostics.string_table.intern(&authored_field.name);
 
-                match validate_value(
+                match validate_value_with_span(
                     view,
                     diagnostics,
                     Some(field_key),
                     &field.shape,
                     field,
                     &authored_field.value,
+                    field_span,
                 ) {
                     ValueCheck::Valid(validated) => {
                         validated_fields.push(ValidatedRecordField {
                             name: authored_field.name.clone(),
                             value: validated,
                             location: field_location,
+                            span: field_span,
                         });
                     }
 
                     ValueCheck::Mismatch => {
                         failed = true;
-                        push_shape_failure(diagnostics, Some(field_key), &field.shape, field);
+                        push_spanned_shape_failure(
+                            diagnostics,
+                            Some(field_key),
+                            &field.shape,
+                            field,
+                            field_span,
+                        );
                     }
 
                     ValueCheck::Reported => failed = true,
@@ -717,9 +805,11 @@ fn validate_record_fields(
                                         type_identity: authored_field.type_identity.clone(),
                                         value,
                                         location: field_location.clone(),
+                                        span: field_span,
                                     },
                                 )),
                                 location: field_location,
+                                span: field_span,
                             });
                         }
 
@@ -733,6 +823,7 @@ fn validate_record_fields(
                                     ),
                                 },
                                 field_location,
+                                field_span,
                             ));
                         }
                     }
@@ -747,6 +838,7 @@ fn validate_record_fields(
                             field: diagnostics.string_table.intern(&authored_field.name),
                         },
                         field_location,
+                        field_span,
                     ));
                 }
             },
@@ -772,6 +864,7 @@ fn validate_record_fields(
                     field: diagnostics.string_table.intern(field.name),
                 },
                 diagnostics.location.clone(),
+                None,
             ));
             continue;
         }
@@ -792,6 +885,7 @@ fn validate_record_fields(
                         name: field.name.to_string(),
                         value: validated_default,
                         location: diagnostics.location.clone(),
+                        span: None,
                     });
                 }
 
@@ -822,6 +916,7 @@ fn push_shape_failure(
         key,
         shape_failure_reason(shape, field, diagnostics.string_table),
         diagnostics.location.clone(),
+        None,
     ));
 }
 
@@ -977,6 +1072,7 @@ fn extract_bool_value(value: &PublicFoldedValue) -> Option<bool> {
 fn validate_template_const_loop_iteration_limit(
     value: i32,
     location: &SourceLocation,
+    field_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<usize, Vec<CompilerDiagnostic>> {
     if value <= 0 {
@@ -987,6 +1083,7 @@ fn validate_template_const_loop_iteration_limit(
                 expected: string_table.intern("a positive integer"),
             },
             location.clone(),
+            field_span,
         )]);
     }
 
@@ -998,6 +1095,7 @@ fn validate_template_const_loop_iteration_limit(
                 expected: string_table.intern("an integer no greater than 1000000"),
             },
             location.clone(),
+            field_span,
         )]);
     }
 
@@ -1008,8 +1106,16 @@ fn config_diagnostic(
     key: Option<StringId>,
     reason: InvalidConfigReason,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(key, reason, location)
+    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(key, reason, location);
+    diagnostic.primary_span = span;
+    if let Some(span) = span {
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = Some(span);
+        }
+    }
+    diagnostic
 }
 
 // -------------------------
@@ -1071,7 +1177,6 @@ pub(crate) fn validate_directory_output_settings(
             &release_setting,
             config,
             string_table,
-            &mut errors,
         );
     }
 
@@ -1147,13 +1252,14 @@ fn validate_one_output_folder(
                     key,
                     folder_id,
                     reason,
-                    location,
+                    location.clone(),
+                    config.setting_span(key),
                     string_table,
                 ));
-                return None;
             }
 
             valid.location = location;
+            valid.span = config.setting_span(key);
             Some(valid)
         }
         Err(reason) => {
@@ -1164,6 +1270,7 @@ fn validate_one_output_folder(
                 folder_id,
                 reason,
                 location,
+                config.setting_span(key),
                 string_table,
             ));
             None
@@ -1179,7 +1286,6 @@ fn validate_output_folders_distinct(
     release_setting: &EffectiveOutputSetting,
     config: &Config,
     string_table: &mut StringTable,
-    errors: &mut Vec<CompilerDiagnostic>,
 ) {
     // Both folders passed classification, so their relative paths are guaranteed valid.
     let dev_identity = output_path_identity(&dev.relative_path)
@@ -1194,14 +1300,25 @@ fn validate_output_folders_distinct(
 
     if dev_identity == release_identity || canonical_roots_match {
         let location = config.setting_location_or_config_file(dev_setting.key, string_table);
-        errors.push(CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
             Some(string_table.intern(dev_setting.key)),
             InvalidConfigReason::OutputFoldersNotDistinct {
                 dev_folder: string_table.intern(&dev_setting.folder.to_string_lossy()),
                 release_folder: string_table.intern(&release_setting.folder.to_string_lossy()),
             },
             location,
-        ));
+        );
+        diagnostic.primary_span = config.setting_span(dev_setting.key);
+        if let Some(span) = diagnostic.primary_span {
+            if let Some(label) = diagnostic.labels.first_mut() {
+                label.span = Some(span);
+            }
+        }
+        let release_location =
+            config.setting_location_or_config_file(release_setting.key, string_table);
+        let mut release_label = DiagnosticLabel::secondary(release_location, None);
+        release_label.span = config.setting_span(release_setting.key);
+        diagnostic.labels.push(release_label);
     }
 }
 
@@ -1209,6 +1326,7 @@ fn assign_entry_root(
     config: &mut Config,
     value: String,
     location: &SourceLocation,
+    field_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<(), Vec<CompilerDiagnostic>> {
     if entry_root_escapes_project(&value, &config.entry_dir) {
@@ -1221,6 +1339,7 @@ fn assign_entry_root(
                 ),
             },
             location.clone(),
+            field_span,
         )]);
     }
 
@@ -1269,13 +1388,21 @@ fn output_folder_diagnostic(
     folder: Option<StringId>,
     reason: InvalidOutputFolderReason,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_config_reason(
+    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
         Some(string_table.intern(key)),
         InvalidConfigReason::InvalidOutputFolder { folder, reason },
         location,
-    )
+    );
+    diagnostic.primary_span = span;
+    if let Some(span) = span {
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = Some(span);
+        }
+    }
+    diagnostic
 }
 
 #[cfg(test)]

@@ -309,10 +309,12 @@ fn constant_capacity_resolves_to_fixed_collection() {
         value: Expression::new(
             ExpressionKind::Int(42),
             location.clone(),
+            None,
             builtin_type_ids::INT,
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     scope_context.add_compile_time_var(constant_declaration, SourceLocation::default());
@@ -472,6 +474,7 @@ fn slot_field_default_template(template_ir_store: &mut TemplateIrStore) -> Templ
             context: TemplateViewContext::default(),
         },
         location,
+        span: None,
     }
 }
 
@@ -486,6 +489,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let wrapper_declaration = Declaration {
         id: wrapper_path.clone(),
         value: Expression::template(wrapper_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![wrapper_declaration]));
@@ -501,6 +505,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
             location,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -537,36 +542,32 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         SyntheticInterfaceMemberIdentity::new(SyntheticInterfaceClass::Builder, "assets", "bundle");
     let constant = Declaration {
         id: constant_path.clone(),
-        value: Expression::int(7, location.clone(), ValueMode::ImmutableOwned)
+        value: Expression::int(7, location.clone(), None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                 project_member.clone(),
             )),
+        binding_span: None,
         config_qualifier: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![constant]));
     let collection_type_id = type_environment.intern_collection(builtin_type_ids::INT, None);
-    let collection = Expression::collection_with_type_id(
-        vec![Expression::reference_with_type_id(
-            constant_path,
-            DataType::Int,
-            builtin_type_ids::INT,
-            location.clone(),
-            ValueMode::ImmutableReference,
-            crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-        )
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            project_member.clone(),
-        ))],
-        CollectionExpressionType {
-            element_type_id: builtin_type_ids::INT,
-            element_diagnostic_type: DataType::Int,
-            fixed_capacity: None,
-            collection_type_id: Some(collection_type_id),
-        },
-        &mut type_environment,
+    let collection = Expression::collection_with_type_id(vec![Expression::reference_with_type_id(
+        constant_path,
+        DataType::Int,
+        builtin_type_ids::INT,
         location.clone(),
-        ValueMode::ImmutableOwned,
+        None,
+        ValueMode::ImmutableReference,
+        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
     )
+    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+        project_member.clone(),
+    ))], CollectionExpressionType {
+        element_type_id: builtin_type_ids::INT,
+        element_diagnostic_type: DataType::Int,
+        fixed_capacity: None,
+        collection_type_id: Some(collection_type_id),
+    }, &mut type_environment, location.clone(), None, ValueMode::ImmutableOwned)
     .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
         builder_member.clone(),
     ));
@@ -576,6 +577,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let field = Declaration {
         id: struct_path.clone().append(string_table.intern("values")),
         value: collection,
+        binding_span: None,
         config_qualifier: None,
     };
 

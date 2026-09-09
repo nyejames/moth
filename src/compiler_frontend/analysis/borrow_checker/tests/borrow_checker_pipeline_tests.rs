@@ -49,7 +49,7 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -128,7 +128,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     counter.clone(),
-                    Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
+                    Expression::int(0, test_source_location(1), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -140,7 +140,12 @@ fn successful_borrow_report_can_be_stored_on_module() {
                         builtin_type_ids::INT,
                         test_source_location(2),
                     ),
-                    value: Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        1,
+                        test_source_location(2),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(2),
             ),

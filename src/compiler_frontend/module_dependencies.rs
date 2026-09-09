@@ -263,13 +263,7 @@ impl<'a> DependencyGraph<'a> {
         header: &Header,
         string_table: &StringTable,
     ) -> Result<Vec<ResolvedDependencyEdge>, CompilerError> {
-        let source = header.tokens.file_id.ok_or_else(|| {
-            CompilerError::new(
-                "Dependency ordering requires a registered header source identity.".to_owned(),
-                header.name_location.to_owned(),
-                ErrorType::Compiler,
-            )
-        })?;
+        let source = header.tokens.file_id;
 
         // Hints retain every authored occurrence for diagnostics and Stage 0 handoff, but graph
         // traversal needs one edge per resolved target. In particular, repeated file-value paths
@@ -535,12 +529,9 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                     .header_for_path(path)
                     .map(|header| header.name_location.to_owned())
                     .unwrap_or_default();
-                let diagnostic_span = graph.header_for_path(path).and_then(|header| {
-                    header
-                        .tokens
-                        .file_id
-                        .map(|source| SourceSpan::new(source, header.name_span))
-                });
+                let diagnostic_span = graph
+                    .header_for_path(path)
+                    .map(|header| SourceSpan::new(header.tokens.file_id, header.name_span));
 
                 if let Err(error) = visit_node(
                     path,

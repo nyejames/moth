@@ -188,6 +188,7 @@ fn synthetic_module(
                     result: None,
                 },
                 location: SourceLocation::default(),
+                span: None,
             });
         }
         if let Some(resource_id) = resource_id {
@@ -205,8 +206,10 @@ fn synthetic_module(
                     ty: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
                     value_kind: ValueKind::RValue,
                     region: RegionId(0),
+                    span: None,
                 }),
                 location: SourceLocation::default(),
+                span: None,
             });
         }
 
@@ -223,6 +226,7 @@ fn synthetic_module(
                 ty: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
                 value_kind: ValueKind::Const,
                 region: RegionId(0),
+                span: None,
             }),
         });
         hir.functions.push(HirFunction {

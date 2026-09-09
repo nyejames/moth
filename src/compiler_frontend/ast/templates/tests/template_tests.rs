@@ -57,6 +57,7 @@ fn start_function_node(
             body,
         ),
         location,
+        span: None,
         scope: entry_dir.to_owned(),
     }
 }
@@ -72,6 +73,7 @@ fn push_start_runtime_fragment_node(
             ValueMode::ImmutableOwned,
         )),
         location,
+        span: None,
         scope,
     }
 }
@@ -267,6 +269,7 @@ fn formatted_doc_template_with_direct_tir(
         TemplateType::Comment(CommentDirectiveKind::Doc),
         parsed_summary,
         location.clone(),
+        None,
     ));
 
     let template = Template {
@@ -276,6 +279,7 @@ fn formatted_doc_template_with_direct_tir(
             context,
         },
         location,
+        span: None,
     };
 
     (template, store_handle)

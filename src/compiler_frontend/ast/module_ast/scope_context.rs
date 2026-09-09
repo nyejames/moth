@@ -128,6 +128,13 @@ enum Stage0ResolutionFactsBacking {
         source_files: Arc<SourceDatabase>,
     },
     FrozenGeneric {
+        /// Explicit owning source identity retained from `StableBodySyntax::donor_file_id`.
+        ///
+        /// WHAT: the concrete `SourceId` that owns every materialised token span and path row.
+        /// WHY: frozen lookups take the retained owner and reject any other identity so donor
+        ///      ranges never alias a requester call-site source and independent package handles
+        ///      stay distinct.
+        owner: SourceId,
         references: FxHashMap<PathSyntaxId, FrozenResolvedFileReference>,
     },
 }
@@ -192,6 +199,7 @@ impl Stage0ResolutionFacts {
     }
 
     pub(crate) fn frozen_generic(
+        owner: SourceId,
         references: Vec<FrozenResolvedFileReference>,
     ) -> Result<Self, CompilerError> {
         let mut indexed = FxHashMap::with_capacity_and_hasher(references.len(), Default::default());
@@ -210,14 +218,22 @@ impl Stage0ResolutionFacts {
         }
         Ok(Self {
             backing: Stage0ResolutionFactsBacking::FrozenGeneric {
+                owner,
                 references: indexed,
             },
         })
     }
 
+    pub(crate) fn frozen_owner(&self) -> Option<SourceId> {
+        match &self.backing {
+            Stage0ResolutionFactsBacking::Ordinary { .. } => None,
+            Stage0ResolutionFactsBacking::FrozenGeneric { owner, .. } => Some(*owner),
+        }
+    }
+
     pub(crate) fn lookup(
         &self,
-        source_file: Option<SourceId>,
+        source_file: SourceId,
         path_syntax: PathSyntaxId,
     ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
         match &self.backing {
@@ -225,17 +241,17 @@ impl Stage0ResolutionFacts {
                 resolved_file_references,
                 source_files,
             } => {
-                let source_file = source_file.ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "ordinary Stage 0 file-reference lookup has no declaring SourceId",
-                    )
-                })?;
                 let Some(reference) = resolved_file_references.get(source_file, path_syntax) else {
                     return Ok(None);
                 };
                 ordinary_reference_view(reference, source_files).map(Some)
             }
-            Stage0ResolutionFactsBacking::FrozenGeneric { references } => {
+            Stage0ResolutionFactsBacking::FrozenGeneric { owner, references } => {
+                if source_file != *owner {
+                    return Err(CompilerError::compiler_error(
+                        "frozen generic Stage 0 lookup used a non-owning SourceId; donor and requester handles stay distinct",
+                    ));
+                }
                 Ok(references.get(&path_syntax).map(frozen_reference_view))
             }
         }
@@ -409,9 +425,14 @@ pub struct ScopeShared {
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
     /// Optional compiler-owned direct-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
-    /// Optional only while parsing a materialised generic body. Ordinary source preparation
-    /// installs its registered identity before header or body consumers run.
-    pub(crate) declaring_file_id: Option<SourceId>,
+    /// Owning source identity for `Stage0` joins and span construction.
+    ///
+    /// WHAT: the exact `SourceId` that owns this scope's token spans and path-table rows
+    ///      (for materialised generics, the retained donor owner).
+    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity,
+    ///      so donor ranges never alias a requester call-site source.
+    pub(crate) declaring_file_id: SourceId,
+    /// Per-scope compile-time template expansion limit shared by child contexts.
     pub(crate) template_const_loop_iteration_limit: usize,
 
     // Receiver method catalog for dispatch.
@@ -720,7 +741,7 @@ impl ScopeContext {
             source_build_config_values: None,
             source_build_config_contract_names: None,
             config_resolution: None,
-            declaring_file_id: None,
+            declaring_file_id: SourceId::COMPILATION_ROOT,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),

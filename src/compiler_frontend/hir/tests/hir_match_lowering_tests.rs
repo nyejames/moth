@@ -69,6 +69,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
                     pattern: MatchPattern::Literal(Expression::int(
                         1,
                         test_source_location(11),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
@@ -76,6 +77,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
                         NodeKind::Return(vec![Expression::int(
                             1,
                             test_source_location(11),
+                            None,
                             ValueMode::ImmutableOwned,
                         )]),
                         test_source_location(11),
@@ -85,6 +87,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
                     NodeKind::Return(vec![Expression::int(
                         2,
                         test_source_location(12),
+                        None,
                         ValueMode::ImmutableOwned,
                     )]),
                     test_source_location(12),
@@ -133,11 +136,13 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
             id: ready_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(20),
+            span: None,
         },
         ChoiceVariant {
             id: busy_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(20),
+            span: None,
         },
     ];
 
@@ -169,12 +174,14 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             tag: 0,
                             captures: vec![],
                             location: test_source_location(22),
+                            span: None,
                         },
                         guard: None,
                         body: vec![node(
                             NodeKind::Return(vec![Expression::int(
                                 1,
                                 test_source_location(22),
+                                None,
                                 ValueMode::ImmutableOwned,
                             )]),
                             test_source_location(22),
@@ -186,12 +193,14 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             tag: 1,
                             captures: vec![],
                             location: test_source_location(23),
+                            span: None,
                         },
                         guard: None,
                         body: vec![node(
                             NodeKind::Return(vec![Expression::int(
                                 2,
                                 test_source_location(23),
+                                None,
                                 ValueMode::ImmutableOwned,
                             )]),
                             test_source_location(23),
@@ -260,6 +269,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                     pattern: MatchPattern::Literal(Expression::int(
                         1,
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
@@ -267,6 +277,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                         NodeKind::ExpressionStatement(Expression::int(
                             9,
                             test_source_location(3),
+                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         test_source_location(3),
@@ -276,6 +287,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                     pattern: MatchPattern::Literal(Expression::int(
                         2,
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     guard: None,
@@ -283,6 +295,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                         NodeKind::ExpressionStatement(Expression::int(
                             8,
                             test_source_location(3),
+                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         test_source_location(3),
@@ -293,6 +306,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                 NodeKind::ExpressionStatement(Expression::int(
                     0,
                     test_source_location(3),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(3),
@@ -356,17 +370,20 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(3),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: Some(Expression::bool(
                     true,
                     test_source_location(3),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 body: vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     test_source_location(3),
@@ -376,6 +393,7 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
                     test_source_location(4),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(4),
@@ -433,6 +451,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         pattern: MatchPattern::Literal(Expression::int(
             1,
             test_source_location(3),
+            None,
             ValueMode::ImmutableOwned,
         )),
         guard: Some(Expression::host_function_call(
@@ -440,6 +459,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
             vec![Expression::bool(
                 true,
                 test_source_location(3),
+                None,
                 ValueMode::ImmutableOwned,
             )],
             vec![builtin_type_ids::NONE],
@@ -667,7 +687,7 @@ fn side_table_maps_statement_and_terminator_locations() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, decl_loc.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(1, decl_loc.clone(), None, ValueMode::ImmutableOwned),
                 )),
                 decl_loc.clone(),
             ),
@@ -704,7 +724,12 @@ fn lowers_relational_pattern_to_hir_relational() {
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, test_source_location(3), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        10,
+                        test_source_location(3),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                     location: test_source_location(3),
                 },
                 guard: None,
@@ -712,6 +737,7 @@ fn lowers_relational_pattern_to_hir_relational() {
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     test_source_location(3),
@@ -721,6 +747,7 @@ fn lowers_relational_pattern_to_hir_relational() {
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
                     test_source_location(4),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(4),
@@ -798,18 +825,25 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, test_source_location(3), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        10,
+                        test_source_location(3),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                     location: test_source_location(3),
                 },
                 guard: Some(Expression::bool(
                     true,
                     test_source_location(3),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 body: vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         9,
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     test_source_location(3),
@@ -819,6 +853,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
                 NodeKind::ExpressionStatement(Expression::int(
                     8,
                     test_source_location(4),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(4),
@@ -888,11 +923,13 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
             id: ready_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(2),
+            span: None,
         },
         ChoiceVariant {
             id: busy_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(2),
+            span: None,
         },
     ];
 
@@ -913,12 +950,14 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         tag: 0,
                         captures: vec![],
                         location: test_source_location(4),
+                        span: None,
                     },
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             1,
                             test_source_location(4),
+                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         test_source_location(4),
@@ -930,12 +969,14 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         tag: 1,
                         captures: vec![],
                         location: test_source_location(5),
+                        span: None,
                     },
                     guard: None,
                     body: vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             2,
                             test_source_location(5),
+                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         test_source_location(5),
@@ -1043,6 +1084,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                     inner_type_id: builtin_type_ids::INT,
                     location: test_source_location(3),
                     binding_location: test_source_location(3),
+                    binding_span: None,
                 },
                 guard: None,
                 body: vec![node(
@@ -1059,6 +1101,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 NodeKind::ExpressionStatement(Expression::int(
                     0,
                     test_source_location(4),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(4),

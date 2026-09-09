@@ -19,6 +19,8 @@ pub(crate) fn transfer_terminator(
     let location = context
         .diagnostics
         .terminator_error_location(block_id, terminator);
+    // Forward the side-table authored terminator span; generated terminators stay spanless.
+    let span = context.diagnostics.terminator_error_span(block_id);
     let conflicts_before = stats.conflicts_checked;
     let terminator_order = layout.terminator_order_or_unknown(block_id);
 
@@ -34,6 +36,7 @@ pub(crate) fn transfer_terminator(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -54,6 +57,7 @@ pub(crate) fn transfer_terminator(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -75,6 +79,7 @@ pub(crate) fn transfer_terminator(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
+                    span,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -95,6 +100,7 @@ pub(crate) fn transfer_terminator(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
+                    span,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -113,6 +119,7 @@ pub(crate) fn transfer_terminator(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -133,6 +140,7 @@ pub(crate) fn transfer_terminator(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,

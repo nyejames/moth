@@ -143,6 +143,7 @@ fn template_with_reference(reference: TemplateTirReference, location: SourceLoca
     Template {
         tir_reference: reference,
         location,
+        span: None,
     }
 }
 
@@ -277,6 +278,7 @@ fn nested_wrapper_finalization_fixture(
                 location: SourceLocation::default(),
                 contribution_sources: Vec::new(),
                 slot_sites: Vec::new(),
+                span: None,
             });
             store
                 .attach_runtime_slot_plan(inner_wrapper_template_id, runtime_slot_plan_id)
@@ -299,6 +301,7 @@ fn nested_wrapper_finalization_fixture(
                 Expression::string_slice(
                     outer_dynamic_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 TemplateSegmentOrigin::Body,
@@ -421,6 +424,7 @@ fn nested_wrapper_finalization_fixture(
                 Box::new(Expression::string_slice(
                     string_table.intern("outer-overlay"),
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -654,7 +658,12 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(
+                1,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             TemplateSegmentOrigin::Body,
             None,
             SourceLocation::default(),
@@ -686,6 +695,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
                 Box::new(Expression::int(
                     2,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -803,7 +813,12 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         let child_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_dynamic_expression_node(
-                Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+                Expression::int(
+                    1,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 TemplateSegmentOrigin::Body,
                 None,
                 SourceLocation::default(),
@@ -823,6 +838,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         ));
         let child_expression_overlay = store
             .allocate_expression_overlay(TirExpressionOverlay {
@@ -831,6 +847,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
                     Box::new(Expression::int(
                         2,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 )],
@@ -853,6 +870,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
                     occurrence_id,
                 },
                 SourceLocation::default(),
+                None,
             ))
         };
         let root = store.push_node(TemplateIrNode::new(
@@ -860,6 +878,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
                 children: vec![child_node],
             },
             SourceLocation::default(),
+            None,
         ));
         let root_template_id = store.push_template(TemplateIr::new(
             root,
@@ -867,6 +886,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         ));
 
         (
@@ -928,20 +948,24 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
         let branch_body = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: vec![] },
             SourceLocation::default(),
+            None,
         ));
         let selector_site_id = store.next_expression_site_id();
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(selector_expression),
             branch_body,
             selector_location.clone(),
+            None,
             selector_site_id,
         );
         let branch_chain_node_id = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::BranchChain {
                 branches: vec![branch],
                 fallback: None,
+                else_marker: None,
             },
             SourceLocation::default(),
+            None,
         ));
         let template_id = store.push_template(TemplateIr::new(
             branch_chain_node_id,
@@ -949,6 +973,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         ));
 
         (template_id, branch_chain_node_id, selector_site_id)
@@ -1039,6 +1064,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
         let loop_body = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: vec![] },
             SourceLocation::default(),
+            None,
         ));
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(header_expression),
@@ -1056,6 +1082,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
                 aggregate_wrapper: None,
             },
             loop_location.clone(),
+            None,
         ));
         let template_id = store.push_template(TemplateIr::new(
             loop_node_id,
@@ -1063,6 +1090,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         ));
 
         (template_id, loop_node_id, condition_site_id)
@@ -1156,6 +1184,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
             Expression::string_slice(
                 structural_text,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -1194,6 +1223,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
                 Box::new(Expression::string_slice(
                     overlay_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -1258,6 +1288,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableReference,
                     ConstRecordState::RuntimeValue,
                 ),
@@ -1279,13 +1310,16 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                         DataType::Bool,
                         builtin_type_ids::BOOL,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableReference,
                         ConstRecordState::RuntimeValue,
                     )),
                     branch_text_node,
                     SourceLocation::default(),
+                    None,
                     nested_selector_site,
                 )],
+                None,
                 None,
                 SourceLocation::default(),
             );
@@ -1302,6 +1336,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                         DataType::Bool,
                         builtin_type_ids::BOOL,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableReference,
                         ConstRecordState::RuntimeValue,
                     )),
@@ -1394,6 +1429,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     Box::new(Expression::string_slice(
                         dynamic_text,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 ),
@@ -1402,6 +1438,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     Box::new(Expression::bool(
                         true,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 ),
@@ -1410,6 +1447,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     Box::new(Expression::bool(
                         false,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 ),
@@ -1472,6 +1510,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                 Expression::string_slice(
                     structural_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 TemplateSegmentOrigin::Body,
@@ -1546,6 +1585,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                 Box::new(Expression::string_slice(
                     override_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -1622,6 +1662,7 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
             location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1669,6 +1710,7 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
             location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1720,6 +1762,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
             location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1780,6 +1823,7 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
             location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -2128,15 +2172,21 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location.clone(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
             branch_body,
             location.clone(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_body), location.clone());
+        let root = builder.push_branch_chain_node(
+            vec![branch],
+            Some(fallback_body),
+            None,
+            location.clone(),
+        );
         builder.finish_template(
             root,
             Style::default(),
@@ -2196,6 +2246,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         let aggregate_output = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
             location.clone(),
+            None,
         ));
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
@@ -2216,6 +2267,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
                 DataType::Bool,
                 builtin_type_ids::BOOL,
                 location.clone(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
@@ -2356,6 +2408,7 @@ fn registered_runtime_template(
         DataType::StringSlice,
         builtin_type_ids::STRING,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
@@ -2448,10 +2501,15 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let unselected_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(unselected_text, location.clone(), ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                    unselected_member,
-                )),
+            Expression::string_slice(
+                unselected_text,
+                location.clone(),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                unselected_member,
+            )),
             TemplateSegmentOrigin::Body,
             None,
             location.clone(),
@@ -2460,6 +2518,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             Expression::string_slice(
                 selected_structural_text,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -2470,13 +2529,16 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             unselected_node,
             location.clone(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], Some(selected_node), location);
+        let root =
+            builder.push_branch_chain_node(vec![branch], Some(selected_node), None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -2504,6 +2566,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
                     Expression::string_slice(
                         selected_effective_text,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )
                     .with_synthetic_interface_provenance(
@@ -2659,6 +2722,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
@@ -2931,6 +2995,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
             },
             type_id: builtin_type_ids::STRING,
             location: SourceLocation::default(),
+            span: None,
         };
 
         let dynamic_node = builder.push_dynamic_expression_node(
@@ -2939,6 +3004,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
@@ -3044,10 +3110,12 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         id: parameter_path.clone(),
         value: Expression::no_value_with_type_id(
             test_source_location(1),
+            None,
             DataType::Int,
             builtin_type_ids::INT,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     parameter.value.reactive_source = Some(ReactiveSource {
@@ -3060,6 +3128,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         DataType::Int,
         builtin_type_ids::INT,
         test_source_location(2),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -3077,6 +3146,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
             },
             type_id: builtin_type_ids::INT,
             location: test_source_location(2),
+            span: None,
         }),
     );
     let function = fixture_function_node(
@@ -3102,6 +3172,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         DataType::Int,
         builtin_type_ids::INT,
         test_source_location(3),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -3120,6 +3191,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         vec![builtin_type_ids::STRING],
         &mut type_environment,
         test_source_location(3),
+        None,
     );
     let active_template =
         template_expression(&mut template_ir_store.borrow_mut(), active_call, None);
@@ -3129,6 +3201,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         DataType::Int,
         builtin_type_ids::INT,
         test_source_location(4),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
@@ -3142,6 +3215,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
             },
             type_id: builtin_type_ids::INT,
             location: test_source_location(4),
+            span: None,
         }),
     );
 
@@ -3149,7 +3223,12 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         function,
         node(
             NodeKind::If(
-                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
+                Expression::bool(
+                    true,
+                    test_source_location(3),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 vec![node(
                     NodeKind::ExpressionStatement(active_template),
                     test_source_location(3),
@@ -3310,6 +3389,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
         parameters: vec![Declaration {
             id: InternedPath::new(),
             value: parameter_default,
+            binding_span: None,
             config_qualifier: None,
         }],
         returns: Vec::new(),
@@ -3354,16 +3434,23 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
             to_type: option_string_type_id,
         },
         SourceLocation::default(),
+        None,
         option_string_type_id,
         DataType::Option(Box::new(DataType::StringSlice)),
         ValueMode::ImmutableOwned,
     );
     let mut node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            condition: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             message,
         },
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     };
     let mut context = TemplateNormalizationContext {
@@ -3412,6 +3499,7 @@ fn function_node(path: InternedPath) -> AstNode {
             Vec::new(),
         ),
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -3420,6 +3508,7 @@ fn struct_node(path: InternedPath) -> AstNode {
     AstNode {
         kind: NodeKind::StructDefinition(path, Vec::new()),
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -3431,9 +3520,11 @@ fn marker_signature(parameter_count: usize) -> FunctionSignature {
                 id: InternedPath::new(),
                 value: Expression::no_value(
                     SourceLocation::default(),
+                    None,
                     DataType::Inferred,
                     ValueMode::default(),
                 ),
+                binding_span: None,
                 config_qualifier: None,
             })
             .collect(),
@@ -3881,6 +3972,7 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
             context,
         },
         location,
+        span: None,
     };
 
     (template, store_handle)
@@ -3950,6 +4042,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
             ],
         },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,

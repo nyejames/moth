@@ -151,7 +151,7 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                     builtin_type_ids::INT,
                     test_source_location(2),
                 ),
-                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+                value: Expression::int(2, test_source_location(2), None, ValueMode::ImmutableOwned),
             },
             test_source_location(2),
         )],
@@ -592,7 +592,7 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     value_name.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
@@ -809,7 +809,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -838,7 +838,12 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                         builtin_type_ids::INT,
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(12),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -948,6 +953,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 Expression::string_slice(
                     string_table.intern("unused"),
                     test_source_location(30),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 CallAccessMode::Shared,
@@ -968,6 +974,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         test_source_location(30),
+        None,
     );
 
     let forward = function_node(
@@ -1076,6 +1083,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
             NodeKind::Return(vec![Expression::int(
                 42,
                 test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             test_source_location(2),
@@ -1093,7 +1101,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1122,7 +1130,12 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                         builtin_type_ids::INT,
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(12),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -1186,6 +1199,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 error_type_id: builtin_type_ids::INT,
                 handling: FallibleExpressionHandling::Propagate,
                 location: test_source_location(2),
+                span: None,
             },
             &mut expression_types,
         );
@@ -1229,6 +1243,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         FallibleExpressionHandling::Propagate,
         &mut forward_expression_types,
         test_source_location(3),
+        None,
     );
     let forward = function_node(
         forward_name.clone(),
@@ -1522,7 +1537,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1551,7 +1566,12 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                         builtin_type_ids::INT,
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(12),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -1603,7 +1623,7 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1683,7 +1703,7 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1702,7 +1722,12 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
+                            Expression::int(
+                                2,
+                                test_source_location(11),
+                                None,
+                                ValueMode::ImmutableOwned,
+                            ),
                             CallAccessMode::Shared,
                             test_source_location(11),
                         )
@@ -1750,7 +1775,7 @@ fn host_mutable_parameter_requires_mutable_access() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1809,7 +1834,7 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1867,7 +1892,7 @@ fn host_shared_parameter_is_shared_only() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1948,7 +1973,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2053,7 +2078,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2153,7 +2178,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     original.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2169,7 +2194,12 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                         builtin_type_ids::INT,
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(12),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -2181,7 +2211,12 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                         builtin_type_ids::INT,
                         test_source_location(13),
                     ),
-                    value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        3,
+                        test_source_location(13),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(13),
             ),
@@ -2386,7 +2421,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2457,7 +2492,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2537,7 +2572,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2626,17 +2661,18 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                                     DataType::Int,
                                     builtin_type_ids::INT,
                                     test_source_location(2),
-                                    ValueMode::MutableOwned,
+                                    None, ValueMode::MutableOwned,
                                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                                 )),
                                 ExpressionRpnItem::Operand(Expression::int(
                                     1,
                                     test_source_location(2),
-                                    ValueMode::ImmutableOwned,
+                                    None, ValueMode::ImmutableOwned,
                                 )),
                                 ExpressionRpnItem::Operator {
                                     operator: Operator::Add,
                                     location: test_source_location(2),
+                                    span: None,
                                 },
                             ],
                         },
@@ -2651,7 +2687,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 NodeKind::Return(vec![Expression::bool(
                     true,
                     test_source_location(3),
-                    ValueMode::ImmutableOwned,
+                    None, ValueMode::ImmutableOwned,
                 )]),
                 test_source_location(3),
             ),
@@ -2667,7 +2703,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                     DataType::Bool,
                     builtin_type_ids::BOOL,
                     test_source_location(11),
-                    ValueMode::ImmutableOwned,
+                    None, ValueMode::ImmutableOwned,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                 )),
                 ExpressionRpnItem::Operand(Expression::function_call(
@@ -2677,7 +2713,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                         DataType::Int,
                         builtin_type_ids::INT,
                         test_source_location(11),
-                        ValueMode::MutableOwned,
+                        None, ValueMode::MutableOwned,
                         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     )],
                     vec![builtin_type_ids::BOOL],
@@ -2686,6 +2722,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 ExpressionRpnItem::Operator {
                     operator: Operator::And,
                     location: test_source_location(11),
+                    span: None,
                 },
             ],
         },
@@ -2704,14 +2741,19 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     lhs,
-                    Expression::bool(false, test_source_location(10), ValueMode::ImmutableOwned),
+                    Expression::bool(
+                        false,
+                        test_source_location(10),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 )),
                 test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     calls.clone(),
-                    Expression::int(0, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(0, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),

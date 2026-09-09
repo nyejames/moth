@@ -188,7 +188,12 @@ impl ConstantResolutionSession {
             string_table,
         );
         let mut declaration = declaration_result?;
-
+        // Top-level constant binding anchor is the header name token, not the
+        // initializer value span left empty by `resolve_declaration_syntax`.
+        declaration.binding_span = Some(crate::compiler_frontend::source::SourceSpan::new(
+            header.tokens.file_id,
+            header.name_span,
+        ));
         if let Some(config_resolution) = &self.module_view.config_resolution {
             resolve_direct_project_config_qualifiers(
                 &mut declaration,

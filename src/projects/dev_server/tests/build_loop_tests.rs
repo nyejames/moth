@@ -192,6 +192,7 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
             entry_root: project_root.to_path_buf(),
             owner,
             setting_location: SourceLocation::default(),
+            setting_span: None,
         }),
     }
 }
@@ -254,6 +255,7 @@ impl DevBuildExecutor for FakeExecutor {
                         project_root: Some(project_root),
                         owner: build_result.output_owner,
                         setting_location: SourceLocation::default(),
+                        setting_span: None,
                     })
                 };
                 write_project_outputs(

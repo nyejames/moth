@@ -29,7 +29,6 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 // ------------------------------
 //  Aggregate-wrapper candidates
 // ------------------------------
@@ -59,11 +58,13 @@ pub(in crate::compiler_frontend::ast::templates) fn build_aggregate_wrapper_cand
     children.push(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
         root_location.to_owned(),
+        None,
     )));
 
     Ok(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children },
         root_location,
+        None,
     )))
 }
 
@@ -98,6 +99,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_branch_body_candidate_
     Ok(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children },
         root_location,
+        None,
     )))
 }
 
@@ -321,7 +323,7 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
     store: &mut TemplateIrStore,
     string_table: &StringTable,
 ) -> Result<TemplateIrNodeId, CompilerError> {
-    let (children, location) = {
+    let (children, location, span) = {
         let node = store.get_node(body_root).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "TIR loop-control trim: body root node {} was missing from the store.",
@@ -329,7 +331,9 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
             ))
         })?;
         match &node.kind {
-            TemplateIrNodeKind::Sequence { children } => (children.clone(), node.location.clone()),
+            TemplateIrNodeKind::Sequence { children } => {
+                (children.clone(), node.location.clone(), node.span)
+            }
             _ => {
                 return Err(CompilerError::compiler_error(format!(
                     "TIR loop-control trim: body root node {} was not a Sequence.",
@@ -376,6 +380,7 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
             children: new_children,
         },
         location,
+        span,
     )))
 }
 

@@ -23,6 +23,7 @@ use crate::compiler_frontend::hir::reactivity::{
     HirReactiveSource, HirReactiveTemplate, ReactiveSourceId, ReactiveTemplateId,
 };
 use crate::compiler_frontend::hir::statements::HirStatement;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -202,6 +203,9 @@ pub(crate) struct HirSideTable {
     /// specific expression or statement.
     hir_to_source: FxHashMap<HirLocation, SourceLocationId>,
 
+    /// Exact spans for authored block terminators. Generated terminators have no entry.
+    terminator_spans: FxHashMap<BlockId, SourceSpan>,
+
     // -------------------------------------------------------------------------
     //  Name side-tables. Store canonical path identity.
     //  Rendering and diagnostics derive leaf names from these.
@@ -241,6 +245,7 @@ impl HirSideTable {
         self.hir_to_ast.clear();
         self.hir_to_source.clear();
         self.local_names.clear();
+        self.terminator_spans.clear();
         self.local_origins.clear();
         self.function_names.clear();
         self.struct_names.clear();
@@ -436,6 +441,11 @@ impl HirSideTable {
 
         self.map_ast_to_hir(ast_location, hir_location);
         self.map_hir_source_location(hir_location, ast_location);
+    }
+
+    /// Stores the exact authored span for a block terminator.
+    pub(crate) fn map_terminator_span(&mut self, block_id: BlockId, span: SourceSpan) {
+        self.terminator_spans.insert(block_id, span);
     }
 
     /// Registers the source location for a local variable if provided.
@@ -642,6 +652,12 @@ impl HirSideTable {
     ) -> Option<&SourceLocation> {
         let source_id = self.hir_source_id_for_hir(hir_location)?;
         self.source_location(source_id)
+    }
+
+    /// Returns the exact authored span for a block terminator, if one was recorded.
+    #[inline]
+    pub(crate) fn terminator_span(&self, block_id: BlockId) -> Option<&SourceSpan> {
+        self.terminator_spans.get(&block_id)
     }
 
     /// Returns the interned path for a local variable.

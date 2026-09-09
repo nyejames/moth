@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -40,6 +41,7 @@ pub(crate) fn reference_expression_from_declaration(
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     base_location: SourceLocation,
+    base_span: Option<SourceSpan>,
 ) -> Expression {
     if context.kind.is_constant_context() {
         if reference_arg.is_unresolved_constant_placeholder() {
@@ -58,6 +60,7 @@ pub(crate) fn reference_expression_from_declaration(
                 placeholder_type,
                 placeholder_type_id,
                 base_location,
+                base_span,
                 ValueMode::ImmutableOwned,
                 reference_arg.value.const_record_state,
             );
@@ -69,12 +72,15 @@ pub(crate) fn reference_expression_from_declaration(
                 reference_arg.value.diagnostic_type.to_owned(),
                 reference_arg.value.type_id,
                 base_location,
+                base_span,
                 ValueMode::ImmutableOwned,
                 reference_arg.value.const_record_state,
             );
         }
 
         let mut inlined_expression = reference_arg.value.to_owned();
+        inlined_expression.location = base_location;
+        inlined_expression.span = base_span;
         inlined_expression.value_mode = ValueMode::ImmutableOwned;
         inlined_expression
     } else {
@@ -83,6 +89,7 @@ pub(crate) fn reference_expression_from_declaration(
             reference_arg.value.diagnostic_type.to_owned(),
             reference_arg.value.type_id,
             base_location,
+            base_span,
             reference_arg.value.value_mode.to_owned(),
             reference_arg.value.const_record_state,
         );
@@ -102,6 +109,7 @@ fn receiver_reference_node(
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     base_location: SourceLocation,
+    base_span: Option<SourceSpan>,
 ) -> AstNode {
     AstNode {
         kind: NodeKind::ExpressionStatement(reference_expression_from_declaration(
@@ -109,9 +117,11 @@ fn receiver_reference_node(
             context,
             type_interner,
             base_location.clone(),
+            base_span,
         )),
         scope: context.scope.to_owned(),
         location: base_location,
+        span: base_span,
     }
 }
 
@@ -130,6 +140,7 @@ pub(crate) fn parse_postfix_chain_expression(
     token_stream: &mut FileTokens,
     receiver_expression: Expression,
     receiver_location: SourceLocation,
+    receiver_span: Option<SourceSpan>,
     chain_access: PostfixChainAccess,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -139,6 +150,7 @@ pub(crate) fn parse_postfix_chain_expression(
         kind: NodeKind::ExpressionStatement(receiver_expression),
         scope: context.scope.to_owned(),
         location: receiver_location,
+        span: receiver_span,
     };
 
     let postfix_node = parse_postfix_chain_typed(
@@ -208,11 +220,16 @@ fn parse_postfix_chain_typed(
         let member_name = parse_member_name_typed(token_stream, string_table)?;
         let receiver_type_id = receiver_node_type_id(&receiver_node)?;
         let member_location = token_stream.current_location();
+        let member_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
         let member_context = MemberStepContext {
             receiver_node: &receiver_node,
             receiver_type_id,
             member_name,
             member_location: member_location.clone(),
+            member_span,
             receiver_access_mode,
             authored_marker_location: authored_marker_location.clone(),
             scope_context: context,
@@ -381,10 +398,21 @@ fn parse_field_access_with_receiver_access(
     } else {
         token_stream.current_location()
     };
+    let base_span = if token_stream.index > 0 {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.tokens[token_stream.index - 1].span,
+        ))
+    } else {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ))
+    };
 
     parse_postfix_chain_typed(
         token_stream,
-        receiver_reference_node(base_arg, context, type_interner, base_location),
+        receiver_reference_node(base_arg, context, type_interner, base_location, base_span),
         chain_access,
         context,
         type_interner,
@@ -405,18 +433,31 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     } else {
         token_stream.current_location()
     };
+    let base_span = if token_stream.index > 0 {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.tokens[token_stream.index - 1].span,
+        ))
+    } else {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ))
+    };
 
     let receiver_expression = reference_expression_from_declaration(
         base_arg,
         context,
         type_interner,
         base_location.clone(),
+        base_span,
     );
 
     parse_postfix_chain_expression(
         token_stream,
         receiver_expression,
         base_location,
+        base_span,
         chain_access,
         context,
         type_interner,

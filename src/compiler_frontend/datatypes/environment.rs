@@ -848,6 +848,7 @@ impl TypeEnvironment {
                         name: field.name.clone(),
                         type_id: self.substitute_type_id(field.type_id, &mapping),
                         location: field.location.clone(),
+                        span: field.span,
                     });
                 }
                 self.generic_instance_fields
@@ -873,6 +874,7 @@ impl TypeEnvironment {
                                 name: field.name.clone(),
                                 type_id: self.substitute_type_id(field.type_id, &mapping),
                                 location: field.location.clone(),
+                                span: field.span,
                             });
                         }
                         ChoiceVariantPayloadDefinition::Record {
@@ -885,6 +887,7 @@ impl TypeEnvironment {
                     tag: variant.tag,
                     payload: substituted_payload,
                     location: variant.location.clone(),
+                    span: variant.span,
                 });
             }
             self.generic_instance_variants

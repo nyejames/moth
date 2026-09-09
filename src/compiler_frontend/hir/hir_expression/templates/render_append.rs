@@ -567,6 +567,7 @@ impl<'a> HirBuilder<'a> {
                 child,
                 wrapper,
                 location,
+                ..
             } => self.append_output_conditioned_runtime_wrapper(
                 child,
                 wrapper,
@@ -578,6 +579,7 @@ impl<'a> HirBuilder<'a> {
                 branches,
                 fallback,
                 location,
+                ..
             } => self.append_owned_runtime_template_branch_chain(
                 branches,
                 fallback.as_deref(),
@@ -591,6 +593,7 @@ impl<'a> HirBuilder<'a> {
                 body,
                 aggregate_wrapper,
                 location,
+                ..
             } => self.append_owned_runtime_template_loop(
                 header,
                 body,
@@ -621,7 +624,7 @@ impl<'a> HirBuilder<'a> {
                 Ok(TemplateBodyEmission::Output)
             }
 
-            OwnedRuntimeTemplateNode::LoopControl { kind, location } => {
+            OwnedRuntimeTemplateNode::LoopControl { kind, location, .. } => {
                 if let Some(flush) = append_context.loop_control_flush {
                     self.flush_runtime_slot_application_for_loop_control(flush, *kind, location)?;
                     return Ok(match kind {
@@ -651,7 +654,7 @@ impl<'a> HirBuilder<'a> {
                 Ok(emission)
             }
 
-            OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { source } => {
+            OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { source, .. } => {
                 let emission = self.append_runtime_slot_source_to_accumulator(
                     *source,
                     append_context,
@@ -665,7 +668,7 @@ impl<'a> HirBuilder<'a> {
                 Ok(emission)
             }
 
-            OwnedRuntimeTemplateNode::Slot { location } => {
+            OwnedRuntimeTemplateNode::Slot { location, .. } => {
                 // Wrapper-shaped templates can reach HIR as runtime values when
                 // they are not used as helpers. Their slot placeholders are
                 // structural insertion points, not renderable chunks, so linear
@@ -759,7 +762,8 @@ impl<'a> HirBuilder<'a> {
                 self.lower_if_with_body_emitters(
                     condition,
                     &branch.location,
-                    |builder| {
+                    None,
+                    |builder: &mut HirBuilder<'_>| {
                         builder.append_owned_runtime_template_node_to_accumulator(
                             &branch.body,
                             append_context,
@@ -768,7 +772,7 @@ impl<'a> HirBuilder<'a> {
                         )?;
                         Ok(())
                     },
-                    |builder| {
+                    |builder: &mut HirBuilder<'_>| {
                         builder.append_owned_runtime_template_branch_chain_from_index(
                             branches,
                             fallback,
@@ -811,7 +815,7 @@ impl<'a> HirBuilder<'a> {
             scrutinee,
             pattern,
             &branch.location,
-            |builder| {
+            |builder: &mut HirBuilder<'_>| {
                 builder.append_owned_runtime_template_node_to_accumulator(
                     &branch.body,
                     append.append_context,
@@ -820,7 +824,7 @@ impl<'a> HirBuilder<'a> {
                 )?;
                 Ok(())
             },
-            |builder| {
+            |builder: &mut HirBuilder<'_>| {
                 builder.append_owned_runtime_template_branch_chain_from_index(
                     append.branches,
                     append.fallback,
@@ -869,19 +873,24 @@ impl<'a> HirBuilder<'a> {
 
         match header {
             TemplateLoopHeader::Conditional { condition } => {
-                self.lower_while_with_body_emitter(condition, fallback_location, |builder| {
-                    let iteration_context = append_context
-                        .with_target_accumulator(aggregate)
-                        .with_emitted_output(Some(emitted_any_iteration));
+                self.lower_while_with_body_emitter(
+                    condition,
+                    fallback_location,
+                    None,
+                    |builder: &mut HirBuilder<'_>| {
+                        let iteration_context = append_context
+                            .with_target_accumulator(aggregate)
+                            .with_emitted_output(Some(emitted_any_iteration));
 
-                    builder.append_owned_runtime_template_node_to_accumulator(
-                        body,
-                        iteration_context,
-                        aggregate_local,
-                        fallback_location,
-                    )?;
-                    Ok(())
-                })?;
+                        builder.append_owned_runtime_template_node_to_accumulator(
+                            body,
+                            iteration_context,
+                            aggregate_local,
+                            fallback_location,
+                        )?;
+                        Ok(())
+                    },
+                )?;
             }
 
             TemplateLoopHeader::Range { bindings, range } => {
@@ -889,7 +898,7 @@ impl<'a> HirBuilder<'a> {
                     bindings,
                     range,
                     fallback_location,
-                    |builder| {
+                    |builder: &mut HirBuilder<'_>| {
                         let iteration_context = append_context
                             .with_target_accumulator(aggregate)
                             .with_emitted_output(Some(emitted_any_iteration));
@@ -910,7 +919,7 @@ impl<'a> HirBuilder<'a> {
                     bindings,
                     iterable,
                     fallback_location,
-                    |builder| {
+                    |builder: &mut HirBuilder<'_>| {
                         let iteration_context = append_context
                             .with_target_accumulator(aggregate)
                             .with_emitted_output(Some(emitted_any_iteration));
@@ -1279,8 +1288,8 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
         match control_kind {
-            TemplateLoopControlKind::Break => self.emit_break_to_current_loop(location),
-            TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(location),
+            TemplateLoopControlKind::Break => self.emit_break_to_current_loop(location, None),
+            TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(location, None),
         }
     }
 
@@ -1294,6 +1303,7 @@ impl<'a> HirBuilder<'a> {
             OwnedRuntimeTemplateNode::LoopControl {
                 kind,
                 location: control_location,
+                ..
             } => {
                 if let Some(flush) = append_context.loop_control_flush {
                     self.flush_runtime_slot_application_for_loop_control(
@@ -1450,8 +1460,9 @@ impl<'a> HirBuilder<'a> {
 
         // `Float` template chunks must use the Moth-owned formatter instead of target-native
         // stringification so casts and templates share one formatting contract.
+        // Template chunk formatting is generated scaffolding: the `FormatFloat` stays spanless.
         if expression.ty == self.type_environment.builtins().float {
-            return self.emit_formatted_float_value(expression, location);
+            return self.emit_formatted_float_value(expression, location, None);
         }
 
         let empty = self.make_expression(

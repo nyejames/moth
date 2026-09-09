@@ -13,6 +13,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -47,6 +48,7 @@ impl<'a> HirBuilder<'a> {
         op: &Operator,
         right: &RuntimeRpnTree,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let lowered_left = self.lower_runtime_tree_value_to_current_block(left, location)?;
 
@@ -65,7 +67,7 @@ impl<'a> HirBuilder<'a> {
         self.set_current_block(condition_block, location)?;
         let (then_block, else_block) = cfg_spec.branch_targets(rhs_block, short_block);
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: lowered_left,
@@ -73,6 +75,7 @@ impl<'a> HirBuilder<'a> {
                 else_block,
             },
             location,
+            span,
         )?;
 
         self.emit_short_circuit_rhs_branch(

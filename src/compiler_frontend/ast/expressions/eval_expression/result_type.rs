@@ -43,60 +43,60 @@ pub(super) fn resolve_expression_result_type(
             }
 
             // Operators consume operand types from the stack and push the result type.
-            ExpressionRpnItem::Operator { operator, location } => {
-                match operator.required_values() {
-                    1 => {
-                        let Some(operand) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::Unary,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        stack.push(resolve_unary_operator_type(
+            ExpressionRpnItem::Operator {
+                operator, location, ..
+            } => match operator.required_values() {
+                1 => {
+                    let Some(operand) = stack.pop() else {
+                        return Err(missing_operand_error(
                             operator,
-                            operand,
+                            OperatorOperandPosition::Unary,
                             location,
-                            type_environment,
-                        )?);
-                    }
-
-                    2 => {
-                        let Some(rhs) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::BinaryRight,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        let Some(lhs) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::BinaryLeft,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        stack.push(resolve_binary_operator_type(
-                            lhs,
-                            rhs,
-                            operator,
-                            location,
-                            type_environment,
-                        )?);
-                    }
-
-                    _ => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "Unsupported operator arity during expression typing: {:?}",
-                            operator
-                        ))
-                        .into());
-                    }
+                            string_table,
+                        ));
+                    };
+                    stack.push(resolve_unary_operator_type(
+                        operator,
+                        operand,
+                        location,
+                        type_environment,
+                    )?);
                 }
-            }
+
+                2 => {
+                    let Some(rhs) = stack.pop() else {
+                        return Err(missing_operand_error(
+                            operator,
+                            OperatorOperandPosition::BinaryRight,
+                            location,
+                            string_table,
+                        ));
+                    };
+                    let Some(lhs) = stack.pop() else {
+                        return Err(missing_operand_error(
+                            operator,
+                            OperatorOperandPosition::BinaryLeft,
+                            location,
+                            string_table,
+                        ));
+                    };
+                    stack.push(resolve_binary_operator_type(
+                        lhs,
+                        rhs,
+                        operator,
+                        location,
+                        type_environment,
+                    )?);
+                }
+
+                _ => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Unsupported operator arity during expression typing: {:?}",
+                        operator
+                    ))
+                    .into());
+                }
+            },
         }
     }
 

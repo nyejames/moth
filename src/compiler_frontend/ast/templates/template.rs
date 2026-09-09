@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -123,6 +124,7 @@ pub struct SlotPlaceholder {
     pub applied_child_wrappers: Vec<TemplateWrapperReference>,
     pub child_wrappers: Vec<TemplateWrapperReference>,
     pub skip_parent_child_wrappers: bool,
+    pub span: Option<SourceSpan>,
 }
 
 impl SlotPlaceholder {
@@ -131,12 +133,14 @@ impl SlotPlaceholder {
         applied_child_wrappers: Vec<TemplateWrapperReference>,
         child_wrappers: Vec<TemplateWrapperReference>,
         skip_parent_child_wrappers: bool,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self {
             key,
             applied_child_wrappers,
             child_wrappers,
             skip_parent_child_wrappers,
+            span,
         }
     }
 }
@@ -167,6 +171,7 @@ pub struct ReactiveSubscription {
     pub source: ReactiveSource,
     pub type_id: TypeId,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 // -------------------------
@@ -290,4 +295,5 @@ pub struct Template {
     pub(crate) tir_reference: TemplateTirReference,
 
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }

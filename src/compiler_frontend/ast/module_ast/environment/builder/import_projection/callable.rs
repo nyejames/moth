@@ -53,10 +53,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
+                    None,
                     function_type_id,
                     diagnostic_type,
                     ValueMode::ImmutableReference,
                 ),
+                binding_span: None,
                 config_qualifier: None,
             };
             Rc::make_mut(&mut self.declaration_table)
@@ -447,6 +449,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let mut value = Expression::new(
                 ExpressionKind::NoValue,
                 Default::default(),
+                None,
                 type_id,
                 diagnostic_type,
                 value_mode.clone(),
@@ -464,6 +467,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             parameters.push(Declaration {
                 id: function_path.append(name),
                 value,
+                binding_span: None,
                 config_qualifier: None,
             });
             parameter_type_ids.push(type_id);

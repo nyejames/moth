@@ -68,6 +68,7 @@ struct ValueRef {
 struct CallEffectSpec<'a> {
     label: String,
     arguments: Vec<PlaceId>,
+    argument_sources: Vec<EventSource>,
     accesses: Vec<AccessKind>,
     provenance: CallResultProvenance,
     result: Option<LocalId>,
@@ -245,6 +246,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 EventSource {
                     hir_node: None,
                     location: local.source_info.clone(),
+                    span: local.span,
                 },
             ));
         }
@@ -361,6 +363,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let source = EventSource {
             hir_node: Some(statement.id),
             location: Some(statement.location.clone()),
+            span: statement.span,
         };
         match &statement.kind {
             HirStatementKind::Assign { target, value } => {
@@ -951,11 +954,16 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let arguments = self.lower_call_arguments(args, source, event_ids)?;
+        let argument_sources = args
+            .iter()
+            .map(|argument| self.value_source(argument, source))
+            .collect();
         let (accesses, provenance) = self.call_effect(target, args.len())?;
         self.emit_call_effect_with_label(
             CallEffectSpec {
                 label: format!("{target:?}"),
                 arguments,
+                argument_sources,
                 accesses,
                 provenance,
                 result,
@@ -978,6 +986,10 @@ impl<'a> FunctionProblemBuilder<'a> {
         expressions.push(receiver.clone());
         expressions.extend(args.iter().cloned());
         let arguments = self.lower_call_arguments(&expressions, source, event_ids)?;
+        let argument_sources = expressions
+            .iter()
+            .map(|argument| self.value_source(argument, source))
+            .collect();
         let receiver_access = if op.requires_mutable_receiver() {
             AccessKind::Exclusive
         } else {
@@ -999,6 +1011,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallEffectSpec {
                 label,
                 arguments,
+                argument_sources,
                 accesses,
                 provenance,
                 result,
@@ -1016,13 +1029,14 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<Vec<PlaceId>, CompilerError> {
         args.iter()
             .map(|argument| {
+                let argument_source = self.value_source(argument, source);
                 let value = match &argument.kind {
                     HirExpressionKind::Load(place) => ValueRef {
-                        place: Some(self.lower_place(place, source, event_ids)?),
+                        place: Some(self.lower_place(place, &argument_source, event_ids)?),
                     },
                     _ => self.lower_expression(argument, source, event_ids)?,
                 };
-                self.materialize_value_place(value, argument, source, event_ids)
+                self.materialize_value_place(value, argument, &argument_source, event_ids)
             })
             .collect()
     }
@@ -1032,7 +1046,9 @@ impl<'a> FunctionProblemBuilder<'a> {
         spec: CallEffectSpec<'_>,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        if spec.arguments.len() != spec.accesses.len() {
+        if spec.arguments.len() != spec.accesses.len()
+            || spec.arguments.len() != spec.argument_sources.len()
+        {
             return Err(compiler_error(
                 "Boracle problem extraction produced mismatched call argument metadata",
             ));
@@ -1040,6 +1056,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let CallEffectSpec {
             label,
             arguments,
+            argument_sources,
             accesses,
             provenance,
             result: result_local,
@@ -1048,8 +1065,13 @@ impl<'a> FunctionProblemBuilder<'a> {
         let call_id = self.next_call_id()?;
         self.calls.push(Call { id: call_id, label });
         let mut call_arguments = Vec::with_capacity(arguments.len());
-        for (index, (place, access)) in arguments.into_iter().zip(accesses).enumerate() {
-            let point = self.new_point(self.current_problem_block()?, source.clone());
+        for (index, ((place, access), argument_source)) in arguments
+            .into_iter()
+            .zip(accesses)
+            .zip(argument_sources)
+            .enumerate()
+        {
+            let point = self.new_point(self.current_problem_block()?, argument_source.clone());
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -1081,7 +1103,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                         .cloned()
                         .expect("call argument was just appended"),
                 },
-                source.clone(),
+                argument_source.clone(),
             ));
             event_ids.push(event_id);
         }
@@ -1123,7 +1145,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 event_id,
                 point,
                 EventKind::Access { use_id },
-                spec.source.clone(),
+                source.clone(),
             ));
             event_ids.push(event_id);
         }
@@ -1132,7 +1154,6 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     /// Lower a terminator's operand accesses and return its event kind.
     ///
-    /// The caller emits the terminator event, so scope retirement can be recorded between the
     /// operand accesses and the terminator itself.
     fn lower_terminator_kind(
         &mut self,
@@ -1483,7 +1504,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 None,
                 false,
                 false,
-                source.clone(),
+                EventSource::none(),
             ));
             self.synthetic_binding_by_value.insert(value_id, binding);
             binding
@@ -1914,6 +1935,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .side_table
                 .hir_source_location_for_hir(HirLocation::Block(block))
                 .cloned(),
+            span: None,
         }
     }
 
@@ -1925,6 +1947,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .side_table
                 .hir_source_location_for_hir(HirLocation::Terminator(block))
                 .cloned(),
+            span: self.module.side_table.terminator_span(block).copied(),
         }
     }
 
@@ -1937,6 +1960,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 .value_source_location(expression.id)
                 .cloned()
                 .or_else(|| fallback.location.clone()),
+            span: expression.span,
         }
     }
 

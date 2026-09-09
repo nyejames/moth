@@ -36,9 +36,11 @@ fn declaration_semantics_preserves_missing_template_authority() {
                     context: TemplateViewContext::default(),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let table = TopLevelDeclarationTable::new(vec![declaration]);

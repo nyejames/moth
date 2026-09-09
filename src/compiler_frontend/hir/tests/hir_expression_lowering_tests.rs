@@ -98,14 +98,18 @@ fn text_aggregate_wrapper_node(
                 text: OwnedFoldedString::Text(string_table.resolve(prefix).to_owned()),
                 reactive_subscription: None,
                 location: location.to_owned(),
+                span: None,
             },
             OwnedRuntimeTemplateNode::AggregateOutput,
             OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text(string_table.resolve(suffix).to_owned()),
                 reactive_subscription: None,
                 location: location.to_owned(),
+                span: None,
             },
         ],
+        location: location.to_owned(),
+        span: None,
     }
 }
 
@@ -125,14 +129,18 @@ fn runtime_template_bool_if_expression(
             selector: TemplateBranchSelector::Bool(condition),
             body: then_body,
             location: location.clone(),
+            span: None,
         }],
         fallback,
+        else_marker: None,
         location: location.clone(),
+        span: None,
     };
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(body),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -166,18 +174,23 @@ fn runtime_template_option_capture_expression(
                     inner_type_id,
                     location: location.clone(),
                     binding_location: location.clone(),
+                    binding_span: None,
                 }),
             },
             body: then_body,
             location: location.clone(),
+            span: None,
         }],
         fallback,
+        else_marker: None,
         location: location.clone(),
+        span: None,
     };
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(body),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -204,11 +217,13 @@ fn runtime_template_range_loop_expression(
         body: Box::new(body),
         aggregate_wrapper: Some(Box::new(aggregate_wrapper)),
         location: location.clone(),
+        span: None,
     };
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(node),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -235,11 +250,13 @@ fn runtime_template_collection_loop_expression(
         body: Box::new(body),
         aggregate_wrapper: Some(Box::new(aggregate_wrapper)),
         location: location.clone(),
+        span: None,
     };
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(node),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -264,11 +281,13 @@ fn runtime_template_conditional_loop_expression(
         body: Box::new(body),
         aggregate_wrapper: Some(Box::new(aggregate_wrapper)),
         location: location.clone(),
+        span: None,
     };
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(node),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -280,10 +299,12 @@ fn loop_binding(name: &str, type_id: TypeId, string_table: &mut StringTable) -> 
         value: Expression::new(
             ExpressionKind::NoValue,
             SourceLocation::default(),
+            None,
             type_id,
             crate::compiler_frontend::datatypes::DataType::Inferred,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -302,18 +323,24 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
                     text: OwnedFoldedString::Text(string_table.resolve(before).to_owned()),
                     reactive_subscription: None,
                     location: location.clone(),
+                    span: None,
                 },
                 OwnedRuntimeTemplateNode::Slot {
                     location: location.clone(),
+                    span: None,
                 },
                 OwnedRuntimeTemplateNode::Text {
                     text: OwnedFoldedString::Text(string_table.resolve(after).to_owned()),
                     reactive_subscription: None,
                     location: location.clone(),
+                    span: None,
                 },
             ],
+            location: location.clone(),
+            span: None,
         }),
         location,
+        span: None,
     };
     let body = match &handoff.body {
         crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateBody::Render(node) => node,
@@ -424,8 +451,10 @@ fn top_level_loop_control_handoff_reports_compiler_bug() {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::LoopControl {
             kind: TemplateLoopControlKind::Break,
             location: location.clone(),
+            span: None,
         }),
         location: location.clone(),
+        span: None,
     };
 
     let err = builder
@@ -453,6 +482,7 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::int(
             42,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         ))
         .expect("int lowering should succeed");
@@ -464,6 +494,7 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::float(
             3.25,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         ))
         .expect("float lowering should succeed");
@@ -478,6 +509,7 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::bool(
             true,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         ))
         .expect("bool lowering should succeed");
@@ -492,6 +524,7 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::char(
             'x',
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         ))
         .expect("char lowering should succeed");
@@ -502,7 +535,8 @@ fn lowers_primitive_literals() {
         HirExpressionKind::Char('x')
     ));
 
-    let string_expr = Expression::string_slice(text, location.clone(), ValueMode::ImmutableOwned);
+    let string_expr =
+        Expression::string_slice(text, location.clone(), None, ValueMode::ImmutableOwned);
     let string_lowered = builder
         .lower_expression(&string_expr)
         .expect("string literal lowering should succeed");
@@ -556,7 +590,7 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
 
     builder.test_register_module_constant(
         third_const.clone(),
-        Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
+        Expression::int(3, location.clone(), None, ValueMode::ImmutableOwned),
     );
 
     let expr = inferred_type_reference_expr(
@@ -607,6 +641,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
         runtime_operand_item(Expression::int(
             2,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operand_item(inferred_type_reference_expr(
@@ -651,17 +686,20 @@ fn runtime_division_subexpression_infers_float_type_in_hir() {
         runtime_operand_item(Expression::int(
             5,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operand_item(Expression::int(
             2,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operator_item(Operator::Divide, location.clone()),
         runtime_operand_item(Expression::int(
             1,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operator_item(Operator::Add, location.clone()),
@@ -698,11 +736,13 @@ fn runtime_integer_division_lowers_to_hir_int_div_with_int_type() {
         runtime_operand_item(Expression::int(
             5,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operand_item(Expression::int(
             2,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operator_item(Operator::IntDivide, location.clone()),
@@ -738,6 +778,7 @@ fn lowers_unary_not_in_runtime_rpn() {
         runtime_operand_item(Expression::bool(
             true,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operator_item(Operator::Not, location.clone()),
@@ -772,11 +813,13 @@ fn lowers_range_operator_in_runtime_rpn() {
         runtime_operand_item(Expression::int(
             1,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operand_item(Expression::int(
             9,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         runtime_operator_item(Operator::Range, location.clone()),
@@ -811,6 +854,7 @@ fn lowers_function_call_to_call_statement_and_temp_load() {
         vec![Expression::int(
             7,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )],
         vec![builtin_type_ids::INT],
@@ -858,6 +902,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_single_return() {
         vec![builtin_type_ids::INT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     assert_eq!(call_expr.type_id, builtin_type_ids::INT);
     assert!(
@@ -886,7 +931,6 @@ fn expression_function_call_uses_variant_result_type_ids_for_no_return() {
     let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
     builder.test_register_function_name(function_name.clone(), FunctionId(33));
-
     let call_expr = Expression::function_call(function_name, vec![], vec![], location.clone());
 
     let lowered = builder
@@ -919,6 +963,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
         vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     assert!(
         matches!(
@@ -957,13 +1002,13 @@ fn expression_host_call_uses_variant_result_type_ids() {
     let mut string_table = StringTable::new();
     let location = test_source_location(6);
     let mut builder = setup_builder(&mut string_table);
-
     let call_expr = Expression::host_function_call_with_typed_arguments(
         ExternalFunctionId::IoLine,
         vec![],
         vec![builtin_type_ids::INT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     assert!(
         matches!(
@@ -1011,6 +1056,7 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
         FallibleExpressionHandling::Recover,
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     assert!(
         matches!(
@@ -1030,11 +1076,13 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
                     expressions: vec![Expression::int(
                         7,
                         location.clone(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )],
                     location: location.clone(),
                 }),
                 location: location.clone(),
+                span: None,
                 scope: test_scope,
             }],
         },
@@ -1068,6 +1116,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
         vec![carrier_type],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     assert_eq!(result_expr.type_id, carrier_type);
     let test_scope = InternedPath::new();
@@ -1079,12 +1128,13 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
             body: vec![AstNode {
                 kind: NodeKind::ThenValue(ProducedValues {
                     expressions: vec![
-                        Expression::int(7, location.clone(), ValueMode::ImmutableOwned),
-                        Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                        Expression::int(7, location.clone(), None, ValueMode::ImmutableOwned),
+                        Expression::bool(false, location.clone(), None, ValueMode::ImmutableOwned),
                     ],
                     location: location.clone(),
                 }),
                 location: location.clone(),
+                span: None,
                 scope: test_scope,
             }],
         },
@@ -1109,7 +1159,7 @@ fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() {
     builder.test_register_function_name(function_name.clone(), FunctionId(24));
 
     let fresh_argument = CallArgument::positional(
-        Expression::int(7, location.clone(), ValueMode::ImmutableOwned),
+        Expression::int(7, location.clone(), None, ValueMode::ImmutableOwned),
         CallAccessMode::Shared,
         location.clone(),
     )
@@ -1210,13 +1260,14 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
         ),
         method_path.clone(),
         vec![CallArgument::positional(
-            Expression::int(7, location.clone(), ValueMode::ImmutableOwned),
+            Expression::int(7, location.clone(), None, ValueMode::ImmutableOwned),
             CallAccessMode::Shared,
             location.clone(),
         )],
         vec![builtin_type_ids::INT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
 
     let lowered = builder
@@ -1269,6 +1320,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
         vec![builtin_type_ids::INT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
 
     let lowered = builder
@@ -1301,6 +1353,7 @@ fn lowers_host_call_expression_with_host_target() {
         vec![Expression::string_slice(
             literal_x,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )],
         vec![builtin_type_ids::INT],
@@ -1416,6 +1469,7 @@ fn runtime_template_expression_lowers_inline_to_accumulator() {
         vec![Expression::string_slice(
             hello,
             location,
+            None,
             ValueMode::ImmutableOwned,
         )],
         builder.string_table,
@@ -1453,6 +1507,7 @@ fn runtime_template_handoff_expression_lowers_inline_to_accumulator() {
         vec![Expression::string_slice(
             hello,
             location,
+            None,
             ValueMode::ImmutableOwned,
         )],
         builder.string_table,
@@ -1491,6 +1546,7 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
         vec![Expression::string_slice(
             inner,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )],
         &string_table,
@@ -1498,9 +1554,9 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
     let outer_template = runtime_template_expression(
         location.clone(),
         vec![
-            Expression::string_slice(before, location.clone(), ValueMode::ImmutableOwned),
+            Expression::string_slice(before, location.clone(), None, ValueMode::ImmutableOwned),
             inner_template,
-            Expression::string_slice(after, location, ValueMode::ImmutableOwned),
+            Expression::string_slice(after, location, None, ValueMode::ImmutableOwned),
         ],
         &string_table,
     );
@@ -1536,7 +1592,12 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
 
     let expr = runtime_template_expression(
         location.clone(),
-        vec![Expression::int(5, location, ValueMode::ImmutableOwned)],
+        vec![Expression::int(
+            5,
+            location,
+            None,
+            ValueMode::ImmutableOwned,
+        )],
         builder.string_table,
     );
 
@@ -1594,15 +1655,21 @@ fn reactive_linear_template_keeps_subscription_chunks_lazy() {
         source: count_source,
         type_id: builtin_type_ids::INT,
         location: location.clone(),
+        span: None,
     };
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
                 expression: Box::new(count_expression),
                 reactive_subscription: Some(subscription),
+                location: location.clone(),
+                span: None,
             }],
+            location: location.clone(),
+            span: None,
         }),
         location: location.clone(),
+        span: None,
     };
     let expression = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
 
@@ -1641,6 +1708,7 @@ fn runtime_template_lowers_nested_templates_in_order() {
         vec![Expression::string_slice(
             b,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )],
         builder.string_table,
@@ -1649,9 +1717,9 @@ fn runtime_template_lowers_nested_templates_in_order() {
     let expr = runtime_template_expression(
         location.clone(),
         vec![
-            Expression::string_slice(a, location.clone(), ValueMode::ImmutableOwned),
+            Expression::string_slice(a, location.clone(), None, ValueMode::ImmutableOwned),
             nested,
-            Expression::string_slice(c, location, ValueMode::ImmutableOwned),
+            Expression::string_slice(c, location, None, ValueMode::ImmutableOwned),
         ],
         builder.string_table,
     );
@@ -1702,11 +1770,13 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
     let then_content = vec![Expression::string_slice(
         shown,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let else_content = vec![Expression::string_slice(
         hidden,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let expr = runtime_template_bool_if_expression(
@@ -1814,11 +1884,13 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         FallibleExpressionHandling::Propagate,
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
     let then_content = vec![propagated_call];
     let else_content = vec![Expression::string_slice(
         fallback,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let expr = runtime_template_bool_if_expression(
@@ -1895,6 +1967,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
     let then_content = vec![Expression::string_slice(
         shown,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let expr = runtime_template_bool_if_expression(
@@ -1967,6 +2040,7 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
     let then_content = vec![Expression::int(
         5,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let expr = runtime_template_bool_if_expression(
@@ -2036,6 +2110,7 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
     let else_content = vec![Expression::string_slice(
         hidden,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let expr = runtime_template_option_capture_expression(
@@ -2222,7 +2297,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         ValueMode::ImmutableReference,
     )];
     let range = RangeLoopSpec {
-        start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+        start: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
         end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
@@ -2370,6 +2445,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
     let body_content = vec![Expression::string_slice(
         tick,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     )];
     let condition = inferred_type_reference_expr(
@@ -2423,7 +2499,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
     );
     let body_content: Vec<Expression> = vec![];
     let range = RangeLoopSpec {
-        start: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+        start: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
         end: inferred_type_reference_expr(
             limit_path,
             builtin_type_ids::INT,
@@ -2646,7 +2722,8 @@ fn nominal_struct_identity_uses_field_parent_path() {
 
     let expr_fields = vec![Declaration {
         id: field_path.clone(),
-        value: Expression::int(42, location.clone(), ValueMode::ImmutableOwned),
+        value: Expression::int(42, location.clone(), None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -2654,6 +2731,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
         struct_path.clone(),
         expr_fields.clone(),
         location.clone(),
+        None,
         ValueMode::MutableOwned,
         false,
         None,
@@ -2700,11 +2778,14 @@ fn rejects_const_record_struct_instance_runtime_lowering() {
             value: Expression::string_slice(
                 field_value,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -2869,11 +2950,14 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
             value: Expression::string_slice(
                 center_value,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         false,
         None,
@@ -2943,10 +3027,17 @@ fn const_record_module_constant_field_access_lowers_field_value_without_struct_c
         palette_struct.clone(),
         vec![Declaration {
             id: red_field,
-            value: Expression::string_slice(red_value, location.clone(), ValueMode::ImmutableOwned),
+            value: Expression::string_slice(
+                red_value,
+                location.clone(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         }],
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -3036,7 +3127,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::Get,
             vec![CallArgument::positional(
-                Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned),
                 CallAccessMode::Shared,
                 location.clone(),
             )],
@@ -3047,12 +3138,12 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
             CollectionBuiltinOp::Set,
             vec![
                 CallArgument::positional(
-                    Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
                     CallAccessMode::Shared,
                     location.clone(),
                 ),
                 CallArgument::positional(
-                    Expression::int(99, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(99, location.clone(), None, ValueMode::ImmutableOwned),
                     CallAccessMode::Shared,
                     location.clone(),
                 ),
@@ -3065,7 +3156,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::PushFixed,
             vec![CallArgument::positional(
-                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(4, location.clone(), None, ValueMode::ImmutableOwned),
                 CallAccessMode::Shared,
                 location.clone(),
             )],
@@ -3075,7 +3166,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::PushGrowable,
             vec![CallArgument::positional(
-                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(4, location.clone(), None, ValueMode::ImmutableOwned),
                 CallAccessMode::Shared,
                 location.clone(),
             )],
@@ -3085,7 +3176,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::Remove,
             vec![CallArgument::positional(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
                 CallAccessMode::Shared,
                 location.clone(),
             )],
@@ -3109,6 +3200,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
             result_type_ids,
             &mut builder.type_environment,
             location.clone(),
+            None,
         );
 
         let lowered = builder
@@ -3152,15 +3244,26 @@ fn map_literal_lowering_preserves_entry_order() {
     let expression = Expression::new(
         ExpressionKind::MapLiteral(vec![
             MapLiteralEntry {
-                key: Expression::string_slice(priya, location.clone(), ValueMode::ImmutableOwned),
-                value: Expression::int(10, location.clone(), ValueMode::ImmutableOwned),
+                key: Expression::string_slice(
+                    priya,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
+                value: Expression::int(10, location.clone(), None, ValueMode::ImmutableOwned),
             },
             MapLiteralEntry {
-                key: Expression::string_slice(grace, location.clone(), ValueMode::ImmutableOwned),
-                value: Expression::int(12, location.clone(), ValueMode::ImmutableOwned),
+                key: Expression::string_slice(
+                    grace,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
+                value: Expression::int(12, location.clone(), None, ValueMode::ImmutableOwned),
             },
         ]),
         location,
+        None,
         map_type,
         crate::compiler_frontend::datatypes::DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -3222,7 +3325,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
         builtin_type_ids::INT,
     );
     let key = CallArgument::positional(
-        Expression::string_slice(key_name, location.clone(), ValueMode::ImmutableOwned),
+        Expression::string_slice(key_name, location.clone(), None, ValueMode::ImmutableOwned),
         CallAccessMode::Shared,
         location.clone(),
     );
@@ -3240,7 +3343,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
             vec![
                 key.clone(),
                 CallArgument::positional(
-                    Expression::int(99, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(99, location.clone(), None, ValueMode::ImmutableOwned),
                     CallAccessMode::Shared,
                     location.clone(),
                 ),
@@ -3267,6 +3370,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
             result_type_ids.clone(),
             &mut builder.type_environment,
             location.clone(),
+            None,
         );
 
         let lowered = builder
@@ -3339,11 +3443,13 @@ fn lowers_choice_variant_expression_to_hir_variant_construct() {
             id: ready_name,
             payload: ChoiceVariantPayload::Unit,
             location: location.clone(),
+            span: None,
         },
         ChoiceVariant {
             id: busy_name,
             payload: ChoiceVariantPayload::Unit,
             location: location.clone(),
+            span: None,
         },
     ];
     let choice_type_id =
@@ -3415,9 +3521,11 @@ fn collection_expression_lowering_preserves_fixed_type_identity() {
         ExpressionKind::Collection(vec![Expression::int(
             1,
             location.clone(),
+            None,
             ValueMode::ImmutableOwned,
         )]),
         location,
+        None,
         fixed_collection,
         crate::compiler_frontend::datatypes::DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -3496,7 +3604,7 @@ fn lowers_fallible_success_to_hir_variant_construct() {
     let result_type_id =
         result_carrier_type_id(&mut builder.type_environment, ok_type_id, err_type_id);
 
-    let value_expr = Expression::int(42, location.clone(), ValueMode::ImmutableOwned);
+    let value_expr = Expression::int(42, location.clone(), None, ValueMode::ImmutableOwned);
 
     let result_expr = Expression::result_construct(
         AstFallibleCarrierVariant::Success,
@@ -3546,9 +3654,12 @@ fn lowers_fallible_error_to_hir_variant_construct() {
     let result_type_id =
         result_carrier_type_id(&mut builder.type_environment, ok_type_id, err_type_id);
 
-    let value_expr =
-        Expression::string_slice(error_text, location.clone(), ValueMode::ImmutableOwned);
-
+    let value_expr = Expression::string_slice(
+        error_text,
+        location.clone(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let result_expr = Expression::result_construct(
         AstFallibleCarrierVariant::Error,
         value_expr,
@@ -3598,6 +3709,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
         vec![builtin_type_ids::FLOAT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
 
     let lowered = builder
@@ -3649,6 +3761,7 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
         vec![builtin_type_ids::FLOAT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
 
     let lowered = builder
@@ -3687,6 +3800,7 @@ fn external_int_call_does_not_emit_validate_float() {
         vec![builtin_type_ids::INT],
         &mut builder.type_environment,
         location.clone(),
+        None,
     );
 
     let lowered = builder
@@ -3734,6 +3848,7 @@ fn external_fallible_float_call_propagation_validates_success() {
                 error_type_id: error_type,
                 handling: FallibleExpressionHandling::Propagate,
                 location: location.clone(),
+                span: None,
             },
             &mut builder.type_environment,
         );
@@ -3796,6 +3911,7 @@ fn external_fallible_float_call_catch_validates_success() {
                 error_type_id: error_type,
                 handling: FallibleExpressionHandling::Propagate,
                 location: location.clone(),
+                span: None,
             },
             &mut builder.type_environment,
         );
@@ -3809,11 +3925,13 @@ fn external_fallible_float_call_catch_validates_success() {
                     expressions: vec![Expression::float(
                         0.0,
                         location.clone(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )],
                     location: location.clone(),
                 }),
                 location: location.clone(),
+                span: None,
                 scope: function_name,
             }],
         },

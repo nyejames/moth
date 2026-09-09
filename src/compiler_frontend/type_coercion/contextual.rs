@@ -85,6 +85,7 @@ pub(crate) fn coerce_expression_to_declared_type(
             return Expression::float(
                 *value as f64,
                 expr.location.clone(),
+                expr.span,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());

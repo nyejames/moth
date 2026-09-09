@@ -25,11 +25,17 @@ fn lowers_while_to_header_body_exit_shape() {
 
     let while_node = node(
         NodeKind::WhileLoop(
-            Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
+            Expression::bool(
+                false,
+                test_source_location(2),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             vec![node(
                 NodeKind::ExpressionStatement(Expression::int(
                     10,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 test_source_location(2),
@@ -90,7 +96,12 @@ fn break_in_while_targets_loop_exit_block() {
 
     let while_node = node(
         NodeKind::WhileLoop(
-            Expression::bool(true, test_source_location(20), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                test_source_location(20),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             vec![node(NodeKind::Break, test_source_location(21))],
         ),
         test_source_location(20),

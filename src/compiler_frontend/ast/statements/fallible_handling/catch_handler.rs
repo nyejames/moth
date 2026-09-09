@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -42,6 +43,11 @@ pub(crate) struct CatchFallibleHandlerSite<'a> {
     pub(crate) value_required: bool,
     pub(crate) compilation_stage: &'a str,
     pub(crate) value_required_location: SourceLocation,
+}
+struct ParsedCatchErrorBinding {
+    binding: CatchErrorBinding,
+    location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 /// Parses a `catch |err|:` handler with an explicit error binding.
@@ -119,7 +125,7 @@ fn parse_catch_error_binding(
     site: &CatchFallibleHandlerSite<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
-) -> Result<CatchErrorBinding, ExpressionParseError> {
+) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_token_kind() != &TokenKind::TypeParameterBracket {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::ExpectedCatchHandlerOpeningPipe,
@@ -147,7 +153,10 @@ fn parse_catch_error_binding(
     };
 
     let handler_name_location = token_stream.current_location();
-
+    let handler_name_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     validate_catch_fallible_handler_binding(
         handler_name,
         handler_name_location.to_owned(),
@@ -182,8 +191,12 @@ fn parse_catch_error_binding(
 
     token_stream.advance();
 
-    Ok(CatchErrorBinding {
-        error_binding: context.scope.append(handler_name),
+    Ok(ParsedCatchErrorBinding {
+        binding: CatchErrorBinding {
+            error_binding: context.scope.append(handler_name),
+        },
+        location: handler_name_location,
+        span: handler_name_span,
     })
 }
 
@@ -197,7 +210,7 @@ fn parse_catch_fallible_handler_body(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
-    error: Option<CatchErrorBinding>,
+    error: Option<ParsedCatchErrorBinding>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
@@ -221,16 +234,18 @@ fn parse_catch_fallible_handler_body(
     if let Some(error_binding) = &error {
         let error_data_type =
             diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_location = token_stream.current_location();
+        let error_binding_location = error_binding.location.clone();
         handler_context.add_var(
             Declaration {
-                id: error_binding.error_binding.to_owned(),
+                id: error_binding.binding.error_binding.to_owned(),
                 value: Expression::no_value_with_type_id(
                     error_binding_location.clone(),
+                    error_binding.span,
                     error_data_type,
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
+                binding_span: error_binding.span,
                 config_qualifier: None,
             },
             error_binding_location,
@@ -255,7 +270,7 @@ fn parse_catch_fallible_handler_body(
     )?;
 
     Ok(CatchFallibleHandler {
-        error,
+        error: error.map(|parsed| parsed.binding),
         body: handler_body,
     })
 }
@@ -318,7 +333,7 @@ fn parse_inline_catch_handler_body(
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     site: CatchFallibleHandlerSite<'_>,
-    error: Option<CatchErrorBinding>,
+    error: Option<ParsedCatchErrorBinding>,
     string_table: &mut StringTable,
 ) -> Result<CatchFallibleHandler, ExpressionParseError> {
     if token_stream.current_token_kind() == &TokenKind::Newline {
@@ -346,6 +361,10 @@ fn parse_inline_catch_handler_body(
     }
 
     let then_location = token_stream.current_location();
+    let then_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance();
 
     // A retained newline proves a multiline form. Other empty boundaries use the
@@ -378,16 +397,18 @@ fn parse_inline_catch_handler_body(
     if let Some(error_binding) = &error {
         let error_data_type =
             diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_location = token_stream.current_location();
+        let error_binding_location = error_binding.location.clone();
         handler_context.add_var(
             Declaration {
-                id: error_binding.error_binding.to_owned(),
+                id: error_binding.binding.error_binding.to_owned(),
                 value: Expression::no_value_with_type_id(
                     error_binding_location.clone(),
+                    error_binding.span,
                     error_data_type,
                     site.error_return_type_id,
                     ValueMode::ImmutableOwned,
                 ),
+                binding_span: error_binding.span,
                 config_qualifier: None,
             },
             error_binding_location,
@@ -426,10 +447,14 @@ fn parse_inline_catch_handler_body(
             location: then_location.clone(),
         }),
         location: then_location,
+        span: then_span,
         scope: handler_context.scope.clone(),
     }];
 
-    Ok(CatchFallibleHandler { error, body })
+    Ok(CatchFallibleHandler {
+        error: error.map(|parsed| parsed.binding),
+        body,
+    })
 }
 
 fn reject_invalid_inline_catch_value_window(

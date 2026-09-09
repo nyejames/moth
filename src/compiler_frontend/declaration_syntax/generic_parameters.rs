@@ -323,10 +323,8 @@ fn with_token_span(
     span: LocalSpan,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none()
-        && let Some(source) = token_stream.file_id
-    {
-        diagnostic.primary_span = Some(SourceSpan::new(source, span));
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
     }
     diagnostic
 }

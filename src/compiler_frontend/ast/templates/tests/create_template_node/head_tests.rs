@@ -208,10 +208,12 @@ fn template_head_expression_preserves_infrastructure_failure() {
             context: TemplateViewContext::default(),
         },
         location: token_stream.current_location(),
+        span: None,
     };
     let declaration = Declaration {
         id: scope.append(stale_name),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let style_directives = frontend_test_style_directives();
@@ -234,6 +236,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
         token_stream.current_location(),
+        None,
     );
 
     let error = match parse_template_head(
@@ -289,6 +292,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
         token_stream.current_location(),
+        None,
     );
 
     let error = match parse_template_head(
@@ -353,8 +357,10 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         value: Expression::string_slice(
             content_string,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -391,7 +397,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
     }))
-    .with_declaring_file_id(Some(source_file));
+    .with_declaring_file_id(source_file);
 
     let template =
         Template::new_const_required(&mut token_stream, &context, vec![], &mut string_table)
@@ -463,7 +469,7 @@ fn template_head_extensionless_path_retains_exact_span() {
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
     }))
-    .with_declaring_file_id(Some(source_file));
+    .with_declaring_file_id(source_file);
 
     let diagnostic = expect_template_diagnostic(
         Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -521,10 +527,12 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
             context: TemplateViewContext::default(),
         },
         location: token_stream.current_location(),
+        span: None,
     };
     let declaration = Declaration {
         id: scope.append(stale_name),
         value: Expression::template(stale_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let style_directives = frontend_test_style_directives();
@@ -631,8 +639,8 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let struct_name = string_table.intern("HtmlDefaults");
-    let field_name = string_table.intern("color");
     let struct_path = scope.append(struct_name);
+    let field_name = string_table.intern("color");
     let field_path = struct_path.append(field_name);
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -641,6 +649,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
             name: field_path.clone(),
             type_id: string_type_id,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -650,6 +659,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let field_value = Expression::string_slice(
         string_table.intern("green"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let record_value = Expression::struct_instance(
@@ -657,9 +667,11 @@ fn const_required_template_head_folds_const_record_instance_field() {
         vec![Declaration {
             id: field_path,
             value: field_value,
+            binding_span: None,
             config_qualifier: None,
         }],
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -669,6 +681,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let declaration = Declaration {
         id: scope.append(record_name),
         value: record_value,
+        binding_span: None,
         config_qualifier: None,
     };
     let context = constant_template_context(&scope, &[declaration]);
@@ -725,10 +738,12 @@ fn source_authored_template_option_capture_if_suffix_reaches_ast() {
         value: Expression::new(
             ExpressionKind::NoValue,
             token_stream.current_location(),
+            None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
@@ -778,10 +793,12 @@ fn template_option_capture_binding_is_not_visible_in_else_branch() {
         value: Expression::new(
             ExpressionKind::NoValue,
             token_stream.current_location(),
+            None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
@@ -1111,10 +1128,12 @@ fn template_else_if_option_capture_binding_is_branch_local() {
         value: Expression::new(
             ExpressionKind::NoValue,
             token_stream.current_location(),
+            None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
@@ -1629,6 +1648,7 @@ fn template_if_composition_applies_shared_head_prefix_to_each_branch() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -1850,6 +1870,7 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
     let declaration = Declaration {
         id: scope.append(list_shell_name),
         value: Expression::template(shell_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let condition_declaration = Declaration {
@@ -1857,10 +1878,12 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
         value: Expression::new(
             ExpressionKind::NoValue,
             token_stream.current_location(),
+            None,
             builtin_type_ids::BOOL,
             DataType::Bool,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let context = with_test_path_context(
@@ -1989,8 +2012,10 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
         value: Expression::bool(
             true,
             token_stream.current_location(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
@@ -2027,8 +2052,10 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
         value: Expression::bool(
             true,
             token_stream.current_location(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let context = imported_const_template_context(&token_stream.src_path, declaration, show_banner);
@@ -2064,6 +2091,7 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -2217,8 +2245,10 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
         value: Expression::bool(
             true,
             token_stream.current_location(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
@@ -2265,6 +2295,7 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -2307,6 +2338,7 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let declarations = vec![Declaration {
         id: wrapper_scope.append(card_name),
         value: Expression::template(card_template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -2379,10 +2411,12 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 token_stream.current_location(),
+                None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         SourceLocation::default(),
@@ -2429,10 +2463,12 @@ fn const_required_template_loop_reports_non_const_collection_source() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 token_stream.current_location(),
+                None,
                 collection_type_id,
                 DataType::collection(DataType::StringSlice),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         SourceLocation::default(),
@@ -2477,10 +2513,12 @@ fn const_required_template_loop_reports_non_const_body() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 token_stream.current_location(),
+                None,
                 builtin_type_ids::STRING,
                 DataType::StringSlice,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         SourceLocation::default(),
@@ -2656,6 +2694,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
     let present_value = Expression::string_slice(
         string_table.intern("Priya"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let scrutinee = Expression::coerced(present_value, option_string_type_id);
@@ -2696,6 +2735,7 @@ fn const_required_template_option_capture_absent_folds_else_branch() {
         DataType::StringSlice,
         &mut type_environment,
         SourceLocation::default(),
+        None,
     );
 
     let template = const_required_option_capture_template_with_direct_tir(
@@ -2735,11 +2775,13 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let present_value = Expression::string_slice(
         string_table.intern("Priya"),
         token_stream.current_location(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let declaration = Declaration {
         id: token_stream.src_path.append(maybe_name),
         value: Expression::coerced(present_value, option_string_type_id),
+        binding_span: None,
         config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
@@ -2782,10 +2824,12 @@ fn const_required_template_option_capture_inlines_absent_source_const() {
         DataType::StringSlice,
         &mut type_environment,
         token_stream.current_location(),
+        None,
     );
     let declaration = Declaration {
         id: token_stream.src_path.append(maybe_name),
         value: absent_value,
+        binding_span: None,
         config_qualifier: None,
     };
     let context = constant_template_context(&token_stream.src_path, &[declaration]);
@@ -2825,10 +2869,12 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         value: Expression::new(
             ExpressionKind::NoValue,
             token_stream.current_location(),
+            None,
             maybe_name_type_id,
             DataType::Option(Box::new(DataType::StringSlice)),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     context.add_var(declaration, SourceLocation::default());
@@ -2868,10 +2914,12 @@ fn const_required_template_if_rejects_runtime_local_condition() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 token_stream.current_location(),
+                None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         SourceLocation::default(),
@@ -2940,6 +2988,7 @@ fn const_required_option_capture_template_with_direct_tir(
         DataType::StringSlice,
         inner_type_id,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         ConstRecordState::RuntimeValue,
     );
@@ -2984,16 +3033,22 @@ fn const_required_option_capture_template_with_direct_tir(
                 inner_type_id,
                 location: location.clone(),
                 binding_location: location.clone(),
+                binding_span: None,
             }),
         };
         let branch = TemplateIrBranch::new(
             selector,
             branch_body,
             location.clone(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let branch_chain_root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_body), location.clone());
+        let branch_chain_root = builder.push_branch_chain_node(
+            vec![branch],
+            Some(fallback_body),
+            None,
+            location.clone(),
+        );
 
         let summary = TemplateIrSummary {
             estimated_output_bytes: "Hello ".len() + "Guest".len(),
@@ -3023,6 +3078,7 @@ fn const_required_option_capture_template_with_direct_tir(
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -3072,6 +3128,7 @@ fn parse_control_flow_template_after_body_parse(
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
         token_stream.current_location(),
+        None,
     );
 
     let parsed_head = parse_template_head(
@@ -3116,6 +3173,7 @@ fn parse_control_flow_template_after_body_parse(
     let template = Template {
         tir_reference,
         location,
+        span: None,
     };
 
     (template, context, string_table)
@@ -3192,6 +3250,7 @@ fn parse_runtime_template_without_validation(
     let mut construction_context = TemplateConstructionContext::new(
         context.template_ir_store.clone(),
         token_stream.current_location(),
+        None,
     );
 
     let parsed_head = parse_template_head(
@@ -3237,6 +3296,7 @@ fn parse_runtime_template_without_validation(
     let template = Template {
         tir_reference,
         location,
+        span: None,
     };
 
     (template, context, string_table)
@@ -3344,6 +3404,7 @@ fn const_required_template_if_validates_branch_condition_through_tir_view_overla
         DataType::Bool,
         builtin_type_ids::BOOL,
         override_location.clone(),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
@@ -3388,8 +3449,12 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
             char_column: 5,
         },
     );
-    let const_true_condition =
-        Expression::bool(true, override_location.clone(), ValueMode::ImmutableOwned);
+    let const_true_condition = Expression::bool(
+        true,
+        override_location.clone(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     install_expression_overlay_on_template(
         &mut template,
@@ -3477,6 +3542,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             DataType::Bool,
             builtin_type_ids::BOOL,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableReference,
             ConstRecordState::RuntimeValue,
         );
@@ -3533,6 +3599,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
             context: const_context,
         },
         location,
+        span: None,
     };
 
     let store = context.template_ir_store.borrow();
@@ -3657,6 +3724,7 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
             context: parent_context,
         },
         location,
+        span: None,
     };
 
     let store = context.template_ir_store.borrow();
@@ -3837,7 +3905,9 @@ fn find_slot_occurrence_id_in_subtree(
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .find_map(|child| find_slot_occurrence_id_in_subtree(store, *child)),
-        TemplateIrNodeKind::BranchChain { branches, fallback } => branches
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => branches
             .iter()
             .find_map(|branch| find_slot_occurrence_id_in_subtree(store, branch.body))
             .or_else(|| {
@@ -3935,7 +4005,9 @@ fn collect_static_tir_fragments(
             }
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 collect_static_tir_fragments(branch.body, store, string_table, output);
             }
@@ -3993,7 +4065,9 @@ fn tir_subtree_contains_slot(
             .get_template(*template)
             .is_some_and(|template| tir_subtree_contains_slot(template.root, store)),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             branches
                 .iter()
                 .any(|branch| tir_subtree_contains_slot(branch.body, store))
@@ -4054,7 +4128,9 @@ fn count_tir_loop_control_signals(
             })
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             branches
                 .iter()
                 .map(|branch| count_tir_loop_control_signals(branch.body, store))

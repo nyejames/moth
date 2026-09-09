@@ -797,7 +797,7 @@ pub(super) fn fold_tir_node_into_buffer(
         )
         .into()),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain { branches, fallback, .. } => {
             fold_tir_branch_chain_with_insertion(
                 branches,
             *fallback,

@@ -217,7 +217,9 @@ fn merge_tir_view_node_metadata(
             )?;
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 merge_effective_expression_metadata(
                     view,

@@ -96,6 +96,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
                     result: None,
                 },
                 location: SourceLocation::default(),
+                span: None,
             })
             .collect(),
         terminator: HirTerminator::RuntimeFailure {

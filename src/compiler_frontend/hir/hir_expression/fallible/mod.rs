@@ -30,6 +30,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -80,6 +81,7 @@ impl<'a> HirBuilder<'a> {
         value_location: &SourceLocation,
         propagation_location: &SourceLocation,
         expr_type_id: FrontendTypeId,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let lowered = self.lower_expression(value)?;
         let ok_type = match self
@@ -107,8 +109,11 @@ impl<'a> HirBuilder<'a> {
         if matches!(handling, FallibleExpressionHandling::Propagate) {
             let result_carrier =
                 self.emit_lowered_result_expression_to_current_block(lowered, value_location)?;
-            let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
+            let success_value = self.lower_fallible_carrier_to_success_value(
+                result_carrier,
+                propagation_location,
+                span,
+            )?;
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -129,6 +134,7 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         value_required: bool,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let lowered = self.lower_expression(value)?;
         let ok_type = match self
@@ -138,7 +144,7 @@ impl<'a> HirBuilder<'a> {
             Some((ok, _)) => ok,
             None => {
                 return_hir_transformation_error!(
-                    "Recovering fallible expression reached HIR lowering without an internal carrier type",
+                    "Recovering fallible expression reached HIR without an internal carrier type",
                     self.hir_error_location(location)
                 );
             }
@@ -156,20 +162,23 @@ impl<'a> HirBuilder<'a> {
             self.emit_lowered_result_expression_to_current_block(lowered, location)?;
         let current_block = self.current_block_id_or_error(location)?;
 
-        self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
-            current_block,
-            result_local: result_carrier.result_local,
-            handled_result: FallibleBranchingContext {
-                result_type_ids,
-                handling: handler,
-                carrier_type: result_carrier.carrier_type,
-                ok_type: result_carrier.ok_type,
-                err_type: result_carrier.err_type,
-                value_required,
-                location,
-                validate_float_success: result_carrier.validate_float_success,
+        self.lower_fallible_carrier_with_branching(
+            FallibleCarrierBranchingContext {
+                current_block,
+                result_local: result_carrier.result_local,
+                handled_result: FallibleBranchingContext {
+                    result_type_ids,
+                    handling: handler,
+                    carrier_type: result_carrier.carrier_type,
+                    ok_type: result_carrier.ok_type,
+                    err_type: result_carrier.err_type,
+                    value_required,
+                    location,
+                    validate_float_success: result_carrier.validate_float_success,
+                },
             },
-        })
+            span,
+        )
     }
 
     pub(crate) fn lower_handled_fallible_call_expression(
@@ -180,6 +189,7 @@ impl<'a> HirBuilder<'a> {
         handling: &FallibleExpressionHandling,
         call_location: &SourceLocation,
         propagation_location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let (_, ok_type, _) = self.result_call_carrier_slots(&target, call_location)?;
 
@@ -197,9 +207,13 @@ impl<'a> HirBuilder<'a> {
                 args,
                 result_type_ids,
                 call_location,
+                span,
             )?;
-            let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
+            let success_value = self.lower_fallible_carrier_to_success_value(
+                result_carrier,
+                propagation_location,
+                span,
+            )?;
 
             self.log_call_result_binding(call_location, None, &success_value);
 
@@ -227,6 +241,7 @@ impl<'a> HirBuilder<'a> {
             handling,
             call_location,
             propagation_location,
+            span,
         } = input;
 
         if matches!(handling, FallibleExpressionHandling::Propagate) {
@@ -236,9 +251,13 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 error_type_id,
                 call_location,
+                span,
             )?;
-            let success_value =
-                self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)?;
+            let success_value = self.lower_fallible_carrier_to_success_value(
+                result_carrier,
+                propagation_location,
+                span,
+            )?;
 
             self.log_call_result_binding(call_location, None, &success_value);
 

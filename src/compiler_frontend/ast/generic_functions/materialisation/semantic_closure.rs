@@ -226,6 +226,7 @@ pub(super) fn install_private_semantic_closure(
                             string_table,
                         )?,
                         location: parameter.location.materialise(string_table),
+                        span: None,
                     })
                 })
                 .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -257,6 +258,7 @@ pub(super) fn install_private_semantic_closure(
                 parameters,
                 returns,
                 location,
+                span: None,
             });
         }
         let canonical_path = materialise_path(&stable_trait.canonical_path, string_table);

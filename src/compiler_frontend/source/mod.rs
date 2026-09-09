@@ -30,6 +30,8 @@
 //! - [`span_encoding`] is the private codec for the frozen 22/10 split. It has no surface
 //!   outside this module.
 
+mod frozen_identity;
+
 mod database;
 mod id;
 pub(crate) mod line_index;
@@ -53,7 +55,10 @@ mod span_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-pub(crate) use database::{SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders};
+pub(crate) use database::{
+    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders,
+};
+pub(crate) use frozen_identity::FrozenIdentityContext;
 pub(crate) use id::SourceId;
 pub(crate) use record::{SourceKind, SourceProvenance, SourceRecord, SourceSlot};
 pub(crate) use registration::SourceRegistrationIndex;

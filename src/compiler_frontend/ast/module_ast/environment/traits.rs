@@ -365,7 +365,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let generic_parameter_scope = self.generic_parameter_scope(
             &this_parameters,
             Some(&registered_this.canonical_by_local),
-            header.tokens.file_id,
+            Some(header.tokens.file_id),
             &visibility,
             string_table,
         )?;
@@ -385,15 +385,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     first_location.0,
                     requirement.name_location.clone(),
                 );
-                if let Some(source) = header.tokens.file_id {
-                    let duplicate_span = SourceSpan::new(source, requirement.span);
-                    diagnostic.primary_span = Some(duplicate_span);
-                    if let Some(primary_label) = diagnostic.labels.get_mut(0) {
-                        primary_label.span = Some(duplicate_span);
-                    }
-                    if let Some(first_label) = diagnostic.labels.get_mut(1) {
-                        first_label.span = Some(SourceSpan::new(source, first_location.1));
-                    }
+                let source = header.tokens.file_id;
+                let duplicate_span = SourceSpan::new(source, requirement.span);
+                diagnostic.primary_span = Some(duplicate_span);
+                if let Some(primary_label) = diagnostic.labels.get_mut(0) {
+                    primary_label.span = Some(duplicate_span);
+                }
+                if let Some(first_label) = diagnostic.labels.get_mut(1) {
+                    first_label.span = Some(SourceSpan::new(source, first_location.1));
                 }
                 return Err(self.diagnostic_messages(diagnostic, string_table));
             }
@@ -454,7 +453,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         } = input;
 
         let visibility = self.header_visibility(header, string_table)?;
-
+        let requirement_span = Some(SourceSpan::new(header.tokens.file_id, requirement.span));
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
         let unresolved_signature = self.unresolved_trait_requirement_signature(
@@ -509,6 +508,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 parameter.value.value_mode.clone(),
                 parameter.value.type_id,
                 parameter.value.location.clone(),
+                parameter.value.span,
             ));
         }
 
@@ -540,6 +540,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             parameters,
             returns,
             location: requirement.name_location.clone(),
+            span: requirement_span,
         })
     }
 
@@ -611,10 +612,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                 )
                 .map_err(|mut messages| {
-                    if let Some(source) = header.tokens.file_id
-                        && let Some(diagnostic) = messages.diagnostics.first_mut()
-                    {
-                        diagnostic.primary_span = Some(SourceSpan::new(source, trait_ref.span));
+                    if let Some(diagnostic) = messages.diagnostics.first_mut() {
+                        diagnostic.primary_span =
+                            Some(SourceSpan::new(header.tokens.file_id, trait_ref.span));
                     }
                     messages
                 })?;

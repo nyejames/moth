@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
@@ -35,7 +36,13 @@ pub fn create_loop(
 ) -> LoopResult<AstNode> {
     ast_log!("Creating a Loop");
 
-    let location = token_stream.current_location();
+    let header_token = token_stream
+        .tokens
+        .get(token_stream.index.saturating_sub(1));
+    let location = header_token
+        .map(|token| token.location.clone())
+        .unwrap_or_else(|| token_stream.current_location());
+    let span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
     let scope = context.scope.clone();
     let colon_index = find_loop_header_colon_index(token_stream)?;
 
@@ -86,6 +93,7 @@ pub fn create_loop(
     Ok(AstNode {
         kind,
         location,
+        span,
         scope,
     })
 }

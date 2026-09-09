@@ -264,6 +264,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             resource_output_plan.plan_provider_runtime_asset(
                 asset.origin.clone(),
                 asset.authored_import_location.clone(),
+                asset.authored_import_span,
                 string_table,
             )?;
         }
@@ -636,6 +637,7 @@ fn emit_planned_resource_outputs(
                 &display_origin(&record.origin),
                 artefact_kind,
                 &record.first_authored_location,
+                record.first_authored_span,
                 string_table,
             ));
         }

@@ -31,6 +31,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -48,6 +49,7 @@ pub(crate) struct HandledFallibleCall {
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
     pub(crate) call_location: SourceLocation,
+    pub(crate) call_span: Option<SourceSpan>,
 }
 
 pub(crate) struct FallibleCallSite {
@@ -63,6 +65,7 @@ pub(crate) struct HandledFallibleHostCall {
     pub(crate) result_type_ids: Vec<TypeId>,
     pub(crate) error_type_id: TypeId,
     pub(crate) call_location: SourceLocation,
+    pub(crate) call_span: Option<SourceSpan>,
 }
 
 pub(crate) struct FallibleHostCallSite {
@@ -101,6 +104,7 @@ impl HandledFallibleHostCall {
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
                     location: self.call_location.clone(),
+                    span: self.call_span,
                 },
                 type_environment,
             );
@@ -129,6 +133,7 @@ impl HandledFallibleCall {
             self.result_type_ids,
             type_environment,
             self.call_location,
+            self.call_span,
         )
     }
 
@@ -151,6 +156,7 @@ impl HandledFallibleCall {
                 expression_handling,
                 type_environment,
                 self.call_location.clone(),
+                self.call_span,
             );
         let function_call_expression = match propagation_location {
             Some(location) => function_call_expression.with_propagation_location(location),
@@ -229,6 +235,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
         string_table,
     )? {
         let expression_location = expression.location.clone();
+        let expression_span = expression.span;
 
         return Ok(match handling {
             FallibleHandling::Propagate => Expression::handled_result_with_type_id(
@@ -237,6 +244,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                 handled_type_id,
                 success_type_diagnostic_spelling,
                 expression_location,
+                expression_span,
             )
             .with_propagation_location(
                 propagation_location.expect("propagation handling must have a postfix location"),
@@ -249,6 +257,7 @@ pub(crate) fn parse_fallible_handling_suffix_for_expression(
                     handled_type_id,
                     success_type_diagnostic_spelling,
                     expression_location,
+                    expression_span,
                 );
 
                 wrap_catch_expression(handled_expression, handling, success_result_type_ids)
@@ -353,6 +362,7 @@ pub(crate) fn wrap_catch_expression(
     debug_assert!(matches!(handler, FallibleHandling::Handler { .. }));
 
     let location = handled_expression.location.clone();
+    let span = handled_expression.span;
     let result_type_id = handled_expression.type_id;
     let diagnostic_type = handled_expression.diagnostic_type.to_owned();
 
@@ -365,6 +375,7 @@ pub(crate) fn wrap_catch_expression(
             })),
         },
         location,
+        span,
         result_type_id,
         diagnostic_type,
         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,

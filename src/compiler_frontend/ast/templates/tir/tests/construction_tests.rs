@@ -17,10 +17,10 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut string_table = StringTable::new();
     let mut construction =
-        TemplateConstructionContext::new(Rc::clone(&store), SourceLocation::default());
+        TemplateConstructionContext::new(Rc::clone(&store), SourceLocation::default(), None);
 
     let body_text = string_table.intern("leaf");
-    construction.record_text(body_text, 4, SourceLocation::default());
+    construction.record_text(body_text, 4, SourceLocation::default(), None);
     let body_id = *construction
         .root_children()
         .first()
@@ -29,6 +29,7 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
     let selector = TemplateBranchSelector::Bool(Expression::bool(
         true,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     ));
     let selector_site_id = construction.next_expression_site_id();
@@ -37,10 +38,13 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
             selector,
             body_id,
             SourceLocation::default(),
+            None,
             selector_site_id,
         )],
         None,
+        None,
         SourceLocation::default(),
+        None,
     );
 
     assert!(construction.control_flow_node_id().is_some());

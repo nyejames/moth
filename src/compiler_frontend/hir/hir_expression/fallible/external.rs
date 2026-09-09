@@ -10,6 +10,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::carrier::EmittedFallibleCarrier;
@@ -30,6 +31,7 @@ pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
     pub(crate) handling:
         &'a crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling,
     pub(crate) call_location: &'a SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) propagation_location: &'a SourceLocation,
 }
 
@@ -61,6 +63,7 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         error_type_id: FrontendTypeId,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
         let (carrier_type, ok_type, err_type) =
             self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, location)?;
@@ -69,6 +72,7 @@ impl<'a> HirBuilder<'a> {
             args,
             carrier_type,
             location,
+            span,
         )?;
 
         Ok(EmittedFallibleCarrier {

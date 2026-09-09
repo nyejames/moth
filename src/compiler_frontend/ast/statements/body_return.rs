@@ -19,6 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
     TypeMismatchContext,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -55,6 +56,11 @@ pub(crate) fn parse_return_statement(
         .into());
     }
 
+    let return_location = token_stream.current_location();
+    let return_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let is_error_return = token_stream.current_token_kind() == &TokenKind::ReturnBang;
     token_stream.advance();
 
@@ -100,7 +106,8 @@ pub(crate) fn parse_return_statement(
 
         ast.push(AstNode {
             kind: NodeKind::ReturnError(returned_error),
-            location: token_stream.current_location(),
+            location: return_location.clone(),
+            span: return_span,
             scope: context.scope.clone(),
         });
 
@@ -164,7 +171,8 @@ pub(crate) fn parse_return_statement(
 
         ast.push(AstNode {
             kind: NodeKind::Return(vec![return_expr]),
-            location: token_stream.current_location(),
+            location: return_location.clone(),
+            span: return_span,
             scope: context.scope.clone(),
         });
 
@@ -235,7 +243,8 @@ pub(crate) fn parse_return_statement(
 
     ast.push(AstNode {
         kind: NodeKind::Return(returned_values),
-        location: token_stream.current_location(),
+        location: return_location,
+        span: return_span,
         scope: context.scope.clone(),
     });
 

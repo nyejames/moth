@@ -22,6 +22,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -54,6 +55,7 @@ pub(crate) struct CastResolutionInput<'a> {
     pub(crate) string_table: &'a StringTable,
     pub(crate) active_generic_type_context: Option<&'a ActiveGenericTypeContext>,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Resolves a user-authored `cast` expression at an explicit typed boundary.
@@ -79,6 +81,7 @@ pub(crate) fn resolve_cast_expression(
         string_table,
         active_generic_type_context,
         location,
+        span,
     } = input;
 
     let source_type_id = source.type_id;
@@ -159,6 +162,7 @@ pub(crate) fn resolve_cast_expression(
         evidence,
         handling,
         location,
+        span,
     };
 
     let result_type_id = if cast.requires_optional_wrap_after_cast {

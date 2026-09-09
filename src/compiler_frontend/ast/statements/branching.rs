@@ -36,6 +36,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -61,6 +62,8 @@ struct OptionPresentCaptureBranch {
     scrutinee: Expression,
     pattern: MatchPattern,
     then_context: ScopeContext,
+    header_location: SourceLocation,
+    header_span: Option<SourceSpan>,
 }
 
 /// Parsed full-match block payload shared by statement and value-producing matches.
@@ -74,7 +77,6 @@ pub(crate) struct ParsedMatchBlock {
     pub arms: Vec<MatchArm>,
     pub default: Option<Vec<AstNode>>,
     pub exhaustiveness: MatchExhaustiveness,
-    pub location: SourceLocation,
     pub scope: InternedPath,
 }
 
@@ -134,6 +136,13 @@ pub fn create_branch(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> BranchingResult<Vec<AstNode>> {
+    let header_token = token_stream
+        .tokens
+        .get(token_stream.index.saturating_sub(1));
+    let header_location = header_token
+        .map(|token| token.location.clone())
+        .unwrap_or_else(|| token_stream.current_location());
+    let header_span = header_token.map(|token| SourceSpan::new(token_stream.file_id, token.span));
     let parsed_header = parse_if_header(token_stream, context, type_interner, string_table)?;
 
     let condition = match parsed_header {
@@ -147,6 +156,8 @@ pub fn create_branch(
                     scrutinee,
                     pattern,
                     then_context,
+                    header_location,
+                    header_span,
                 },
                 token_stream,
                 context,
@@ -158,6 +169,8 @@ pub fn create_branch(
         ParsedIfHeader::MatchStyle { scrutinee } => {
             let match_statement = create_match_node(
                 scrutinee,
+                header_location,
+                header_span,
                 token_stream,
                 context,
                 type_interner,
@@ -178,7 +191,6 @@ pub fn create_branch(
             ),
         ));
     }
-
     token_stream.advance();
 
     // Both bodies publish provisional generic requests into the shared sink. Finalisation owns
@@ -234,7 +246,8 @@ pub fn create_branch(
             else_block,
             IfBranchMetadata::new(request_ranges, then_scope.clone(), else_scope),
         ),
-        location: token_stream.current_location(),
+        location: header_location,
+        span: header_span,
         scope: then_scope,
     }])
 }
@@ -247,6 +260,13 @@ fn create_option_present_capture_branch(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
 ) -> BranchingResult<Vec<AstNode>> {
+    let OptionPresentCaptureBranch {
+        scrutinee,
+        pattern,
+        then_context,
+        header_location,
+        header_span,
+    } = parsed_header;
     if token_stream.current_token_kind() != &TokenKind::Colon {
         return Err(branching_error(
             CompilerDiagnostic::invalid_control_flow_statement(
@@ -259,9 +279,7 @@ fn create_option_present_capture_branch(
 
     let body = function_body_to_ast(
         token_stream,
-        parsed_header
-            .then_context
-            .new_child_control_flow(ContextKind::Branch, string_table),
+        then_context.new_child_control_flow(ContextKind::Branch, string_table),
         type_interner,
         warnings,
         string_table,
@@ -292,16 +310,17 @@ fn create_option_present_capture_branch(
 
     Ok(vec![AstNode {
         kind: NodeKind::Match {
-            scrutinee: parsed_header.scrutinee,
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: parsed_header.pattern,
+                pattern,
                 guard: None,
                 body,
             }],
             default,
             exhaustiveness,
         },
-        location: token_stream.current_location(),
+        location: header_location,
+        span: header_span,
         scope: context.scope.clone(),
     }])
 }
@@ -314,6 +333,8 @@ fn create_option_present_capture_branch(
 /// exhaustiveness) are enforced here so downstream HIR lowering can assume valid input.
 fn create_match_node(
     scrutinee: Expression,
+    header_location: SourceLocation,
+    header_span: Option<SourceSpan>,
     token_stream: &mut FileTokens,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -337,7 +358,8 @@ fn create_match_node(
             default: parsed_match.default,
             exhaustiveness: parsed_match.exhaustiveness,
         },
-        location: parsed_match.location,
+        location: header_location,
+        span: header_span,
         scope: parsed_match.scope,
     })
 }
@@ -524,7 +546,6 @@ pub(crate) fn parse_match_block(
         arms,
         default: else_block,
         exhaustiveness,
-        location: token_stream.current_location(),
         scope: match_context.scope,
         scrutinee,
     })

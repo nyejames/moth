@@ -1570,6 +1570,7 @@ fn builder_owner_conflict_fails_without_mutation() {
                 profile: BuildProfile::Dev,
             },
             setting_location: setting_location.clone(),
+            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };

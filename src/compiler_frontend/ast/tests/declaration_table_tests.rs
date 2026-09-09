@@ -801,9 +801,11 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
         id: path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }

@@ -47,6 +47,7 @@ pub(crate) fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
         location,
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -64,6 +65,7 @@ pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Decla
     Declaration {
         id: name,
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -83,7 +85,15 @@ pub(crate) fn param(
 
     Declaration {
         id: name,
-        value: Expression::new(ExpressionKind::NoValue, location, id, data_type, value_mode),
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            location,
+            None,
+            id,
+            data_type,
+            value_mode,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -124,14 +134,7 @@ pub(crate) fn immutable_reference_expr(
     id: TypeId,
     location: SourceLocation,
 ) -> Expression {
-    Expression::reference_with_type_id(
-        name,
-        data_type,
-        id,
-        location,
-        ValueMode::ImmutableReference,
-        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-    )
+    Expression::reference_with_type_id(name, data_type, id, location, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue)
 }
 
 pub(crate) fn assignment_target(
@@ -146,6 +149,7 @@ pub(crate) fn assignment_target(
         diagnostic_type: data_type,
         value_mode: ValueMode::MutableReference,
         location,
+        span: None,
     }
 }
 

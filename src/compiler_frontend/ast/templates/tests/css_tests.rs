@@ -26,6 +26,7 @@ fn located_text_piece(
                 char_column: char_column + text_len,
             },
         ),
+        span: None,
     })
 }
 

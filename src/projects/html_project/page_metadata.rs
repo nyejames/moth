@@ -16,6 +16,7 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 const PAGE_TITLE: &str = "page_title";
 const PAGE_DESCRIPTION: &str = "page_description";
@@ -39,10 +40,13 @@ pub(crate) struct HtmlPageMetadata {
 ///
 /// Metadata is a builder-owned, non-executable use. Its authored declaration location must remain
 /// attached so output conflicts identify the metadata use rather than the resource-table intern.
+/// The span stays `None` until an upstream authored span exists for metadata declarations;
+/// const-fact locations are span-free today.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MetadataResourceUse {
     pub(crate) origin: StableResourceOriginId,
     pub(crate) authored_location: SourceLocation,
+    pub(crate) authored_span: Option<SourceSpan>,
 }
 
 /// The complete page-metadata selection for one HTML entry.
@@ -179,6 +183,7 @@ fn record_metadata_structural_uses(
             OwnedFoldedStringPiece::Resource(origin) => resource_uses.push(MetadataResourceUse {
                 origin: origin.clone(),
                 authored_location: authored_location.clone(),
+                authored_span: None,
             }),
             OwnedFoldedStringPiece::SiteRoot => *uses_site_root = true,
             OwnedFoldedStringPiece::Text(_) => {}

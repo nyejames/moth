@@ -13,6 +13,7 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -23,6 +24,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let lowered = self.lower_expression(value)?;
         let option_type = lowered.value.ty;
@@ -47,7 +49,7 @@ impl<'a> HirBuilder<'a> {
         let option_for_branch =
             self.make_local_load_expression(option_local, option_type, location, branch_region);
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             branch_block,
             HirTerminator::Match {
                 scrutinee: option_for_branch,
@@ -65,9 +67,10 @@ impl<'a> HirBuilder<'a> {
                 ],
             },
             location,
+            span,
         )?;
 
-        self.emit_option_none_return(none_block, option_type, location)?;
+        self.emit_option_none_return(none_block, option_type, location, span)?;
 
         self.set_current_block(present_block, location)?;
         let present_region = self.current_region_or_error(location)?;
@@ -97,6 +100,7 @@ impl<'a> HirBuilder<'a> {
         none_block: crate::compiler_frontend::hir::ids::BlockId,
         propagated_option_type: crate::compiler_frontend::datatypes::ids::TypeId,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         self.set_current_block(none_block, location)?;
         let none_region = self.current_region_or_error(location)?;
@@ -110,7 +114,12 @@ impl<'a> HirBuilder<'a> {
             .fallible_carrier_slots(function_return_type)
         {
             let none = self.option_none_expression(success_type, none_region, location)?;
-            return self.emit_terminator(none_block, HirTerminator::ReturnSuccess(none), location);
+            return self.emit_terminator_with_span(
+                none_block,
+                HirTerminator::ReturnSuccess(none),
+                location,
+                span,
+            );
         }
 
         let none = self.option_none_expression(function_return_type, none_region, location)?;
@@ -123,7 +132,7 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        self.emit_terminator(none_block, HirTerminator::Return(none), location)
+        self.emit_terminator_with_span(none_block, HirTerminator::Return(none), location, span)
     }
 
     fn option_none_expression(

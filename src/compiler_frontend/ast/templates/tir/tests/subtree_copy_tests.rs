@@ -29,7 +29,12 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn text_node(
@@ -62,8 +67,10 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             branch_body,
             SourceLocation::default(),
+            None,
             selector_site,
         )],
+        None,
         None,
         SourceLocation::default(),
     );
@@ -196,6 +203,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                     site_id: expression_site,
                 },
                 SourceLocation::default(),
+                None,
             ));
         let slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
         let root = builder.push_sequence_node(vec![expression, slot], SourceLocation::default());
@@ -221,6 +229,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                     Box::new(Expression::bool(
                         false,
                         SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 )],
@@ -252,6 +261,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             occurrence_id: child_occurrence,
         },
         SourceLocation::default(),
+        None,
     ));
 
     let mut copy_state = TirCopyState::new();

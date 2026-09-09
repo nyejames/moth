@@ -216,6 +216,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     let module_constant = Declaration {
         id: constant_path.clone(),
         value: Expression::structural_string(producer_pieces, SourceLocation::default()),
+        binding_span: None,
         config_qualifier: None,
     };
     let const_values =
@@ -329,12 +330,19 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
 
     let nested_count = Declaration {
         id: InternedPath::from_single_str("count", &mut producer_string_table),
-        value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            7,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let nested_record = Expression::anonymous_const_record(
         vec![nested_count],
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         producer_marker,
     );
@@ -342,17 +350,30 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     let producer_fields = vec![
         Declaration {
             id: InternedPath::from_single_str("year", &mut producer_string_table),
-            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(
+                2026,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("enabled", &mut producer_string_table),
-            value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("nested", &mut producer_string_table),
             value: nested_record,
+            binding_span: None,
             config_qualifier: None,
         },
     ];
@@ -362,9 +383,11 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         value: Expression::anonymous_const_record(
             producer_fields,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             producer_marker,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let const_values =
@@ -530,11 +553,13 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
                     name: title_path,
                     type_id: builtin_type_ids::STRING,
                     location: SourceLocation::default(),
+                    span: None,
                 },
                 FieldDefinition {
                     name: year_path,
                     type_id: builtin_type_ids::INT,
                     location: SourceLocation::default(),
+                    span: None,
                 },
             ]),
             generic_parameters: None,
@@ -600,9 +625,11 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
         id: path.clone(),
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }

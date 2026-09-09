@@ -579,7 +579,9 @@ impl PreparationWalk {
                     );
                     Ok(facts)
                 }
-                TemplateIrNodeKind::BranchChain { branches, fallback } => {
+                TemplateIrNodeKind::BranchChain {
+                    branches, fallback, ..
+                } => {
                     let mut facts = PreparationFacts::const_value();
                     for branch in branches {
                         let branch_selector = effective_branch_selector_for_view(

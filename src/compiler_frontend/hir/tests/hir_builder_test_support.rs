@@ -172,11 +172,13 @@ impl<'a> HirBuilder<'a> {
                     name: message_path,
                     type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
                     location: SourceLocation::default(),
+                    span: None,
                 },
                 FieldDefinition {
                     name: code_path,
                     type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::INT,
                     location: SourceLocation::default(),
+                    span: None,
                 },
             ]
             .into_boxed_slice(),
@@ -267,6 +269,7 @@ impl<'a> HirBuilder<'a> {
         let declaration = Declaration {
             id: name.clone(),
             value,
+            binding_span: None,
             config_qualifier: None,
         };
         self.module_const_values
@@ -290,6 +293,7 @@ impl<'a> HirBuilder<'a> {
                 name,
                 type_id,
                 location,
+                span: None,
             })
             .collect::<Vec<_>>();
 
@@ -325,6 +329,7 @@ impl<'a> HirBuilder<'a> {
                                 name: field.id.clone(),
                                 type_id: field.value.type_id,
                                 location: field.value.location.clone(),
+                                span: field.value.span,
                             })
                             .collect::<Vec<_>>();
                         ChoiceVariantPayloadDefinition::Record {
@@ -333,6 +338,7 @@ impl<'a> HirBuilder<'a> {
                     }
                 },
                 location: variant.location.clone(),
+                span: variant.span,
             })
             .collect::<Vec<_>>();
 
@@ -398,6 +404,7 @@ pub(crate) fn register_local(
             mutable: true,
             region: RegionId(0),
             source_info: Some(location),
+            span: None,
         },
         name,
     );
@@ -438,7 +445,11 @@ pub(crate) fn expressions_to_owned_render_node_with_resources(
         .map(|expression| expression_to_owned_node(expression, string_table, resources))
         .collect();
 
-    OwnedRuntimeTemplateNode::Sequence { children }
+    OwnedRuntimeTemplateNode::Sequence {
+        children,
+        location: SourceLocation::default(),
+        span: None,
+    }
 }
 
 fn expression_to_owned_node(
@@ -451,6 +462,7 @@ fn expression_to_owned_node(
             text: OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
             reactive_subscription: None,
             location: expression.location.to_owned(),
+            span: expression.span,
         },
 
         // WHAT: mirrors the runtime handoff: a structural string converts to a piece-bearing
@@ -467,12 +479,15 @@ fn expression_to_owned_node(
                 text,
                 reactive_subscription: None,
                 location: expression.location.to_owned(),
+                span: expression.span,
             }
         }
 
         _ => OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression.clone()),
             reactive_subscription: None,
+            location: expression.location.to_owned(),
+            span: expression.span,
         },
     }
 }
@@ -486,6 +501,7 @@ pub(crate) fn runtime_template_expression(
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(body),
         location: location.clone(),
+        span: None,
     };
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
@@ -542,7 +558,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
     let node =
         expressions_to_owned_render_node_with_resources(&[structural], &string_table, &resources);
 
-    let OwnedRuntimeTemplateNode::Sequence { children } = node else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = node else {
         panic!("fixture content should map to a sequence node");
     };
     let [single] = children.as_slice() else {
@@ -552,6 +568,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
         text,
         reactive_subscription: None,
         location: node_location,
+        ..
     } = single
     else {
         panic!("structural string fixture should map to a piece-bearing text node, got {single:?}");
@@ -580,7 +597,7 @@ fn all_text_structural_fixture_keeps_pieces_without_a_resource_table() {
 
     let node = expressions_to_owned_render_node(&[structural], &string_table);
 
-    let OwnedRuntimeTemplateNode::Sequence { children } = node else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = node else {
         panic!("fixture content should map to a sequence node");
     };
     let [single] = children.as_slice() else {

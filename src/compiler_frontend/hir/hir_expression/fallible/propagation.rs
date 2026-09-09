@@ -13,6 +13,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -38,8 +39,15 @@ impl<'a> HirBuilder<'a> {
         };
 
         let propagation_location = value.propagation_location().unwrap_or(location);
-        self.lower_fallible_carrier_to_success_value(result_carrier, propagation_location)
-            .map(Some)
+        // The `!` dispatch branch and its error edge carry the outer propagation span;
+        // the success value span is restored below from the authored expression.
+        let mut success_value = self.lower_fallible_carrier_to_success_value(
+            result_carrier,
+            propagation_location,
+            value.span,
+        )?;
+        success_value.span = value.span;
+        Ok(Some(success_value))
     }
 
     /// Builds the list of result type IDs for a handled expression.
@@ -69,6 +77,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, CompilerError> {
         let (carrier_type, ok_type, err_type) =
             self.result_call_carrier_slots(&target, location)?;
@@ -82,7 +91,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         let result_local =
-            self.emit_result_call_to_current_block(target, args, carrier_type, location)?;
+            self.emit_result_call_to_current_block(target, args, carrier_type, location, span)?;
 
         Ok(EmittedFallibleCarrier {
             result_local,
@@ -160,6 +169,7 @@ impl<'a> HirBuilder<'a> {
                     args,
                     result_type_ids,
                     &value.location,
+                    value.span,
                 )?;
 
                 Ok(Some(carrier))
@@ -179,6 +189,7 @@ impl<'a> HirBuilder<'a> {
                     result_type_ids,
                     *error_type_id,
                     &value.location,
+                    value.span,
                 )?,
             )),
 

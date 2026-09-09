@@ -9,6 +9,7 @@
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
 //! HIR transformation or lowering invariant failure only. Normal user-facing source failures
 //! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
+use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind, SourceLocation};
@@ -704,11 +705,14 @@ impl<'a> HirBuilder<'a> {
             };
 
             let param_type = self.lower_type_id(param.value.type_id, &param_location)?;
+            // Authored parameter binding uses the explicit `Declaration.binding_span`
+            // (the binding-name anchor), never the default-value/initializer span.
             let local_id = self.allocate_named_local(
                 param.id.to_owned(),
                 param_type,
                 param.value.value_mode.is_mutable(),
                 Some(param_location.clone()),
+                param.binding_span,
             )?;
             if let Some(source) = &param.value.reactive_source {
                 self.bind_reactive_source_for_local(local_id, source, param_type, &param_location)?;
@@ -725,6 +729,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         variable: &Declaration,
         location: &SourceLocation,
+        statement_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if variable.value.is_const_record_value() {
             if !self.module_constants_by_name.contains_key(&variable.id) {
@@ -746,11 +751,15 @@ impl<'a> HirBuilder<'a> {
         };
 
         let local_type = self.lower_type_id(variable.value.type_id, &source_location)?;
+        // Authored binding: the local carries the explicit `Declaration.binding_span`
+        // (the binding-name anchor), never the initializer span. The initializer span
+        // belongs to the value expression lowered below.
         let local_id = self.allocate_named_local(
             variable.id.to_owned(),
             local_type,
             variable.value.value_mode.is_mutable(),
             Some(source_location.clone()),
+            variable.binding_span,
         )?;
         if let Some(source) = &variable.value.reactive_source {
             self.bind_reactive_source_for_local(local_id, source, local_type, &source_location)?;
@@ -758,12 +767,15 @@ impl<'a> HirBuilder<'a> {
 
         let value = self.lower_expression_value_to_current_block(&variable.value)?;
 
-        self.emit_statement_kind(
+        // Authored initialization carries the statement span, falling back to the
+        // initializer span when the statement is identity-free.
+        self.emit_statement_kind_with_span(
             crate::compiler_frontend::hir::statements::HirStatementKind::Assign {
                 target: HirPlace::Local(local_id),
                 value,
             },
             location,
+            statement_span.or(variable.value.span),
         )
     }
 
@@ -773,6 +785,7 @@ impl<'a> HirBuilder<'a> {
         ty: crate::compiler_frontend::datatypes::ids::TypeId,
         mutable: bool,
         source_info: Option<SourceLocation>,
+        span: Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
         let local_location = source_info.to_owned().unwrap_or_default();
 
@@ -798,6 +811,7 @@ impl<'a> HirBuilder<'a> {
             mutable,
             region,
             source_info,
+            span,
         };
 
         self.side_table.map_local_source(&local);

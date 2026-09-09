@@ -28,6 +28,7 @@ impl<'a> HirBuilder<'a> {
                 ExpressionRpnItem::Operator {
                     operator,
                     location: operator_location,
+                    span: operator_span,
                 } => match operator.required_values() {
                     1 => {
                         let Some(operand) = stack.pop() else {
@@ -41,6 +42,7 @@ impl<'a> HirBuilder<'a> {
                             op: operator.to_owned(),
                             operand: Box::new(operand),
                             location: operator_location.clone(),
+                            span: *operator_span,
                         });
                     }
                     2 => {
@@ -68,6 +70,7 @@ impl<'a> HirBuilder<'a> {
                             op: operator.to_owned(),
                             right: Box::new(right),
                             location: operator_location.clone(),
+                            span: *operator_span,
                         });
                     }
                     _ => {

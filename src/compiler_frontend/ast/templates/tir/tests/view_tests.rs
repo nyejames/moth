@@ -51,6 +51,7 @@ fn bool_expression() -> Expression {
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
         location: SourceLocation::default(),
+        span: None,
         reactive_source: None,
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
@@ -1221,6 +1222,7 @@ fn bool_expression_with_location(location: &SourceLocation) -> Expression {
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
         location: location.clone(),
+        span: None,
         reactive_source: None,
         reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
@@ -1250,12 +1252,14 @@ fn build_template_with_branch_chain(
         TemplateBranchSelector::Bool(bool_expression_with_location(&branch_location)),
         branch_body,
         branch_location,
+        None,
         builder.store.next_expression_site_id(),
     );
 
     let root = builder.push_branch_chain_node(
         vec![branch],
         Some(fallback_body),
+        None,
         SourceLocation::default(),
     );
     let template_id = builder.finish_template(

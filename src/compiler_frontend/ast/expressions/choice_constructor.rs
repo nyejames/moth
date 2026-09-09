@@ -36,6 +36,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -101,6 +102,10 @@ pub(super) fn parse_choice_construct(
     token_stream.skip_newlines();
 
     let variant_location = token_stream.current_location();
+    let variant_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let variant_name = match token_stream.current_token_kind() {
         TokenKind::Symbol(name) => *name,
 
@@ -199,6 +204,7 @@ pub(super) fn parse_choice_construct(
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
                     location: constructor_location.clone(),
+                    span: variant_span,
                 },
                 context,
                 type_interner,
@@ -268,6 +274,7 @@ pub(super) fn parse_choice_construct(
                 diagnostic_type,
                 type_id: choice_type_id,
                 location: variant_location,
+                span: variant_span,
                 value_mode: ValueMode::ImmutableOwned,
             });
             Ok(choice_expr)
@@ -370,6 +377,7 @@ pub(super) fn parse_choice_construct(
                 choice_fields.push(Declaration {
                     id: field.name.clone(),
                     value,
+                    binding_span: None,
                     config_qualifier: None,
                 });
             }
@@ -395,6 +403,7 @@ pub(super) fn parse_choice_construct(
                 diagnostic_type,
                 type_id: choice_type_id,
                 location: variant_location,
+                span: variant_span,
                 value_mode,
             });
             Ok(choice_expr)
@@ -428,6 +437,7 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                             name: field.id.clone(),
                             type_id: field.value.type_id,
                             location: field.value.location.clone(),
+                            span: field.value.span,
                         })
                         .collect();
 
@@ -437,6 +447,7 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                 }
             },
             location: variant.location.clone(),
+            span: variant.span,
         })
         .collect()
 }

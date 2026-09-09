@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -36,6 +37,7 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b> {
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
 }
 
@@ -54,6 +56,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         target,
         string_table,
         location,
+        span,
         classification,
     } = input;
 
@@ -97,6 +100,7 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         scrutinee: header.scrutinee,
         pattern: header.pattern,
         location,
+        span,
     }))
 }
 
@@ -110,6 +114,7 @@ struct InlineValueMatchParseInput<'a, 'b> {
     scrutinee: Expression,
     pattern: MatchPattern,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 /// The speculative outer parser may discard only authored diagnostics. Once a match shape is
@@ -129,6 +134,7 @@ fn parse_inline_value_match(
         scrutinee,
         pattern,
         location,
+        span,
     } = input;
 
     let output = parse_inline_then_else(InlineThenElseInput {
@@ -143,11 +149,13 @@ fn parse_inline_value_match(
     let then_body = vec![then_value_node(
         output.then_values,
         location.clone(),
+        output.then_span,
         then_context.scope.clone(),
     )];
     let else_body = vec![then_value_node(
         output.else_values,
         location.clone(),
+        output.else_span,
         context.scope.clone(),
     )];
 
@@ -167,9 +175,13 @@ fn parse_inline_value_match(
     Ok(match output.result_type_id {
         Some(result_type_id) => ParsedReceiverValue::Complete(build_value_match_expression(
             value_match,
+            span,
             result_type_id,
             type_interner.environment(),
         )),
-        None => ParsedReceiverValue::NeedsSlotInference(ValueBlock::Match(value_match)),
+        None => ParsedReceiverValue::NeedsSlotInference {
+            block: ValueBlock::Match(value_match),
+            span,
+        },
     })
 }

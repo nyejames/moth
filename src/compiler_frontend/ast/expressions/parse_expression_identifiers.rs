@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateSlotReason, InvalidThisUsageReason, NameNamespace,
 };
 use crate::compiler_frontend::external_packages::ExternalConstantValue;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -230,6 +231,10 @@ pub(super) fn parse_identifier_or_call(
             Some(signature) => {
                 let generic_template = context.lookup_generic_function_template(&binding.id);
                 let call_location = token_stream.current_location();
+                let call_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
 
                 parse_source_callable_member(SourceCallableMemberInput {
                     token_stream,
@@ -238,6 +243,7 @@ pub(super) fn parse_identifier_or_call(
                     generic_template,
                     visible_name: identifier,
                     call_location,
+                    call_span,
                     context,
                     expression,
                     allow_boundary_catch,
@@ -251,11 +257,16 @@ pub(super) fn parse_identifier_or_call(
 
             None => {
                 let reference_location = token_stream.current_location();
+                let reference_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
                 let reference_expression = reference_expression_from_declaration(
                     binding.as_declaration(),
                     context,
                     type_interner,
                     reference_location.clone(),
+                    reference_span,
                 );
                 token_stream.advance();
 
@@ -269,6 +280,7 @@ pub(super) fn parse_identifier_or_call(
                     ExpressionOperandInput {
                         operand: reference_expression,
                         wrapper_location: reference_location,
+                        wrapper_span: reference_span,
                     },
                 )?;
                 return Ok(()); // Will have moved onto the next token already
@@ -309,8 +321,12 @@ pub(super) fn parse_identifier_or_call(
     //  External constant
     // ------------------------------------
     if let Some((_const_id, const_def)) = context.lookup_visible_external_constant(identifier) {
-        token_stream.advance();
         let location = token_stream.current_location();
+        let span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
+        token_stream.advance();
 
         if context.kind.is_constant_context() && !const_def.value.is_scalar() {
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -323,13 +339,17 @@ pub(super) fn parse_identifier_or_call(
 
         let value_mode = ValueMode::ImmutableOwned;
         let const_expr = match const_def.value {
-            ExternalConstantValue::Float(value) => Expression::float(value, location, value_mode),
-            ExternalConstantValue::Int(value) => Expression::int(value, location, value_mode),
+            ExternalConstantValue::Float(value) => {
+                Expression::float(value, location, span, value_mode)
+            }
+            ExternalConstantValue::Int(value) => Expression::int(value, location, span, value_mode),
             ExternalConstantValue::StringSlice(value) => {
                 let string_id = string_table.intern(value);
-                Expression::string_slice(string_id, location, value_mode)
+                Expression::string_slice(string_id, location, span, value_mode)
             }
-            ExternalConstantValue::Bool(value) => Expression::bool(value, location, value_mode),
+            ExternalConstantValue::Bool(value) => {
+                Expression::bool(value, location, span, value_mode)
+            }
         };
 
         push_expression_operand(
@@ -361,6 +381,10 @@ pub(super) fn parse_identifier_or_call(
 
         // External calls parse from metadata directly; do not synthesize fake parameter declarations.
         let call_location = token_stream.current_location();
+        let call_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
         token_stream.advance();
 
         let function_call_expression =
@@ -369,6 +393,7 @@ pub(super) fn parse_identifier_or_call(
                 external_function_id: function_id,
                 external_function: host_function_definition,
                 call_location,
+                call_span,
                 context,
                 value_required: true,
                 allow_boundary_catch: allow_boundary_catch
@@ -480,11 +505,16 @@ fn parse_this_reference(
     };
 
     let reference_location = token_stream.current_location();
+    let reference_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let reference_expression = reference_expression_from_declaration(
         receiver_declaration.as_declaration(),
         context,
         type_interner,
         reference_location.clone(),
+        reference_span,
     );
     token_stream.advance();
 
@@ -498,6 +528,7 @@ fn parse_this_reference(
         ExpressionOperandInput {
             operand: reference_expression,
             wrapper_location: reference_location,
+            wrapper_span: reference_span,
         },
     )?;
 

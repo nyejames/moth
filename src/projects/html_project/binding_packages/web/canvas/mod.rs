@@ -57,6 +57,7 @@ pub fn register_web_canvas_package(
         &canvas_logical_source_path(),
         canvas_js_path(),
         SourceLocation::default(),
+        None,
     )
     .expect("built-in canvas asset identity is a proven internal invariant");
 

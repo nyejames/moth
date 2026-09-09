@@ -21,6 +21,7 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceProvenance,
 };
@@ -375,6 +376,7 @@ impl HirBackendSelection {
 pub(crate) struct ReachableMapUse {
     pub(crate) kind: ReachableMapUseKind,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 /// One reachable structural resource anchor and its executable owner.
 ///
@@ -387,6 +389,7 @@ pub(crate) struct ReachableResourceUse {
     pub(crate) resource_id: ResourceId,
     pub(crate) owner: FunctionId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// One reachable structural site-root anchor and its executable owner.
@@ -398,6 +401,7 @@ pub(crate) struct ReachableResourceUse {
 pub(crate) struct ReachableSiteRootUse {
     pub(crate) owner: FunctionId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable assertion failure message and its HIR evaluation fact.
@@ -409,6 +413,7 @@ pub(crate) struct ReachableSiteRootUse {
 pub(crate) struct ReachableAssertionMessageUse {
     pub(crate) evaluation: HirAssertionMessageEvaluation,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -426,6 +431,7 @@ pub(crate) struct ReachableExternalCall {
     pub(crate) function_id: ExternalFunctionId,
     pub(crate) statement_id: HirNodeId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable reactive template-backed value.
@@ -436,6 +442,7 @@ pub(crate) struct ReachableExternalCall {
 pub(crate) struct ReachableReactiveTemplateUse {
     pub(crate) template_id: ReactiveTemplateId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable sink that consumes a reactive template-backed value.
@@ -444,6 +451,7 @@ pub(crate) struct ReachableReactiveSinkUse {
     pub(crate) kind: ReachableReactiveSinkKind,
     pub(crate) template_id: ReactiveTemplateId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -463,6 +471,7 @@ pub(crate) enum ReachableReactiveSinkKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableRuntimeCastUse {
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable compiler-owned checked numeric operation.
@@ -472,6 +481,7 @@ pub(crate) struct ReachableRuntimeCastUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableNumericOpUse {
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable compiler-owned Float formatting or validation statement.
@@ -483,6 +493,7 @@ pub(crate) struct ReachableNumericOpUse {
 pub(crate) struct ReachableFloatStatementUse {
     pub(crate) kind: ReachableFloatStatementKind,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -900,6 +911,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                             function_id: *function_id,
                             statement_id: statement.id,
                             location: statement.location.clone(),
+                            span: statement.span,
                         });
                 }
             }
@@ -945,6 +957,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Operation(*op),
                     location: statement.location.clone(),
+                    span: statement.span,
                 });
                 self.collect_runtime_feature_uses_from_expression(receiver, &statement.location);
                 for arg in args {
@@ -959,6 +972,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_numeric_ops
                     .push(ReachableNumericOpUse {
                         location: statement.location.clone(),
+                        span: statement.span,
                     });
 
                 match operands {
@@ -986,6 +1000,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         location: statement.location.clone(),
+                        span: statement.span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, &statement.location);
             }
@@ -996,6 +1011,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
                         location: statement.location.clone(),
+                        span: statement.span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, &statement.location);
             }
@@ -1006,6 +1022,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
                         location: statement.location.clone(),
+                        span: statement.span,
                     });
                 self.collect_runtime_feature_uses_from_expression(source, &statement.location);
             }
@@ -1065,6 +1082,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .push(ReachableAssertionMessageUse {
                         evaluation: *message_evaluation,
                         location,
+                        span: message.span,
                     });
                 self.collect_runtime_feature_uses_from_expression(message, &fallback_location);
             }
@@ -1099,6 +1117,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 .push(ReachableReactiveTemplateUse {
                     template_id: template.id,
                     location: expression_location.clone(),
+                    span: expression.span,
                 });
         }
 
@@ -1108,6 +1127,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Literal,
                     location: expression_location.clone(),
+                    span: expression.span,
                 });
                 for entry in entries {
                     self.collect_runtime_feature_uses_from_expression(
@@ -1134,6 +1154,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         location: expression_location.clone(),
+                        span: expression.span,
                     });
                 self.collect_runtime_feature_uses_from_expression(operand, &expression_location);
             }
@@ -1191,6 +1212,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                     resource_id: *resource_id,
                                     owner: self.owner_function,
                                     location: expression_location.clone(),
+                                    span: expression.span,
                                 });
                         }
                         ConstStringPiece::SiteRoot => {
@@ -1199,6 +1221,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                 .push(ReachableSiteRootUse {
                                     owner: self.owner_function,
                                     location: expression_location.clone(),
+                                    span: expression.span,
                                 });
                         }
                     }
@@ -1246,6 +1269,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 kind,
                 template_id: template.id,
                 location,
+                span: expression.span,
             });
     }
 

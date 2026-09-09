@@ -37,7 +37,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
+use crate::compiler_frontend::source::{
+    LocalSpan, SourceDatabase, SourceId, SourceSlot, SourceSpan,
+};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -436,17 +438,21 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 Expression::new(
                     ExpressionKind::NoValue,
                     header.name_location.to_owned(),
+                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
             config_qualifier: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.tokens.src_path,
             declaration,
             &header.name_location,
+            header.tokens.file_id,
+            header.name_span,
         )),
         HeaderKind::Struct { .. } => Some(Declaration {
             id: header.tokens.src_path.to_owned(),
@@ -458,11 +464,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 Expression::new(
                     ExpressionKind::NoValue,
                     header.name_location.to_owned(),
+                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
             config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
@@ -476,11 +484,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 Expression::new(
                     ExpressionKind::NoValue,
                     header.name_location.to_owned(),
+                    Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
             config_qualifier: None,
         }),
         HeaderKind::StartFunction => {
@@ -504,11 +514,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     Expression::new(
                         ExpressionKind::NoValue,
                         header.name_location.to_owned(),
+                        Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                         type_id_hint_for_diagnostic_type(&data_type),
                         data_type,
                         ValueMode::ImmutableReference,
                     )
                 },
+                binding_span: None,
                 config_qualifier: None,
             })
         }
@@ -524,6 +536,8 @@ fn constant_declaration_placeholder(
     path: &InternedPath,
     declaration: &DeclarationSyntax,
     location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    file_id: SourceId,
+    name_span: LocalSpan,
 ) -> Declaration {
     Declaration {
         id: path.to_owned(),
@@ -532,11 +546,13 @@ fn constant_declaration_placeholder(
             Expression::new(
                 ExpressionKind::NoValue,
                 location.to_owned(),
+                Some(SourceSpan::new(file_id, name_span)),
                 type_id_hint_for_diagnostic_type(&data_type),
                 data_type,
                 declaration.value_mode(),
             )
         },
+        binding_span: Some(SourceSpan::new(file_id, name_span)),
         config_qualifier: None,
     }
 }

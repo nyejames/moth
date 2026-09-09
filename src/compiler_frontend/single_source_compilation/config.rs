@@ -51,7 +51,7 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -105,18 +105,21 @@ pub(crate) struct ConfigCompilationOutcome {
 
 /// One authored top-level config constant projected to the owned folded-value vocabulary.
 ///
-/// WHAT: carries the authored key name, its owned folded value, the two spans config
-///       diagnostics underline, and a location-only table aligned with direct record fields.
-///       Public folded values stay location-free; each `direct_field_locations[i]` is the
-///       initializer span for `Record` field `i`.
-/// WHY:  build-side validation consumes owned values with no donor-local AST identity, so the
+/// WHAT: carries the authored key name, its owned folded value, the declaration and key-name
+///       spans config diagnostics underline, and location/span tables aligned with direct record
+///       fields. Public folded values stay location-free; the parallel tables retain the exact
+///       initializer provenance needed after folding.
+/// WHY: build-side validation consumes owned values with no donor-local AST identity, so the
 ///       compiler service resolves every donor-local handle while the module is still in scope.
 pub(crate) struct FoldedConfigDeclaration {
     pub(crate) name: StringId,
     pub(crate) value: PublicFoldedValue,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) name_location: SourceLocation,
+    pub(crate) name_span: Option<SourceSpan>,
     pub(crate) direct_field_locations: Vec<SourceLocation>,
+    pub(crate) direct_field_spans: Vec<Option<SourceSpan>>,
 }
 
 /// Compile one authored `config.moth` to owned folded declarations and retain its source spans.
@@ -244,8 +247,8 @@ fn compile_prepared_config_source(
 
     // Preserve key-name spans before AST consumes the headers. The full header path becomes the
     // declaration ID, so every folded declaration can carry its exact authored name span.
-    let authored_key_name_locations =
-        collect_authored_config_key_name_locations(&sorted.headers, authored_scope);
+    let authored_key_name_provenance =
+        collect_authored_config_key_name_provenance(&sorted.headers, authored_scope);
 
     // Fold the ordered declarations. Config stops here: no HIR, borrow facts or interface.
     let config_resolution = ConfigResolutionServices::new(
@@ -293,12 +296,11 @@ fn compile_prepared_config_source(
     }
 
     // Project every authored top-level folded constant into the owned folded-value vocabulary
-    // while the donor-local type environment and string table are still in scope. Config rejects
-    // file-value paths, so the projection needs no module resource table.
+    // while the donor-local type environment and string table are still in scope.
     let declarations = project_authored_config_declarations(
         &ast,
         authored_scope,
-        &authored_key_name_locations,
+        &authored_key_name_provenance,
         request.binding_packages,
         string_table,
     )?;
@@ -425,7 +427,7 @@ fn reject_mutable_config_bindings(
 fn project_authored_config_declarations(
     ast: &Ast,
     authored_scope: &InternedPath,
-    authored_key_name_locations: &HashMap<InternedPath, SourceLocation>,
+    authored_key_name_provenance: &HashMap<InternedPath, (SourceLocation, Option<SourceSpan>)>,
     binding_packages: &ExternalPackageRegistry,
     string_table: &StringTable,
 ) -> Result<Vec<FoldedConfigDeclaration>, CompilerMessages> {
@@ -465,37 +467,75 @@ fn project_authored_config_declarations(
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
         let direct_field_locations = project_direct_field_locations(&ast.const_values, value_id)
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+        let direct_field_spans = project_direct_field_spans(&ast.const_values, value_id)
+            .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
         if let PublicFoldedValue::Record(fields) = &value {
-            if fields.len() != direct_field_locations.len() {
+            if fields.len() != direct_field_locations.len()
+                || fields.len() != direct_field_spans.len()
+            {
                 return Err(CompilerMessages::from_error(
                     CompilerError::compiler_error(
-                        "config field locations must align with folded record fields",
+                        "config field provenance must align with folded record fields",
                     ),
                     string_table.clone(),
                 ));
             }
-        } else if !direct_field_locations.is_empty() {
+        } else if !direct_field_locations.is_empty() || !direct_field_spans.is_empty() {
             return Err(CompilerMessages::from_error(
                 CompilerError::compiler_error(
-                    "config field locations were projected for a non-record value",
+                    "config field provenance was projected for a non-record value",
                 ),
                 string_table.clone(),
             ));
         }
 
+        let (name_location, name_span) = authored_key_name_provenance
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| (metadata.location.clone(), None));
+
         declarations.push(FoldedConfigDeclaration {
             name,
             value,
             location: metadata.location.clone(),
-            name_location: authored_key_name_locations
-                .get(path)
-                .cloned()
-                .unwrap_or_else(|| metadata.location.clone()),
+            span: metadata.span,
+            name_location,
+            name_span,
             direct_field_locations,
+            direct_field_spans,
         });
     }
 
     Ok(declarations)
+}
+
+/// Project direct record-field initializer spans in folded-field order.
+fn project_direct_field_spans(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+) -> Result<Vec<Option<SourceSpan>>, CompilerError> {
+    let Some(payload) = const_values.payload(value_id) else {
+        return Err(CompilerError::compiler_error(
+            "config field-span projection: missing const-store value",
+        ));
+    };
+
+    match payload {
+        ConstValuePayload::Record(fields) => Ok(fields
+            .iter()
+            .map(|field| {
+                const_values
+                    .metadata(field.value)
+                    .and_then(|metadata| metadata.span)
+            })
+            .collect()),
+
+        ConstValuePayload::OptionSome(inner) | ConstValuePayload::Coerced(inner) => {
+            project_direct_field_spans(const_values, *inner)
+        }
+
+        _ => Ok(Vec::new()),
+    }
 }
 
 /// Project direct record-field initializer locations in folded-field order.
@@ -663,14 +703,14 @@ fn prepare_config_file(
 //  Authored Key-Name Spans
 // -------------------------
 
-/// Collect the authored key-name spans for config key-identity diagnostics.
+/// Collect the authored key-name locations and exact spans for config key-identity diagnostics.
 ///
 /// Imported support declarations are excluded because they are not config entries.
-fn collect_authored_config_key_name_locations(
+fn collect_authored_config_key_name_provenance(
     headers: &[Header],
     authored_scope: &InternedPath,
-) -> HashMap<InternedPath, SourceLocation> {
-    let mut key_name_locations = HashMap::new();
+) -> HashMap<InternedPath, (SourceLocation, Option<SourceSpan>)> {
+    let mut key_name_provenance = HashMap::new();
     for header in headers {
         let HeaderKind::Constant { .. } = &header.kind else {
             continue;
@@ -678,12 +718,15 @@ fn collect_authored_config_key_name_locations(
         if header.source_file != *authored_scope {
             continue;
         }
-        key_name_locations.insert(
+        key_name_provenance.insert(
             header.tokens.src_path.to_owned(),
-            header.name_location.clone(),
+            (
+                header.name_location.clone(),
+                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
+            ),
         );
     }
-    key_name_locations
+    key_name_provenance
 }
 
 // -------------------------

@@ -26,7 +26,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
-
+use crate::compiler_frontend::source::SourceSpan;
 mod conflicts;
 mod move_decision;
 mod statement;
@@ -50,6 +50,7 @@ struct SharedReadEnv<'a, 'module> {
     block_id: BlockId,
     tracker: &'a mut StatementAccessTracker,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     current_order: i32,
     stats: &'a mut BlockTransferStats,
     value_fact_buffer: &'a mut ValueFactBuffer,
@@ -64,6 +65,7 @@ struct AccessCheckContext<'a, 'module> {
     block_id: BlockId,
     tracker: &'a mut StatementAccessTracker,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     stats: &'a mut BlockTransferStats,
     actor_index_hint: Option<usize>,
     current_order: i32,
@@ -95,6 +97,7 @@ struct AssignTransferContext<'a, 'module> {
     tracker: &'a mut StatementAccessTracker,
     value_fact_buffer: &'a mut ValueFactBuffer,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     stats: &'a mut BlockTransferStats,
 }
 
@@ -153,6 +156,7 @@ fn transfer_assign_target(
     let current_order = context.current_order;
     let tracker = &mut *context.tracker;
     let location = context.location.clone();
+    let span = context.span;
     let stats = &mut *context.stats;
 
     match target {
@@ -173,6 +177,7 @@ fn transfer_assign_target(
                 state,
                 value,
                 location.clone(),
+                value.span,
                 &transfer_context.diagnostics,
             )?;
             let rhs_direct_alias_roots = rhs_provenance.as_ref().map(|provenance| {
@@ -236,6 +241,7 @@ fn transfer_assign_target(
                                 block_id,
                                 tracker,
                                 location: location.clone(),
+                                span: value.span,
                                 stats,
                                 actor_index_hint: Some(local_index),
                                 current_order,
@@ -296,6 +302,7 @@ fn transfer_assign_target(
                 block_id,
                 tracker,
                 location: location.clone(),
+                span,
                 stats,
                 actor_index_hint: Some(local_index),
                 current_order,
@@ -373,6 +380,7 @@ fn transfer_assign_target(
                 state,
                 target,
                 location.clone(),
+                span,
                 &transfer_context.diagnostics,
             )?;
             let mut check = AccessCheckContext {
@@ -382,6 +390,7 @@ fn transfer_assign_target(
                 block_id,
                 tracker,
                 location: location.clone(),
+                span,
                 stats,
                 actor_index_hint: place_root_local_index(layout, target),
                 current_order,
@@ -456,14 +465,23 @@ fn mutable_argument_roots(
     state: &BorrowState,
     expression: &HirExpression,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<RootSet, BorrowCheckError> {
     if let HirExpressionKind::Load(place) = &expression.kind {
-        return roots_for_place(layout, state, place, location, diagnostics);
+        return roots_for_place(layout, state, place, location, expression.span, diagnostics);
     }
 
     let mut roots = RootSet::empty(layout.local_count());
-    collect_expression_roots(layout, state, expression, &mut roots, location, diagnostics)?;
+    collect_expression_roots(
+        layout,
+        state,
+        expression,
+        &mut roots,
+        location,
+        span,
+        diagnostics,
+    )?;
     Ok(roots)
 }
 
@@ -493,6 +511,7 @@ fn direct_value_provenance_from_expression(
     state: &BorrowState,
     expression: &HirExpression,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<DirectValueProvenance>, BorrowCheckError> {
     // WHAT: a fallible success unwrap carries the success payload's alias roots through the
@@ -507,6 +526,7 @@ fn direct_value_provenance_from_expression(
                 state,
                 result,
                 location,
+                span,
                 diagnostics,
             );
         }
@@ -518,6 +538,7 @@ fn direct_value_provenance_from_expression(
                     state,
                     element,
                     location.clone(),
+                    element.span,
                     diagnostics,
                 )? {
                     roots.union_with(&provenance.roots);
@@ -540,7 +561,7 @@ fn direct_value_provenance_from_expression(
 
     if expression.value_kind == ValueKind::Place {
         return Ok(Some(DirectValueProvenance {
-            roots: roots_for_place(layout, state, place, location, diagnostics)?,
+            roots: roots_for_place(layout, state, place, location, expression.span, diagnostics)?,
             slot_backed: false,
         }));
     }
@@ -551,7 +572,7 @@ fn direct_value_provenance_from_expression(
     {
         let source_state = state.local_state(local_index);
         return Ok(Some(DirectValueProvenance {
-            roots: roots_for_place(layout, state, place, location, diagnostics)?,
+            roots: roots_for_place(layout, state, place, location, expression.span, diagnostics)?,
             slot_backed: source_state.mode.contains(LocalMode::SLOT),
         }));
     }
@@ -596,6 +617,7 @@ fn roots_for_place(
     state: &BorrowState,
     place: &HirPlace,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<RootSet, BorrowCheckError> {
     increment_frontend_counter(FrontendCounter::BorrowPlaceAccessCount);
@@ -616,15 +638,20 @@ fn roots_for_place(
                 return Err(diagnostics.use_of_uninitialized_local(
                     diagnostics.local_place(layout.local_ids[local_index]),
                     location,
+                    span,
                 ));
             }
 
             Ok(state.effective_roots(local_index))
         }
 
-        HirPlace::Field { base, .. } => roots_for_place(layout, state, base, location, diagnostics),
+        HirPlace::Field { base, .. } => {
+            roots_for_place(layout, state, base, location, span, diagnostics)
+        }
 
-        HirPlace::Index { base, .. } => roots_for_place(layout, state, base, location, diagnostics),
+        HirPlace::Index { base, .. } => {
+            roots_for_place(layout, state, base, location, span, diagnostics)
+        }
     }
 }
 
@@ -673,6 +700,8 @@ fn record_shared_reads_in_expression(
                 .context
                 .diagnostics
                 .value_error_location(expression.id, location.clone());
+            // Preserve the authored expression span; generated values stay spanless.
+            let value_span = expression.span;
             record_shared_reads_in_place_indices(env, place, value_location.clone(), roots)?;
 
             let place_roots = roots_for_place(
@@ -680,6 +709,7 @@ fn record_shared_reads_in_expression(
                 env.state,
                 place,
                 value_location.clone(),
+                value_span,
                 &env.context.diagnostics,
             )?;
             let actor_index_hint = place_root_local_index(env.layout, place);
@@ -690,6 +720,7 @@ fn record_shared_reads_in_expression(
                 block_id: env.block_id,
                 tracker: env.tracker,
                 location: value_location,
+                span: value_span,
                 stats: env.stats,
                 actor_index_hint,
                 current_order: env.current_order,
@@ -703,6 +734,8 @@ fn record_shared_reads_in_expression(
                 .context
                 .diagnostics
                 .value_error_location(expression.id, location.clone());
+            // Preserve the authored expression span; generated values stay spanless.
+            let value_span = expression.span;
             record_shared_reads_in_place_indices(env, place, value_location.clone(), roots)?;
 
             let place_roots = roots_for_place(
@@ -710,6 +743,7 @@ fn record_shared_reads_in_expression(
                 env.state,
                 place,
                 value_location.clone(),
+                value_span,
                 &env.context.diagnostics,
             )?;
             let actor_index_hint = place_root_local_index(env.layout, place);
@@ -720,6 +754,7 @@ fn record_shared_reads_in_expression(
                 block_id: env.block_id,
                 tracker: env.tracker,
                 location: value_location.clone(),
+                span: value_span,
                 stats: env.stats,
                 actor_index_hint,
                 current_order: env.current_order,
@@ -799,36 +834,84 @@ fn collect_expression_roots(
     expression: &HirExpression,
     out: &mut RootSet,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
         HirExpressionKind::Load(place) => {
-            let roots = roots_for_place(layout, state, place, location.clone(), diagnostics)?;
+            let roots = roots_for_place(
+                layout,
+                state,
+                place,
+                location.clone(),
+                expression.span,
+                diagnostics,
+            )?;
             out.union_with(&roots);
 
             if let HirPlace::Index { index, .. } = place {
-                collect_expression_roots(layout, state, index, out, location, diagnostics)?;
+                collect_expression_roots(
+                    layout,
+                    state,
+                    index,
+                    out,
+                    location,
+                    index.span,
+                    diagnostics,
+                )?;
             }
         }
 
         HirExpressionKind::Copy(place) => {
             if let HirPlace::Index { index, .. } = place {
-                collect_expression_roots(layout, state, index, out, location, diagnostics)?;
+                collect_expression_roots(
+                    layout,
+                    state,
+                    index,
+                    out,
+                    location,
+                    index.span,
+                    diagnostics,
+                )?;
             }
         }
 
         HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_roots(layout, state, left, out, location.clone(), diagnostics)?;
-            collect_expression_roots(layout, state, right, out, location, diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                left,
+                out,
+                location.clone(),
+                left.span,
+                diagnostics,
+            )?;
+            collect_expression_roots(layout, state, right, out, location, right.span, diagnostics)?;
         }
 
         HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_roots(layout, state, operand, out, location, diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                operand,
+                out,
+                location,
+                operand.span,
+                diagnostics,
+            )?;
         }
 
         HirExpressionKind::StructConstruct { fields, .. } => {
             for (_, value) in fields {
-                collect_expression_roots(layout, state, value, out, location.clone(), diagnostics)?;
+                collect_expression_roots(
+                    layout,
+                    state,
+                    value,
+                    out,
+                    location.clone(),
+                    value.span,
+                    diagnostics,
+                )?;
             }
         }
 
@@ -841,6 +924,7 @@ fn collect_expression_roots(
                     element,
                     out,
                     location.clone(),
+                    element.span,
                     diagnostics,
                 )?;
             }
@@ -853,6 +937,7 @@ fn collect_expression_roots(
                     &entry.key,
                     out,
                     location.clone(),
+                    entry.key.span,
                     diagnostics,
                 )?;
                 collect_expression_roots(
@@ -861,23 +946,48 @@ fn collect_expression_roots(
                     &entry.value,
                     out,
                     location.clone(),
+                    entry.value.span,
                     diagnostics,
                 )?;
             }
         }
         HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_roots(layout, state, tuple, out, location.clone(), diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                tuple,
+                out,
+                location.clone(),
+                tuple.span,
+                diagnostics,
+            )?;
         }
 
         HirExpressionKind::Range { start, end } => {
-            collect_expression_roots(layout, state, start, out, location.clone(), diagnostics)?;
-            collect_expression_roots(layout, state, end, out, location, diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                start,
+                out,
+                location.clone(),
+                start.span,
+                diagnostics,
+            )?;
+            collect_expression_roots(layout, state, end, out, location, end.span, diagnostics)?;
         }
 
         HirExpressionKind::FallibleUnwrapSuccess { result }
         | HirExpressionKind::FallibleUnwrapError { result }
         | HirExpressionKind::Cast { source: result, .. } => {
-            collect_expression_roots(layout, state, result, out, location, diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                result,
+                out,
+                location,
+                result.span,
+                diagnostics,
+            )?;
         }
 
         HirExpressionKind::Int(_)
@@ -895,13 +1005,22 @@ fn collect_expression_roots(
                     &field.value,
                     out,
                     location.clone(),
+                    field.value.span,
                     diagnostics,
                 )?;
             }
         }
 
         HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_roots(layout, state, source, out, location, diagnostics)?;
+            collect_expression_roots(
+                layout,
+                state,
+                source,
+                out,
+                location,
+                source.span,
+                diagnostics,
+            )?;
         }
     }
 
@@ -1144,7 +1263,14 @@ fn transfer_aggregate_child(
     )?;
 
     if let HirExpressionKind::Load(place) = &expression.kind {
-        let roots = roots_for_place(layout, state, place, location.clone(), diagnostics)?;
+        let roots = roots_for_place(
+            layout,
+            state,
+            place,
+            location.clone(),
+            expression.span,
+            diagnostics,
+        )?;
         if roots.is_empty() {
             return Ok(());
         }

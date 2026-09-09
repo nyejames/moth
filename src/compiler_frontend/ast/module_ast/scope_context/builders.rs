@@ -258,9 +258,11 @@ impl ScopeContext {
 
     /// Identify the authored source file for path-syntax table joins.
     ///
-    /// `None` is reserved for an identity-free materialised generic body; ordinary
-    /// source/header contexts pass their registered `SourceId`.
-    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<SourceId>) -> ScopeContext {
+    /// WHAT: threads the owning `SourceId` (for materialised generics, the retained donor owner)
+    ///       into `Stage0` lookups and span construction.
+    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity.
+    ///      Donor and requester handles stay distinct.
+    pub(crate) fn with_declaring_file_id(mut self, file_id: SourceId) -> ScopeContext {
         Rc::make_mut(&mut self.shared).declaring_file_id = file_id;
         self
     }

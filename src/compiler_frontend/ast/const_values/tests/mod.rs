@@ -57,6 +57,7 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
     ExpressionRpnItem::Operator {
         operator,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -69,7 +70,12 @@ fn literal_int_resolves_as_const() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let expression = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let expression = Expression::int(
+        42,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
@@ -89,6 +95,7 @@ fn literal_string_resolves_as_const() {
     let expression = Expression::string_slice(
         string_id,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let env = ConstValueEnvironment::default();
@@ -115,11 +122,13 @@ fn folded_arithmetic_resolves_to_literal() {
             rvalue_item(Expression::int(
                 1,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             rvalue_item(Expression::int(
                 2,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -130,9 +139,9 @@ fn folded_arithmetic_resolves_to_literal() {
         DataType::Int,
         builtin_type_ids::INT,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
-
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
@@ -159,6 +168,7 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
             rvalue_item(Expression::int(
                 5,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Multiply),
@@ -169,12 +179,18 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
         DataType::Int,
         builtin_type_ids::INT,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(3, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::int(
+            3,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -203,6 +219,7 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
             rvalue_item(Expression::int(
                 2,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -213,12 +230,18 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
         DataType::Int,
         builtin_type_ids::INT,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(40, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::int(
+            40,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -240,18 +263,16 @@ fn reference_to_known_const_resolves() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let path = InternedPath::from_single_str("ratio", &mut string_table);
-    let expression = Expression::reference_with_type_id(
-        path.clone(),
-        DataType::Float,
-        builtin_type_ids::FLOAT,
-        SourceLocation::default(),
-        ValueMode::ImmutableReference,
-        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-    );
+    let expression = Expression::reference_with_type_id(path.clone(), DataType::Float, builtin_type_ids::FLOAT, SourceLocation::default(), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = make_environment_with(
         "ratio",
-        Expression::float(2.71, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::float(
+            2.71,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut string_table,
     );
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -275,14 +296,7 @@ fn unresolved_reference_fails() {
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
     let path = InternedPath::from_single_str("unknown", &mut string_table);
-    let expression = Expression::reference_with_type_id(
-        path,
-        DataType::Int,
-        builtin_type_ids::INT,
-        SourceLocation::default(),
-        ValueMode::ImmutableReference,
-        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-    );
+    let expression = Expression::reference_with_type_id(path, DataType::Int, builtin_type_ids::INT, SourceLocation::default(), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -331,7 +345,8 @@ fn mutable_declaration_fails_private_const_resolution() {
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("value", &mut string_table),
-        value: Expression::int(1, SourceLocation::default(), ValueMode::MutableOwned),
+        value: Expression::int(1, SourceLocation::default(), None, ValueMode::MutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -374,7 +389,12 @@ fn coerced_expression_resolves_inner_value() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let inner = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let inner = Expression::int(
+        7,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
 
     let env = ConstValueEnvironment::default();
@@ -408,6 +428,7 @@ fn runtime_rpn_with_unresolved_reference_fails() {
             rvalue_item(Expression::int(
                 2,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             operator_item(Operator::Add),
@@ -418,6 +439,7 @@ fn runtime_rpn_with_unresolved_reference_fails() {
         DataType::Int,
         builtin_type_ids::INT,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -442,7 +464,13 @@ fn body_local_immutable_literal_resolves() {
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
-        value: Expression::int(99, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            99,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -469,7 +497,8 @@ fn body_local_mutable_declaration_fails() {
     let const_values = ConstValueStore::default();
     let declaration = Declaration {
         id: InternedPath::from_single_str("local", &mut string_table),
-        value: Expression::int(99, SourceLocation::default(), ValueMode::MutableOwned),
+        value: Expression::int(99, SourceLocation::default(), None, ValueMode::MutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 

@@ -177,6 +177,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
     plan.plan_origin(
         origin.clone(),
         Default::default(),
+        None,
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,

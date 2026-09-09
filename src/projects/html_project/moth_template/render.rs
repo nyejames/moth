@@ -59,6 +59,7 @@ pub(super) fn render_structural_content(
             plan.plan_origin(
                 origin.clone(),
                 interned.first_authored_location.clone(),
+                None,
                 context.clone(),
                 string_table,
                 ResourceUseKind::Executable,

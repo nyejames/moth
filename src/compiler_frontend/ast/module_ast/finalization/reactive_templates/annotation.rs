@@ -306,7 +306,9 @@ impl<'store, 'flow> EnvironmentAwarePayloadCollector<'store, 'flow> {
                 Ok(())
             }
 
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 for branch in branches {
                     let selector_expression = self.effective_expression(
                         branch.selector_site_id,

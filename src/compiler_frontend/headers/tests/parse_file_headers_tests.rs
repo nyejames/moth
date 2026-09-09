@@ -610,9 +610,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     // The stream keeps its own identity; only the path table is another file's.
     let swapped = FileTokens::new_with_identity(
         file_tokens.src_path,
-        file_tokens
-            .file_id
-            .expect("ordinary header test stream should retain source identity"),
+        file_tokens.file_id,
         file_tokens.canonical_os_path,
         file_tokens.tokens,
         other_path_syntax,

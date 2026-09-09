@@ -269,8 +269,10 @@ fn runtime_template_context_with_style_directives(
                 },
                 ..Default::default()
             },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 

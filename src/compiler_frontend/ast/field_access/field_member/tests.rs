@@ -53,6 +53,7 @@ fn slot_template(store: &mut TemplateIrStore) -> Template {
             context: TemplateViewContext::default(),
         },
         location,
+        span: None,
     }
 }
 
@@ -73,9 +74,11 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }],
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -84,6 +87,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
     let receiver = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_value),
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::from_single_str("scope", &mut string_table),
     };
 
@@ -154,6 +158,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
             name: field_path.clone(),
             type_id: type_environment.builtins().string,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -164,6 +169,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }],
     )]);
@@ -175,6 +181,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
             ValueMode::ImmutableReference,
         )),
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::from_single_str("scope", &mut string_table),
     };
 

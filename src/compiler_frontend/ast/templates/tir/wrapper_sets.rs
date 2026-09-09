@@ -280,7 +280,9 @@ fn collect_wrapper_contexts(
                 collect_wrapper_contexts(store, *child_id, inherited_wrapper_refs, contexts)?;
             }
         }
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 collect_wrapper_contexts(store, branch.body, inherited_wrapper_refs, contexts)?;
             }

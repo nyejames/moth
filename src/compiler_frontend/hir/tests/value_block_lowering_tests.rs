@@ -73,6 +73,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
         pattern: MatchPattern::Literal(Expression::int(
             1,
             test_source_location(3),
+            None,
             ValueMode::ImmutableOwned,
         )),
         guard: None,
@@ -81,6 +82,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
                 expressions: vec![Expression::int(
                     10,
                     test_source_location(3),
+                    None,
                     ValueMode::ImmutableOwned,
                 )],
                 location: test_source_location(3),
@@ -93,6 +95,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
         pattern: MatchPattern::Literal(Expression::int(
             2,
             test_source_location(4),
+            None,
             ValueMode::ImmutableOwned,
         )),
         guard: None,
@@ -101,6 +104,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
                 expressions: vec![Expression::int(
                     20,
                     test_source_location(4),
+                    None,
                     ValueMode::ImmutableOwned,
                 )],
                 location: test_source_location(4),
@@ -114,6 +118,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             expressions: vec![Expression::int(
                 0,
                 test_source_location(5),
+                None,
                 ValueMode::ImmutableOwned,
             )],
             location: test_source_location(5),
@@ -138,6 +143,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             })),
         },
         test_source_location(2),
+        None,
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -226,6 +232,7 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
                 expressions: vec![Expression::int(
                     1,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 )],
                 location: test_source_location(2),

@@ -311,10 +311,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         Default::default(),
+                        None,
                         type_id,
                         diagnostic_type,
                         ValueMode::ImmutableReference,
                     ),
+                    binding_span: None,
                     config_qualifier: None,
                 })
                 .ok_or_else(|| {
@@ -470,6 +472,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 name: field_path.clone(),
                 type_id: field_type_id,
                 location: Default::default(),
+                span: None,
             });
             let default_value = match &field.folded_default {
                 Some(value) => {
@@ -478,6 +481,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 None => Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
+                    None,
                     field_type_id,
                     diagnostic_type_spelling(field_type_id, &self.type_environment),
                     ValueMode::ImmutableReference,
@@ -486,6 +490,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             field_declarations.push(Declaration {
                 id: field_path,
                 value: default_value,
+                binding_span: None,
                 config_qualifier: None,
             });
         }
@@ -531,6 +536,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         name: nominal_path.join_str(&field.name, string_table),
                         type_id: field_type_id,
                         location: Default::default(),
+                        span: None,
                     });
                 }
                 ChoiceVariantPayloadDefinition::Record {
@@ -542,6 +548,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 tag,
                 payload,
                 location: Default::default(),
+                span: None,
             });
         }
 

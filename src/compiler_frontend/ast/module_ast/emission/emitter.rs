@@ -57,7 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -101,7 +101,7 @@ struct BaseScopeContextInput<'scope> {
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
-    declaring_file_id: Option<SourceId>,
+    declaring_file_id: SourceId,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }
@@ -690,6 +690,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: request.instance_path.clone(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
+                // Materialised bodies carry their retained donor owner; the scope threads it so
+                // Stage 0 lookups validate against the frozen facts owner and never alias the
+                // requester call-site source.
                 declaring_file_id: token_stream.file_id,
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
@@ -765,6 +768,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.ast.push(AstNode {
             kind: NodeKind::Function(request.instance_path.clone(), signature, body),
             location: template.declaration_location,
+            // Donor declaration range; consumer identity must not pair with it until 1F5.
+            span: None,
             scope: request.instance_path,
         });
 
@@ -859,6 +864,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.validated_generic_template_bodies.push(AstNode {
             kind: NodeKind::Function(template.function_path, resolved_signature.signature, body),
             location: template.declaration_location,
+            // Donor declaration range; consumer identity must not pair with it until 1F5.
+            span: None,
             scope: header.tokens.src_path,
         });
         Ok(())
@@ -944,6 +951,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.ast.push(AstNode {
             kind: NodeKind::Function(token_stream.src_path, resolved_signature.signature, body),
             location: header.name_location,
+            span: Some(SourceSpan::new(token_stream.file_id, header.name_span)),
             scope: function_scope,
         });
 
@@ -1026,6 +1034,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),
             location: header.name_location,
+            span: None,
             scope: start_scope,
         });
 
@@ -1059,6 +1068,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.ast.push(AstNode {
             kind: NodeKind::StructDefinition(header.tokens.src_path.to_owned(), fields),
             location: header.name_location,
+            span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
             scope: header.tokens.src_path,
         });
 

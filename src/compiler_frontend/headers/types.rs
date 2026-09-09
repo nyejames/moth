@@ -1627,7 +1627,7 @@ fn validate_header(
             "retained header path does not use the prepared file's final source prefix",
         ));
     }
-    if header.tokens.file_id != Some(file_id) {
+    if header.tokens.file_id != file_id {
         return Err(CompilerError::compiler_error(
             "retained header token stream does not match the prepared file identity",
         ));

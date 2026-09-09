@@ -11,11 +11,21 @@ use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_de
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn int_literal(value: i32) -> Expression {
-    Expression::int(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::int(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn float_literal(value: f64) -> Expression {
-    Expression::float(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::float(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 #[test]
@@ -37,6 +47,7 @@ fn float_declaration_from_int_expression_becomes_coerced() {
     let runtime_expr = Expression::new(
         ExpressionKind::Runtime(ExpressionRpn::empty()),
         SourceLocation::default(),
+        None,
         builtin_type_ids::INT,
         DataType::Int,
         ValueMode::ImmutableOwned,
@@ -80,7 +91,12 @@ fn int_declaration_from_int_is_unchanged() {
 fn float_declaration_rejects_bool_unchanged() {
     // Bool → Float is not coercible; the expression should be returned unchanged.
     let env = TypeEnvironment::new();
-    let expr = Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let expr = Expression::bool(
+        true,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let result = coerce_expression_to_declared_type(expr, env.builtins().float, &env);
     // No coercion applied — type stays Bool.
     assert_eq!(result.type_id, builtin_type_ids::BOOL);
@@ -94,6 +110,7 @@ fn option_declaration_from_inner_expression_becomes_coerced() {
     let expr = Expression::string_slice(
         string_table.intern("Ana"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -122,6 +139,7 @@ fn option_declaration_from_option_expression_is_unchanged() {
         DataType::StringSlice,
         &mut env,
         SourceLocation::default(),
+        None,
     );
 
     let result = coerce_expression_to_declared_type(expr, option_string, &env);

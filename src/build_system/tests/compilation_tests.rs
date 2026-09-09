@@ -511,6 +511,7 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
         type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
         value: PublicFoldedValue::String(OwnedFoldedString::Text("Docs".to_owned())),
         location: SourceLocation::default(),
+        span: None,
     });
     let mut string_table = StringTable::new();
 
@@ -556,6 +557,7 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
                 direct_value.as_ref(),
             ),
             qualifier_location: SourceLocation::default(),
+            qualifier_span: None,
             value_location: None,
         });
     config.extra_project_fields.push(ProjectMetadataField {
@@ -563,6 +565,7 @@ fn effective_project_fields_classify_fixed_direct_and_metadata_kinds() {
         type_identity: CanonicalTypeIdentity::AnonymousConstRecord,
         value: PublicFoldedValue::Record(Vec::new()),
         location: SourceLocation::default(),
+        span: None,
     });
 
     let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)

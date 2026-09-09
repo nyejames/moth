@@ -4,7 +4,6 @@
 //! WHY: the parser keeps hash-prefixed top-level forms in one place so `file_parser` can remain a
 //! high-level loop over classified items.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, InvalidConfigReason,
 };
@@ -102,11 +101,7 @@ fn handle_top_level_const_template(
     let template_token = token_stream.current_token();
     token_stream.advance();
 
-    let source_id = token_stream.file_id.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "const fragment preparation requires a retained source identity",
-        )
-    })?;
+    let source_id = token_stream.file_id;
 
     let source_file = token_stream.src_path.to_owned();
     let mut build_context = HeaderBuildContext {

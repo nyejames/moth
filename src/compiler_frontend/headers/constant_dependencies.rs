@@ -453,20 +453,15 @@ fn is_nominal_constructor(
 fn attach_reference_span(
     mut diagnostic: CompilerDiagnostic,
     reference: &InitializerReference,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
 ) -> CompilerDiagnostic {
     // The byte range stays authoritative in the location for current render; the span lets the
     // 1F boundary resolve the same range without rereading source text.
-    if let Some(source) = file_id {
-        diagnostic.primary_span = Some(SourceSpan::new(source, reference.span));
-    }
+    diagnostic.primary_span = Some(SourceSpan::new(file_id, reference.span));
     diagnostic
 }
 
-fn self_reference_error(
-    reference: &InitializerReference,
-    file_id: Option<SourceId>,
-) -> CompilerDiagnostic {
+fn self_reference_error(reference: &InitializerReference, file_id: SourceId) -> CompilerDiagnostic {
     attach_reference_span(
         CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantSelfReference,
@@ -480,7 +475,7 @@ fn self_reference_error(
 
 fn not_visible_constant_error(
     reference: &InitializerReference,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
 ) -> CompilerDiagnostic {
     attach_reference_span(
         CompilerDiagnostic::compile_time_evaluation_error(
@@ -495,7 +490,7 @@ fn not_visible_constant_error(
 
 fn non_constant_reference_error(
     reference: &InitializerReference,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
 ) -> CompilerDiagnostic {
     attach_reference_span(
         CompilerDiagnostic::compile_time_evaluation_error(
@@ -512,7 +507,7 @@ fn same_file_forward_reference_error(
     constant_path: &InternedPath,
     target_path: &InternedPath,
     reference: &InitializerReference,
-    file_id: Option<SourceId>,
+    file_id: SourceId,
 ) -> CompilerDiagnostic {
     let target_name = target_path.name().or_else(|| constant_path.name());
     attach_reference_span(

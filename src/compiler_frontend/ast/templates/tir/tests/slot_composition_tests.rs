@@ -44,7 +44,12 @@ fn slot_summary(slot_count: u32) -> TemplateIrSummary {
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn build_single_slot_template(store: &mut TemplateIrStore, key: SlotKey) -> TemplateIrId {
@@ -551,10 +556,11 @@ fn schema_from_branch_chain_containing_slot() {
         TemplateBranchSelector::Bool(bool_expression(true)),
         branch_body_slot,
         SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
     let branch_chain =
-        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+        builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
     let template_id = builder.finish_template(
         branch_chain,
         Style::default(),
@@ -618,16 +624,18 @@ fn loose_fill_target_prefers_later_positional_slot_across_branches() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             default_slot,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         ),
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             positional_slot,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         ),
     ];
-    let root = builder.push_branch_chain_node(branches, None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(branches, None, None, SourceLocation::default());
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -808,6 +816,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     let aggregate_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
         SourceLocation::default(),
+        None,
     ));
 
     let mut builder = TemplateIrBuilder::new(&mut store);
@@ -822,6 +831,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     let expression = Expression::string_slice(
         text_id,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let dynamic_node = builder.push_dynamic_expression_node(
@@ -1579,6 +1589,7 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
         store.next_slot_occurrence_id(),
         SourceLocation::default(),
         None,
+        None,
         Some(TemplateWrapperSetId::new(0)),
         false,
     );
@@ -1615,6 +1626,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
         store.next_slot_occurrence_id(),
         SourceLocation::default(),
         None,
+        None,
         Some(TemplateWrapperSetId::new(0)),
         false,
     );
@@ -1641,9 +1653,10 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             body,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default())
+        builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default())
     };
     let routed = TirSlotContributions {
         default_nodes: vec![branch_node],
@@ -1801,6 +1814,7 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
         location: SourceLocation::default(),
         contribution_sources: vec![],
         slot_sites: vec![],
+        span: None,
     });
     {
         let child_template = store
@@ -2032,23 +2046,32 @@ fn branch_chain_with_slots_in_body_is_expanded() {
     let mut store = TemplateIrStore::new();
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, SourceLocation::default());
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence_id,
+        SourceLocation::default(),
+        None,
+        None,
+        None,
+        false,
+    );
     let body_slot = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         SourceLocation::default(),
+        None,
     ));
 
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression(true)),
         body_slot,
         SourceLocation::default(),
+        None,
         store.next_expression_site_id(),
     );
 
     let mut builder = TemplateIrBuilder::new(&mut store);
     let branch_chain =
-        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+        builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
     let wrapper = builder.finish_template(
         branch_chain,
         Style::default(),
@@ -2190,11 +2213,13 @@ fn expand_preserves_non_slot_nodes() {
             origin: TemplateSegmentOrigin::Body,
         },
         SourceLocation::default(),
+        None,
     ));
 
     let aggregate_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
         SourceLocation::default(),
+        None,
     ));
 
     let loop_control_node = store.push_node(TemplateIrNode::new(
@@ -2202,11 +2227,13 @@ fn expand_preserves_non_slot_nodes() {
             kind: TemplateLoopControlKind::Break,
         },
         SourceLocation::default(),
+        None,
     ));
 
     let expression = Expression::string_slice(
         text_id,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let site_id = store.next_expression_site_id();
@@ -2218,11 +2245,13 @@ fn expand_preserves_non_slot_nodes() {
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
 
     let runtime_slot_plan_id = store.push_slot_plan(
         crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan {
             location: SourceLocation::default(),
+            span: None,
             contribution_sources: vec![],
             slot_sites: vec![],
         },
@@ -2236,14 +2265,23 @@ fn expand_preserves_non_slot_nodes() {
             site: runtime_slot_site_id,
         },
         SourceLocation::default(),
+        None,
     ));
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::new(SlotKey::Default, occurrence_id, SourceLocation::default());
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence_id,
+        SourceLocation::default(),
+        None,
+        None,
+        None,
+        false,
+    );
     let slot_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         SourceLocation::default(),
+        None,
     ));
 
     let root = store.push_node(TemplateIrNode::new(
@@ -2258,6 +2296,7 @@ fn expand_preserves_non_slot_nodes() {
             ],
         },
         SourceLocation::default(),
+        None,
     ));
 
     let wrapper = store.push_template(TemplateIr::new(
@@ -2266,6 +2305,7 @@ fn expand_preserves_non_slot_nodes() {
         TemplateType::String,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
 
     let contribution = build_single_text_template(&mut store, &mut string_table, "only slot");
@@ -2467,6 +2507,7 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
             ..TemplateIrSummary::default()
         },
         SourceLocation::default(),
+        None,
     ));
 
     let error = compose_tir_head_chain(&mut store, template_id, &string_table, false)

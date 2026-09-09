@@ -589,7 +589,7 @@ fn alias_expanded_nested_optional_type_is_rejected() {
 
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: Some(SourceId::COMPILATION_ROOT),
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -642,9 +642,11 @@ fn resolves_named_types_recursively_in_composite_types() {
         id: point_path,
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             DataType::Int,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -685,9 +687,11 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
@@ -696,7 +700,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: Some(SourceId::COMPILATION_ROOT),
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -748,9 +752,11 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
@@ -759,7 +765,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: Some(SourceId::COMPILATION_ROOT),
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -817,9 +823,11 @@ fn bare_generic_type_name_requires_type_arguments() {
         id: box_path.to_owned(),
         value: Expression::no_value(
             SourceLocation::default(),
+            None,
             DataType::runtime_struct(box_path.to_owned(), box_type_id),
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
     let mut generic_declarations = FxHashMap::default();
@@ -828,7 +836,7 @@ fn bare_generic_type_name_requires_type_arguments() {
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations));
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
-        declaring_file_id: Some(SourceId::COMPILATION_ROOT),
+        declaring_file_id: SourceId::COMPILATION_ROOT,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,

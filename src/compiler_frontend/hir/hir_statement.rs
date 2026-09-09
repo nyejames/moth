@@ -25,6 +25,7 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::return_hir_transformation_error;
 
@@ -191,38 +192,44 @@ impl<'a> HirBuilder<'a> {
 
         let result = match &node.kind {
             NodeKind::VariableDeclaration(var) => {
-                self.lower_variable_declaration_statement(var, &node.location)
+                self.lower_variable_declaration_statement(var, &node.location, node.span)
             }
 
             NodeKind::Assignment { target, value } => {
-                self.lower_assignment_statement(target, value, &node.location)
+                self.lower_assignment_statement(target, value, &node.location, node.span)
             }
 
             NodeKind::MultiBind { targets, value } => {
-                self.lower_multi_bind_statement(targets, value, &node.location)
+                self.lower_multi_bind_statement(targets, value, &node.location, node.span)
             }
 
             NodeKind::ExpressionStatement(expr) => {
-                self.lower_expression_statement(expr, &node.location)
+                self.lower_expression_statement(expr, &node.location, node.span)
             }
 
-            NodeKind::Return(values) => self.lower_return_statement(values, &node.location),
+            NodeKind::Return(values) => {
+                self.lower_return_statement(values, &node.location, node.span)
+            }
 
             NodeKind::ReturnError(value) => {
-                self.lower_error_return_statement(value, &node.location)
+                self.lower_error_return_statement(value, &node.location, node.span)
             }
 
-            NodeKind::If(condition, then_body, else_body, _) => {
-                self.lower_if_statement(condition, then_body, else_body.as_deref(), &node.location)
-            }
+            NodeKind::If(condition, then_body, else_body, _) => self.lower_if_statement(
+                condition,
+                then_body,
+                else_body.as_deref(),
+                &node.location,
+                node.span,
+            ),
 
             NodeKind::WhileLoop(condition, body) => {
-                self.lower_while_statement(condition, body, &node.location)
+                self.lower_while_statement(condition, body, &node.location, node.span)
             }
 
-            NodeKind::Break => self.lower_break_statement(&node.location),
+            NodeKind::Break => self.lower_break_statement(&node.location, node.span),
 
-            NodeKind::Continue => self.lower_continue_statement(&node.location),
+            NodeKind::Continue => self.lower_continue_statement(&node.location, node.span),
 
             NodeKind::Match {
                 scrutinee,
@@ -235,6 +242,7 @@ impl<'a> HirBuilder<'a> {
                 default.as_deref(),
                 *exhaustiveness,
                 &node.location,
+                node.span,
             ),
 
             NodeKind::LexicalScope { body } => self.lower_lexical_scope(body, &node.location),
@@ -245,20 +253,26 @@ impl<'a> HirBuilder<'a> {
                 bindings,
                 range,
                 body,
-            } => self.lower_range_loop_statement(bindings, range, body, &node.location),
+            } => self.lower_range_loop_statement(bindings, range, body, &node.location, node.span),
 
             NodeKind::CollectionLoop {
                 bindings,
                 iterable,
                 body,
-            } => self.lower_collection_loop_statement(bindings, iterable, body, &node.location),
+            } => self.lower_collection_loop_statement(
+                bindings,
+                iterable,
+                body,
+                &node.location,
+                node.span,
+            ),
 
             NodeKind::ThenValue(produced_values) => {
-                self.lower_then_value_statement(produced_values, &node.location)
+                self.lower_then_value_statement(produced_values, &node.location, node.span)
             }
 
             NodeKind::Assert { condition, message } => {
-                self.lower_assert_statement(condition, message, &node.location)
+                self.lower_assert_statement(condition, message, &node.location, node.span)
             }
 
             NodeKind::PushStartRuntimeFragment(expr) => {
@@ -273,9 +287,10 @@ impl<'a> HirBuilder<'a> {
                 };
 
                 let value = self.lower_expression_value_to_current_block(expr)?;
-                self.emit_statement_kind(
+                self.emit_statement_kind_with_span(
                     HirStatementKind::PushRuntimeFragment { vec_local, value },
                     &node.location,
+                    node.span,
                 )
             }
 
@@ -304,6 +319,7 @@ impl<'a> HirBuilder<'a> {
         target: &PlaceExpression,
         value: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let (target_prelude, target_place) = self.lower_place_expression_to_hir_place(target)?;
 
@@ -313,12 +329,16 @@ impl<'a> HirBuilder<'a> {
 
         let lowered_value = self.lower_expression_value_to_current_block(value)?;
 
-        self.emit_statement_kind(
+        // Authored assignment: the statement span covers the whole `target = value` operation.
+        // Place-lowering preludes above keep their own expression spans; only this Assign
+        // carries the statement span.
+        self.emit_statement_kind_with_span(
             HirStatementKind::Assign {
                 target: target_place,
                 value: lowered_value,
             },
             location,
+            span,
         )
     }
 
@@ -327,6 +347,7 @@ impl<'a> HirBuilder<'a> {
         targets: &[MultiBindTarget],
         value: &Expression,
         location: &SourceLocation,
+        statement_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         // INVARIANT: AST validation guarantees the RHS is an explicitly supported multi-bind
         // source (currently a multi-return function call). This lowering assumes that invariant
@@ -342,6 +363,8 @@ impl<'a> HirBuilder<'a> {
 
         let rhs_type = rhs_value.ty;
         let rhs_local = self.allocate_temp_local(rhs_type, Some(location.to_owned()))?;
+        // Generated tuple spill: the hidden rhs local is compiler scaffolding, so the
+        // assignment stays spanless even though the RHS value itself is authored.
         self.emit_statement_kind(
             HirStatementKind::Assign {
                 target: HirPlace::Local(rhs_local),
@@ -387,6 +410,7 @@ impl<'a> HirBuilder<'a> {
                     target_type,
                     target.value_mode.is_mutable(),
                     Some(target.location.to_owned()),
+                    target.span,
                 )?,
                 MultiBindTargetKind::Assignment => {
                     let Some(local_id) = self.locals_by_name.get(&target.id).copied() else {
@@ -452,12 +476,15 @@ impl<'a> HirBuilder<'a> {
                 slot_region,
             );
 
-            self.emit_statement_kind(
+            // Authored per-slot bind: each target carries its own binding span. Fall back
+            // to the statement span only when the target is identity-free.
+            self.emit_statement_kind_with_span(
                 HirStatementKind::Assign {
                     target: HirPlace::Local(target_local),
                     value: slot_value,
                 },
                 &target.location,
+                target.span.or(statement_span),
             )?;
         }
 
@@ -468,6 +495,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expression: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let value = self.lower_expression_value_to_current_block(expression)?;
 
@@ -477,12 +505,23 @@ impl<'a> HirBuilder<'a> {
                 ExpressionKind::HandledFallibleFunctionCall { .. }
                     | ExpressionKind::HandledFallibleHostFunctionCall { .. }
             ) {
-                self.emit_statement_kind(HirStatementKind::Expr(value), location)?;
+                // Authored unit-valued handled call in statement position keeps the
+                // statement span; the fallback covers identity-free statements.
+                self.emit_statement_kind_with_span(
+                    HirStatementKind::Expr(value),
+                    location,
+                    span.or(expression.span),
+                )?;
             }
             return Ok(());
         }
 
-        self.emit_statement_kind(HirStatementKind::Expr(value), location)
+        // Authored expression statement carries the statement span.
+        self.emit_statement_kind_with_span(
+            HirStatementKind::Expr(value),
+            location,
+            span.or(expression.span),
+        )
     }
 
     // -------------------------
@@ -499,18 +538,20 @@ impl<'a> HirBuilder<'a> {
         condition: &Expression,
         message: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         // Statically known false → immediate assertion failure, no pass block needed.
         if matches!(condition.kind, ExpressionKind::Bool(false)) {
             let message_value = self.lower_expression_value_to_current_block(message)?;
             let failure_block = self.current_block_id_or_error(location)?;
-            return self.emit_terminator(
+            return self.emit_terminator_with_span(
                 failure_block,
                 HirTerminator::AssertFailure {
                     message_evaluation: classify_assertion_message_evaluation(&message_value),
                     message: message_value,
                 },
                 location,
+                span,
             );
         }
 
@@ -529,7 +570,9 @@ impl<'a> HirBuilder<'a> {
         let pass_block = self.create_block(pass_region, location, "assert-pass")?;
         let failure_block = self.create_block(failure_region, location, "assert-fail")?;
 
-        self.emit_terminator(
+        // Authored assert header: the condition branch carries the statement span so
+        // diagnostics can point at the authored `assert(...)`.
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: condition_value,
@@ -537,6 +580,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: failure_block,
             },
             location,
+            span.or(condition.span),
         )?;
         self.log_control_flow_edge(condition_block, pass_block, "assert.true");
         self.log_control_flow_edge(condition_block, failure_block, "assert.false");
@@ -544,13 +588,14 @@ impl<'a> HirBuilder<'a> {
         self.set_current_block(failure_block, location)?;
         let message_value = self.lower_expression_value_to_current_block(message)?;
         let failure_tail_block = self.current_block_id_or_error(location)?;
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             failure_tail_block,
             HirTerminator::AssertFailure {
                 message_evaluation: classify_assertion_message_evaluation(&message_value),
                 message: message_value,
             },
             location,
+            span,
         )?;
 
         self.set_current_block(pass_block, location)
@@ -566,10 +611,11 @@ impl<'a> HirBuilder<'a> {
         range: &RangeLoopSpec,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         // Loop lowering is intentionally split into a dedicated submodule to keep this file
         // focused on statement dispatch and shared lowering helpers.
-        self.lower_range_loop_statement_impl(bindings, range, body, location)
+        self.lower_range_loop_statement_impl(bindings, range, body, location, span)
     }
 
     fn lower_collection_loop_statement(
@@ -578,8 +624,9 @@ impl<'a> HirBuilder<'a> {
         iterable: &Expression,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_collection_loop_statement_impl(bindings, iterable, body, location)
+        self.lower_collection_loop_statement_impl(bindings, iterable, body, location, span)
     }
 
     // -------------------------
@@ -591,10 +638,20 @@ impl<'a> HirBuilder<'a> {
         kind: HirStatementKind,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        self.emit_statement_kind_with_span(kind, location, None)
+    }
+
+    pub(super) fn emit_statement_kind_with_span(
+        &mut self,
+        kind: HirStatementKind,
+        location: &SourceLocation,
+        span: Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
             kind,
             location: location.clone(),
+            span,
         };
 
         self.side_table.map_statement(location, &statement);

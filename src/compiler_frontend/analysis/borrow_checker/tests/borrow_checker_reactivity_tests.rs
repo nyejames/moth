@@ -63,7 +63,7 @@ fn reactive_assignment_records_invalidation_after_initialization() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
                 test_source_location(1),
@@ -76,7 +76,12 @@ fn reactive_assignment_records_invalidation_after_initialization() {
                         builtin_type_ids::INT,
                         test_source_location(2),
                     ),
-                    value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(2),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(2),
             ),
@@ -143,6 +148,7 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
                     Expression::string_slice(
                         string_table.intern("reactive"),
                         test_source_location(2),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
@@ -241,7 +247,7 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
                 test_source_location(1),
@@ -252,6 +258,7 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
                         test_source_location(2),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
@@ -277,7 +284,12 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
                         builtin_type_ids::INT,
                         test_source_location(4),
                     ),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        2,
+                        test_source_location(4),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(4),
             ),
@@ -337,7 +349,7 @@ fn mutable_call_argument_records_reactive_invalidation() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
                 test_source_location(2),
@@ -451,7 +463,7 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
                         .with_reactive_source(source),
                 )),
                 test_source_location(2),
@@ -543,7 +555,7 @@ fn field_write_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 source_path.clone(),
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
             test_source_location(1),
@@ -604,7 +616,7 @@ fn reactive_parameter_does_not_grant_mutation_permission() {
                     builtin_type_ids::INT,
                     test_source_location(2),
                 ),
-                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+                value: Expression::int(2, test_source_location(2), None, ValueMode::ImmutableOwned),
             },
             test_source_location(2),
         )],
@@ -638,7 +650,7 @@ fn map_mutation_records_reactive_invalidation() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 map_path.clone(),
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
             test_source_location(1),
@@ -686,6 +698,7 @@ fn metadata_with_subscription(
         source,
         type_id: builtin_type_ids::INT,
         location,
+        span: None,
     });
     metadata
 }
@@ -737,6 +750,7 @@ fn append_synthetic_map_clear(
         ty: local.ty,
         value_kind: ValueKind::Place,
         region: local.region,
+        span: None,
     };
     let statement = HirStatement {
         id: statement_id,
@@ -747,6 +761,7 @@ fn append_synthetic_map_clear(
             result: None,
         },
         location,
+        span: None,
     };
 
     let start_function = hir
@@ -792,6 +807,7 @@ fn append_synthetic_field_write(
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region: local.region,
+        span: None,
     };
     let statement = HirStatement {
         id: statement_id,
@@ -803,6 +819,7 @@ fn append_synthetic_field_write(
             value,
         },
         location,
+        span: None,
     };
 
     let start_function = hir

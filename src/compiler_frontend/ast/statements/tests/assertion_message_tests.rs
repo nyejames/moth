@@ -53,10 +53,11 @@ fn propagated_expression(line: i32) -> Expression {
         ..SourceLocation::default()
     };
     Expression::option_propagation_with_type_id(
-        Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+        Expression::bool(true, location.clone(), None, ValueMode::ImmutableOwned),
         builtin_type_ids::BOOL,
         DataType::Bool,
         location,
+        None,
     )
 }
 
@@ -64,6 +65,7 @@ fn handoff_expression(handoff: OwnedRuntimeTemplateHandoff) -> Expression {
     Expression::new(
         ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
         SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -113,8 +115,11 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(propagated_expression(10)),
             reactive_subscription: None,
+            location: SourceLocation::default(),
+            span: None,
         }),
         location: SourceLocation::default(),
+        span: None,
     });
     assert_eq!(assert_escape_location(dynamic), dynamic_location);
 
@@ -123,13 +128,21 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
             branches: vec![OwnedRuntimeTemplateBranch {
                 selector: TemplateBranchSelector::Bool(propagated_expression(11)),
-                body: OwnedRuntimeTemplateNode::Sequence { children: vec![] },
+                body: OwnedRuntimeTemplateNode::Sequence {
+                    children: vec![],
+                    location: SourceLocation::default(),
+                    span: None,
+                },
                 location: SourceLocation::default(),
+                span: None,
             }],
             fallback: None,
+            else_marker: None,
             location: SourceLocation::default(),
+            span: None,
         }),
         location: SourceLocation::default(),
+        span: None,
     });
     assert_eq!(assert_escape_location(selector), selector_location);
 
@@ -139,11 +152,17 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
             header: TemplateLoopHeader::Conditional {
                 condition: Box::new(propagated_expression(12)),
             },
-            body: Box::new(OwnedRuntimeTemplateNode::Sequence { children: vec![] }),
+            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                children: vec![],
+                location: SourceLocation::default(),
+                span: None,
+            }),
             aggregate_wrapper: None,
             location: SourceLocation::default(),
+            span: None,
         }),
         location: SourceLocation::default(),
+        span: None,
     });
     assert_eq!(assert_escape_location(header), header_location);
 }
@@ -161,6 +180,7 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
             site_id,
         },
         location.clone(),
+        None,
     ));
     let root = store.push_template(TemplateIr::new(
         node,
@@ -168,6 +188,7 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         location.clone(),
+        None,
     ));
     let template = Template {
         tir_reference: TemplateTirReference {
@@ -176,10 +197,12 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
             context: TemplateViewContext::default(),
         },
         location: location.clone(),
+        span: None,
     };
     let message = Expression::new(
         ExpressionKind::Template(Box::new(template)),
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -247,7 +270,7 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     );
     let loop_with_local_break = node(
         NodeKind::WhileLoop(
-            Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+            Expression::bool(true, location.clone(), None, ValueMode::ImmutableOwned),
             vec![node(NodeKind::Break, location.clone())],
         ),
         location.clone(),
@@ -255,7 +278,12 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    true,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 then_body: vec![nested_function, loop_with_local_break],
                 else_body: vec![],
                 then_scope: location.scope.clone(),
@@ -266,6 +294,7 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
             })),
         },
         location.clone(),
+        None,
         crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -280,7 +309,12 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let outer_break_message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    true,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 then_body: vec![node(NodeKind::Break, location.clone())],
                 else_body: vec![],
                 then_scope: location.scope.clone(),
@@ -291,6 +325,7 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
             })),
         },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -303,7 +338,12 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let outer_continue_message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    true,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 then_body: vec![node(NodeKind::Continue, location.clone())],
                 else_body: vec![],
                 then_scope: location.scope.clone(),
@@ -314,6 +354,7 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
             })),
         },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -327,10 +368,16 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let enclosing_return = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    true,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 then_body: vec![AstNode {
                     kind: NodeKind::Return(vec![]),
                     location: location.clone(),
+                    span: None,
                     scope: Default::default(),
                 }],
                 else_body: vec![],
@@ -342,6 +389,7 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
             })),
         },
         location.clone(),
+        None,
         crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,

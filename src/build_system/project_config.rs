@@ -120,7 +120,9 @@ pub(crate) fn compile_project_config_file(
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
     config.extra_project_fields.clear();
-    // 1. Compile the config source to folded values.
+    config.setting_locations.clear();
+    config.setting_spans.clear();
+    config.html_section = crate::projects::settings::HtmlSectionConfig::default();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         CompilerMessages::from_error(
             CompilerError::file_error(

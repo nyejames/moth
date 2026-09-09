@@ -192,11 +192,11 @@ pub(super) struct CollectedReachableInputs {
 /// WHAT: records that an authored structural provider reference resolved through the
 ///       boundary-aware namespace from a consumer project module to a provider project
 ///       module, carrying both `ModuleId` values and the exact authored dependency-clause
-///       `SourceLocation`.
+///       location.
 /// WHY: the namespace resolves to boundary-local `ModuleId`s directly, so the graph inserts a
 ///      provider-before-consumer edge without a path-to-ID mapping step. The authored source
-///      location is retained in the graph side table so a later diagnostic owner can attribute
-///      the edge to the exact dependency clause without reparsing.
+///      location is retained in the graph side table so a later
+///      diagnostic owner can attribute the edge to the exact dependency clause without reparsing.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
@@ -1738,6 +1738,7 @@ fn handle_provider_capable_dependency(
                     import_location: dependency_location,
                     dependency_source,
                     dependency_span,
+                    import_span: Some(SourceSpan::new(dependency_source, dependency_span)),
                     prefix_path: &prefix_path,
                     raw_prefix: &prefix_str,
                     provider,
@@ -2081,6 +2082,7 @@ struct ProviderBackedImportRequest<'a> {
     import_location: &'a SourceLocation,
     dependency_source: SourceId,
     dependency_span: LocalSpan,
+    import_span: Option<SourceSpan>,
     prefix_path: &'a InternedPath,
     raw_prefix: &'a str,
     provider: &'a std::sync::Arc<dyn ExternalImportProvider>,
@@ -2141,6 +2143,8 @@ fn resolve_provider_target_via_filesystem(
         request.consumer_canonical_path,
         &canonical_source_path,
         request.import_path,
+        request.dependency_source,
+        request.dependency_span,
         request.project_path_resolver,
         string_table,
     )?;
@@ -2193,6 +2197,7 @@ fn invoke_provider_and_record_resolution(
         logical_source_path,
         canonical_source_path: canonical_source_path.clone(),
         source_location: SourceLocation::from_path(request.consumer_canonical_path, string_table),
+        source_span: request.import_span,
     };
 
     let result = {
@@ -2317,6 +2322,8 @@ fn check_provider_dependency_module_boundary(
     declaring_file: &Path,
     target_file: &Path,
     dependency_path: &InternedPath,
+    dependency_source: SourceId,
+    dependency_span: LocalSpan,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
 ) -> Result<(), SourceDiscoveryError> {
@@ -2325,9 +2332,11 @@ fn check_provider_dependency_module_boundary(
 
     if consumer_container != target_container {
         let location = SourceLocation::from_path(declaring_file, string_table);
-        return Err(SourceDiscoveryError::from(
+        return Err(SourceDiscoveryError::from(with_provider_dependency_span(
             CompilerDiagnostic::cross_module_import_not_exported(dependency_path.clone(), location),
-        ));
+            dependency_source,
+            dependency_span,
+        )));
     }
 
     Ok(())

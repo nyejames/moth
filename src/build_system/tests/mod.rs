@@ -202,6 +202,7 @@ fn test_output_plan(
             profile,
         },
         setting_location: SourceLocation::default(),
+        setting_span: None,
     })
 }
 

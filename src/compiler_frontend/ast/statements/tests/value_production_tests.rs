@@ -32,6 +32,7 @@ fn then_value(line: i32) -> AstNode {
             expressions: vec![Expression::int(
                 line,
                 test_source_location(line),
+                None,
                 ValueMode::ImmutableOwned,
             )],
             location: test_source_location(line),
@@ -45,6 +46,7 @@ fn return_value(line: i32) -> AstNode {
         NodeKind::Return(vec![Expression::int(
             line,
             test_source_location(line),
+            None,
             ValueMode::ImmutableOwned,
         )]),
         test_source_location(line),
@@ -56,6 +58,7 @@ fn expression_statement(line: i32) -> AstNode {
         NodeKind::ExpressionStatement(Expression::int(
             line,
             test_source_location(line),
+            None,
             ValueMode::ImmutableOwned,
         )),
         test_source_location(line),
@@ -67,7 +70,12 @@ fn assert_statement(condition: Expression, line: i32) -> AstNode {
         NodeKind::Assert {
             condition,
             // Branch-exit tests inspect only the condition's terminality effect.
-            message: Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
+            message: Expression::bool(
+                true,
+                test_source_location(line),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
         },
         test_source_location(line),
     )
@@ -77,7 +85,12 @@ fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, line: i32) 
     let branch_metadata = test_if_branch_metadata(else_body.is_some());
     node(
         NodeKind::If(
-            Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                test_source_location(line),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             then_body,
             else_body,
             branch_metadata,
@@ -89,11 +102,17 @@ fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, line: i32) 
 fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i32) -> AstNode {
     node(
         NodeKind::Match {
-            scrutinee: Expression::int(line, test_source_location(line), ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(
+                line,
+                test_source_location(line),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     line,
                     test_source_location(line + 1),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -289,7 +308,12 @@ fn branch_exits_report_assert_false_as_terminal() {
     let summary = analyze_branch_exits(&[
         expression_statement(1),
         assert_statement(
-            Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
+            Expression::bool(
+                false,
+                test_source_location(2),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             2,
         ),
         then_value(3),
@@ -301,7 +325,12 @@ fn branch_exits_report_assert_false_as_terminal() {
 #[test]
 fn branch_exits_do_not_treat_passing_assert_as_terminal() {
     let summary = analyze_branch_exits(&[assert_statement(
-        Expression::bool(true, test_source_location(1), ValueMode::ImmutableOwned),
+        Expression::bool(
+            true,
+            test_source_location(1),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         1,
     )]);
 
@@ -312,11 +341,21 @@ fn branch_exits_do_not_treat_passing_assert_as_terminal() {
 fn branch_exits_combine_assert_false_branches_as_terminal() {
     let terminating_if = bool_if(
         vec![assert_statement(
-            Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
+            Expression::bool(
+                false,
+                test_source_location(2),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             2,
         )],
         Some(vec![assert_statement(
-            Expression::bool(false, test_source_location(3), ValueMode::ImmutableOwned),
+            Expression::bool(
+                false,
+                test_source_location(3),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             3,
         )]),
         1,
@@ -324,7 +363,12 @@ fn branch_exits_combine_assert_false_branches_as_terminal() {
 
     let partial_if = bool_if(
         vec![assert_statement(
-            Expression::bool(false, test_source_location(5), ValueMode::ImmutableOwned),
+            Expression::bool(
+                false,
+                test_source_location(5),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             5,
         )],
         None,

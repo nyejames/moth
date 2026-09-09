@@ -1908,6 +1908,7 @@ fn fixture_dummy_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsse
         canonical_source_path,
         asset_kind: "js".to_owned(),
         authored_import_location: SourceLocation::default(),
+        authored_import_span: None,
     }
 }
 

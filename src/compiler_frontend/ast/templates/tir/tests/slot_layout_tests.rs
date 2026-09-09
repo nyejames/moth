@@ -73,6 +73,7 @@ fn layout_rejects_a_missing_child_template() {
             occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let parent = store.push_template(TemplateIr::new(
         child_node,
@@ -80,6 +81,7 @@ fn layout_rejects_a_missing_child_template() {
         TemplateType::String,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
 
     let error =
@@ -101,6 +103,7 @@ fn layout_rejects_a_child_template_with_a_missing_root() {
         TemplateType::String,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
     let reference = TemplateTirChildReference::new(
         child_template,
@@ -114,6 +117,7 @@ fn layout_rejects_a_child_template_with_a_missing_root() {
             occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let parent = store.push_template(TemplateIr::new(
         child_node,
@@ -121,6 +125,7 @@ fn layout_rejects_a_child_template_with_a_missing_root() {
         TemplateType::String,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
 
     let error = collect_tir_slot_layout(&store, parent).expect_err("missing child root must fail");
@@ -137,6 +142,7 @@ fn layout_rejects_a_node_cycle() {
     let sequence = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         SourceLocation::default(),
+        None,
     ));
     MalformedTirStore::new(&mut store).set_node_kind(
         sequence,
@@ -150,6 +156,7 @@ fn layout_rejects_a_node_cycle() {
         TemplateType::String,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
 
     let error = collect_tir_slot_layout(&store, template).expect_err("node cycle must fail");
@@ -166,6 +173,7 @@ fn layout_rejects_a_template_cycle() {
     let child_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         SourceLocation::default(),
+        None,
     ));
     let first = store.push_template(TemplateIr::new(
         child_node,
@@ -173,6 +181,7 @@ fn layout_rejects_a_template_cycle() {
         TemplateType::String,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
     let reference = TemplateTirChildReference::new(
         first,
@@ -186,6 +195,7 @@ fn layout_rejects_a_template_cycle() {
             occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     MalformedTirStore::new(&mut store).set_template_root(first, cycle_node);
 

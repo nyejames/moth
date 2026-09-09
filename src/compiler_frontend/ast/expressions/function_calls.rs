@@ -36,6 +36,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -45,6 +46,7 @@ pub struct FunctionCallParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
     pub id: &'a InternedPath,
     pub call_location: SourceLocation,
+    pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub signature: &'a FunctionSignature,
     pub value_required: bool,
@@ -60,6 +62,7 @@ pub struct ExternalFunctionCallParseInput<'a, 'b> {
     pub external_function_id: ExternalFunctionId,
     pub external_function: &'a ExternalFunctionDef,
     pub call_location: SourceLocation,
+    pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
@@ -74,6 +77,7 @@ struct ParsedExternalFunctionCall {
     result_type_ids: Vec<TypeId>,
     error_return_type_id: Option<TypeId>,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 struct CallFinishContext<'a, 'b> {
@@ -99,6 +103,7 @@ pub(crate) fn parse_function_call_expression(
         token_stream,
         id,
         call_location,
+        call_span,
         context,
         signature,
         value_required,
@@ -122,6 +127,7 @@ pub(crate) fn parse_function_call_expression(
             external_function_id: function_id,
             external_function: host_function,
             call_location,
+            call_span,
             context,
             value_required,
             allow_boundary_catch,
@@ -160,6 +166,7 @@ pub(crate) fn parse_function_call_expression(
         result_type_ids: signature.success_return_type_ids(),
         args,
         call_location,
+        call_span,
     };
 
     finish_function_call_expression(
@@ -278,6 +285,7 @@ pub(crate) fn parse_external_function_call_expression(
         external_function_id,
         external_function,
         call_location,
+        call_span,
         context,
         value_required,
         allow_boundary_catch,
@@ -291,6 +299,7 @@ pub(crate) fn parse_external_function_call_expression(
         external_function_id,
         external_function,
         call_location,
+        call_span,
         context,
         type_interner,
         string_table,
@@ -315,11 +324,13 @@ fn parse_external_function_call_parts(
     external_function_id: ExternalFunctionId,
     external_function: &ExternalFunctionDef,
     call_location: SourceLocation,
+    call_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<ParsedExternalFunctionCall, ExpressionParseError> {
     let location = call_location;
+    let span = call_span;
 
     // ------------------------
     //  Parse raw arguments
@@ -400,6 +411,7 @@ fn parse_external_function_call_parts(
         result_type_ids,
         error_return_type_id,
         location,
+        span,
     })
 }
 
@@ -423,6 +435,7 @@ fn finish_external_function_call_expression(
         result_type_ids,
         error_return_type_id,
         location,
+        span,
     } = parsed_call;
 
     if let Some(error_type_id) = error_return_type_id {
@@ -432,6 +445,7 @@ fn finish_external_function_call_expression(
             result_type_ids,
             error_type_id,
             call_location: location,
+            call_span: span,
         };
 
         if token_stream_starts_fallible_handling_suffix(token_stream) {
@@ -475,6 +489,7 @@ fn finish_external_function_call_expression(
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         location,
+        span,
     ))
 }
 

@@ -312,6 +312,7 @@ fn display_renders_choice_variants() {
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
                 location: SourceLocation::default(),
+                span: None,
             },
             ChoiceVariantDefinition {
                 name: failed,
@@ -320,6 +321,7 @@ fn display_renders_choice_variants() {
                     fields: Box::new([]),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ]
         .into_boxed_slice(),
@@ -410,6 +412,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
             name: value_name.clone(),
             type_id: env.builtins().int,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -437,6 +440,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -475,6 +479,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
             name: item_name.clone(),
             type_id: box_parameter_type_id,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(box_parameter_list),
@@ -516,10 +521,12 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
                     name: InternedPath::from_single_str("inner", &mut table),
                     type_id: state_parameter_type_id,
                     location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(state_parameter_list),
@@ -635,6 +642,7 @@ fn updating_choice_variants_preserves_generic_parameter_list() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
@@ -686,6 +694,7 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
                 location: SourceLocation::default(),
+                span: None,
             },
             ChoiceVariantDefinition {
                 name: table.intern("Full"),
@@ -695,10 +704,12 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
                         name: InternedPath::from_single_str("value", &mut table),
                         type_id: parameter_type_id,
                         location: SourceLocation::default(),
+                        span: None,
                     }]
                     .into_boxed_slice(),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ]
         .into_boxed_slice(),
@@ -763,6 +774,7 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
             name: InternedPath::from_single_str("value", &mut table),
             type_id: parameter_type_id,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
@@ -808,6 +820,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
             name: InternedPath::from_single_str("value", &mut local_table),
             type_id: box_parameter_type_id,
             location: source_location.clone(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(box_parameter_list),
@@ -837,10 +850,12 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
                     name: InternedPath::from_single_str("item", &mut local_table),
                     type_id: state_parameter_type_id,
                     location: source_location.clone(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
             location: source_location.clone(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(state_parameter_list),
@@ -1068,6 +1083,7 @@ fn runtime_equality_query_accepts_unit_choices() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1094,10 +1110,12 @@ fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
                     name: InternedPath::from_single_str("value", &mut table),
                     type_id: int_type_id,
                     location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1128,10 +1146,12 @@ fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
                     name: InternedPath::from_single_str("callback", &mut table),
                     type_id: function_type_id,
                     location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1163,10 +1183,12 @@ fn runtime_equality_query_rejects_recursive_choice_payloads() {
                     name: InternedPath::from_single_str("next", &mut table),
                     type_id: choice_type_id,
                     location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
             location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
@@ -1541,6 +1563,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
                 name: InternedPath::from_single_str("value", &mut local_table),
                 type_id: requester.builtins().int,
                 location: source_location.clone(),
+                span: None,
             }]
             .into_boxed_slice(),
             generic_parameters: None,
@@ -1564,10 +1587,12 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
                         name: InternedPath::from_single_str("item", &mut local_table),
                         type_id: requester.builtins().string,
                         location: source_location.clone(),
+                        span: None,
                     }]
                     .into_boxed_slice(),
                 },
                 location: source_location,
+                span: None,
             }]
             .into_boxed_slice(),
             generic_parameters: None,

@@ -47,7 +47,7 @@ fn reactive_declaration_metadata_is_bound_to_local() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 count_path.clone(),
-                Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
                     .with_reactive_source(source),
             )),
             test_source_location(2),
@@ -141,7 +141,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
                 test_source_location(2),
@@ -152,6 +152,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
@@ -224,7 +225,7 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path,
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, test_source_location(2), None, ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
                 test_source_location(2),
@@ -235,6 +236,7 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
                         test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
@@ -320,6 +322,7 @@ fn metadata_with_subscription(
         source,
         type_id: builtin_type_ids::INT,
         location,
+        span: None,
     });
     metadata
 }

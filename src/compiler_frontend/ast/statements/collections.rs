@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -110,6 +111,10 @@ fn parse_collection_literal(
     let mut items: Vec<Expression> = Vec::new();
     let mut inner_type_spelling = None;
     let collection_location = token_stream.current_location();
+    let collection_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let mut consumed_close_curly = false;
 
     let (mut inferred_inner_type_id, explicit_collection_type_id, fixed_capacity) =
@@ -282,6 +287,7 @@ fn parse_collection_literal(
         },
         type_interner.environment_mut_for_derived_types(),
         token_stream.current_location(),
+        collection_span,
         value_mode.to_owned(),
     ))
 }
@@ -484,6 +490,11 @@ fn parse_map_literal(
     let mut entries: Vec<MapLiteralEntry> = Vec::new();
     let mut known_keys: KnownMapKeys = HashMap::new();
     let mut consumed_close_curly = false;
+    let map_location = token_stream.current_location();
+    let map_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
 
     // The current token is an open curly brace; skip to the first entry.
     token_stream.advance();
@@ -636,7 +647,8 @@ fn parse_map_literal(
             map_type_id: Some(map_type_id),
         },
         type_interner.environment_mut_for_derived_types(),
-        token_stream.current_location(),
+        map_location,
+        map_span,
         value_mode.to_owned(),
     ))
 }
@@ -653,6 +665,10 @@ fn parse_inferred_curly_literal(
     string_table: &mut StringTable,
 ) -> CollectionParseResult<Expression> {
     let literal_location = token_stream.current_location();
+    let literal_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
 
     // Collection delimiters own intervening newlines; normalize them before the bounded
     // expression parser sees the first entry as a possible statement terminator.
@@ -878,6 +894,7 @@ fn parse_inferred_curly_literal(
                 },
                 type_interner.environment_mut_for_derived_types(),
                 token_stream.current_location(),
+                literal_span,
                 value_mode.to_owned(),
             ))
         }
@@ -979,6 +996,7 @@ fn parse_inferred_curly_literal(
                 },
                 type_interner.environment_mut_for_derived_types(),
                 token_stream.current_location(),
+                literal_span,
                 value_mode.to_owned(),
             ))
         }

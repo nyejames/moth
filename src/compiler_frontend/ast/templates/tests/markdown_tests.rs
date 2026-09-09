@@ -27,6 +27,7 @@ fn formatter_text_piece(text: &str, string_table: &mut StringTable) -> Formatter
     FormatterInputPiece::Text(FormatterTextPiece {
         text: string_table.intern(text),
         location: SourceLocation::default(),
+        span: None,
     })
 }
 

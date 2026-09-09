@@ -24,10 +24,29 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashSet;
+#[derive(Clone, Debug)]
+struct BackendDiagnosticLocation {
+    location: SourceLocation,
+    span: Option<SourceSpan>,
+}
+
+fn with_optional_primary_span(
+    mut diagnostic: CompilerDiagnostic,
+    span: Option<SourceSpan>,
+) -> CompilerDiagnostic {
+    if let Some(span) = span {
+        diagnostic.primary_span = Some(span);
+        if let Some(primary_label) = diagnostic.labels.first_mut() {
+            primary_label.span = Some(span);
+        }
+    }
+    diagnostic
+}
 
 /// Failure mode for backend feature validation.
 ///
@@ -134,12 +153,17 @@ fn validate_runtime_assertion_messages(
         return Ok(());
     };
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+    let diagnostic = with_optional_primary_span(
         CompilerDiagnostic::unsupported_backend_feature(
             string_table.intern(target.as_str()),
             UnsupportedBackendFeatureReason::RuntimeAssertionMessages,
             message.location.clone(),
         ),
+        message.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+        diagnostic,
     )))
 }
 
@@ -179,12 +203,17 @@ fn validate_wasm_cross_module_calls(
         BackendTarget::Wasm => "Wasm",
         BackendTarget::Js => "JavaScript",
     });
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+    let diagnostic = with_optional_primary_span(
         CompilerDiagnostic::unsupported_backend_feature(
             backend_name,
             UnsupportedBackendFeatureReason::CrossModuleCalls,
             statement.location.clone(),
         ),
+        statement.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(Box::new(
+        diagnostic,
     )))
 }
 
@@ -210,10 +239,13 @@ fn validate_wasm_maps(
 
     // Only the first reachable unsupported operation is reported. Unreachable helpers remain
     // valid typed HIR and do not block the build.
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        reason,
-        map_use.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            reason,
+            map_use.location.clone(),
+        ),
+        map_use.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -237,10 +269,13 @@ fn validate_wasm_reactive_features(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::ReactiveTemplateRuntime,
-        reactive_template.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::ReactiveTemplateRuntime,
+            reactive_template.location.clone(),
+        ),
+        reactive_template.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -263,10 +298,13 @@ fn validate_wasm_runtime_casts(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::RuntimeCasts,
-        runtime_cast.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::RuntimeCasts,
+            runtime_cast.location.clone(),
+        ),
+        runtime_cast.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -289,10 +327,13 @@ fn validate_wasm_checked_numeric_ops(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::CheckedNumericOperations,
-        numeric_op.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::CheckedNumericOperations,
+            numeric_op.location.clone(),
+        ),
+        numeric_op.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -325,10 +366,13 @@ fn validate_wasm_float_statements(
         }
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        reason,
-        float_statement.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            reason,
+            float_statement.location.clone(),
+        ),
+        float_statement.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -366,10 +410,14 @@ fn validate_wasm_generic_runtime_values(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::GenericRuntimeValues,
-        location,
+    let BackendDiagnosticLocation { location, span } = location;
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::GenericRuntimeValues,
+            location,
+        ),
+        span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(
@@ -386,7 +434,7 @@ fn first_generic_runtime_module_location(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     reachable_blocks: &FxHashSet<BlockId>,
-) -> Option<SourceLocation> {
+) -> Option<BackendDiagnosticLocation> {
     for block in &module.blocks {
         if !reachable_blocks.contains(&block.id) {
             continue;
@@ -414,7 +462,7 @@ fn first_generic_runtime_statement_location(
     statement: &HirStatement,
     module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<BackendDiagnosticLocation> {
     match &statement.kind {
         HirStatementKind::Assign { value, .. }
         | HirStatementKind::Expr(value)
@@ -458,7 +506,7 @@ fn first_generic_runtime_terminator_location(
     terminator: &HirTerminator,
     module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<BackendDiagnosticLocation> {
     match terminator {
         HirTerminator::If { condition, .. } => {
             first_generic_runtime_expression_location(condition, module, type_environment)
@@ -494,18 +542,19 @@ fn first_generic_runtime_expression_location(
     expression: &HirExpression,
     module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<BackendDiagnosticLocation> {
     if matches!(
         type_environment.get(expression.ty),
         Some(TypeDefinition::GenericInstance(_))
     ) {
-        return Some(
-            module
+        return Some(BackendDiagnosticLocation {
+            location: module
                 .side_table
                 .value_source_location(expression.id)
                 .cloned()
                 .unwrap_or_default(),
-        );
+            span: expression.span,
+        });
     }
 
     match &expression.kind {
@@ -586,10 +635,13 @@ fn validate_js_reactive_sinks(
         return Ok(());
     };
 
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::ReactiveExternalCallSink,
-        rejected_sink.location.clone(),
+    let diagnostic = with_optional_primary_span(
+        CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::ReactiveExternalCallSink,
+            rejected_sink.location.clone(),
+        ),
+        rejected_sink.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(Box::new(

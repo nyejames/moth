@@ -19,8 +19,11 @@ fn empty_runtime_template_handoff() -> OwnedRuntimeTemplateHandoff {
     OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: Vec::new(),
+            location: location.clone(),
+            span: None,
         }),
         location,
+        span: None,
     }
 }
 
@@ -29,10 +32,13 @@ fn empty_runtime_slot_application_handoff() -> OwnedRuntimeSlotApplicationHandof
     OwnedRuntimeSlotApplicationHandoff {
         wrapper: OwnedRuntimeTemplateNode::Sequence {
             children: Vec::new(),
+            location: location.clone(),
+            span: None,
         },
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
         location,
+        span: None,
     }
 }
 

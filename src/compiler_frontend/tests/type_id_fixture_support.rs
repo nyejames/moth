@@ -99,10 +99,12 @@ pub(crate) fn param_declaration(
         value: Expression::new(
             ExpressionKind::NoValue,
             location,
+            None,
             type_id,
             DataType::Inferred,
             value_mode,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -140,6 +142,7 @@ pub(crate) fn inferred_type_reference_expr(
         DataType::Inferred,
         type_id,
         location,
+        None,
         value_mode,
         ConstRecordState::RuntimeValue,
     )
@@ -156,6 +159,7 @@ pub(crate) fn const_record_reference_expr(
         DataType::Inferred,
         type_id,
         location,
+        None,
         value_mode,
         ConstRecordState::ConstRecord,
     )
@@ -169,6 +173,7 @@ pub(crate) fn no_value_expr(
     Expression::new(
         ExpressionKind::NoValue,
         location,
+        None,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -185,6 +190,7 @@ pub(crate) fn runtime_expr(
     Expression::new(
         ExpressionKind::Runtime(ExpressionRpn { items }),
         location,
+        None,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -200,7 +206,11 @@ pub(crate) fn runtime_operator_item(
     operator: Operator,
     location: SourceLocation,
 ) -> ExpressionRpnItem {
-    ExpressionRpnItem::Operator { operator, location }
+    ExpressionRpnItem::Operator {
+        operator,
+        location,
+        span: None,
+    }
 }
 
 pub(crate) fn runtime_function_call_item(
@@ -217,6 +227,7 @@ pub(crate) fn runtime_function_call_item(
             result_type_ids,
         },
         location,
+        None,
         expression_type_id,
         DataType::Inferred,
         ValueMode::MutableOwned,
@@ -241,6 +252,7 @@ pub(crate) fn runtime_handled_function_call_item(
             propagation_location: None,
         },
         location,
+        None,
         expression_type_id,
         DataType::Inferred,
         ValueMode::MutableOwned,
@@ -284,6 +296,7 @@ pub(crate) fn collection_expr(
     Expression::new(
         ExpressionKind::Collection(items),
         location,
+        None,
         builtin_type_ids::NONE,
         DataType::Inferred,
         value_mode,
@@ -304,6 +317,7 @@ pub(crate) fn multi_bind_target(
         value_mode,
         kind,
         location,
+        span: None,
     }
 }
 
@@ -321,6 +335,7 @@ pub(crate) fn field_access_node(
             field,
         },
         location.clone(),
+        None,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -330,6 +345,7 @@ pub(crate) fn field_access_node(
     AstNode {
         kind: NodeKind::ExpressionStatement(expression),
         location,
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -350,6 +366,7 @@ pub(crate) fn choice_construct_expr(
             diagnostic_type: DataType::Inferred,
             type_id,
             location,
+            span: None,
             value_mode,
         },
     )
@@ -365,6 +382,7 @@ pub(crate) fn option_none_expr(
         DataType::Inferred,
         type_environment,
         location,
+        None,
     )
 }
 
@@ -394,6 +412,7 @@ pub(crate) fn handled_result_expr(
         result_type_id,
         DataType::Inferred,
         location.clone(),
+        None,
     );
 
     match handling {
@@ -564,6 +583,7 @@ pub(crate) fn choice_type_id(
                             name: field.id.clone(),
                             type_id: field.value.type_id,
                             location: field.value.location.clone(),
+                            span: None,
                         })
                         .collect::<Vec<_>>();
                     ChoiceVariantPayloadDefinition::Record {
@@ -572,6 +592,7 @@ pub(crate) fn choice_type_id(
                 }
             },
             location: variant.location.clone(),
+            span: None,
         })
         .collect::<Vec<_>>();
 
@@ -617,6 +638,7 @@ pub(crate) fn build_ast_with_choices(
                     name: field.id.clone(),
                     type_id: field.value.type_id,
                     location: field.value.location.clone(),
+                    span: None,
                 })
                 .collect::<Vec<_>>();
 
@@ -655,6 +677,7 @@ pub(crate) fn build_ast_with_choices(
                                 name: field.id.clone(),
                                 type_id: field.value.type_id,
                                 location: field.value.location.clone(),
+                                span: None,
                             })
                             .collect::<Vec<_>>();
                         ChoiceVariantPayloadDefinition::Record {
@@ -663,6 +686,7 @@ pub(crate) fn build_ast_with_choices(
                     }
                 },
                 location: variant.location.clone(),
+                span: None,
             })
             .collect::<Vec<_>>();
 

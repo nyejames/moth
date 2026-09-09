@@ -13,14 +13,14 @@
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 /// Owned runtime slot-application plan prepared for HIR lowering.
 ///
 /// WHAT: mirrors the routed source/site shape of a runtime slot plan, replacing
@@ -34,6 +34,7 @@ pub struct OwnedRuntimeSlotApplicationHandoff {
     pub(crate) contribution_sources: Vec<OwnedRuntimeSlotContributionSource>,
     pub(crate) slot_sites: Vec<OwnedRuntimeSlotSite>,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template value materialized for a child-template boundary.
@@ -41,6 +42,7 @@ pub struct OwnedRuntimeSlotApplicationHandoff {
 pub struct OwnedRuntimeTemplateHandoff {
     pub(crate) body: OwnedRuntimeTemplateBody,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template body kind.
@@ -69,6 +71,8 @@ pub(crate) enum OwnedRuntimeTemplateBody {
 pub(crate) enum OwnedRuntimeTemplateNode {
     Sequence {
         children: Vec<OwnedRuntimeTemplateNode>,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Owned literal or structural string payload.
@@ -81,15 +85,20 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         text: OwnedFoldedString,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     DynamicExpression {
         expression: Box<Expression>,
         reactive_subscription: Option<ReactiveSubscription>,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     ChildTemplate {
         template: Box<OwnedRuntimeTemplateHandoff>,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Output-conditioned wrapper application around one child occurrence.
@@ -104,12 +113,15 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         child: Box<OwnedRuntimeTemplateNode>,
         wrapper: Box<OwnedRuntimeTemplateNode>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     BranchChain {
         branches: Vec<OwnedRuntimeTemplateBranch>,
         fallback: Option<Box<OwnedRuntimeTemplateNode>>,
+        else_marker: Option<TemplateElseMarker>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     Loop {
@@ -117,6 +129,7 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         body: Box<OwnedRuntimeTemplateNode>,
         aggregate_wrapper: Option<Box<OwnedRuntimeTemplateNode>>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     AggregateOutput,
@@ -124,15 +137,20 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     LoopControl {
         kind: TemplateLoopControlKind,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     RuntimeSlotSite {
         site: RuntimeSlotSiteId,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Planned runtime contribution spliced into a copied wrapper tree.
     RuntimeSlotContributionSource {
         source: RuntimeSlotContributionSourceId,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Structural slot placeholder that survived as a runtime value.
@@ -146,15 +164,16 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     /// finished and the wrapper is treated as a value rather than a helper.
     Slot {
         location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 }
 
-/// One owned conditional runtime-template branch.
 #[derive(Clone, Debug)]
 pub(crate) struct OwnedRuntimeTemplateBranch {
     pub(crate) selector: TemplateBranchSelector,
     pub(crate) body: OwnedRuntimeTemplateNode,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned source-accumulator plan for one runtime slot contribution.
@@ -164,6 +183,7 @@ pub(crate) struct OwnedRuntimeSlotContributionSource {
     pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) renders_wrapper_unconditionally: bool,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned runtime slot-site plan for one wrapper placeholder occurrence.
@@ -175,6 +195,7 @@ pub(crate) struct OwnedRuntimeSlotSite {
     pub(crate) site: RuntimeSlotSiteId,
     pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Walks every nested `OwnedRuntimeTemplateNode` in `handoff` and calls `callback` for each.

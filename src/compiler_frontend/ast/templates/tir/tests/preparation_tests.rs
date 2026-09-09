@@ -56,6 +56,7 @@ fn runtime_expression(string_table: &mut StringTable) -> Expression {
             result_type_ids: vec![builtin_type_ids::STRING],
         },
         SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -211,6 +212,7 @@ fn preparation_keeps_reactive_content_on_runtime_handoff() {
                     source,
                     type_id: builtin_type_ids::STRING,
                     location: SourceLocation::default(),
+                    span: None,
                 }),
                 SourceLocation::default(),
             );
@@ -311,9 +313,10 @@ fn preparation_mode_controls_const_required_branch_validation() {
             TemplateBranchSelector::Bool(runtime_expression(table)),
             body,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        builder.push_branch_chain_node(vec![branch], None, SourceLocation::default())
+        builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default())
     };
 
     let (value, _) = prepare_root(
@@ -349,14 +352,19 @@ fn preparation_const_required_recurses_through_coerced_loop_condition() {
     let result = prepare_root(
         TemplateType::StringFunction,
         |builder, table| {
-            let condition =
-                Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned);
+            let condition = Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            );
             let coerced_once = Expression::new(
                 ExpressionKind::Coerced {
                     value: Box::new(condition),
                     to_type: builtin_type_ids::BOOL,
                 },
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
@@ -367,6 +375,7 @@ fn preparation_const_required_recurses_through_coerced_loop_condition() {
                     to_type: builtin_type_ids::BOOL,
                 },
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::BOOL,
                 DataType::Bool,
                 ValueMode::ImmutableOwned,
@@ -439,6 +448,7 @@ fn preparation_reenters_nested_template_payload_authority() {
         TemplateType::String,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     let nested_template = Template {
         tir_reference: TemplateTirReference {
@@ -447,6 +457,7 @@ fn preparation_reenters_nested_template_payload_authority() {
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     };
     let outer_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -488,6 +499,7 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     };
     {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -634,6 +646,7 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
+        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -641,12 +654,14 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
             site: RuntimeSlotSiteId(0),
         },
         SourceLocation::default(),
+        None,
     ));
     let root = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::Sequence {
             children: vec![runtime_site],
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
@@ -654,6 +669,7 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, plan_id)
@@ -695,11 +711,13 @@ fn preparation_rejects_runtime_slot_site_from_a_different_plan() {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
+        span: None,
     });
     let other_plan = store.push_slot_plan(TemplateSlotPlan {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
+        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -707,6 +725,7 @@ fn preparation_rejects_runtime_slot_site_from_a_different_plan() {
             site: RuntimeSlotSiteId(0),
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = store.push_template(TemplateIr::new(
         runtime_site,
@@ -714,6 +733,7 @@ fn preparation_rejects_runtime_slot_site_from_a_different_plan() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, owner_plan)
@@ -732,6 +752,7 @@ fn preparation_rejects_out_of_range_runtime_slot_site() {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
+        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -739,6 +760,7 @@ fn preparation_rejects_out_of_range_runtime_slot_site() {
             site: RuntimeSlotSiteId(0),
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = store.push_template(TemplateIr::new(
         runtime_site,
@@ -746,6 +768,7 @@ fn preparation_rejects_out_of_range_runtime_slot_site() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, plan)
@@ -771,6 +794,7 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
+        span: None,
     });
     MalformedTirStore::new(&mut store)
         .replace_slot_sites(plan, vec![site_plan(RuntimeSlotSiteId(7), render_root)]);
@@ -780,6 +804,7 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
             site: RuntimeSlotSiteId(7),
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = store.push_template(TemplateIr::new(
         runtime_site,
@@ -787,6 +812,7 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, plan)
@@ -816,6 +842,7 @@ fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() 
                 source: reactive_source,
                 type_id: builtin_type_ids::STRING,
                 location: SourceLocation::default(),
+                span: None,
             }),
             SourceLocation::default(),
         )
@@ -827,6 +854,7 @@ fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() 
             contribution_root,
         )],
         slot_sites: Vec::new(),
+        span: None,
     });
     let wrapper_root = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -843,6 +871,7 @@ fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() 
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, plan_id)
@@ -870,6 +899,7 @@ fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk(
         TemplateType::String,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     let wrapper_set = store.push_wrapper_set(TemplateWrapperSet {
         wrappers: vec![TemplateWrapperReference::new(
@@ -923,10 +953,12 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
         DataType::StringSlice,
         &mut type_environment,
         SourceLocation::default(),
+        None,
     );
     let capture_expression = Expression::new(
         ExpressionKind::Reference(capture_path.clone()),
         SourceLocation::default(),
+        None,
         string_type_id,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -955,15 +987,22 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
                 inner_type_id: string_type_id,
                 location: SourceLocation::default(),
                 binding_location: SourceLocation::default(),
+                binding_span: None,
             }),
         };
         let branch = TemplateIrBranch::new(
             selector,
             body,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        builder.push_branch_chain_node(vec![branch], Some(fallback), SourceLocation::default())
+        builder.push_branch_chain_node(
+            vec![branch],
+            Some(fallback),
+            None,
+            SourceLocation::default(),
+        )
     };
 
     assert!(
@@ -1054,6 +1093,7 @@ fn empty_source_plan(
         render_root,
         renders_wrapper_unconditionally: true,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -1063,6 +1103,7 @@ fn site_plan(site: RuntimeSlotSiteId, render_root: TemplateIrNodeId) -> Template
         key: SlotKey::Default,
         render_root,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -1083,6 +1124,7 @@ fn preparation_rejects_contribution_marker_with_wrong_plan() {
         location: SourceLocation::default(),
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
+        span: None,
     });
     let other_plan = TemplateSlotPlanId::new(owner_plan.index() + 1);
     let marker = push_runtime_slot_contribution_source(
@@ -1090,6 +1132,7 @@ fn preparation_rejects_contribution_marker_with_wrong_plan() {
         other_plan,
         RuntimeSlotContributionSourceId(0),
         SourceLocation::default(),
+        None,
     );
     MalformedTirStore::new(&mut store)
         .replace_slot_sites(owner_plan, vec![site_plan(RuntimeSlotSiteId(0), marker)]);
@@ -1120,12 +1163,14 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
             location: SourceLocation::default(),
             contribution_sources: vec![],
             slot_sites: vec![],
+            span: None,
         });
         push_runtime_slot_contribution_source(
             &mut store,
             plan,
             RuntimeSlotContributionSourceId(0),
             SourceLocation::default(),
+            None,
         )
     };
     let template_id = {
@@ -1171,12 +1216,14 @@ fn preparation_rejects_out_of_range_contribution_source() {
         location: SourceLocation::default(),
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
+        span: None,
     });
     let marker = push_runtime_slot_contribution_source(
         &mut store,
         plan,
         RuntimeSlotContributionSourceId(1),
         SourceLocation::default(),
+        None,
     );
     MalformedTirStore::new(&mut store)
         .replace_slot_sites(plan, vec![site_plan(RuntimeSlotSiteId(0), marker)]);
@@ -1213,6 +1260,7 @@ fn preparation_rejects_source_identity_mismatch() {
         location: SourceLocation::default(),
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
+        span: None,
     });
     MalformedTirStore::new(&mut store).replace_contribution_sources(
         plan,
@@ -1223,6 +1271,7 @@ fn preparation_rejects_source_identity_mismatch() {
         plan,
         RuntimeSlotContributionSourceId(0),
         SourceLocation::default(),
+        None,
     );
     MalformedTirStore::new(&mut store)
         .replace_slot_sites(plan, vec![site_plan(RuntimeSlotSiteId(0), marker)]);
@@ -1262,17 +1311,20 @@ fn preparation_rejects_plan_a_source_inside_plan_b() {
         location: SourceLocation::default(),
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
+        span: None,
     });
     let plan_a_marker = push_runtime_slot_contribution_source(
         &mut store,
         plan_a,
         RuntimeSlotContributionSourceId(0),
         SourceLocation::default(),
+        None,
     );
     let plan_b = store.push_slot_plan(TemplateSlotPlan {
         location: SourceLocation::default(),
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), plan_a_marker)],
+        span: None,
     });
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -1314,12 +1366,14 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
                 inner_text,
             )],
             slot_sites: vec![],
+            span: None,
         });
         let marker = push_runtime_slot_contribution_source(
             &mut store,
             inner_plan,
             RuntimeSlotContributionSourceId(0),
             SourceLocation::default(),
+            None,
         );
         MalformedTirStore::new(&mut store)
             .replace_slot_sites(inner_plan, vec![site_plan(RuntimeSlotSiteId(0), marker)]);
@@ -1329,6 +1383,7 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
             TemplateType::String,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         );
         inner_template.runtime_slot_plan = Some(inner_plan);
         store.push_template(inner_template)
@@ -1361,12 +1416,14 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
             child_node,
         )],
         slot_sites: vec![],
+        span: None,
     });
     let outer_marker = push_runtime_slot_contribution_source(
         &mut store,
         outer_plan,
         RuntimeSlotContributionSourceId(0),
         SourceLocation::default(),
+        None,
     );
     MalformedTirStore::new(&mut store).replace_slot_sites(
         outer_plan,

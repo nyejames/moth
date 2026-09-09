@@ -62,13 +62,15 @@ fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable)
         TemplateBranchSelector::Bool(Expression::bool(
             false,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         body,
         SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
@@ -129,13 +131,15 @@ fn parent_with_branch_body_child(
         TemplateBranchSelector::Bool(Expression::bool(
             true,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         )),
         body,
         SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
@@ -164,6 +168,7 @@ fn parent_with_loop_body_child(
             condition: Box::new(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         },

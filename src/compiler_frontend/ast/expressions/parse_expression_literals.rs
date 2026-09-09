@@ -23,6 +23,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize_i32_with_sign};
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralKind, NumericLiteralSign};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -92,7 +93,15 @@ pub(super) fn parse_literal_expression(
                         )
                     })?;
 
-                Expression::int(value_i32, location.to_owned(), state.value_mode.to_owned())
+                Expression::int(
+                    value_i32,
+                    location.to_owned(),
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    )),
+                    state.value_mode.to_owned(),
+                )
             } else {
                 let mut value = materialize_f64(&token, string_table).map_err(|reason| {
                     // Use authored source text so diagnostics report the original literal.
@@ -110,7 +119,15 @@ pub(super) fn parse_literal_expression(
                     }
                 }
 
-                Expression::float(value, location.to_owned(), state.value_mode.to_owned())
+                Expression::float(
+                    value,
+                    location.to_owned(),
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    )),
+                    state.value_mode.to_owned(),
+                )
             };
 
             token_stream.advance();
@@ -128,8 +145,15 @@ pub(super) fn parse_literal_expression(
 
         TokenKind::StringSliceLiteral(string) => {
             let location = token_stream.current_location();
-            let string_expr =
-                Expression::string_slice(string, location.to_owned(), state.value_mode.to_owned());
+            let string_expr = Expression::string_slice(
+                string,
+                location.to_owned(),
+                Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                )),
+                state.value_mode.to_owned(),
+            );
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -145,8 +169,15 @@ pub(super) fn parse_literal_expression(
 
         TokenKind::BoolLiteral(value) => {
             let location = token_stream.current_location();
-            let bool_expr =
-                Expression::bool(value, location.to_owned(), state.value_mode.to_owned());
+            let bool_expr = Expression::bool(
+                value,
+                location.to_owned(),
+                Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                )),
+                state.value_mode.to_owned(),
+            );
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -162,8 +193,15 @@ pub(super) fn parse_literal_expression(
 
         TokenKind::CharLiteral(value) => {
             let location = token_stream.current_location();
-            let char_expr =
-                Expression::char(value, location.to_owned(), state.value_mode.to_owned());
+            let char_expr = Expression::char(
+                value,
+                location.to_owned(),
+                Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                )),
+                state.value_mode.to_owned(),
+            );
             token_stream.advance();
             push_expression_operand(
                 token_stream,
@@ -209,11 +247,16 @@ pub(super) fn parse_literal_expression(
                 };
 
             let location = token_stream.current_location();
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             let mut none_expr = Expression::option_none_with_type_id(
                 inner_type_id,
                 inner_diagnostic_type,
                 type_interner.environment_mut_for_derived_types(),
                 location.clone(),
+                span,
             );
             none_expr.value_mode = state.value_mode.to_owned();
             token_stream.advance();

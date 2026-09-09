@@ -132,34 +132,6 @@ fn header_name(
 }
 
 #[test]
-fn missing_header_source_identity_is_an_internal_failure() {
-    let (mut headers, mut string_table) = parse_module_headers(
-        &[("src/@page.moth", "content #= @intro.mtf\n")],
-        "src/@page.moth",
-    );
-    let header = headers
-        .headers
-        .iter_mut()
-        .find(|header| !matches!(header.kind, HeaderKind::StartFunction))
-        .expect("fixture must contain the content constant");
-    header.tokens.file_id = None;
-
-    let bag =
-        resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect_err("missing identity must not silently discard the content dependency");
-    assert!(matches!(
-        bag.diagnostics(),
-        [diagnostic] if matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InfrastructureError {
-                error_type: ErrorType::Compiler,
-                ..
-            }
-        )
-    ));
-}
-
-#[test]
 fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last() {
     let (headers, mut string_table) = parse_module_headers(
         &[
@@ -229,13 +201,8 @@ fn reports_circular_dependencies() {
         .find(|header| header_name(header, &string_table) == "Middle")
         .expect("cycle fixture must contain the Middle header");
     let expected_primary_location = cycle_header.name_location.clone();
-    let expected_primary_span = SourceSpan::new(
-        cycle_header
-            .tokens
-            .file_id
-            .expect("cycle fixture header must retain its source identity"),
-        cycle_header.name_span,
-    );
+    let expected_primary_span =
+        SourceSpan::new(cycle_header.tokens.file_id, cycle_header.name_span);
 
     let bag =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)

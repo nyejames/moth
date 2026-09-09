@@ -483,6 +483,7 @@ pub(super) fn parse_field_member_access_typed(
 
     let result_expression = if let Some(mut inlined_expression) = field.const_inline_value {
         inlined_expression.location = member_location.clone();
+        inlined_expression.span = context.member_span;
         inlined_expression
     } else {
         increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
@@ -505,6 +506,7 @@ pub(super) fn parse_field_member_access_typed(
                 field: field.field_name,
             },
             member_location.clone(),
+            context.member_span,
             field.type_id,
             field.diagnostic_type,
             field.value_mode,
@@ -517,5 +519,6 @@ pub(super) fn parse_field_member_access_typed(
         kind: NodeKind::ExpressionStatement(result_expression),
         scope: scope_context.scope.to_owned(),
         location: member_location,
+        span: context.member_span,
     }))
 }

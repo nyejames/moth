@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, TemplateIrId, TemplateIrNodeId,
@@ -31,6 +31,7 @@ use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -41,21 +42,31 @@ pub(crate) struct TemplateConstructionContext {
     head_node_count: u32,
     control_flow_node_id: Option<TemplateIrNodeId>,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 impl TemplateConstructionContext {
-    pub(crate) fn new(store: Rc<RefCell<TemplateIrStore>>, location: SourceLocation) -> Self {
+    pub(crate) fn new(
+        store: Rc<RefCell<TemplateIrStore>>,
+        location: SourceLocation,
+        span: Option<SourceSpan>,
+    ) -> Self {
         Self {
             store,
             children: Vec::new(),
             head_node_count: 0,
             control_flow_node_id: None,
             location,
+            span,
         }
     }
 
     pub(crate) fn location(&self) -> &SourceLocation {
         &self.location
+    }
+
+    pub(crate) fn span(&self) -> Option<SourceSpan> {
+        self.span
     }
 
     pub(crate) fn store(&self) -> std::cell::Ref<'_, TemplateIrStore> {
@@ -88,8 +99,16 @@ impl TemplateConstructionContext {
         text: StringId,
         byte_len: usize,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
-        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Body, None, location);
+        self.record_text_segment(
+            text,
+            byte_len,
+            TemplateSegmentOrigin::Body,
+            None,
+            location,
+            span,
+        );
     }
 
     pub(crate) fn record_head_text(
@@ -97,8 +116,16 @@ impl TemplateConstructionContext {
         text: StringId,
         byte_len: usize,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
-        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Head, None, location);
+        self.record_text_segment(
+            text,
+            byte_len,
+            TemplateSegmentOrigin::Head,
+            None,
+            location,
+            span,
+        );
     }
 
     pub(crate) fn record_reactive_head_text(
@@ -107,6 +134,7 @@ impl TemplateConstructionContext {
         byte_len: usize,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         self.record_text_segment(
             text,
@@ -114,6 +142,7 @@ impl TemplateConstructionContext {
             TemplateSegmentOrigin::Head,
             reactive_subscription,
             location,
+            span,
         );
     }
 
@@ -124,6 +153,7 @@ impl TemplateConstructionContext {
         origin: TemplateSegmentOrigin,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
@@ -134,6 +164,7 @@ impl TemplateConstructionContext {
                     origin,
                 },
                 location,
+                span,
             ));
 
             if let Some(subscription) = reactive_subscription {
@@ -158,6 +189,7 @@ impl TemplateConstructionContext {
         expression: Expression,
         reactive_subscription: Option<ReactiveSubscription>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
@@ -170,6 +202,7 @@ impl TemplateConstructionContext {
                     site_id,
                 },
                 location,
+                span,
             ))
         };
 
@@ -186,6 +219,7 @@ impl TemplateConstructionContext {
         child_reference: &TemplateTirReference,
         origin: TemplateSegmentOrigin,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
@@ -201,6 +235,7 @@ impl TemplateConstructionContext {
                     occurrence_id,
                 },
                 location,
+                span,
             ))
         };
 
@@ -212,13 +247,15 @@ impl TemplateConstructionContext {
         &mut self,
         slot: SlotPlaceholder,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), TemplateError> {
         let node_id = {
             let mut store = self.store.borrow_mut();
-            let placeholder = store.tir_slot_placeholder_from_ast(&slot, location.clone())?;
+            let placeholder = store.tir_slot_placeholder_from_ast(&slot, location.clone(), span)?;
             store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Slot { placeholder },
                 location,
+                span,
             ))
         };
 
@@ -230,6 +267,7 @@ impl TemplateConstructionContext {
         &mut self,
         contribution_template_id: TemplateIrId,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
@@ -238,6 +276,7 @@ impl TemplateConstructionContext {
                     template: contribution_template_id,
                 },
                 location,
+                span,
             ))
         };
 
@@ -252,13 +291,20 @@ impl TemplateConstructionContext {
         &mut self,
         branches: Vec<TemplateIrBranch>,
         fallback: Option<TemplateIrNodeId>,
+        else_marker: Option<TemplateElseMarker>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
             store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain { branches, fallback },
+                TemplateIrNodeKind::BranchChain {
+                    branches,
+                    fallback,
+                    else_marker,
+                },
                 location,
+                span,
             ))
         };
 
@@ -270,6 +316,7 @@ impl TemplateConstructionContext {
         header: TemplateLoopHeader,
         body: TemplateIrNodeId,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
@@ -282,6 +329,7 @@ impl TemplateConstructionContext {
                     aggregate_wrapper: None,
                 },
                 location,
+                span,
             ))
         };
 
@@ -292,12 +340,14 @@ impl TemplateConstructionContext {
         &mut self,
         kind: TemplateLoopControlKind,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
             store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::LoopControl { kind },
                 location,
+                span,
             ))
         };
 
@@ -369,6 +419,7 @@ impl TemplateConstructionContext {
             mut head_node_count,
             control_flow_node_id,
             location,
+            span,
         } = self;
 
         let mut store = store.borrow_mut();
@@ -417,6 +468,7 @@ impl TemplateConstructionContext {
                     children: root_children,
                 },
                 location.clone(),
+                span,
             )),
         };
 
@@ -424,7 +476,7 @@ impl TemplateConstructionContext {
         summary.set_head_node_count(head_node_count);
 
         let template_id =
-            store.push_template(TemplateIr::new(root, style, kind, summary, location));
+            store.push_template(TemplateIr::new(root, style, kind, summary, location, span));
 
         Ok(TemplateTirReference {
             root: template_id,

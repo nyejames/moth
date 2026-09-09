@@ -20,6 +20,7 @@ use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -38,6 +39,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         produced_values: &ProducedValues,
         location: &SourceLocation,
+        statement_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let maybe_target = self.active_value_block_target.clone();
         if let Some(target) = maybe_target {
@@ -59,12 +61,17 @@ impl<'a> HirBuilder<'a> {
             {
                 let value = self.lower_expression_value_to_current_block(expr)?;
                 let value = self.materialize_value_block_result(value, location);
-                self.emit_statement_kind(
+                // Authored `then` production: each result assignment carries the
+                // produced expression's span, falling back to the statement span
+                // when the expression is identity-free. The trailing jump to the
+                // merge block below is generated CFG and stays spanless.
+                self.emit_statement_kind_with_span(
                     HirStatementKind::Assign {
                         target: HirPlace::Local(*result_local),
                         value,
                     },
                     location,
+                    expr.span.or(statement_span),
                 )?;
             }
 
@@ -99,14 +106,20 @@ impl<'a> HirBuilder<'a> {
         value: HirExpression,
         location: &SourceLocation,
     ) -> HirExpression {
+        // The copy preserves the incoming expression span; generated values stay spanless.
+        let span = value.span;
         match value.kind {
-            HirExpressionKind::Load(place) => self.make_expression(
-                location,
-                HirExpressionKind::Copy(place),
-                value.ty,
-                ValueKind::RValue,
-                value.region,
-            ),
+            HirExpressionKind::Load(place) => {
+                let mut copied = self.make_expression(
+                    location,
+                    HirExpressionKind::Copy(place),
+                    value.ty,
+                    ValueKind::RValue,
+                    value.region,
+                );
+                copied.span = span;
+                copied
+            }
             _ => value,
         }
     }
@@ -171,7 +184,9 @@ impl<'a> HirBuilder<'a> {
         let then_block = self.create_block(then_region, location, "value-if-then")?;
         let else_block = self.create_block(else_region, location, "value-if-else")?;
 
-        self.emit_terminator(
+        // Authored value-if header: the condition branch carries the authored
+        // condition span. Merge jumps below are generated CFG and stay spanless.
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: condition_value,
@@ -179,6 +194,7 @@ impl<'a> HirBuilder<'a> {
                 else_block,
             },
             location,
+            value_if.condition.span,
         )?;
 
         self.log_control_flow_edge(condition_block, then_block, "value-if.true");
@@ -312,12 +328,15 @@ impl<'a> HirBuilder<'a> {
                 merge_block,
             },
             |builder| {
+                // Authored value-match dispatch carries the scrutinee span; the
+                // merge resume below is generated CFG and stays spanless.
                 builder.lower_match_statement(
                     &value_match.scrutinee,
                     &value_match.arms,
                     value_match.default.as_deref(),
                     value_match.exhaustiveness,
                     location,
+                    value_match.scrutinee.span,
                 )
             },
         )?;

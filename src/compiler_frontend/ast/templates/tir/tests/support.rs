@@ -38,7 +38,7 @@ impl TirSlotPlaceholder {
         occurrence_id: SlotOccurrenceId,
         location: SourceLocation,
     ) -> Self {
-        Self::with_wrapper_sets(key, occurrence_id, location, None, None, false)
+        Self::with_wrapper_sets(key, occurrence_id, location, None, None, None, false)
     }
 }
 
@@ -166,7 +166,9 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
     match kind {
         TemplateIrNodeKind::Sequence { children } => children.clone(),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             let mut ids: Vec<TemplateIrNodeId> =
                 branches.iter().map(|branch| branch.body).collect();
             if let Some(fallback) = fallback {
@@ -470,7 +472,9 @@ where
                 Ok(Vec::new())
             }
 
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 let mut children =
                     Vec::with_capacity(branches.len() + usize::from(fallback.is_some()));
                 for branch in branches.iter_mut() {

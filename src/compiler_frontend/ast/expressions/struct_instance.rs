@@ -30,6 +30,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -78,6 +79,10 @@ pub(super) fn parse_struct_constructor_expression(
     } = input;
 
     let constructor_location = token_stream.current_location();
+    let constructor_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let struct_name_display = string_table.resolve(struct_name).to_owned();
 
     // The stream is positioned on the struct symbol when called.
@@ -123,6 +128,7 @@ pub(super) fn parse_struct_constructor_expression(
                 constructor_fields: Some(&constructor_field_views),
                 raw_args: Some(&raw_args),
                 location: constructor_location.clone(),
+                span: constructor_span,
             },
             context,
             type_interner,
@@ -220,6 +226,7 @@ pub(super) fn parse_struct_constructor_expression(
         struct_fields.push(Declaration {
             id: field.name.clone(),
             value,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -235,6 +242,7 @@ pub(super) fn parse_struct_constructor_expression(
         struct_path.to_owned(),
         struct_fields,
         constructor_location,
+        constructor_span,
         instance_ownership,
         enforce_const_record,
         generic_instance_key,

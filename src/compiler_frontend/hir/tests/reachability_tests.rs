@@ -719,6 +719,7 @@ fn reachability_records_reachable_map_uses_only() {
                         id: HirNodeId(10),
                         kind: HirStatementKind::Expr(map_literal_expression(10)),
                         location: literal_location.clone(),
+                        span: None,
                     },
                     map_statement_at(11, HirMapOp::Contains, operation_location.clone()),
                 ],
@@ -731,6 +732,7 @@ fn reachability_records_reachable_map_uses_only() {
                         id: HirNodeId(12),
                         kind: HirStatementKind::Expr(map_literal_expression(12)),
                         location: unreachable_location.clone(),
+                        span: None,
                     },
                     map_statement_at(13, HirMapOp::Clear, unreachable_location),
                 ],
@@ -1096,7 +1098,6 @@ fn block(id: BlockId, statements: Vec<HirStatement>, terminator: HirTerminator) 
 fn call_statement(id: u32, target: CallTarget) -> HirStatement {
     call_statement_at(id, target, SourceLocation::default())
 }
-
 fn call_statement_at(id: u32, target: CallTarget, location: SourceLocation) -> HirStatement {
     HirStatement {
         id: HirNodeId(id),
@@ -1106,6 +1107,7 @@ fn call_statement_at(id: u32, target: CallTarget, location: SourceLocation) -> H
             result: None::<LocalId>,
         },
         location,
+        span: None,
     }
 }
 
@@ -1119,6 +1121,7 @@ fn map_statement_at(id: u32, op: HirMapOp, location: SourceLocation) -> HirState
             result: None::<LocalId>,
         },
         location,
+        span: None,
     }
 }
 
@@ -1143,8 +1146,10 @@ fn structural_string_statement(
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
+            span: None,
         }),
         location,
+        span: None,
     }
 }
 
@@ -1155,6 +1160,7 @@ fn unit_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::NONE,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -1165,6 +1171,7 @@ fn bool_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::BOOL,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -1175,6 +1182,7 @@ fn int_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -1185,6 +1193,7 @@ fn float_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::FLOAT,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -1212,6 +1221,7 @@ fn float_statement(
             },
         },
         location,
+        span: None,
     }
 }
 
@@ -1225,6 +1235,7 @@ fn cast_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::STRING,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -1245,6 +1256,7 @@ fn reachability_records_reachable_runtime_casts_only() {
                     id: HirNodeId(10),
                     kind: HirStatementKind::Expr(cast_expression(10)),
                     location: reachable_location.clone(),
+                    span: None,
                 }],
                 HirTerminator::Return(unit_expression(0)),
             ),
@@ -1254,6 +1266,7 @@ fn reachability_records_reachable_runtime_casts_only() {
                     id: HirNodeId(11),
                     kind: HirStatementKind::Expr(cast_expression(11)),
                     location: unreachable_location.clone(),
+                    span: None,
                 }],
                 HirTerminator::Return(unit_expression(1)),
             ),
@@ -1364,6 +1377,7 @@ fn map_literal_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     }
 }
 

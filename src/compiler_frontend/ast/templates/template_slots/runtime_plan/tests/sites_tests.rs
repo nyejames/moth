@@ -31,7 +31,12 @@ use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn assert_authority_error(
@@ -60,6 +65,7 @@ fn push_slot_plan(store: &mut TemplateIrStore) -> TemplateSlotPlanId {
         location: SourceLocation::default(),
         contribution_sources: vec![],
         slot_sites: vec![],
+        span: None,
     })
 }
 
@@ -69,6 +75,7 @@ fn contribution_fill(store: &mut TemplateIrStore, plan: TemplateSlotPlanId) -> T
         plan,
         RuntimeSlotContributionSourceId(0),
         SourceLocation::default(),
+        None,
     )
 }
 
@@ -146,7 +153,9 @@ fn node_contains_contribution(
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .any(|child| node_contains_contribution(*child, store, plan)),
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             branches
                 .iter()
                 .any(|branch| node_contains_contribution(branch.body, store, plan))
@@ -377,6 +386,7 @@ fn versioned_wrapper_keeps_keyed_wrapper_context_on_nested_child() {
             occurrence_id: nested_occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let wrapper_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -465,8 +475,10 @@ fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             slot_node,
             SourceLocation::default(),
+            None,
             selector_site,
         )],
+        None,
         None,
         SourceLocation::default(),
     );
@@ -544,9 +556,11 @@ fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             then_slot,
             SourceLocation::default(),
+            None,
             selector_site,
         )],
         Some(fallback_slot),
+        None,
         SourceLocation::default(),
     );
     let loop_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
@@ -617,7 +631,9 @@ fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
     }
 
     match &store.get_node(injected_branch).expect("branch").kind {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             assert!(node_contains_contribution(branches[0].body, &store, plan));
             assert!(node_contains_contribution(
                 fallback.expect("fallback"),

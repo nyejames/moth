@@ -26,6 +26,7 @@ fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
         location,
+        span: None,
         scope: InternedPath::new(),
     }
 }

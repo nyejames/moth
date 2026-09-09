@@ -76,6 +76,7 @@ impl<'a> HirBuilder<'a> {
                 op,
                 operand,
                 location,
+                span,
             } => {
                 let mut prelude = Vec::new();
                 let lowered_operand =
@@ -102,6 +103,7 @@ impl<'a> HirBuilder<'a> {
                         },
                         numeric_result_ty,
                         location,
+                        *span,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],
@@ -109,28 +111,29 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                Ok(LoweredExpression {
-                    prelude,
-                    value: self.make_expression(
-                        location,
-                        HirExpressionKind::UnaryOp {
-                            op: hir_op,
-                            operand: Box::new(lowered_operand),
-                        },
-                        result_ty,
-                        ValueKind::RValue,
-                        region,
-                    ),
-                })
+                let mut value = self.make_expression(
+                    location,
+                    HirExpressionKind::UnaryOp {
+                        op: hir_op,
+                        operand: Box::new(lowered_operand),
+                    },
+                    result_ty,
+                    ValueKind::RValue,
+                    region,
+                );
+                value.span = *span;
+                Ok(LoweredExpression { prelude, value })
             }
             RuntimeRpnTree::Binary {
                 left,
                 op,
                 right,
                 location,
+                span,
             } => {
                 if matches!(op, Operator::And | Operator::Or) {
-                    return self.lower_short_circuit_binary_expression(left, op, right, location);
+                    return self
+                        .lower_short_circuit_binary_expression(left, op, right, location, *span);
                 }
 
                 let mut prelude = Vec::new();
@@ -142,19 +145,18 @@ impl<'a> HirBuilder<'a> {
 
                 if matches!(op, Operator::Range) {
                     let range_ty = builtin_type_ids::RANGE;
-                    return Ok(LoweredExpression {
-                        prelude,
-                        value: self.make_expression(
-                            location,
-                            HirExpressionKind::Range {
-                                start: Box::new(lowered_left),
-                                end: Box::new(lowered_right),
-                            },
-                            range_ty,
-                            ValueKind::RValue,
-                            region,
-                        ),
-                    });
+                    let mut value = self.make_expression(
+                        location,
+                        HirExpressionKind::Range {
+                            start: Box::new(lowered_left),
+                            end: Box::new(lowered_right),
+                        },
+                        range_ty,
+                        ValueKind::RValue,
+                        region,
+                    );
+                    value.span = *span;
+                    return Ok(LoweredExpression { prelude, value });
                 }
 
                 // Numeric arithmetic is lowered as a checked NumericOp statement. Comparisons
@@ -177,6 +179,7 @@ impl<'a> HirBuilder<'a> {
                         HirNumericOperands::Binary { left, right },
                         numeric_result_ty,
                         location,
+                        *span,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],
@@ -188,20 +191,19 @@ impl<'a> HirBuilder<'a> {
                 let result_ty =
                     self.infer_binop_result_type(lowered_left.ty, lowered_right.ty, hir_op);
 
-                Ok(LoweredExpression {
-                    prelude,
-                    value: self.make_expression(
-                        location,
-                        HirExpressionKind::BinOp {
-                            op: hir_op,
-                            left: Box::new(lowered_left),
-                            right: Box::new(lowered_right),
-                        },
-                        result_ty,
-                        ValueKind::RValue,
-                        region,
-                    ),
-                })
+                let mut value = self.make_expression(
+                    location,
+                    HirExpressionKind::BinOp {
+                        op: hir_op,
+                        left: Box::new(lowered_left),
+                        right: Box::new(lowered_right),
+                    },
+                    result_ty,
+                    ValueKind::RValue,
+                    region,
+                );
+                value.span = *span;
+                Ok(LoweredExpression { prelude, value })
             }
         }
     }

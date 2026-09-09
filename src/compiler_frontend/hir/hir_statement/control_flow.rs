@@ -28,6 +28,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
@@ -82,6 +83,7 @@ impl<'a> HirBuilder<'a> {
         then_body: &[AstNode],
         else_body: Option<&[AstNode]>,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if matches!(condition.kind, ExpressionKind::Bool(_)) {
             increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
@@ -94,6 +96,7 @@ impl<'a> HirBuilder<'a> {
         self.lower_if_with_body_emitters(
             condition,
             location,
+            span,
             |builder| builder.lower_statement_sequence(then_body),
             |builder| {
                 if let Some(else_nodes) = else_body {
@@ -115,6 +118,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         condition: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
         emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
         emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
@@ -129,7 +133,7 @@ impl<'a> HirBuilder<'a> {
         let then_block = self.create_block(then_region, location, "if-then")?;
         let else_block = self.create_block(else_region, location, "if-else")?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: condition_value,
@@ -137,6 +141,7 @@ impl<'a> HirBuilder<'a> {
                 else_block,
             },
             location,
+            span,
         )?;
 
         self.log_control_flow_edge(condition_block, then_block, "if.true");
@@ -186,23 +191,26 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_break_statement(
         &mut self,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.emit_break_to_current_loop(location)
+        self.emit_break_to_current_loop(location, span)
     }
 
     pub(crate) fn emit_break_to_current_loop(
         &mut self,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let current_block = self.current_block_id_or_error(location)?;
         let targets = self.current_loop_targets_or_error("break", location)?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Break {
                 target: targets.break_target,
             },
             location,
+            span,
         )?;
 
         self.log_control_flow_edge(current_block, targets.break_target, "loop.break");
@@ -212,23 +220,26 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_continue_statement(
         &mut self,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.emit_continue_to_current_loop(location)
+        self.emit_continue_to_current_loop(location, span)
     }
 
     pub(crate) fn emit_continue_to_current_loop(
         &mut self,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let current_block = self.current_block_id_or_error(location)?;
         let targets = self.current_loop_targets_or_error("continue", location)?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Continue {
                 target: targets.continue_target,
             },
             location,
+            span,
         )?;
 
         self.log_control_flow_edge(current_block, targets.continue_target, "loop.continue");
@@ -240,8 +251,9 @@ impl<'a> HirBuilder<'a> {
         condition: &Expression,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_while_statement_impl(condition, body, location)
+        self.lower_while_statement_impl(condition, body, location, span)
     }
 
     /// Lower an AST match statement into explicit CFG blocks and a `Match` terminator.
@@ -259,6 +271,7 @@ impl<'a> HirBuilder<'a> {
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         self.validate_match_exhaustiveness_contract(exhaustiveness, default, location)?;
 
@@ -269,6 +282,7 @@ impl<'a> HirBuilder<'a> {
                 default,
                 exhaustiveness,
                 location,
+                span,
             );
         }
 
@@ -278,6 +292,7 @@ impl<'a> HirBuilder<'a> {
             default,
             exhaustiveness,
             location,
+            span,
         )
     }
 
@@ -321,6 +336,7 @@ impl<'a> HirBuilder<'a> {
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
         let current_block = self.current_block_id_or_error(location)?;
@@ -381,13 +397,14 @@ impl<'a> HirBuilder<'a> {
 
         let scrutinee_for_captures = scrutinee_value.clone();
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Match {
                 scrutinee: scrutinee_value,
                 arms: hir_arms,
             },
             location,
+            span,
         )?;
 
         let mut terminated_anchor: Option<BlockId> = None;
@@ -447,6 +464,7 @@ impl<'a> HirBuilder<'a> {
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
         let mut dispatch_block = self.current_block_id_or_error(location)?;
@@ -507,7 +525,7 @@ impl<'a> HirBuilder<'a> {
                 )?
             };
 
-            self.emit_terminator(
+            self.emit_terminator_with_span(
                 dispatch_block,
                 HirTerminator::Match {
                     scrutinee: scrutinee_value.clone(),
@@ -525,6 +543,7 @@ impl<'a> HirBuilder<'a> {
                     ],
                 },
                 location,
+                span,
             )?;
 
             if let Some(guard_block_id) = guard_block {
@@ -712,7 +731,8 @@ impl<'a> HirBuilder<'a> {
 
             let guard_value = builder.lower_match_guard_value_to_current_block(guard)?;
             let guard_tail_block = builder.current_block_id_or_error(location)?;
-            builder.emit_terminator(
+            // Authored guard branch carries the guard expression span.
+            builder.emit_terminator_with_span(
                 guard_tail_block,
                 HirTerminator::If {
                     condition: guard_value,
@@ -720,6 +740,7 @@ impl<'a> HirBuilder<'a> {
                     else_block: next_dispatch,
                 },
                 location,
+                guard.span,
             )?;
 
             builder.log_control_flow_edge(guard_tail_block, arm_body_block, "match.guard.true");
@@ -1130,8 +1151,22 @@ impl<'a> HirBuilder<'a> {
         terminator: HirTerminator,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        self.emit_terminator_with_span(block_id, terminator, location, None)
+    }
+
+    pub(crate) fn emit_terminator_with_span(
+        &mut self,
+        block_id: BlockId,
+        terminator: HirTerminator,
+        location: &SourceLocation,
+        span: Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
         self.log_terminator_emitted(block_id, &terminator, location);
-        self.set_block_terminator(block_id, terminator, location)
+        self.set_block_terminator(block_id, terminator, location)?;
+        if let Some(span) = span {
+            self.side_table.map_terminator_span(block_id, span);
+        }
+        Ok(())
     }
 
     pub(super) fn push_loop_targets(&mut self, break_target: BlockId, continue_target: BlockId) {

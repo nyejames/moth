@@ -44,7 +44,7 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
             body: vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     inner,
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             )],
@@ -54,7 +54,7 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
     let after_declaration = node(
         NodeKind::VariableDeclaration(make_test_variable(
             after,
-            Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+            Expression::int(2, test_source_location(4), None, ValueMode::ImmutableOwned),
         )),
         test_source_location(4),
     );

@@ -110,9 +110,7 @@ fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
 }
 
 fn source_span_for(token_stream: &FileTokens, span: LocalSpan) -> Option<SourceSpan> {
-    token_stream
-        .file_id
-        .map(|source| SourceSpan::new(source, span))
+    Some(SourceSpan::new(token_stream.file_id, span))
 }
 
 fn with_source_span(

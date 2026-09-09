@@ -102,6 +102,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
     plan.plan_origin(
         origin.clone(),
         first_location,
+        None,
         ResourceUrlContext::page_document(Path::new("docs/first.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -110,6 +111,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
     plan.plan_origin(
         origin.clone(),
         second_location,
+        None,
         ResourceUrlContext::page_document(Path::new("docs/second.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -118,6 +120,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
     plan.plan_origin(
         origin,
         third_location,
+        None,
         ResourceUrlContext::Stylesheet(PathBuf::from("docs/styles/main.css")),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -147,6 +150,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_locations() {
     plan.plan_origin(
         first,
         first_location,
+        None,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -156,6 +160,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_locations() {
         .plan_origin(
             second,
             second_location,
+            None,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -207,6 +212,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
     plan.plan_origin(
         first,
         first_location,
+        None,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -216,6 +222,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
         .plan_origin(
             second,
             second_location,
+            None,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -268,6 +275,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
     plan.plan_origin(
         first,
         first_location,
+        None,
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -277,6 +285,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
         .plan_origin(
             second,
             second_location,
+            None,
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -329,6 +338,7 @@ fn reserved_html_output_rejects_resource_planning() {
         .plan_origin(
             origin,
             location,
+            None,
             ResourceUrlContext::page_document(Path::new("other.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -365,6 +375,7 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
         .plan_origin(
             origin,
             location,
+            None,
             ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -415,6 +426,7 @@ fn live_resource_use_locations_override_intern_location() {
             resource_id,
             owner: FunctionId(0),
             location: first_live_location.clone(),
+            span: None,
         });
     reachability
         .reachable_resource_uses
@@ -422,6 +434,7 @@ fn live_resource_use_locations_override_intern_location() {
             resource_id,
             owner: FunctionId(0),
             location: second_live_location.clone(),
+            span: None,
         });
 
     let mut locations = HashMap::new();
@@ -465,7 +478,10 @@ fn later_live_use_replaces_intern_fallback_location() {
         OriginAuthoredLocations {
             executable: Vec::new(),
             metadata: Vec::new(),
-            fallback: Some(intern_location.clone()),
+            fallback: Some(AuthoredResourceLocation {
+                location: intern_location.clone(),
+                span: None,
+            }),
         },
     );
     plan.plan_union(
@@ -481,9 +497,15 @@ fn later_live_use_replaces_intern_fallback_location() {
     live_locations.insert(
         origin,
         OriginAuthoredLocations {
-            executable: vec![live_location.clone()],
+            executable: vec![AuthoredResourceLocation {
+                location: live_location.clone(),
+                span: None,
+            }],
             metadata: Vec::new(),
-            fallback: Some(intern_location),
+            fallback: Some(AuthoredResourceLocation {
+                location: intern_location,
+                span: None,
+            }),
         },
     );
     plan.plan_union(&union, &live_locations, context, &mut string_table)
@@ -524,6 +546,7 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
             resource_id,
             owner: FunctionId(0),
             location: live_location.clone(),
+            span: None,
         });
     let mut locations = HashMap::new();
     record_reachable_resource_locations(&mut locations, &module, &reachability).unwrap();
@@ -536,6 +559,7 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
     plan.plan_origin(
         origin.clone(),
         metadata_location.clone(),
+        None,
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -544,6 +568,7 @@ fn fragment_and_metadata_uses_keep_authored_locations_with_hir_use() {
     plan.plan_origin(
         origin.clone(),
         fragment_location.clone(),
+        None,
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -583,6 +608,7 @@ fn metadata_only_use_plans_output_without_an_executable_use() {
     plan.plan_origin(
         origin.clone(),
         metadata_location.clone(),
+        None,
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -611,6 +637,7 @@ fn record_for_origin_resolves_planned_records_directly() {
     plan.plan_origin(
         first.clone(),
         authored_location("first.moth", &mut string_table),
+        None,
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -619,6 +646,7 @@ fn record_for_origin_resolves_planned_records_directly() {
     plan.plan_origin(
         second.clone(),
         authored_location("second.moth", &mut string_table),
+        None,
         ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html")),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -651,6 +679,7 @@ fn project_local_origin_preserves_entry_root_relative_path() {
     plan.plan_origin(
         origin,
         authored_location("docs/getting-started/@page.moth", &mut string_table),
+        None,
         ResourceUrlContext::page_document(Path::new("docs/getting-started/index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,

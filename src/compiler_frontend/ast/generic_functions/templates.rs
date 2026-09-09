@@ -17,14 +17,20 @@ use std::sync::Arc;
 /// One generic function body and the facts for every path handle in that body.
 ///
 /// WHAT: keeps generated body tokens paired with the Stage 0 rows compacted for that exact
-///       token table.
+///       token table, plus the concrete owning `SourceId` carried by both.
 /// WHY: persistent generic path handles restart per body, so a generated parser must never look
-///      them up in another body's facts or in the declaring module's table.
+///      them up in another body's facts or in the declaring module's table. Materialised bodies
+///      retain their donor identity (`FileTokens::file_id` equals the frozen facts owner);
+///      donor ranges stay distinct from requester call-site sources until a final
+///      `FrozenIdentityContext` remap.
 #[derive(Clone)]
 pub(crate) enum GenericFunctionBody {
     /// Source templates still use the active module's ordinary Stage 0 services.
     Source(FileTokens),
     /// Materialised templates own the compact facts for their frozen token table.
+    ///
+    /// INVARIANT: `tokens.file_id` equals `resolution_facts.frozen_owner()`. Emission threads
+    /// both into `declaring_file_id`/`Stage0` lookups together.
     Materialised {
         tokens: FileTokens,
         resolution_facts: Arc<Stage0ResolutionFacts>,

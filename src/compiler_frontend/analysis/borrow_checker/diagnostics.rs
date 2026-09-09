@@ -14,6 +14,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(super) struct BorrowDiagnostics<'a> {
@@ -83,6 +84,13 @@ impl<'a> BorrowDiagnostics<'a> {
         statement.location.clone()
     }
 
+    pub(super) fn statement_error_span(&self, statement: &HirStatement) -> Option<SourceSpan> {
+        statement.span
+    }
+
+    pub(super) fn terminator_error_span(&self, block_id: BlockId) -> Option<SourceSpan> {
+        self.module.side_table.terminator_span(block_id).copied()
+    }
     pub(super) fn terminator_error_location(
         &self,
         block_id: BlockId,
@@ -157,15 +165,26 @@ impl<'a> BorrowDiagnostics<'a> {
         place: DiagnosticPlace,
         conflicting_place: Option<DiagnosticPlace>,
         existing_location: Option<SourceLocation>,
+        existing_span: Option<SourceSpan>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::multiple_mutable_borrows(
+        let mut diagnostic = CompilerDiagnostic::multiple_mutable_borrows(
             place,
             conflicting_place,
             existing_location,
             location,
-        )
-        .into()
+        );
+        diagnostic.primary_span = span;
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = span;
+        }
+        if let Some(existing_span) = existing_span {
+            if let Some(label) = diagnostic.labels.get_mut(1) {
+                label.span = Some(existing_span);
+            }
+        }
+        diagnostic.into()
     }
 
     pub(super) fn shared_mutable_conflict(
@@ -175,17 +194,28 @@ impl<'a> BorrowDiagnostics<'a> {
         requested_access: BorrowAccessKind,
         conflicting_place: Option<DiagnosticPlace>,
         existing_location: Option<SourceLocation>,
+        existing_span: Option<SourceSpan>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::shared_mutable_conflict(
+        let mut diagnostic = CompilerDiagnostic::shared_mutable_conflict(
             place,
             existing_access,
             requested_access,
             conflicting_place,
             existing_location,
             location,
-        )
-        .into()
+        );
+        diagnostic.primary_span = span;
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = span;
+        }
+        if let Some(existing_span) = existing_span {
+            if let Some(label) = diagnostic.labels.get_mut(1) {
+                label.span = Some(existing_span);
+            }
+        }
+        diagnostic.into()
     }
 
     pub(super) fn invalid_mutable_access(
@@ -194,23 +224,40 @@ impl<'a> BorrowDiagnostics<'a> {
         reason: InvalidMutableAccessReason,
         conflicting_place: Option<DiagnosticPlace>,
         conflicting_location: Option<SourceLocation>,
+        conflicting_span: Option<SourceSpan>,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::invalid_mutable_access(
+        let mut diagnostic = CompilerDiagnostic::invalid_mutable_access(
             place,
             reason,
             conflicting_place,
             conflicting_location,
             location,
-        )
-        .into()
+        );
+        diagnostic.primary_span = span;
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = span;
+        }
+        if let Some(conflicting_span) = conflicting_span {
+            if let Some(label) = diagnostic.labels.get_mut(1) {
+                label.span = Some(conflicting_span);
+            }
+        }
+        diagnostic.into()
     }
 
     pub(super) fn use_of_uninitialized_local(
         &self,
         place: DiagnosticPlace,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::use_of_uninitialized_local(place, location).into()
+        let mut diagnostic = CompilerDiagnostic::use_of_uninitialized_local(place, location);
+        diagnostic.primary_span = span;
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = span;
+        }
+        diagnostic.into()
     }
 }

@@ -27,6 +27,7 @@ use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -60,6 +61,7 @@ pub struct ResolvedCastExpression {
     pub(crate) evidence: ResolvedCastEvidence,
     pub(crate) handling: CastHandling,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]

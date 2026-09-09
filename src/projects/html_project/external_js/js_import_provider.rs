@@ -148,6 +148,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             &request.logical_source_path,
             request.canonical_source_path,
             request.source_location,
+            request.source_span,
         )
         .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
 

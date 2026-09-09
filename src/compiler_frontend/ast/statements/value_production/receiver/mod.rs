@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
@@ -68,6 +69,7 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
     pub(super) string_table: &'a mut StringTable,
     pub(super) condition: Expression,
     pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
 }
 
 /// Attempts to parse a value-producing block when the current token is `if` at a
@@ -96,7 +98,7 @@ pub fn try_parse_value_block_at_receiver(
     .map(|parsed| {
         parsed.map(|value| match value {
             ParsedReceiverValue::Complete(expression) => expression,
-            ParsedReceiverValue::NeedsSlotInference(_) => {
+            ParsedReceiverValue::NeedsSlotInference { .. } => {
                 unreachable!(
                     "known receivers must wrap a finished expression; mixed-slot parse results belong to multi-bind"
                 )
@@ -122,6 +124,10 @@ pub fn try_parse_value_block_at_receiver_with_target(
     }
 
     let location = token_stream.current_location();
+    let span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance();
 
     let classification = classify_if_header(token_stream);
@@ -148,6 +154,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 target,
                 string_table,
                 location,
+                span,
             },
         )),
 
@@ -160,6 +167,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     target: target.clone(),
                     string_table,
                     location: location.clone(),
+                    span,
                     classification,
                 },
             ) {
@@ -173,6 +181,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 target,
                 string_table,
                 location,
+                span,
             ))
         }
 
@@ -185,6 +194,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     target: target.clone(),
                     string_table,
                     location: location.clone(),
+                    span,
                     classification,
                 },
             ) {
@@ -198,6 +208,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 target,
                 string_table,
                 location,
+                span,
             ))
         }
 
@@ -208,6 +219,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
             target,
             string_table,
             location,
+            span,
         )),
     }
 }
@@ -228,6 +240,7 @@ fn parse_bool_value_if_after_condition(
     target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> ReceiverResult<ParsedReceiverValue> {
     if if_condition_is_missing(token_stream) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
@@ -270,6 +283,7 @@ fn parse_bool_value_if_after_condition(
             string_table,
             condition,
             location,
+            span,
         });
     }
 
@@ -282,6 +296,7 @@ fn parse_bool_value_if_after_condition(
             string_table,
             condition,
             location,
+            span,
         });
     }
 

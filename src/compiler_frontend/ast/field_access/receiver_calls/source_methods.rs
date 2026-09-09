@@ -178,6 +178,7 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner> {
     pub(super) receiver_node: &'a AstNode,
     pub(super) member_name: StringId,
     pub(super) member_location: SourceLocation,
+    pub(super) member_span: Option<SourceSpan>,
     pub(super) receiver_access_mode: ReceiverAccessMode,
     pub(super) authored_marker_location: Option<SourceLocation>,
     pub(super) scope_context: &'a ScopeContext,
@@ -194,6 +195,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         receiver_node,
         member_name,
         member_location,
+        member_span,
         receiver_access_mode,
         authored_marker_location,
         scope_context,
@@ -226,9 +228,12 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         .into());
     }
 
-    let member_span = token_stream
-        .file_id
-        .map(|source| SourceSpan::new(source, token_stream.current_token().span));
+    let member_span = member_span.or_else(|| {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ))
+    });
     token_stream.advance();
 
     let method_name = string_table.resolve(member_name).to_owned();
@@ -345,11 +350,13 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_location.clone(),
+        member_span,
     );
 
     Ok(AstNode {
         kind: NodeKind::ExpressionStatement(method_call_expression),
         scope: scope_context.scope.to_owned(),
         location: member_location,
+        span: member_span,
     })
 }

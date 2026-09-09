@@ -98,6 +98,7 @@ pub(crate) fn register_builtin_error_types(string_table: &mut StringTable) -> Bu
                 .unwrap_or_default(),
         ),
         location,
+        span: None,
         scope: error_path.to_owned(),
     }];
 
@@ -152,17 +153,20 @@ fn type_declaration(
         value: Expression::new(
             ExpressionKind::NoValue,
             location,
+            None,
             type_id_hint_for_diagnostic_type(&data_type),
             data_type,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
 fn required_field(id: InternedPath, data_type: DataType, location: SourceLocation) -> Declaration {
     Declaration {
         id,
-        value: Expression::no_value(location, data_type, ValueMode::ImmutableOwned),
+        value: Expression::no_value(location, None, data_type, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -170,7 +174,8 @@ fn required_field(id: InternedPath, data_type: DataType, location: SourceLocatio
 fn defaulted_int_field(id: InternedPath, value: i32, location: SourceLocation) -> Declaration {
     Declaration {
         id,
-        value: Expression::int(value, location, ValueMode::ImmutableOwned),
+        value: Expression::int(value, location, None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }

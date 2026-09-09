@@ -52,6 +52,7 @@ fn lower_minimal_reactive_source_module_with_report(
             mutable: true,
             region,
             source_info: Some(test_source_location(1)),
+            span: None,
         }],
         statements: vec![statement(
             1,
@@ -109,6 +110,7 @@ fn reactive_invalidation_report(statement_id: u32, source: ReactiveSourceId) -> 
             source,
             kind: ReactiveInvalidationKind::Assignment,
             location: test_source_location(2),
+            span: None,
         }],
     );
     report
@@ -130,6 +132,7 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
         ty: types.string,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
 
     let block = HirBlock {
@@ -142,6 +145,7 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
                 mutable: true,
                 region,
                 source_info: Some(test_source_location(1)),
+                span: None,
             },
             HirLocal {
                 id: fragments_local,
@@ -149,6 +153,7 @@ fn lower_minimal_reactive_template_module(function_name: &str) -> String {
                 mutable: true,
                 region,
                 source_info: Some(test_source_location(1)),
+                span: None,
             },
         ],
         statements: vec![statement(
@@ -226,6 +231,7 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
         ty: types.string,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
 
     let block = HirBlock {
@@ -237,6 +243,7 @@ fn lower_placeholder_template_parameter_module(function_name: &str) -> String {
             mutable: false,
             region,
             source_info: Some(test_source_location(1)),
+            span: None,
         }],
         statements: vec![statement(1, HirStatementKind::Expr(parameter_value), 2)],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),

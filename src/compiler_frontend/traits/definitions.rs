@@ -8,6 +8,7 @@
 
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
@@ -34,6 +35,7 @@ pub(crate) struct ResolvedTraitRequirement {
     pub(crate) parameters: Vec<ResolvedTraitParameter>,
     pub(crate) returns: Vec<ResolvedTraitReturn>,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Required receiver access for a trait method.
@@ -51,6 +53,7 @@ pub(crate) struct ResolvedTraitParameter {
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
     pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// One requirement return slot.

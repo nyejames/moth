@@ -104,6 +104,7 @@ fn expand_tir_slot_placeholders_from_node(
                     children: expanded_children,
                 },
                 node.location.to_owned(),
+                None,
             )))
         }
 
@@ -150,6 +151,7 @@ fn expand_tir_slot_placeholders_from_node(
                     children: wrapped_nodes,
                 },
                 node.location.to_owned(),
+                None,
             )))
         }
 
@@ -189,10 +191,15 @@ fn expand_tir_slot_placeholders_from_node(
                     occurrence_id,
                 },
                 node.location.to_owned(),
+                node.span,
             )))
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches,
+            fallback,
+            else_marker,
+        } => {
             let mut expanded_branches = Vec::with_capacity(branches.len());
             let mut any_branch_changed = false;
 
@@ -210,6 +217,7 @@ fn expand_tir_slot_placeholders_from_node(
                         branch.selector.to_owned(),
                         expanded_body_id,
                         branch.location.to_owned(),
+                        branch.span,
                         branch.selector_site_id,
                     ));
                 } else {
@@ -244,8 +252,10 @@ fn expand_tir_slot_placeholders_from_node(
                 TemplateIrNodeKind::BranchChain {
                     branches: expanded_branches,
                     fallback: expanded_fallback,
+                    else_marker: else_marker.to_owned(),
                 },
                 node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -295,6 +305,7 @@ fn expand_tir_slot_placeholders_from_node(
                     aggregate_wrapper: expanded_aggregate_wrapper,
                 },
                 node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -519,6 +530,7 @@ fn attach_conditional_wrapper_set(
                 TemplateType::String,
                 summary,
                 node.location.to_owned(),
+                node.span,
             );
             template.conditional_child_wrapper_set = Some(wrapper_set_id);
             let template_id = store.push_template(template);
@@ -541,6 +553,7 @@ fn attach_conditional_wrapper_set(
             occurrence_id,
         },
         location,
+        None,
     )))
 }
 

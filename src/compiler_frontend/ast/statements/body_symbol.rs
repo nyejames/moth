@@ -49,6 +49,7 @@ fn push_accessed_symbol_statement(
     if is_expression_statement(&accessed_expression) {
         let location = accessed_expression.location.clone();
         ast.push(AstNode {
+            span: accessed_expression.span,
             kind: NodeKind::ExpressionStatement(accessed_expression),
             location,
             scope: context.scope.clone(),
@@ -177,9 +178,12 @@ pub(crate) fn parse_this_statement(
                 string_table,
             )?;
 
+            let location = expression.location.clone();
+            let span = expression.span;
             ast.push(AstNode {
                 kind: NodeKind::ExpressionStatement(expression),
-                location: token_stream.current_location(),
+                location,
+                span,
                 scope: context.scope.clone(),
             });
             Ok(())
@@ -325,12 +329,10 @@ pub(crate) fn parse_symbol_statement(
                     existing_reference.value.location.clone(),
                     token_stream.current_location(),
                 );
-                if let Some(source) = token_stream.file_id {
-                    diagnostic.primary_span = Some(SourceSpan::new(
-                        source,
-                        token_stream.tokens[token_stream.index].span,
-                    ));
-                }
+                diagnostic.primary_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.tokens[token_stream.index].span,
+                ));
                 return Err(diagnostic.into());
             }
 
@@ -344,9 +346,12 @@ pub(crate) fn parse_symbol_statement(
                     string_table,
                 )?;
 
+                let location = expression.location.clone();
+                let span = expression.span;
                 ast.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
-                    location: token_stream.current_location(),
+                    location,
+                    span,
                     scope: context.scope.clone(),
                 });
                 return Ok(());
@@ -372,6 +377,10 @@ pub(crate) fn parse_symbol_statement(
         }
 
         let call_location = token_stream.current_location();
+        let call_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
         token_stream.advance();
         let external_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
@@ -379,6 +388,7 @@ pub(crate) fn parse_symbol_statement(
                 external_function_id,
                 external_function: external_function_def,
                 call_location,
+                call_span,
                 context,
                 value_required: false,
                 allow_boundary_catch: true,
@@ -386,9 +396,12 @@ pub(crate) fn parse_symbol_statement(
                 type_interner,
                 string_table,
             })?;
+        let external_call_location = external_call_expression.location.clone();
+        let external_call_span = external_call_expression.span;
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(external_call_expression),
-            location: token_stream.current_location(),
+            location: external_call_location,
+            span: external_call_span,
             scope: context.scope.clone(),
         });
         return Ok(());
@@ -438,9 +451,12 @@ pub(crate) fn parse_symbol_statement(
             string_table,
         )?;
 
+        let location = expression.location.clone();
+        let span = expression.span;
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(expression),
-            location: token_stream.current_location(),
+            location,
+            span,
             scope: context.scope.clone(),
         });
         return Ok(());
@@ -458,6 +474,8 @@ pub(crate) fn parse_symbol_statement(
     let declaration = resolved_declaration.declaration;
     let statement_kind = resolved_declaration.statement_kind;
     let is_compile_time_binding = resolved_declaration.is_compile_time_binding;
+    let declaration_location = resolved_declaration.binding_location.clone();
+    let declaration_span = resolved_declaration.binding_span;
 
     // Lift struct definitions and functions to the AST statement level;
     // everything else becomes a local variable declaration.
@@ -465,7 +483,8 @@ pub(crate) fn parse_symbol_statement(
         ResolvedDeclarationStatementKind::StructDefinition(params) => {
             ast.push(AstNode {
                 kind: NodeKind::StructDefinition(declaration.id.to_owned(), params.to_owned()),
-                location: token_stream.current_location(),
+                location: declaration_location.clone(),
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }
@@ -477,7 +496,8 @@ pub(crate) fn parse_symbol_statement(
                     signature.to_owned(),
                     body.to_owned(),
                 ),
-                location: token_stream.current_location(),
+                location: declaration_location.clone(),
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }
@@ -485,7 +505,8 @@ pub(crate) fn parse_symbol_statement(
         ResolvedDeclarationStatementKind::Variable => {
             ast.push(AstNode {
                 kind: NodeKind::VariableDeclaration(declaration.to_owned()),
-                location: token_stream.current_location(),
+                location: declaration_location,
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }

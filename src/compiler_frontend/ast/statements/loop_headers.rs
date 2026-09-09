@@ -26,6 +26,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -42,6 +43,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 struct ParsedBindingName {
     id: StringId,
     location: SourceLocation,
+    span: LocalSpan,
 }
 
 #[derive(Debug, Clone)]
@@ -367,6 +369,7 @@ fn parse_binding_tokens(
         binding_names.push(ParsedBindingName {
             id: symbol_id,
             location: token.location.clone(),
+            span: token.span,
         });
         position += 1;
 
@@ -567,6 +570,7 @@ fn parse_range_loop_spec_from_tokens(
         Expression::new(
             ExpressionKind::Int(0),
             location,
+            None,
             builtin_type_ids::INT,
             DataType::Int,
             ValueMode::ImmutableOwned,
@@ -859,15 +863,21 @@ fn declare_loop_binding(
     }
 
     let data_type = diagnostic_type_spelling(type_id, parser.type_interner.environment());
+    let binding_span = Some(SourceSpan::new(
+        parser.scope_context.shared.declaring_file_id,
+        binding_name.span,
+    ));
     let declaration = Declaration {
         id: parser.scope_context.scope.append(binding_name.id),
         value: Expression::new(
             ExpressionKind::NoValue,
             binding_name.location.clone(),
+            binding_span,
             type_id,
             data_type,
             ValueMode::ImmutableOwned,
         ),
+        binding_span,
         config_qualifier: None,
     };
 

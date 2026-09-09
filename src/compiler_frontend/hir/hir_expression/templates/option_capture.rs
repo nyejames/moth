@@ -19,6 +19,7 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
@@ -36,6 +37,7 @@ impl<'a> HirBuilder<'a> {
             binding_path,
             inner_type_id,
             binding_location,
+            binding_span,
             ..
         } = pattern
         else {
@@ -95,11 +97,11 @@ impl<'a> HirBuilder<'a> {
 
         let mut terminated_anchor: Option<BlockId> = None;
 
-        self.set_current_block(present_block, location)?;
         let capture_local = self.register_template_option_capture_local(
             binding_path,
             *inner_type_id,
             binding_location,
+            *binding_span,
         )?;
         self.emit_template_option_capture_assignment(
             capture_local,
@@ -107,6 +109,7 @@ impl<'a> HirBuilder<'a> {
             option_type,
             *inner_type_id,
             binding_location,
+            *binding_span,
         )?;
         self.with_temporary_local_bindings([(binding_path.clone(), capture_local)], |builder| {
             append_present(builder)
@@ -163,6 +166,7 @@ impl<'a> HirBuilder<'a> {
         binding_path: &InternedPath,
         inner_type_id: TypeId,
         binding_location: &SourceLocation,
+        binding_span: Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
         let ty = self.lower_type_id(inner_type_id, binding_location)?;
         let region = self.current_region_or_error(binding_location)?;
@@ -174,6 +178,7 @@ impl<'a> HirBuilder<'a> {
             mutable: false,
             region,
             source_info: Some(binding_location.clone()),
+            span: binding_span,
         };
 
         self.register_local_in_block(block_id, local, binding_location)?;
@@ -190,11 +195,13 @@ impl<'a> HirBuilder<'a> {
         option_type: TypeId,
         inner_type_id: TypeId,
         location: &SourceLocation,
+        binding_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let field_ty = self.lower_type_id(inner_type_id, location)?;
         let region = self.current_region_or_error(location)?;
         let source = self.make_local_load_expression(option_local, option_type, location, region);
-        let payload_get = self.make_expression(
+        // Authored option capture materialization carries the binding span.
+        let mut payload_get = self.make_expression(
             location,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Option,
@@ -206,13 +213,15 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             region,
         );
+        payload_get.span = binding_span;
 
-        self.emit_statement_kind(
+        self.emit_statement_kind_with_span(
             HirStatementKind::Assign {
                 target: HirPlace::Local(capture_local),
                 value: payload_get,
             },
             location,
+            binding_span,
         )
     }
 }

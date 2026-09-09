@@ -190,7 +190,7 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
                         close_index: scan_index,
                         location,
                         span,
-                        source,
+                        source: Some(source),
                     });
                 }
                 TokenKind::TemplateClose => nested_templates = nested_templates.saturating_sub(1),
@@ -198,14 +198,14 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
                     return Some(DirectElseMarker::MalformedElseIf {
                         location,
                         span,
-                        source,
+                        source: Some(source),
                     });
                 }
                 TokenKind::Eof => {
                     return Some(DirectElseMarker::MalformedElseIf {
                         location,
                         span,
-                        source,
+                        source: Some(source),
                     });
                 }
                 _ => {}
@@ -217,7 +217,7 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
         return Some(DirectElseMarker::MalformedElseIf {
             location,
             span,
-            source,
+            source: Some(source),
         });
     }
 
@@ -228,14 +228,14 @@ pub(super) fn classify_direct_else_marker(token_stream: &FileTokens) -> Option<D
             close_index: index,
             location,
             span,
-            source,
+            source: Some(source),
         });
     }
 
     Some(DirectElseMarker::Malformed {
         location,
         span,
-        source,
+        source: Some(source),
     })
 }
 
@@ -515,14 +515,14 @@ pub(super) fn classify_direct_loop_control_marker(
             close_index,
             location,
             span,
-            source,
+            source: Some(source),
         })
     } else {
         Some(DirectLoopControlMarker::Continue {
             close_index,
             location,
             span,
-            source,
+            source: Some(source),
         })
     }
 }
@@ -531,6 +531,16 @@ pub(super) fn loop_control_marker_location(marker: &DirectLoopControlMarker) -> 
     match marker {
         DirectLoopControlMarker::Break { location, .. }
         | DirectLoopControlMarker::Continue { location, .. } => location,
+    }
+}
+pub(super) fn loop_control_marker_source_span(
+    marker: &DirectLoopControlMarker,
+) -> Option<SourceSpan> {
+    match marker {
+        DirectLoopControlMarker::Break { span, source, .. }
+        | DirectLoopControlMarker::Continue { span, source, .. } => {
+            source.map(|source| SourceSpan::new(source, *span))
+        }
     }
 }
 
@@ -594,7 +604,7 @@ pub(super) fn orphan_loop_control_diagnostic(
     }
 }
 
-fn with_loop_control_marker_span(
+pub(super) fn with_loop_control_marker_span(
     mut diagnostic: CompilerDiagnostic,
     span: LocalSpan,
     source: Option<SourceId>,

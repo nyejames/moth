@@ -35,10 +35,12 @@ fn reactive_expression(
         source: source.clone(),
         type_id: builtin_type_ids::INT,
         location: SourceLocation::default(),
+        span: None,
     };
     let expression = Expression::new(
         ExpressionKind::Reference(source.path.clone()),
         SourceLocation::default(),
+        None,
         builtin_type_ids::INT,
         DataType::Int,
         ValueMode::ImmutableReference,
@@ -64,6 +66,7 @@ fn template_from_node(
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     Template {
         tir_reference: TemplateTirReference {
@@ -72,6 +75,7 @@ fn template_from_node(
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -108,6 +112,7 @@ fn composed_view_walk_collects_dynamic_subscription_metadata() {
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let template = template_from_node(
         &mut store,
@@ -132,6 +137,7 @@ fn composed_view_walk_collects_text_side_table_subscription_metadata() {
             origin: TemplateSegmentOrigin::Body,
         },
         SourceLocation::default(),
+        None,
     ));
     store
         .set_node_reactive_subscription(text, subscription.clone())
@@ -162,6 +168,7 @@ fn finalized_view_walk_reads_expression_overlay_metadata() {
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
@@ -205,6 +212,7 @@ fn composed_view_walk_enters_parsed_structural_child() {
             site_id: child_site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let child = template_from_node(
         &mut store,
@@ -224,6 +232,7 @@ fn composed_view_walk_enters_parsed_structural_child() {
             occurrence_id: child_occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let root = template_from_node(
         &mut store,
@@ -250,6 +259,7 @@ fn resolved_slot_source_contributes_metadata_through_exact_view_context() {
             site_id: source_site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let source = template_from_node(
         &mut store,
@@ -260,13 +270,18 @@ fn resolved_slot_source_contributes_metadata_through_exact_view_context() {
     let occurrence_id = store.next_slot_occurrence_id();
     let slot_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot {
-            placeholder: TirSlotPlaceholder::new(
+            placeholder: TirSlotPlaceholder::with_wrapper_sets(
                 SlotKey::Default,
                 occurrence_id,
                 SourceLocation::default(),
+                None,
+                None,
+                None,
+                false,
             ),
         },
         SourceLocation::default(),
+        None,
     ));
     let slot_resolution_overlay = store
         .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
@@ -311,6 +326,7 @@ fn non_template_coercion_is_resolved_at_the_outer_expression_boundary() {
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let template = template_from_node(
         &mut store,
@@ -338,6 +354,7 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
             site_id: wrapper_site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let wrapper = template_from_node(
         &mut store,
@@ -359,6 +376,7 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
             origin: TemplateSegmentOrigin::Body,
         },
         SourceLocation::default(),
+        None,
     ));
     let root = store.push_template({
         let mut template = TemplateIr::new(
@@ -367,6 +385,7 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             SourceLocation::default(),
+            None,
         );
         template.conditional_child_wrapper_set = Some(wrapper_set);
         template
@@ -378,6 +397,7 @@ fn wrapper_transition_contributes_metadata_through_exact_view() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let metadata = merge(&root_template, &store).expect("wrapper should be readable");
@@ -392,8 +412,11 @@ fn owned_runtime_handoff_metadata_is_traversed() {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression),
             reactive_subscription: Some(subscription.clone()),
+            location: SourceLocation::default(),
+            span: None,
         }),
         location: SourceLocation::default(),
+        span: None,
     };
 
     let metadata = metadata_for_owned_runtime_template_handoff(&handoff, &mut |expression| {
@@ -413,6 +436,7 @@ fn missing_composed_root_returns_compiler_error() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let error = merge(&template, &store).expect_err("missing root should fail");
@@ -434,6 +458,7 @@ fn exact_view_cycle_is_an_internal_reactive_metadata_error() {
             occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     store.push_template(TemplateIr::new(
         child_node,
@@ -441,6 +466,7 @@ fn exact_view_cycle_is_an_internal_reactive_metadata_error() {
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     let template = Template {
         tir_reference: TemplateTirReference {
@@ -449,6 +475,7 @@ fn exact_view_cycle_is_an_internal_reactive_metadata_error() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let error = merge(&template, &store).expect_err("active exact-view recursion must fail");

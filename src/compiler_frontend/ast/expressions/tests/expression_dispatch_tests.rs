@@ -323,6 +323,7 @@ fn constant_identifier_uses_module_store_tir() {
             context: TemplateViewContext::default(),
         },
         location: location.clone(),
+        span: None,
     };
 
     let mut context = ScopeContext::new_for_tests(
@@ -337,6 +338,7 @@ fn constant_identifier_uses_module_store_tir() {
     context.set_local_declarations(vec![Declaration {
         id: InternedPath::from_components(vec![constant_name]),
         value: Expression::template(template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }]);
 

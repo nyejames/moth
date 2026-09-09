@@ -61,19 +61,21 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     let bindings = LoopBindings {
         item: Some(Declaration {
             id: item_path,
-            value: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+            value: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }),
         index: Some(Declaration {
             id: index_path,
-            value: Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
+            value: Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }),
     };
 
     let collection_bindings = build_collection_iteration_bindings(
         &bindings,
-        &Expression::int(1, location.clone(), ValueMode::ImmutableOwned)
+        &Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(provenance.clone()),
         0,
         &provenance,
@@ -102,7 +104,12 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
         bindings: vec![],
     };
 
-    let condition = Expression::bool(true, test_source_location(1), ValueMode::ImmutableOwned);
+    let condition = Expression::bool(
+        true,
+        test_source_location(1),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let resolved = resolve_fold_bindings_in_expression(&condition, &mut fold_context)
         .expect("resolution should succeed");
 
@@ -122,8 +129,12 @@ fn string_slice_with_no_bindings_returns_borrowed() {
         bindings: vec![],
     };
 
-    let text =
-        Expression::string_slice(text_id, test_source_location(1), ValueMode::ImmutableOwned);
+    let text = Expression::string_slice(
+        text_id,
+        test_source_location(1),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let resolved = resolve_fold_bindings_in_expression(&text, &mut fold_context)
         .expect("resolution should succeed");
 
@@ -142,7 +153,12 @@ fn bool_condition_binding_substitution_returns_owned() {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str("show", &mut string_table);
 
-    let binding_value = Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned);
+    let binding_value = Expression::bool(
+        true,
+        test_source_location(2),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let bindings = vec![TemplateFoldBinding {
         path: path.clone(),
         value: binding_value,
@@ -188,6 +204,7 @@ fn option_present_capture_substitution_returns_owned() {
     let inner_value = Expression::string_slice(
         string_table.intern("Alice"),
         test_source_location(2),
+        None,
         ValueMode::ImmutableOwned,
     );
     let option_value = Expression::coerced(inner_value, builtin_type_ids::STRING);
@@ -196,7 +213,6 @@ fn option_present_capture_substitution_returns_owned() {
         path: path.clone(),
         value: option_value,
     }];
-
     let scrutinee = Expression::reference(
         path,
         DataType::StringSlice,
@@ -257,6 +273,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         Expression::string_slice(
             string_table.intern("payload"),
             test_source_location(1),
+            None,
             ValueMode::ImmutableOwned,
         ),
         builtin_type_ids::STRING,
@@ -274,6 +291,7 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
         inner_type_id: builtin_type_ids::STRING,
         location: test_source_location(1),
         binding_location: test_source_location(1),
+        binding_span: None,
     };
 
     let store = TemplateIrStore::new();
@@ -304,6 +322,7 @@ fn store_qualified_template_with_tir_reference(tir_reference: TemplateTirReferen
     Template {
         tir_reference,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -331,6 +350,7 @@ fn assert_store_backed_option_capture(
         inner_type_id: builtin_type_ids::STRING,
         location: test_source_location(1),
         binding_location: test_source_location(1),
+        binding_span: None,
     };
 
     let mut fold_context = TirFoldContext {
@@ -369,6 +389,7 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
     let inner = Expression::string_slice(
         string_table.intern("value"),
         test_source_location(1),
+        None,
         ValueMode::ImmutableOwned,
     );
     let coerced = Expression::coerced(inner, builtin_type_ids::STRING);
@@ -420,6 +441,7 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let coerced_template = Expression::coerced(
@@ -468,15 +490,18 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
             ExpressionRpnItem::Operand(Expression::int(
                 1,
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
                 location: test_source_location(1),
+                span: None,
             },
             ExpressionRpnItem::Operand(Expression::int(
                 2,
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         ],
@@ -502,12 +527,12 @@ fn rpn_with_bound_reference_operand_returns_owned() {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str("counter", &mut string_table);
 
-    let binding_value = Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned);
+    let binding_value =
+        Expression::int(5, test_source_location(2), None, ValueMode::ImmutableOwned);
     let bindings = vec![TemplateFoldBinding {
         path: path.clone(),
         value: binding_value,
     }];
-
     let rpn = ExpressionRpn {
         items: vec![
             ExpressionRpnItem::Operand(Expression::reference(
@@ -519,10 +544,12 @@ fn rpn_with_bound_reference_operand_returns_owned() {
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
                 location: test_source_location(1),
+                span: None,
             },
             ExpressionRpnItem::Operand(Expression::int(
                 1,
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         ],

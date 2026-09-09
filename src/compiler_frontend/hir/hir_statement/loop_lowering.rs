@@ -28,6 +28,7 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::return_hir_transformation_error;
 
@@ -79,8 +80,9 @@ impl<'a> HirBuilder<'a> {
         condition: &Expression,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_while_with_body_emitter(condition, location, |builder| {
+        self.lower_while_with_body_emitter(condition, location, span, |builder| {
             builder.lower_statement_sequence(body)
         })
     }
@@ -95,6 +97,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         condition: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
         emit_body: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
         let parent_region = self.current_region_or_error(location)?;
@@ -110,7 +113,7 @@ impl<'a> HirBuilder<'a> {
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error(location)?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: condition_value,
@@ -118,6 +121,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: exit_block,
             },
             location,
+            span,
         )?;
 
         self.log_control_flow_edge(condition_block, body_block, "while.true");
@@ -152,10 +156,15 @@ impl<'a> HirBuilder<'a> {
         range: &RangeLoopSpec,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_range_loop_with_body_emitter(bindings, range, location, |builder| {
-            builder.lower_statement_sequence(body)
-        })
+        self.lower_range_loop_with_body_emitter_and_span(
+            bindings,
+            range,
+            location,
+            span,
+            |builder| builder.lower_statement_sequence(body),
+        )
     }
 
     pub(crate) fn lower_range_loop_with_body_emitter(
@@ -163,6 +172,25 @@ impl<'a> HirBuilder<'a> {
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         location: &SourceLocation,
+        mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
+    ) -> Result<(), CompilerError> {
+        // Template loops are generated scaffolding: headers stay spanless. Statement
+        // loops use the span-aware entry below with the authored `for` span.
+        self.lower_range_loop_with_body_emitter_and_span(
+            bindings,
+            range,
+            location,
+            None,
+            &mut emit_body,
+        )
+    }
+
+    fn lower_range_loop_with_body_emitter_and_span(
+        &mut self,
+        bindings: &LoopBindings,
+        range: &RangeLoopSpec,
+        location: &SourceLocation,
+        span: Option<SourceSpan>,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
         // Build an explicit CFG pipeline so runtime range semantics are deterministic:
@@ -185,7 +213,7 @@ impl<'a> HirBuilder<'a> {
         self.emit_range_loop_zero_step_guard(runtime, location)?;
         self.emit_range_loop_step_magnitude_normalization(runtime, location)?;
         self.emit_range_loop_direction_dispatch(runtime, location)?;
-        self.emit_range_loop_header_checks(range, runtime, location)?;
+        self.emit_range_loop_header_checks(range, runtime, location, span)?;
         let step_block_is_reachable =
             self.lower_range_loop_body_with_emitter(bindings, runtime, location, &mut emit_body)?;
         if step_block_is_reachable {
@@ -285,6 +313,10 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        // Generated loop-state spills: `current`/`end`/`step`/`ascending`/`index`
+        // temps are compiler scaffolding, so these assignments stay spanless even
+        // though the lowered bound values themselves carry expression spans.
+        // Only the header bounds checks below carry the authored `for` span.
         let RangeLoopRuntime { locals, types, .. } = runtime;
 
         let lowered_start = self.lower_expression_value_to_current_block(&range.start)?;
@@ -399,12 +431,13 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        // Generated safety guard: the zero-step check and its `RuntimeFailure`
+        // are compiler scaffolding and stay spanless.
         let RangeLoopRuntime {
             blocks,
             locals,
             types,
         } = runtime;
-
         self.set_current_block(blocks.step_zero_check, location)?;
         let zero_check_region = self.current_region_or_error(location)?;
         let step_for_zero_check = self.make_expression(
@@ -461,6 +494,8 @@ impl<'a> HirBuilder<'a> {
         runtime: RangeLoopRuntime,
         location: &SourceLocation,
     ) -> Result<(), CompilerError> {
+        // Generated normalization: magnitude/direction CFG and checked numeric
+        // step updates are compiler scaffolding and stay spanless.
         let RangeLoopRuntime {
             blocks,
             locals,
@@ -605,6 +640,7 @@ impl<'a> HirBuilder<'a> {
         range: &RangeLoopSpec,
         runtime: RangeLoopRuntime,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let RangeLoopRuntime {
             blocks,
@@ -673,7 +709,10 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             header_ascending_region,
         );
-        self.emit_terminator(
+        // Authored loop header: the ascending bounds check carries the `for`
+        // statement span. The selector dispatch above is generated scaffolding
+        // and stays spanless.
+        self.emit_terminator_with_span(
             blocks.header_ascending,
             HirTerminator::If {
                 condition: asc_condition,
@@ -681,6 +720,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: blocks.exit,
             },
             location,
+            span.or(range.end.span),
         )?;
         self.log_control_flow_edge(blocks.header_ascending, blocks.body, "for.asc.true");
         self.log_control_flow_edge(blocks.header_ascending, blocks.exit, "for.asc.false");
@@ -716,7 +756,9 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             header_descending_region,
         );
-        self.emit_terminator(
+        // Authored loop header: the descending bounds check carries the `for`
+        // statement span.
+        self.emit_terminator_with_span(
             blocks.header_descending,
             HirTerminator::If {
                 condition: desc_condition,
@@ -724,6 +766,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: blocks.exit,
             },
             location,
+            span.or(range.end.span),
         )?;
         self.log_control_flow_edge(blocks.header_descending, blocks.body, "for.desc.true");
         self.log_control_flow_edge(blocks.header_descending, blocks.exit, "for.desc.false");
@@ -893,10 +936,15 @@ impl<'a> HirBuilder<'a> {
         iterable: &Expression,
         body: &[AstNode],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_collection_loop_with_body_emitter(bindings, iterable, location, |builder| {
-            builder.lower_statement_sequence(body)
-        })
+        self.lower_collection_loop_with_body_emitter_and_span(
+            bindings,
+            iterable,
+            location,
+            span,
+            |builder| builder.lower_statement_sequence(body),
+        )
     }
 
     pub(crate) fn lower_collection_loop_with_body_emitter(
@@ -906,6 +954,28 @@ impl<'a> HirBuilder<'a> {
         location: &SourceLocation,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
+        // Template loops are generated scaffolding: headers stay spanless. Statement
+        // loops use the span-aware entry below with the authored `for` span.
+        self.lower_collection_loop_with_body_emitter_and_span(
+            bindings,
+            iterable,
+            location,
+            None,
+            &mut emit_body,
+        )
+    }
+
+    fn lower_collection_loop_with_body_emitter_and_span(
+        &mut self,
+        bindings: &LoopBindings,
+        iterable: &Expression,
+        location: &SourceLocation,
+        span: Option<SourceSpan>,
+        mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
+    ) -> Result<(), CompilerError> {
+        // Generated collection spills: the iterable/length/index temps, the length
+        // call, and step/jump edges are compiler scaffolding and stay spanless.
+        // Only the header bounds check below carries the authored `for` span.
         let parent_region = self.current_region_or_error(location)?;
 
         let header_block = self.create_block(parent_region, location, "loop-collection-header")?;
@@ -992,7 +1062,10 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             header_region,
         );
-        self.emit_terminator(
+        // Authored loop header: the bounds check carries the `for` statement span,
+        // falling back to the iterable span when identity-free. Init spills, the
+        // length call, and jumps above are generated scaffolding and stay spanless.
+        self.emit_terminator_with_span(
             header_block,
             HirTerminator::If {
                 condition: continue_condition,
@@ -1000,6 +1073,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: exit_block,
             },
             location,
+            span.or(iterable.span),
         )?;
         self.log_control_flow_edge(header_block, body_block, "loop.collection.true");
         self.log_control_flow_edge(header_block, exit_block, "loop.collection.false");
@@ -1128,12 +1202,15 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(location)?;
         let block_id = self.current_block_id_or_error(location)?;
         let local_id = self.allocate_local_id();
+        // Authored loop binding uses the explicit `Declaration.binding_span`
+        // (the binding-name anchor), never an initializer span.
         let local = HirLocal {
             id: local_id,
             ty,
             mutable: false,
             region,
             source_info: Some(location.clone()),
+            span: binding.binding_span,
         };
 
         self.side_table.map_local_source(&local);
@@ -1145,12 +1222,16 @@ impl<'a> HirBuilder<'a> {
         self.side_table
             .map_ast_to_hir(location, HirLocation::Local(local_id));
 
-        self.emit_statement_kind(
+        // Authored binding materialization carries the explicit binding span.
+        // Jumps and numeric step updates elsewhere stay spanless as generated
+        // scaffolding.
+        self.emit_statement_kind_with_span(
             HirStatementKind::Assign {
                 target: HirPlace::Local(local_id),
                 value,
             },
             location,
+            binding.binding_span,
         )?;
 
         Ok((binding.id.clone(), local_id))

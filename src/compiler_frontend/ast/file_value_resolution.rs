@@ -25,6 +25,7 @@ use crate::compiler_frontend::headers::synthetic_content_header::content_constan
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -43,6 +44,10 @@ pub(crate) fn resolve_file_value(
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
     let location = token_stream.current_location();
+    let span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let row = token_stream
         .path_syntax
         .try_path_for_token(path_syntax, &location)?;
@@ -85,6 +90,7 @@ pub(crate) fn resolve_file_value(
             Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => structural_string(
                 vec![ConstStringPiece::SiteRoot],
                 row.location.clone(),
+                span,
                 value_mode,
             ),
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
@@ -113,6 +119,7 @@ pub(crate) fn resolve_file_value(
                     return Ok(Expression::new(
                         kind,
                         row.location.clone(),
+                        span,
                         builtin_type_ids::STRING,
                         DataType::StringSlice,
                         value_mode.clone(),
@@ -140,6 +147,7 @@ pub(crate) fn resolve_file_value(
                     context,
                     type_interner,
                     row.location.clone(),
+                    span,
                 ))
             }
             _ => Err(CompilerError::compiler_error(
@@ -174,6 +182,7 @@ pub(crate) fn resolve_file_value(
                 structural_string(
                     vec![ConstStringPiece::Resource(resource)],
                     row.location.clone(),
+                    span,
                     value_mode,
                 )
             }
@@ -188,11 +197,13 @@ pub(crate) fn resolve_file_value(
 fn structural_string(
     pieces: Vec<ConstStringPiece>,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: &ValueMode,
 ) -> Result<Expression, ExpressionParseError> {
     Ok(Expression::new(
         ExpressionKind::StructuralString { pieces },
         location,
+        span,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         value_mode.clone(),

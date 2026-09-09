@@ -545,6 +545,7 @@ impl ModuleMaterialisationContext {
                 },
                 body: StableBodySyntax {
                     declaration_path: Box::new([]),
+                    donor_file_id: crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
                     pool: Box::new([]),
                     tokens: Box::new([]),
                     path_syntax: PathSyntaxTable::default(),
@@ -998,10 +999,12 @@ impl GenericTemplateArtefact {
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
+                    None,
                     function_type_id,
                     DataType::Function(Box::new(None), signature.clone()),
                     ValueMode::ImmutableReference,
                 ),
+                binding_span: None,
                 config_qualifier: None,
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
@@ -1059,6 +1062,7 @@ impl GenericTemplateArtefact {
                 let declaration = Declaration {
                     id: local_path.clone(),
                     value,
+                    binding_span: None,
                     config_qualifier: None,
                 };
                 let lookups = Rc::make_mut(&mut environment.lookups);
@@ -1130,10 +1134,12 @@ impl GenericTemplateArtefact {
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     Default::default(),
+                    None,
                     function_type_id,
                     DataType::Function(Box::new(Some(receiver.clone())), signature.clone()),
                     ValueMode::ImmutableReference,
                 ),
+                binding_span: None,
                 config_qualifier: None,
             };
             let lookups = Rc::make_mut(&mut environment.lookups);
@@ -1482,10 +1488,12 @@ impl GenericTemplateArtefact {
                         value: Expression::new(
                             ExpressionKind::NoValue,
                             Default::default(),
+                            None,
                             function_type_id,
                             DataType::Function(Box::new(receiver), signature),
                             ValueMode::ImmutableReference,
                         ),
+                        binding_span: None,
                         config_qualifier: None,
                     },
                 )?;
@@ -2055,6 +2063,7 @@ impl StableFunctionSignature {
                 Expression::new(
                     ExpressionKind::NoValue,
                     parameter_location.clone(),
+                    None,
                     type_id,
                     diagnostic_type_spelling(type_id, context.type_environment),
                     parameter.value_mode.clone(),
@@ -2071,6 +2080,7 @@ impl StableFunctionSignature {
             parameters.push(Declaration {
                 id: parameter_path,
                 value,
+                binding_span: None,
                 config_qualifier: None,
             });
             parameter_type_ids.push(type_id);
@@ -2225,10 +2235,12 @@ fn declaration_table_without_module_values(
                 id: path.clone(),
                 value: Expression::no_value_with_type_id(
                     metadata.location.clone(),
+                    metadata.span,
                     metadata.diagnostic_type.clone(),
                     metadata.type_id,
                     metadata.value_mode.clone(),
                 ),
+                binding_span: None,
                 config_qualifier: None,
             },
         ) {

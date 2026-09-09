@@ -119,10 +119,12 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
         id: InternedPath::new(),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Int,
             int_type_id,
             ValueMode::default(),
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let mut return_slot = ReturnSlot::success(DataType::Int);
@@ -141,10 +143,12 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
         id: InternedPath::new(),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Int,
             int_type_id,
             ValueMode::default(),
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     FunctionSignature {
@@ -166,10 +170,12 @@ fn constant_declaration(type_id: TypeId, decl_path: InternedPath) -> Declaration
         id: decl_path,
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Int,
             type_id,
             ValueMode::default(),
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }

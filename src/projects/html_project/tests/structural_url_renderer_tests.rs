@@ -75,6 +75,7 @@ fn plan_origin_for(
     plan.plan_origin(
         resource_origin,
         MessageSourceLocation::default(),
+        None,
         context,
         string_table,
         ResourceUseKind::Executable,

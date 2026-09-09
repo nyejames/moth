@@ -73,6 +73,7 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
             context,
         },
         location,
+        span: None,
     };
 
     (Expression::template(template, value_mode), store_handle)
@@ -99,6 +100,7 @@ pub(crate) fn expression(
         ty,
         value_kind,
         region,
+        span: None,
     }
 }
 
@@ -152,6 +154,7 @@ pub(crate) fn statement(id: u32, kind: HirStatementKind, line: i32) -> HirStatem
         id: HirNodeId(id),
         kind,
         location: test_source_location(line),
+        span: None,
     }
 }
 
@@ -162,5 +165,6 @@ pub(crate) fn local(local_id: u32, ty: TypeId, region: RegionId) -> HirLocal {
         mutable: true,
         region,
         source_info: Some(test_source_location(1)),
+        span: None,
     }
 }

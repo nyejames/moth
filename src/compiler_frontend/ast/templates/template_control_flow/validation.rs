@@ -115,7 +115,9 @@ fn validate_runtime_tir_view_node(
 ) -> Result<(), TemplateError> {
     let node = view.effective_node(node_ref)?;
     match &node.kind {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             let branches = branches.clone();
             let fallback = *fallback;
             let node_location = node.location.clone();
@@ -256,7 +258,9 @@ fn tir_view_subtree_contains_runtime_artifact(
             Ok(false)
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             let bodies: Vec<_> = branches.iter().map(|branch| branch.body).collect();
             let fallback = *fallback;
 

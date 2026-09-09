@@ -7,7 +7,9 @@
 
 use super::builder::PathNode;
 use super::id::PathId;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{
+    FrozenStringTable, StringId, StringTable,
+};
 
 /// Immutable path trie storage shared by the mutable builder and frozen readers.
 ///
@@ -105,6 +107,29 @@ impl PathTable {
         string_table: &StringTable,
         scratch: &mut Vec<StringId>,
     ) -> String {
+        self.render_portable_with(path, string_table, scratch)
+    }
+
+    /// Render a path using immutable strings after the identity freeze boundary.
+    ///
+    /// This leaves [`Self::render_portable`] unchanged for mutable build-stage callers while
+    /// allowing a frozen identity context to render the same stable `PathId` without copying or
+    /// rebuilding its string table.
+    pub fn render_portable_frozen(
+        &self,
+        path: PathId,
+        string_table: &FrozenStringTable,
+        scratch: &mut Vec<StringId>,
+    ) -> String {
+        self.render_portable_with(path, string_table, scratch)
+    }
+
+    fn render_portable_with<T: StringTableResolver + ?Sized>(
+        &self,
+        path: PathId,
+        string_table: &T,
+        scratch: &mut Vec<StringId>,
+    ) -> String {
         let components = self.resolve_components(path, scratch);
         let mut rendered = String::new();
         for (index, component) in components.iter().enumerate() {
@@ -114,5 +139,21 @@ impl PathTable {
             rendered.push_str(string_table.resolve(*component));
         }
         rendered
+    }
+}
+
+trait StringTableResolver {
+    fn resolve(&self, id: StringId) -> &str;
+}
+
+impl StringTableResolver for StringTable {
+    fn resolve(&self, id: StringId) -> &str {
+        StringTable::resolve(self, id)
+    }
+}
+
+impl StringTableResolver for FrozenStringTable {
+    fn resolve(&self, id: StringId) -> &str {
+        FrozenStringTable::resolve(self, id)
     }
 }

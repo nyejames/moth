@@ -28,6 +28,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, To
 pub(crate) struct BuildConfigQualifierSyntax {
     pub(crate) type_annotation: ParsedTypeRef,
     pub(crate) qualifier_location: SourceLocation,
+    pub(crate) qualifier_span: Option<SourceSpan>,
     pub(crate) default_none: bool,
 }
 
@@ -345,6 +346,10 @@ pub(crate) fn parse_build_config_qualifier(
     string_table: &mut StringTable,
 ) -> Result<BuildConfigQualifierSyntax, Box<CompilerDiagnostic>> {
     let qualifier_location = token_stream.current_location();
+    let qualifier_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     require_config_marker_adjacent(token_stream)?;
     token_stream.advance(); // past `#`
 
@@ -379,6 +384,7 @@ pub(crate) fn parse_build_config_qualifier(
     Ok(BuildConfigQualifierSyntax {
         type_annotation,
         qualifier_location,
+        qualifier_span,
         default_none: false,
     })
 }

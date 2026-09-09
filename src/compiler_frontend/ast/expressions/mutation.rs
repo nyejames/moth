@@ -169,7 +169,11 @@ fn evaluate_compound_assignment_value(
     // -------------------------------------------
 
     let target_expression = expression_from_place_expression(target);
-    let operator_item = ExpressionRpnItem::Operator { operator, location };
+    let operator_item = ExpressionRpnItem::Operator {
+        operator,
+        location,
+        span: target.span,
+    };
     let mut inferred = ExpectedType::Infer;
     let value = evaluate_expression(
         context,
@@ -207,6 +211,10 @@ fn build_mutation_from_target(
     string_table: &mut StringTable,
 ) -> Result<AstNode, ExpressionParseError> {
     let location = token_stream.current_location();
+    let span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let target_type_id = target.type_id;
 
     ast_log!(
@@ -243,10 +251,10 @@ fn build_mutation_from_target(
             declaration_location,
             location,
         );
-        if let Some(source) = token_stream.file_id {
-            diagnostic.primary_span =
-                Some(SourceSpan::new(source, token_stream.current_token().span));
-        }
+        diagnostic.primary_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
         return Err(diagnostic.into());
     }
 
@@ -356,6 +364,7 @@ fn build_mutation_from_target(
     Ok(AstNode {
         kind: NodeKind::Assignment { target, value },
         location: location.clone(),
+        span,
         scope: context.scope.clone(),
     })
 }

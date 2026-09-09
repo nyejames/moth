@@ -87,10 +87,12 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             location: SourceLocation::default(),
+            span: None,
         },
         ExpressionRpnItem::Operand(Expression::string_slice(
             string_table.get_or_intern(String::from("?v=1")),
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         )),
     ];
@@ -150,11 +152,13 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
             ExpressionRpnItem::Operand(Expression::string_slice(
                 string_table.intern("plain"),
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             ExpressionRpnItem::Operator {
                 operator: Operator::Equality,
                 location: SourceLocation::default(),
+                span: None,
             },
         ]
     };

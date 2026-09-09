@@ -131,10 +131,12 @@ fn param_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::default(),
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -167,10 +169,12 @@ fn field_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -180,6 +184,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
         name: path(name, string_table),
         type_id,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -316,6 +321,7 @@ fn unit_variant(name: &str, string_table: &mut StringTable) -> ChoiceVariantDefi
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Unit,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -329,6 +335,7 @@ fn record_variant(
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Record { fields },
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -455,6 +462,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -2233,6 +2241,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let default_value = Expression::string_slice(
         string_table.intern("wrong"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let retained_fields = vec![field_declaration_with_default(

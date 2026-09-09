@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::parse_non_choice_
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -120,6 +121,10 @@ fn parse_option_present_capture(
         }
     };
     let binding_location = token_stream.current_location();
+    let binding_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance();
 
     // Reject type annotations such as `|name String|`.
@@ -151,5 +156,6 @@ fn parse_option_present_capture(
         inner_type_id,
         location,
         binding_location,
+        binding_span,
     })
 }

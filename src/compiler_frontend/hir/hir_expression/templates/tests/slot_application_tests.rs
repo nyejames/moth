@@ -36,6 +36,7 @@ fn piece_bearing_text_node(pieces: Vec<OwnedFoldedStringPiece>) -> OwnedRuntimeT
         text: OwnedFoldedString::Pieces(pieces),
         reactive_subscription: None,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn plain_text_node(text: &str) -> OwnedRuntimeTemplateNode {
         text: OwnedFoldedString::Text(text.to_owned()),
         reactive_subscription: None,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 

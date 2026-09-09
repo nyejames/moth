@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -207,11 +208,16 @@ fn parse_copy_place_payload(
                 .into())
             } else {
                 let reference_location = token_stream.current_location();
+                let reference_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
                 let reference_expression = reference_expression_from_declaration(
                     place_declaration.as_declaration(),
                     context,
                     type_interner,
                     reference_location.clone(),
+                    reference_span,
                 );
                 token_stream.advance();
 
@@ -222,6 +228,7 @@ fn parse_copy_place_payload(
                         token_stream,
                         reference_expression,
                         reference_location,
+                        reference_span,
                         PostfixChainAccess::shared(),
                         context,
                         type_interner,
@@ -300,6 +307,7 @@ pub(crate) fn place_expression_from_expression(expression: &Expression) -> Optio
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
             location: expression.location.clone(),
+            span: expression.span,
         }),
 
         ExpressionKind::FieldAccess { base, field } => {
@@ -313,6 +321,7 @@ pub(crate) fn place_expression_from_expression(expression: &Expression) -> Optio
                 diagnostic_type: expression.diagnostic_type.clone(),
                 value_mode: expression.value_mode.clone(),
                 location: expression.location.clone(),
+                span: expression.span,
             })
         }
 
@@ -363,6 +372,7 @@ pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expre
     let mut expression = Expression::new(
         kind,
         place.location.clone(),
+        place.span,
         place.type_id,
         place.diagnostic_type.clone(),
         place.value_mode.clone(),

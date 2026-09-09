@@ -98,14 +98,9 @@ impl DiagnosticPayload {
             DiagnosticPayload::WholeObjectBorrowConflict {
                 whole_place,
                 part_place,
-                part_location,
             } => {
-                remap_whole_object_borrow_conflict_payload(
-                    whole_place,
-                    part_place,
-                    part_location,
-                    remap,
-                );
+                whole_place.remap_string_ids(remap);
+                part_place.remap_string_ids(remap);
             }
 
             DiagnosticPayload::MultipleMutableBorrows {
@@ -119,12 +114,8 @@ impl DiagnosticPayload {
                 remap_single_place_borrow_payload(place, remap);
             }
 
-            DiagnosticPayload::MoveWhileBorrowed {
-                place,
-                borrow_location,
-                ..
-            } => {
-                remap_place_with_optional_location(place, borrow_location, remap);
+            DiagnosticPayload::MoveWhileBorrowed { place, .. } => {
+                remap_single_place_borrow_payload(place, remap);
             }
 
             DiagnosticPayload::InvalidMutableAccess {
@@ -652,27 +643,61 @@ impl DiagnosticPayload {
             }
         }
     }
+}
 
+fn remap_path_import_payload(path: &mut InternedPath, remap: &StringIdRemap) {
+    path.remap_string_ids(remap);
+}
+
+fn remap_invalid_import_path_payload(
+    path: &mut InternedPath,
+    reason: &mut InvalidImportPathReason,
+    remap: &StringIdRemap,
+) {
+    path.remap_string_ids(remap);
+    reason.remap_string_ids(remap);
+}
+
+fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &StringIdRemap) {
+    place.remap_string_ids(remap);
+}
+
+fn remap_shared_mutable_conflict_payload(
+    place: &mut DiagnosticPlace,
+    conflicting_place: &mut Option<DiagnosticPlace>,
+    remap: &StringIdRemap,
+) {
+    place.remap_string_ids(remap);
+    remap_optional_place(conflicting_place, remap);
+}
+
+fn remap_place_with_optional_conflict(
+    place: &mut DiagnosticPlace,
+    conflicting_place: &mut Option<DiagnosticPlace>,
+    remap: &StringIdRemap,
+) {
+    place.remap_string_ids(remap);
+    remap_optional_place(conflicting_place, remap);
+}
+
+fn remap_optional_place(place: &mut Option<DiagnosticPlace>, remap: &StringIdRemap) {
+    if let Some(place) = place {
+        place.remap_string_ids(remap);
+    }
+}
+
+impl DiagnosticPayload {
     /// Rebind every source location carried by a diagnostic payload to one final file scope.
     ///
     /// Most payloads carry semantic names only; the variants below retain a secondary authored
     /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
-    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+    pub(crate) fn rebind_source_identity(&mut self, _logical_path: &InternedPath) {
         match self {
             DiagnosticPayload::DuplicateTraitRequirement { .. } => {}
 
             DiagnosticPayload::DuplicatePublicExport { .. } => {}
 
             DiagnosticPayload::DuplicateMothTemplateInputPath { .. } => {}
-
-            DiagnosticPayload::MoveWhileBorrowed {
-                borrow_location: existing_location,
-                ..
-            }
-            | DiagnosticPayload::WholeObjectBorrowConflict {
-                part_location: existing_location,
-                ..
-            } => rebind_optional_location(existing_location, logical_path),
 
             DiagnosticPayload::None
             | DiagnosticPayload::ExpectedToken { .. }
@@ -708,6 +733,8 @@ impl DiagnosticPayload {
             | DiagnosticPayload::BorrowConflict { .. }
             | DiagnosticPayload::MultipleMutableBorrows { .. }
             | DiagnosticPayload::SharedMutableConflict { .. }
+            | DiagnosticPayload::MoveWhileBorrowed { .. }
+            | DiagnosticPayload::WholeObjectBorrowConflict { .. }
             | DiagnosticPayload::InvalidMutableAccess { .. }
             | DiagnosticPayload::UseAfterPossibleMove { .. }
             | DiagnosticPayload::UseOfUninitializedLocal { .. }
@@ -797,78 +824,5 @@ impl DiagnosticPayload {
             | DiagnosticPayload::CommonSyntaxMistake { .. }
             | DiagnosticPayload::InfrastructureError { .. } => {}
         }
-    }
-}
-
-fn remap_path_import_payload(path: &mut InternedPath, remap: &StringIdRemap) {
-    path.remap_string_ids(remap);
-}
-
-fn remap_invalid_import_path_payload(
-    path: &mut InternedPath,
-    reason: &mut InvalidImportPathReason,
-    remap: &StringIdRemap,
-) {
-    path.remap_string_ids(remap);
-    reason.remap_string_ids(remap);
-}
-
-fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &StringIdRemap) {
-    place.remap_string_ids(remap);
-}
-
-fn remap_shared_mutable_conflict_payload(
-    place: &mut DiagnosticPlace,
-    conflicting_place: &mut Option<DiagnosticPlace>,
-    remap: &StringIdRemap,
-) {
-    place.remap_string_ids(remap);
-    remap_optional_place(conflicting_place, remap);
-}
-
-fn remap_whole_object_borrow_conflict_payload(
-    whole_place: &mut DiagnosticPlace,
-    part_place: &mut DiagnosticPlace,
-    part_location: &mut Option<SourceLocation>,
-    remap: &StringIdRemap,
-) {
-    whole_place.remap_string_ids(remap);
-    part_place.remap_string_ids(remap);
-    remap_optional_location(part_location, remap);
-}
-
-fn remap_place_with_optional_location(
-    place: &mut DiagnosticPlace,
-    location: &mut Option<SourceLocation>,
-    remap: &StringIdRemap,
-) {
-    place.remap_string_ids(remap);
-    remap_optional_location(location, remap);
-}
-
-fn remap_place_with_optional_conflict(
-    place: &mut DiagnosticPlace,
-    conflicting_place: &mut Option<DiagnosticPlace>,
-    remap: &StringIdRemap,
-) {
-    place.remap_string_ids(remap);
-    remap_optional_place(conflicting_place, remap);
-}
-
-fn remap_optional_place(place: &mut Option<DiagnosticPlace>, remap: &StringIdRemap) {
-    if let Some(place) = place {
-        place.remap_string_ids(remap);
-    }
-}
-
-fn remap_optional_location(location: &mut Option<SourceLocation>, remap: &StringIdRemap) {
-    if let Some(location) = location {
-        location.remap_string_ids(remap);
-    }
-}
-
-fn rebind_optional_location(location: &mut Option<SourceLocation>, logical_path: &InternedPath) {
-    if let Some(location) = location {
-        location.rebind_source_identity(logical_path);
     }
 }

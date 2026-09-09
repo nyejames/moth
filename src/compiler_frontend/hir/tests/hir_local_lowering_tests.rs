@@ -129,7 +129,7 @@ fn variable_declaration_emits_local_and_assign_statement() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(42, test_source_location(4), ValueMode::ImmutableOwned),
+                Expression::int(42, test_source_location(4), None, ValueMode::ImmutableOwned),
             )),
             test_source_location(4),
         )],
@@ -200,14 +200,14 @@ fn duplicate_local_declarations_in_same_scope_fail() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, test_source_location(3), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(3),
             ),
@@ -240,6 +240,7 @@ fn assignment_lowers_value_prelude_before_assign() {
             NodeKind::Return(vec![Expression::int(
                 1,
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             test_source_location(1),
@@ -331,6 +332,7 @@ fn call_expression_statements_materialize_result_values() {
             NodeKind::Return(vec![Expression::int(
                 9,
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             test_source_location(1),
@@ -358,7 +360,12 @@ fn call_expression_statements_materialize_result_values() {
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
                     alloc_id,
                     vec![CallArgument::positional(
-                        Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
+                        Expression::int(
+                            1,
+                            test_source_location(3),
+                            None,
+                            ValueMode::ImmutableOwned,
+                        ),
                         CallAccessMode::Shared,
                         test_source_location(3),
                     )],
@@ -424,6 +431,7 @@ fn return_lowering_handles_zero_one_and_many_values() {
             NodeKind::Return(vec![Expression::int(
                 8,
                 test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             test_source_location(2),
@@ -439,8 +447,13 @@ fn return_lowering_handles_zero_one_and_many_values() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
-                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
+                Expression::int(1, test_source_location(3), None, ValueMode::ImmutableOwned),
+                Expression::bool(
+                    true,
+                    test_source_location(3),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
             ]),
             test_source_location(3),
         )],

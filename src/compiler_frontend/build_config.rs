@@ -747,6 +747,7 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
     pub(crate) qualifier_location: SourceLocation,
+    pub(crate) qualifier_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 

@@ -47,6 +47,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -76,6 +77,7 @@ pub(super) struct ExpressionDispatchState<'a> {
 pub(super) struct ExpressionOperandInput {
     pub(super) operand: Expression,
     pub(super) wrapper_location: SourceLocation,
+    pub(super) wrapper_span: Option<SourceSpan>,
 }
 
 /// Reports adjacent operands at the second expression without guessing the missing operator.
@@ -259,6 +261,7 @@ pub(super) fn push_expression_operand(
     operand: Expression,
 ) -> Result<(), ExpressionParseError> {
     let wrapper_location = operand.location.clone();
+    let wrapper_span = operand.span;
     push_expression_operand_at_location(
         token_stream,
         context,
@@ -269,6 +272,7 @@ pub(super) fn push_expression_operand(
         ExpressionOperandInput {
             operand,
             wrapper_location,
+            wrapper_span,
         },
     )
 }
@@ -295,6 +299,7 @@ pub(super) fn push_expression_operand_at_location(
             token_stream,
             operand_input.operand,
             operand_input.wrapper_location,
+            operand_input.wrapper_span,
             PostfixChainAccess::shared(),
             context,
             type_interner,
@@ -352,17 +357,27 @@ fn parse_unary_operator(
             ) {
                 *next_number_negative = true;
             } else {
+                let span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                ));
                 expression.push(ExpressionRpnItem::Operator {
                     operator: Operator::Negate,
                     location: token_stream.current_location(),
+                    span,
                 });
             }
             true
         }
         TokenKind::Not => {
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             expression.push(ExpressionRpnItem::Operator {
                 operator: Operator::Not,
                 location: token_stream.current_location(),
+                span,
             });
             true
         }
@@ -374,19 +389,29 @@ fn push_operator_item(
     expression: &mut Vec<ExpressionRpnItem>,
     _context: &ScopeContext,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     operator: Operator,
 ) {
-    expression.push(ExpressionRpnItem::Operator { operator, location });
+    expression.push(ExpressionRpnItem::Operator {
+        operator,
+        location,
+        span,
+    });
 }
 
 /// Convenience for the common match arm that pushes an operator and advances.
 fn advance_with_operator(
     expression: &mut Vec<ExpressionRpnItem>,
     context: &ScopeContext,
-    location: SourceLocation,
+    token_stream: &FileTokens,
     operator: Operator,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    push_operator_item(expression, context, location, operator);
+    let location = token_stream.current_location();
+    let span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
+    push_operator_item(expression, context, location, span, operator);
     Ok(ExpressionTokenStep::Advance)
 }
 
@@ -434,6 +459,11 @@ pub(super) fn dispatch_expression_token(
         TokenKind::CloseParenthesis => dispatch_close_parenthesis(token_stream, state),
 
         TokenKind::OpenParenthesis => {
+            let group_location = token_stream.current_location();
+            let group_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             token_stream.advance();
             // A grouped expression is no longer the immediate receiving boundary.
             // This keeps `(cast value)` from acting as an operator operand while
@@ -465,7 +495,8 @@ pub(super) fn dispatch_expression_token(
                 state.allow_boundary_catch,
                 ExpressionOperandInput {
                     operand: value,
-                    wrapper_location: token_stream.current_location(),
+                    wrapper_location: group_location,
+                    wrapper_span: group_span,
                 },
             )?;
 
@@ -569,6 +600,10 @@ pub(super) fn dispatch_expression_token(
         }
         TokenKind::Path(path_syntax) => {
             let path_location = token_stream.current_location();
+            let path_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             let operand = resolve_file_value(
                 path_syntax,
                 token_stream,
@@ -588,6 +623,7 @@ pub(super) fn dispatch_expression_token(
                 ExpressionOperandInput {
                     operand,
                     wrapper_location: path_location,
+                    wrapper_span: path_span,
                 },
             )?;
             Ok(ExpressionTokenStep::Continue)
@@ -624,6 +660,10 @@ pub(super) fn dispatch_expression_token(
 
         TokenKind::Copy => {
             let copy_location = token_stream.current_location();
+            let copy_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             token_stream.advance();
 
             let copied_place =
@@ -634,6 +674,7 @@ pub(super) fn dispatch_expression_token(
                 copied_place.diagnostic_type,
                 copied_place.type_id,
                 copy_location.clone(),
+                copy_span,
                 state.value_mode.to_owned(),
             );
 
@@ -710,48 +751,27 @@ pub(super) fn dispatch_expression_token(
         // -------------------------------
         //  Arithmetic operators
         // -------------------------------
-        TokenKind::Add => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Add,
-        ),
-        TokenKind::Subtract => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Subtract,
-        ),
-        TokenKind::Multiply => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Multiply,
-        ),
-        TokenKind::Divide => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Divide,
-        ),
-        TokenKind::IntDivide => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::IntDivide,
-        ),
-        TokenKind::Exponent => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Exponent,
-        ),
-        TokenKind::Modulus => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Modulus,
-        ),
+        TokenKind::Add => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Add)
+        }
+        TokenKind::Subtract => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Subtract)
+        }
+        TokenKind::Multiply => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Multiply)
+        }
+        TokenKind::Divide => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Divide)
+        }
+        TokenKind::IntDivide => {
+            advance_with_operator(state.expression, context, token_stream, Operator::IntDivide)
+        }
+        TokenKind::Exponent => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Exponent)
+        }
+        TokenKind::Modulus => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Modulus)
+        }
 
         // -------------------------------
         //  Comparison operators
@@ -760,49 +780,37 @@ pub(super) fn dispatch_expression_token(
             dispatch_is_token(token_stream, context, type_interner, state, string_table)
         }
 
-        TokenKind::LessThan => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::LessThan,
-        ),
+        TokenKind::LessThan => {
+            advance_with_operator(state.expression, context, token_stream, Operator::LessThan)
+        }
         TokenKind::LessThanOrEqual => advance_with_operator(
             state.expression,
             context,
-            token_stream.current_location(),
+            token_stream,
             Operator::LessThanOrEqual,
         ),
         TokenKind::GreaterThan => advance_with_operator(
             state.expression,
             context,
-            token_stream.current_location(),
+            token_stream,
             Operator::GreaterThan,
         ),
         TokenKind::GreaterThanOrEqual => advance_with_operator(
             state.expression,
             context,
-            token_stream.current_location(),
+            token_stream,
             Operator::GreaterThanOrEqual,
         ),
-        TokenKind::And => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::And,
-        ),
-        TokenKind::Or => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Or,
-        ),
+        TokenKind::And => {
+            advance_with_operator(state.expression, context, token_stream, Operator::And)
+        }
+        TokenKind::Or => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Or)
+        }
 
-        TokenKind::ExclusiveRange => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Range,
-        ),
+        TokenKind::ExclusiveRange => {
+            advance_with_operator(state.expression, context, token_stream, Operator::Range)
+        }
 
         // -------------------------------
         //  Unexpected tokens
@@ -1009,12 +1017,7 @@ fn dispatch_is_token(
         // `is not` → inequality operator.
         Some(TokenKind::Not) => {
             token_stream.advance();
-            advance_with_operator(
-                state.expression,
-                context,
-                token_stream.current_location(),
-                Operator::NotEqual,
-            )
+            advance_with_operator(state.expression, context, token_stream, Operator::NotEqual)
         }
 
         // `is:` → type guard in a match arm. The left-hand side must be a single expression.
@@ -1039,12 +1042,7 @@ fn dispatch_is_token(
         }
 
         // Bare `is` → equality operator.
-        _ => advance_with_operator(
-            state.expression,
-            context,
-            token_stream.current_location(),
-            Operator::Equality,
-        ),
+        _ => advance_with_operator(state.expression, context, token_stream, Operator::Equality),
     }
 }
 
@@ -1110,6 +1108,10 @@ fn parse_cast_expression(
     };
 
     let cast_location = token_stream.current_location();
+    let cast_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let propagate = token_stream.current_token_kind() == &TokenKind::CastBang;
     token_stream.advance();
 
@@ -1215,6 +1217,7 @@ fn parse_cast_expression(
         string_table,
         active_generic_type_context: context.active_generic_type_context(),
         location: cast_location,
+        span: cast_span,
     })?;
 
     if let Some(handler) = catch_handler {

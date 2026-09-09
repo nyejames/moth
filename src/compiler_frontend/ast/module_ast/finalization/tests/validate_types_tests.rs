@@ -39,6 +39,7 @@ fn invalid_string_expression(location: SourceLocation) -> Expression {
     Expression::new(
         ExpressionKind::Bool(true),
         location,
+        None,
         TypeId(9999),
         DataType::Bool,
         ValueMode::ImmutableOwned,
@@ -49,6 +50,7 @@ fn orphan_bool_expression() -> Expression {
     Expression::new(
         ExpressionKind::Bool(true),
         SourceLocation::default(),
+        None,
         TypeId(9999),
         DataType::Bool,
         ValueMode::ImmutableOwned,
@@ -59,6 +61,7 @@ fn owned_render_handoff(node: OwnedRuntimeTemplateNode) -> OwnedRuntimeTemplateH
     OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(node),
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -82,13 +85,19 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
     let selectors = vec![
         TemplateBranchSelector::Bool(orphan_bool_expression()),
         TemplateBranchSelector::OptionPresentCapture {
-            scrutinee: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            scrutinee: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             pattern: Box::new(MatchPattern::OptionPresentCapture {
                 name: strings.intern("value"),
                 binding_path: InternedPath::new(),
                 inner_type_id: TypeId(9999),
                 location: SourceLocation::default(),
                 binding_location: SourceLocation::default(),
+                binding_span: None,
             }),
         },
     ];
@@ -99,11 +108,16 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
                 selector,
                 body: OwnedRuntimeTemplateNode::Sequence {
                     children: Vec::new(),
+                    location: SourceLocation::default(),
+                    span: None,
                 },
                 location: SourceLocation::default(),
+                span: None,
             }],
             fallback: None,
+            else_marker: None,
             location: SourceLocation::default(),
+            span: None,
         });
     }
 }
@@ -112,6 +126,7 @@ fn orphan_declaration() -> Declaration {
     Declaration {
         id: InternedPath::new(),
         value: orphan_bool_expression(),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -119,6 +134,8 @@ fn orphan_declaration() -> Declaration {
 fn empty_loop_body() -> Box<OwnedRuntimeTemplateNode> {
     Box::new(OwnedRuntimeTemplateNode::Sequence {
         children: Vec::new(),
+        location: SourceLocation::default(),
+        span: None,
     })
 }
 
@@ -129,14 +146,19 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
             wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
                 expression: Box::new(orphan_bool_expression()),
                 reactive_subscription: None,
+                location: SourceLocation::default(),
+                span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
             location: SourceLocation::default(),
+            span: None,
         },
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Sequence {
                 children: Vec::new(),
+                location: SourceLocation::default(),
+                span: None,
             },
             contribution_sources: vec![OwnedRuntimeSlotContributionSource {
                 source: RuntimeSlotContributionSourceId(0),
@@ -145,21 +167,30 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                         selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
                         body: OwnedRuntimeTemplateNode::Sequence {
                             children: Vec::new(),
+                            location: SourceLocation::default(),
+                            span: None,
                         },
                         location: SourceLocation::default(),
+                        span: None,
                     }],
                     fallback: None,
+                    else_marker: None,
                     location: SourceLocation::default(),
+                    span: None,
                 },
                 renders_wrapper_unconditionally: false,
                 location: SourceLocation::default(),
+                span: None,
             }],
             slot_sites: Vec::new(),
             location: SourceLocation::default(),
+            span: None,
         },
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Sequence {
                 children: Vec::new(),
+                location: SourceLocation::default(),
+                span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: vec![OwnedRuntimeSlotSite {
@@ -174,11 +205,13 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                             start: Expression::bool(
                                 true,
                                 SourceLocation::default(),
+                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                             end: Expression::bool(
                                 true,
                                 SourceLocation::default(),
+                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                             end_kind: RangeEndKind::Exclusive,
@@ -188,10 +221,13 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                     body: empty_loop_body(),
                     aggregate_wrapper: None,
                     location: SourceLocation::default(),
+                    span: None,
                 },
                 location: SourceLocation::default(),
+                span: None,
             }],
             location: SourceLocation::default(),
+            span: None,
         },
     ];
 
@@ -215,24 +251,36 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
             selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
             body: OwnedRuntimeTemplateNode::Sequence {
                 children: Vec::new(),
+                location: SourceLocation::default(),
+                span: None,
             },
             location: SourceLocation::default(),
+            span: None,
         }],
         fallback: None,
+        else_marker: None,
         location: SourceLocation::default(),
+        span: None,
     });
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            condition: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             message: Expression::new(
                 ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::STRING,
                 DataType::Template,
                 ValueMode::ImmutableOwned,
             ),
         },
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     };
     let type_environment = TypeEnvironment::new();
@@ -253,23 +301,33 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
         wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(orphan_bool_expression()),
             reactive_subscription: None,
+            location: SourceLocation::default(),
+            span: None,
         },
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
         location: SourceLocation::default(),
+        span: None,
     };
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            condition: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             message: Expression::new(
                 ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(slot_handoff)),
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::STRING,
                 DataType::Template,
                 ValueMode::ImmutableOwned,
             ),
         },
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     };
     let type_environment = TypeEnvironment::new();
@@ -297,7 +355,12 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
             }),
             range: Box::new(RangeLoopSpec {
                 start: orphan_bool_expression(),
-                end: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                end: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             }),
@@ -308,7 +371,12 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                start: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 end: orphan_bool_expression(),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
@@ -320,8 +388,18 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
-                end: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                start: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
+                end: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(orphan_bool_expression()),
             }),
@@ -332,8 +410,18 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
-                end: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                start: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
+                end: Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             }),
@@ -353,6 +441,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
             iterable: Box::new(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         },
@@ -363,9 +452,12 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
             header,
             body: Box::new(OwnedRuntimeTemplateNode::Sequence {
                 children: Vec::new(),
+                location: SourceLocation::default(),
+                span: None,
             }),
             aggregate_wrapper: None,
             location: SourceLocation::default(),
+            span: None,
         });
     }
 }
@@ -376,6 +468,7 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
     let structural = Expression::string_slice(
         strings.intern("structural"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let mut store = TemplateIrStore::new();
@@ -395,16 +488,23 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
             to_type: option_string_type_id,
         },
         SourceLocation::default(),
+        None,
         option_string_type_id,
         DataType::Option(Box::new(DataType::StringSlice)),
         ValueMode::ImmutableOwned,
     );
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            condition: Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             message,
         },
         location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     };
     let context = TypeValidationContext {
@@ -432,6 +532,7 @@ fn template_with_dynamic_overlay(
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let root = store.push_template(TemplateIr::new(
         node,
@@ -439,6 +540,7 @@ fn template_with_dynamic_overlay(
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
     let expression_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
@@ -457,6 +559,7 @@ fn template_with_dynamic_overlay(
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -466,6 +569,7 @@ fn validation_checks_effective_dynamic_expression_overlay() {
     let structural = Expression::string_slice(
         strings.intern("structural"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let overlay = invalid_string_expression(SourceLocation::default());
@@ -491,6 +595,7 @@ fn validation_rejects_non_finalized_template_reference() {
     let structural = Expression::string_slice(
         strings.intern("structural"),
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let mut store = TemplateIrStore::new();
@@ -522,6 +627,7 @@ fn validation_reports_missing_template_root() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
     let type_environment = TypeEnvironment::new();
     let context = TypeValidationContext {
@@ -574,6 +680,7 @@ fn finalized_template_with_site_overlay(
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -581,6 +688,7 @@ fn invalid_bool_expression(value: bool, location: SourceLocation) -> Expression 
     Expression::new(
         ExpressionKind::Bool(value),
         location,
+        None,
         TypeId(9999),
         DataType::Bool,
         ValueMode::ImmutableOwned,
@@ -593,8 +701,12 @@ fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_expres
     let mut store = TemplateIrStore::new();
 
     let structural_location = location_at(10, 5);
-    let structural_selector =
-        Expression::bool(true, structural_location.clone(), ValueMode::ImmutableOwned);
+    let structural_selector = Expression::bool(
+        true,
+        structural_location.clone(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let overlay_location = location_at(20, 7);
     let overlay_selector = invalid_bool_expression(true, overlay_location.clone());
@@ -606,10 +718,11 @@ fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_expres
             TemplateBranchSelector::Bool(structural_selector),
             branch_body,
             structural_location,
+            None,
             builder.store.next_expression_site_id(),
         );
         let branch_chain_node_id =
-            builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
         let template_id = builder.finish_template(
             branch_chain_node_id,
             Style::default(),
@@ -662,6 +775,7 @@ fn finalized_tir_view_loop_header_payload_validates_effective_overlay_expression
     let structural_condition = Expression::bool(
         false,
         structural_location.clone(),
+        None,
         ValueMode::ImmutableOwned,
     );
 

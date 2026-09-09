@@ -43,7 +43,7 @@ fn float_expr(
     value: f64,
     location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
 ) -> Expression {
-    Expression::float(value, location, ValueMode::ImmutableOwned)
+    Expression::float(value, location, None, ValueMode::ImmutableOwned)
 }
 
 fn string_expr(
@@ -54,6 +54,7 @@ fn string_expr(
     Expression::string_slice(
         string_table.intern(value),
         location,
+        None,
         ValueMode::ImmutableOwned,
     )
 }
@@ -151,6 +152,7 @@ fn make_float_to_string_cast(
         },
         handling: CastHandling::Infallible,
         location: location.clone(),
+        span: None,
     };
 
     Expression::cast(cast, builtin_type_ids::STRING, &TypeEnvironment::new())
@@ -199,6 +201,7 @@ fn cast_float_to_string_flushes_source_prelude_before_formatting() {
         vec![builtin_type_ids::FLOAT],
         &mut builder.type_environment,
         loc.clone(),
+        None,
     );
     let expr = make_float_to_string_cast(source, loc.clone());
 
@@ -363,15 +366,21 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
         source,
         type_id: builtin_type_ids::FLOAT,
         location: loc.clone(),
+        span: None,
     };
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
                 expression: Box::new(value_ref),
                 reactive_subscription: Some(subscription),
+                location: loc.clone(),
+                span: None,
             }],
+            location: loc.clone(),
+            span: None,
         }),
         location: loc.clone(),
+        span: None,
     };
 
     let mut builder = setup_builder(&mut string_table);
@@ -428,6 +437,7 @@ fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
         },
         handling: CastHandling::Infallible,
         location: loc.clone(),
+        span: None,
     };
 
     let expr = Expression::cast(cast, optional_string_type, &builder.type_environment);

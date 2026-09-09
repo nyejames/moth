@@ -68,10 +68,12 @@ pub(super) fn restore_generated_local_alias(
         value: Expression::new(
             ExpressionKind::NoValue,
             Default::default(),
+            None,
             type_id,
             diagnostic_type_spelling(type_id, &environment.type_environment),
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let lookups = Rc::make_mut(&mut environment.lookups);

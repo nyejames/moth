@@ -146,7 +146,6 @@ pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) dependency_prefix: String,
 }
-
 /// The check-only jobs stay in a separate lane so no caller can accidentally publish their
 /// interfaces, generated functions, resource associations, graph edges or backend roots.
 struct ModuleCompilationJobBatch {

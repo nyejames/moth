@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExp
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     parse_build_config_qualifier, starts_build_config_qualifier,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -99,6 +100,10 @@ pub(super) fn parse_anonymous_const_record_expression(
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
     let record_location = token_stream.current_location();
+    let record_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance(); // past the opening `|`
 
     let mut fields: Vec<Declaration> = Vec::new();
@@ -108,7 +113,12 @@ pub(super) fn parse_anonymous_const_record_expression(
     token_stream.skip_newlines();
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
         token_stream.advance();
-        return Ok(finish_record(Vec::new(), record_location, type_interner));
+        return Ok(finish_record(
+            Vec::new(),
+            record_location,
+            record_span,
+            type_interner,
+        ));
     }
 
     loop {
@@ -184,7 +194,12 @@ pub(super) fn parse_anonymous_const_record_expression(
         }
     }
 
-    Ok(finish_record(fields, record_location, type_interner))
+    Ok(finish_record(
+        fields,
+        record_location,
+        record_span,
+        type_interner,
+    ))
 }
 
 /// Parse one `name = value` or `name #Config of T = value` record field.
@@ -202,6 +217,10 @@ fn parse_record_field(
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
     let name_location = token_stream.current_location();
+    let binding_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     ensure_not_keyword_shadow_identifier(field_name, name_location.clone(), string_table)
         .map_err(ExpressionParseError::from)?;
 
@@ -267,12 +286,17 @@ fn parse_record_field(
         // so retain a sentinel and let the config resolver construct the typed OptionNone value.
         if token_stream.current_token_kind() == &TokenKind::NoneLiteral && qualifier.is_some() {
             let location = token_stream.current_location();
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             token_stream.advance();
             if let Some(qualifier) = qualifier.as_mut() {
                 qualifier.default_none = true;
             }
             Expression::no_value(
                 location,
+                span,
                 crate::compiler_frontend::datatypes::DataType::Inferred,
                 ValueMode::ImmutableOwned,
             )
@@ -282,12 +306,22 @@ fn parse_record_field(
     } else {
         // A qualified required field may omit its initializer so explicit inputs or builder
         // globals can satisfy it. Optional absence resolves to an ordinary OptionNone.
-        let location = qualifier
-            .as_ref()
-            .map(|qualifier| qualifier.qualifier_location.clone())
-            .unwrap_or_else(|| token_stream.current_location());
+        let (location, span) = match qualifier.as_ref() {
+            Some(qualifier) => (
+                qualifier.qualifier_location.clone(),
+                qualifier.qualifier_span,
+            ),
+            None => (
+                token_stream.current_location(),
+                Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.current_token().span,
+                )),
+            ),
+        };
         Expression::no_value(
             location,
+            span,
             crate::compiler_frontend::datatypes::DataType::Inferred,
             ValueMode::ImmutableOwned,
         )
@@ -296,6 +330,7 @@ fn parse_record_field(
     fields.push(Declaration {
         id: InternedPath::from_components(vec![field_name]),
         value,
+        binding_span,
         config_qualifier: qualifier,
     });
     Ok(())
@@ -329,12 +364,14 @@ fn parse_record_field_value(
 fn finish_record(
     fields: Vec<Declaration>,
     record_location: SourceLocation,
+    record_span: Option<SourceSpan>,
     type_interner: &AstTypeInterner<'_>,
 ) -> Expression {
     let record_type_id = type_interner.environment().anonymous_const_record_type();
     Expression::anonymous_const_record(
         fields,
         record_location,
+        record_span,
         ValueMode::ImmutableOwned,
         record_type_id,
     )

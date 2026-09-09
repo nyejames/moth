@@ -17,7 +17,7 @@ use super::span_encoding::{
     DecodedSpan, decode_logical, encode_extended_index, encode_inline, fits_inline, load_logical,
     store_logical,
 };
-use super::{SourceDatabase, SourceId, SourceRecord};
+use super::{FrozenIdentityContext, FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord};
 
 use std::cmp::Ordering;
 use std::mem::size_of;
@@ -132,6 +132,32 @@ pub enum SpanCapacityReason {
 pub enum SpanJoinError {
     DifferentSources { left: SourceId, right: SourceId },
     Capacity(SpanCapacityError),
+}
+
+/// Lookup boundary used by exact global-span resolution.
+///
+/// Both mutable and frozen source owners implement this narrow source-record lookup, so a span
+/// keeps one exact resolution API while the owner lifecycle changes at the identity boundary.
+pub(crate) trait SourceSpanDatabase {
+    fn source_record_for_span(&self, source: SourceId) -> &SourceRecord;
+}
+
+impl SourceSpanDatabase for SourceDatabase {
+    fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
+        self.source_record(source)
+    }
+}
+
+impl SourceSpanDatabase for FrozenSourceDatabase {
+    fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
+        self.source_record(source)
+    }
+}
+
+impl SourceSpanDatabase for FrozenIdentityContext {
+    fn source_record_for_span(&self, source: SourceId) -> &SourceRecord {
+        self.source_record(source)
+    }
 }
 
 /// A record's own resolver, available once slice 1D4 installs the source's frozen table.
@@ -315,17 +341,18 @@ impl SourceSpan {
         self.local.is_empty_with(resolver)
     }
 
-    /// Resolve against the database that owns this span's source identity.
+    /// Resolve against the source owner that owns this span's identity.
     ///
-    /// The reserved compilation root owns no record, so its spans resolve without a lookup and
-    /// only through its exact empty range; every other identity resolves through its own loaded
-    /// record, and an unresolvable extended row names that source as a compiler bug.
-    pub fn byte_range(self, sources: &SourceDatabase) -> ResolvedByteRange {
+    /// Mutable [`SourceDatabase`] and lookup-only [`FrozenSourceDatabase`] owners share this exact
+    /// operation. The reserved compilation root owns no record, so its spans resolve without a
+    /// lookup and only through its exact empty range; every other identity resolves through its
+    /// own loaded record, and an unresolvable extended row names that source as a compiler bug.
+    pub fn byte_range<S: SourceSpanDatabase>(self, sources: &S) -> ResolvedByteRange {
         if self.source == SourceId::COMPILATION_ROOT {
             return self.resolve_compilation_root_range();
         }
 
-        let source = sources.source_record(self.source);
+        let source = sources.source_record_for_span(self.source);
         self.local.resolve_from_record(source, self.source)
     }
 
@@ -358,17 +385,17 @@ impl SourceSpan {
     }
 
     #[allow(dead_code)]
-    pub fn start(self, sources: &SourceDatabase) -> u32 {
+    pub fn start<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
         self.byte_range(sources).start()
     }
 
     #[allow(dead_code)]
-    pub fn end(self, sources: &SourceDatabase) -> u32 {
+    pub fn end<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
         self.byte_range(sources).end()
     }
 
     #[allow(dead_code)]
-    pub fn overlaps(self, other: Self, sources: &SourceDatabase) -> bool {
+    pub fn overlaps<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
         if self.source != other.source {
             return false;
         }
@@ -379,7 +406,7 @@ impl SourceSpan {
     }
 
     #[allow(dead_code)]
-    pub fn contains(self, other: Self, sources: &SourceDatabase) -> bool {
+    pub fn contains<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
         if self.source != other.source {
             return false;
         }

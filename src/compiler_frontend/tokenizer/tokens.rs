@@ -269,9 +269,15 @@ pub struct FileTokens {
     /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
     pub path_syntax: FilePathSyntax,
     pub src_path: InternedPath,
-    /// Optional only for materialised generic bodies, whose donor identity remains canonical
-    /// provenance until the consuming compilation context remaps it.
-    pub file_id: Option<SourceId>,
+    /// Required owning source identity for every token stream, including materialised generics.
+    ///
+    /// WHAT: the exact `SourceId` that owns this stream's token spans and path-table rows.
+    /// WHY: materialised generic bodies retain their donor identity with an explicit owner
+    ///      (`StableBodySyntax::donor_file_id` + frozen facts owner) instead of detaching to
+    ///      `None`. Spans therefore never silently remap a donor range onto a requester
+    ///      call-site source, and no magic identity is fabricated. Cross-database remap waits
+    ///      for the final `FrozenIdentityContext` migration.
+    pub file_id: SourceId,
     /// Canonical filesystem source path for IO/path-resolution-only logic.
     pub canonical_os_path: Option<PathBuf>,
     // WHAT: Cheap token classification gathered during lexing.
@@ -298,7 +304,7 @@ impl FileTokens {
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            Some(file_id),
+            file_id,
             canonical_os_path,
             tokens,
             FilePathSyntax::preparing(path_syntax),
@@ -309,17 +315,19 @@ impl FileTokens {
     ///
     /// This is deliberately separate from source construction: generated generic materialisation
     /// is the only path that receives an independently captured table rather than the prepared
-    /// source's immutable shared table. It has no source identity until a consuming context remaps
-    /// the frozen provenance.
+    /// source's immutable shared table. The caller supplies the retained donor/owner identity
+    /// captured in `StableBodySyntax`; materialisation never fabricates a magic identity, uses
+    /// `None`, or remaps the donor range onto the requester call-site source.
     pub(crate) fn new_frozen(
         src_path: InternedPath,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            None,
+            file_id,
             canonical_os_path,
             tokens,
             FilePathSyntax::shared(path_syntax),
@@ -336,7 +344,7 @@ impl FileTokens {
     ) -> FileTokens {
         Self::with_path_syntax(
             src_path,
-            Some(file_id),
+            file_id,
             canonical_os_path,
             tokens,
             FilePathSyntax::Deferred,
@@ -345,7 +353,7 @@ impl FileTokens {
 
     fn with_path_syntax(
         src_path: InternedPath,
-        file_id: Option<SourceId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
@@ -369,7 +377,7 @@ impl FileTokens {
     pub fn new_substream(
         source: &FileTokens,
         src_path: InternedPath,
-        file_id: Option<SourceId>,
+        file_id: SourceId,
         tokens: Vec<Token>,
     ) -> FileTokens {
         Self::with_path_syntax(
@@ -391,7 +399,7 @@ impl FileTokens {
     ///      file owner from remapping or rebinding its one table.
     pub(crate) fn new_path_free_substream(
         src_path: InternedPath,
-        file_id: Option<SourceId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -408,9 +416,11 @@ impl FileTokens {
     ///
     /// AST consumers use this for defaults, declaration initializers and loop headers. The table
     /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
+    /// The caller supplies the owning `SourceId` (for generated bodies, the retained donor/owner
+    /// identity); no `None` or magic identity is accepted.
     pub fn new_from_slice(
         src_path: InternedPath,
-        file_id: Option<SourceId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         source_path_syntax: &FilePathSyntax,
@@ -629,7 +639,7 @@ impl FileTokens {
         file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) {
-        self.file_id = Some(file_id);
+        self.file_id = file_id;
         self.canonical_os_path = canonical_os_path;
 
         for token in &mut self.tokens {

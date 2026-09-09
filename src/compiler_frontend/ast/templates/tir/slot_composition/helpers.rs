@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -125,7 +126,7 @@ pub(super) fn children_of_node(
 pub(crate) fn stored_insert_contribution_templates(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<Option<Vec<(TemplateIrId, SourceLocation)>>, CompilerError> {
+) -> Result<Option<Vec<(TemplateIrId, SourceLocation, Option<SourceSpan>)>>, CompilerError> {
     let template = store.get_template(template_id).ok_or_else(|| {
         CompilerError::compiler_error(
             "TIR slot composition: stored insert carrier referenced a missing template.",
@@ -154,7 +155,7 @@ pub(crate) fn stored_insert_contribution_templates(
         let TemplateIrNodeKind::InsertContribution { template } = child.kind else {
             return Ok(None);
         };
-        contributions.push((template, child.location.clone()));
+        contributions.push((template, child.location.clone(), child.span));
     }
 
     Ok(Some(contributions))
@@ -217,6 +218,7 @@ pub(super) fn rebuild_root_sequence(
             children: resolved_children,
         },
         original_root_node.location.to_owned(),
+        None,
     )))
 }
 
@@ -227,6 +229,7 @@ pub(super) fn compose_wrapper_application(
     layout: &TirSlotLayout,
     fill_nodes: Vec<TemplateIrNodeId>,
     fill_location: SourceLocation,
+    fill_span: Option<SourceSpan>,
     string_table: &StringTable,
     allow_runtime_plans: bool,
 ) -> SlotCompositionResult<TemplateTirChildReference> {
@@ -248,6 +251,7 @@ pub(super) fn compose_wrapper_application(
             &routed,
             string_table,
             &fill_location,
+            fill_span,
         )?
     } else {
         let expanded_root = super::schema::expand_tir_slot_placeholders_into(

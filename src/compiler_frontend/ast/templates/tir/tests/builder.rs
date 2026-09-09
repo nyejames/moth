@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
@@ -47,6 +47,7 @@ impl<'store> TemplateIrBuilder<'store> {
                 origin,
             },
             location,
+            None,
         ));
 
         if let Some(subscription) = reactive_subscription {
@@ -76,6 +77,7 @@ impl<'store> TemplateIrBuilder<'store> {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children },
             location,
+            None,
         ))
     }
 
@@ -91,6 +93,7 @@ impl<'store> TemplateIrBuilder<'store> {
                 occurrence_id,
             },
             location,
+            None,
         ))
     }
 
@@ -123,6 +126,7 @@ impl<'store> TemplateIrBuilder<'store> {
                 site_id,
             },
             location,
+            None,
         ))
     }
 
@@ -134,6 +138,7 @@ impl<'store> TemplateIrBuilder<'store> {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Slot { placeholder },
             location,
+            None,
         ))
     }
 
@@ -143,7 +148,15 @@ impl<'store> TemplateIrBuilder<'store> {
         location: SourceLocation,
     ) -> TemplateIrNodeId {
         let occurrence_id = self.store.next_slot_occurrence_id();
-        let placeholder = TirSlotPlaceholder::new(key, occurrence_id, location);
+        let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+            key,
+            occurrence_id,
+            location,
+            None,
+            None,
+            None,
+            false,
+        );
         self.push_tir_slot_placeholder_node(placeholder)
     }
 
@@ -155,6 +168,7 @@ impl<'store> TemplateIrBuilder<'store> {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::InsertContribution { template },
             location,
+            None,
         ))
     }
 
@@ -162,11 +176,17 @@ impl<'store> TemplateIrBuilder<'store> {
         &mut self,
         branches: Vec<TemplateIrBranch>,
         fallback: Option<TemplateIrNodeId>,
+        else_marker: Option<TemplateElseMarker>,
         location: SourceLocation,
     ) -> TemplateIrNodeId {
         self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::BranchChain { branches, fallback },
+            TemplateIrNodeKind::BranchChain {
+                branches,
+                fallback,
+                else_marker,
+            },
             location,
+            None,
         ))
     }
 
@@ -186,6 +206,7 @@ impl<'store> TemplateIrBuilder<'store> {
                 aggregate_wrapper,
             },
             location,
+            None,
         ))
     }
 
@@ -197,6 +218,7 @@ impl<'store> TemplateIrBuilder<'store> {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::LoopControl { kind },
             location,
+            None,
         ))
     }
 
@@ -209,6 +231,6 @@ impl<'store> TemplateIrBuilder<'store> {
         location: SourceLocation,
     ) -> TemplateIrId {
         self.store
-            .push_template(TemplateIr::new(root, style, kind, summary, location))
+            .push_template(TemplateIr::new(root, style, kind, summary, location, None))
     }
 }

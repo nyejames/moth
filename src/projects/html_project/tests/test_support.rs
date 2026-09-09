@@ -60,6 +60,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
             ty: unit_type,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         }),
     }];
     module.functions = vec![HirFunction {
@@ -167,6 +168,7 @@ pub(crate) fn add_reachable_external_import(
             result: None,
         },
         location: SourceLocation::default(),
+        span: None,
     });
 
     external_import.package_id = package_id;
@@ -254,6 +256,7 @@ pub(crate) fn js_runtime_asset_import(
         &logical_source_path,
         canonical_source_path,
         SourceLocation::default(),
+        None,
     )
     .expect("fixture JS runtime asset identity should be internally valid")
 }
@@ -280,6 +283,7 @@ pub(crate) fn non_js_runtime_asset_import(
                 .expect("fixture foreign asset path should be valid"),
         ),
         canonical_source_path,
+        authored_import_span: None,
         asset_kind: asset_kind.to_owned(),
         authored_import_location: SourceLocation::default(),
     }

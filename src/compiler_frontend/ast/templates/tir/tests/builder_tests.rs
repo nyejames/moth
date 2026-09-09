@@ -333,6 +333,7 @@ fn push_dynamic_expression_node_stores_expression_payload() {
     let expression = Expression::string_slice(
         string_table.intern("expr"),
         SourceLocation::default(),
+        None,
         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
     );
 
@@ -459,6 +460,7 @@ fn expression_site_ids_assigned_in_document_order() {
             Expression::string_slice(
                 string_table.intern("a"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -469,6 +471,7 @@ fn expression_site_ids_assigned_in_document_order() {
             Expression::string_slice(
                 string_table.intern("b"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -479,6 +482,7 @@ fn expression_site_ids_assigned_in_document_order() {
             Expression::string_slice(
                 string_table.intern("c"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -552,6 +556,7 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
             Expression::string_slice(
                 string_table.intern("expr"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -585,6 +590,7 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
         TemplateType::String,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ));
 
     // Both templates point to the same root node: the derived root is shared,
@@ -671,6 +677,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             Expression::string_slice(
                 string_table.intern("e1"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -688,14 +695,20 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body_a,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let chain_first =
-            builder.push_branch_chain_node(vec![branch_first], None, SourceLocation::default());
+        let chain_first = builder.push_branch_chain_node(
+            vec![branch_first],
+            None,
+            None,
+            SourceLocation::default(),
+        );
 
         let loop_body_a = builder.push_text_node(
             string_table.intern("la"),
@@ -708,6 +721,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                 condition: Box::new(Expression::bool(
                     true,
                     SourceLocation::default(),
+                    None,
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
@@ -740,6 +754,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             Expression::string_slice(
                 string_table.intern("e2"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -757,14 +772,20 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body_b,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let chain_second =
-            builder.push_branch_chain_node(vec![branch_second], None, SourceLocation::default());
+        let chain_second = builder.push_branch_chain_node(
+            vec![branch_second],
+            None,
+            None,
+            SourceLocation::default(),
+        );
 
         let loop_body_b = builder.push_text_node(
             string_table.intern("lb"),
@@ -782,17 +803,20 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                     start: Expression::int(
                         0,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         1,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),
@@ -866,25 +890,30 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             body_a,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
         let branch_b = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             body_b,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
 
         let chain_id = builder.push_branch_chain_node(
             vec![branch_a, branch_b],
+            None,
             None,
             SourceLocation::default(),
         );
@@ -922,6 +951,7 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
                 condition: Box::new(Expression::bool(
                     true,
                     SourceLocation::default(),
+                    None,
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
@@ -945,6 +975,7 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
                 iterable: Box::new(Expression::string_slice(
                     string_table.intern("items"),
                     SourceLocation::default(),
+                    None,
                     crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                 )),
             },
@@ -1012,17 +1043,20 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     start: Expression::int(
                         0,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         2,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),
@@ -1049,11 +1083,13 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     start: Expression::int(
                         0,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
@@ -1115,6 +1151,7 @@ fn expression_sites_share_one_document_order_counter() {
             Expression::string_slice(
                 string_table.intern("expr"),
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
@@ -1133,14 +1170,16 @@ fn expression_sites_share_one_document_order_counter() {
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
             branch_body,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
         let chain_node =
-            builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
 
         // Third: a range loop with start (site 2), end (site 3), step (site 4).
         let loop_body = builder.push_text_node(
@@ -1159,17 +1198,20 @@ fn expression_sites_share_one_document_order_counter() {
                     start: Expression::int(
                         0,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end: Expression::int(
                         10,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     ),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: Some(Expression::int(
                         1,
                         SourceLocation::default(),
+                        None,
                         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
                     )),
                 }),

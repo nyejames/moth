@@ -31,7 +31,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderDependencyKind, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -239,11 +239,16 @@ fn facade_project_globals_dependency(
                 &clause.dependency.path,
                 &prepared.semantic.string_table,
             ) {
-                return Ok(Some(CompilerDiagnostic::invalid_dependency_clause(
+                let mut diagnostic = CompilerDiagnostic::invalid_dependency_clause(
                     clause.binding.clause_kind(),
                     InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
                     clause.dependency.location.clone(),
-                )));
+                );
+                diagnostic.primary_span = Some(SourceSpan::new(
+                    clause.dependency.dependency_shell_id.source,
+                    clause.dependency.span,
+                ));
+                return Ok(Some(diagnostic));
             }
         }
     }

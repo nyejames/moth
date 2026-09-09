@@ -73,6 +73,7 @@ impl<'a> HirBuilder<'a> {
                             mutable: false,
                             region,
                             source_info: Some(capture.location.clone()),
+                            span: capture.binding_span,
                         },
                         &capture.location,
                     )?;
@@ -86,11 +87,11 @@ impl<'a> HirBuilder<'a> {
 
                 Ok(local_ids)
             }
-
             MatchPattern::OptionPresentCapture {
                 binding_path,
                 inner_type_id,
                 binding_location,
+                binding_span,
                 ..
             } => {
                 let ty = self.lower_type_id(*inner_type_id, binding_location)?;
@@ -106,6 +107,7 @@ impl<'a> HirBuilder<'a> {
                         mutable: false,
                         region,
                         source_info: Some(binding_location.clone()),
+                        span: *binding_span,
                     },
                     binding_location,
                 )?;
@@ -176,12 +178,16 @@ impl<'a> HirBuilder<'a> {
                         &capture.location,
                     );
 
-                    self.emit_statement_kind(
+                    // Authored capture materialization: each arm-entry assignment
+                    // carries the capture's binding span, falling back to the
+                    // field span when the binding is identity-free.
+                    self.emit_statement_kind_with_span(
                         HirStatementKind::Assign {
                             target: HirPlace::Local(local_id),
                             value: payload_get,
                         },
                         &capture.location,
+                        capture.binding_span.or(capture.span),
                     )?;
                 }
 
@@ -191,6 +197,7 @@ impl<'a> HirBuilder<'a> {
             MatchPattern::OptionPresentCapture {
                 inner_type_id,
                 binding_location,
+                binding_span,
                 ..
             } => {
                 if capture_locals.is_empty() {
@@ -212,12 +219,14 @@ impl<'a> HirBuilder<'a> {
                     ValueKind::RValue,
                     region,
                 );
-                self.emit_statement_kind(
+                // Authored option capture materialization carries the binding span.
+                self.emit_statement_kind_with_span(
                     HirStatementKind::Assign {
                         target: HirPlace::Local(local_id),
                         value: payload_get,
                     },
                     binding_location,
+                    *binding_span,
                 )?;
                 Ok(())
             }

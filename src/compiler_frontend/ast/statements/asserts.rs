@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -38,6 +39,10 @@ pub(crate) fn parse_assert_statement(
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
     let assert_location = token_stream.current_location();
+    let assert_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let assert_name = string_table.intern("assert");
     let condition_name = string_table.intern("condition");
     let message_name = string_table.intern("message");
@@ -52,6 +57,7 @@ pub(crate) fn parse_assert_statement(
         DataType::StringSlice,
         type_interner.environment_mut_for_derived_types(),
         assert_location.clone(),
+        None,
     );
     let message_type_id = default_message.type_id;
 
@@ -150,6 +156,7 @@ pub(crate) fn parse_assert_statement(
     ast.push(AstNode {
         kind: NodeKind::Assert { condition, message },
         location: assert_location,
+        span: assert_span,
         scope: context.scope.clone(),
     });
 

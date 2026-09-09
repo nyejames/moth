@@ -15,6 +15,7 @@ use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize
 use crate::compiler_frontend::numeric_text::token::{
     NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
@@ -45,6 +46,7 @@ fn materialize_numeric_literal(
     token: &NumericLiteralToken,
     sign: NumericLiteralSign,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> LiteralPatternResult<Expression> {
     if token.kind == NumericLiteralKind::WholeNumber {
@@ -59,6 +61,7 @@ fn materialize_numeric_literal(
         Ok(Expression::int(
             value_i32,
             location,
+            span,
             ValueMode::ImmutableOwned,
         ))
     } else {
@@ -80,6 +83,7 @@ fn materialize_numeric_literal(
         Ok(Expression::float(
             float_value,
             location,
+            span,
             ValueMode::ImmutableOwned,
         ))
     }
@@ -135,10 +139,14 @@ pub(super) fn parse_literal_pattern(
         // Numeric literal — use the shared materialization helper.
         TokenKind::NumericLiteral(token) => {
             let location = token_stream.current_location();
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             let token = token.to_owned();
 
             let expression =
-                materialize_numeric_literal(&token, token.sign, location, string_table)?;
+                materialize_numeric_literal(&token, token.sign, location, span, string_table)?;
             token_stream.advance();
             expression
         }
@@ -146,19 +154,32 @@ pub(super) fn parse_literal_pattern(
         // Bool, char, and string literals.
         TokenKind::BoolLiteral(value) => {
             let location = token_stream.current_location();
-            let expression = Expression::bool(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
+            let expression = Expression::bool(*value, location, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
         TokenKind::CharLiteral(value) => {
             let location = token_stream.current_location();
-            let expression = Expression::char(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
+            let expression = Expression::char(*value, location, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
         TokenKind::StringSliceLiteral(value) => {
             let location = token_stream.current_location();
-            let expression = Expression::string_slice(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
+            let expression =
+                Expression::string_slice(*value, location, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
@@ -166,6 +187,10 @@ pub(super) fn parse_literal_pattern(
         // Negative numeric literal — consume the leading `-` then materialize via the helper.
         TokenKind::Negative => {
             let minus_sign_location = token_stream.current_location();
+            let minus_sign_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ));
             token_stream.advance();
 
             match token_stream.current_token_kind() {
@@ -175,6 +200,7 @@ pub(super) fn parse_literal_pattern(
                         &token,
                         NumericLiteralSign::Negative,
                         minus_sign_location,
+                        minus_sign_span,
                         string_table,
                     )?;
                     token_stream.advance();

@@ -31,6 +31,7 @@ fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
         location,
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -105,9 +106,9 @@ fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId, Bloc
 fn collection_literal(location: SourceLocation) -> Expression {
     crate::compiler_frontend::tests::type_id_fixture_support::collection_expr(
         vec![
-            Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
-            Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
-            Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
+            Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned),
+            Expression::int(2, location.clone(), None, ValueMode::ImmutableOwned),
+            Expression::int(3, location.clone(), None, ValueMode::ImmutableOwned),
         ],
         location,
         ValueMode::ImmutableOwned,
@@ -131,8 +132,8 @@ fn lowers_range_loop_with_new_syntax() {
                 index: None,
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(3, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -198,8 +199,8 @@ fn lowers_range_loop_without_user_bindings() {
                 index: None,
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(3, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -258,8 +259,8 @@ fn lowers_range_loop_with_index_binding() {
                 )),
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(4, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -335,7 +336,8 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let step_decl = node(
         NodeKind::VariableDeclaration(Declaration {
             id: step_symbol.clone(),
-            value: Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+            value: Expression::int(2, location.clone(), None, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }),
         location.clone(),
@@ -352,8 +354,8 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
                 index: None,
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(10, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(10, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 Some(inferred_type_reference_expr(
                     step_symbol,
@@ -411,8 +413,8 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                 index: None,
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(4, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -423,6 +425,7 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                             vec![runtime_operand_item(Expression::bool(
                                 true,
                                 location.clone(),
+                                None,
                                 ValueMode::ImmutableOwned,
                             ))],
                             builtin_type_ids::BOOL,
@@ -435,8 +438,10 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                                 value: Expression::int(
                                     1,
                                     location.clone(),
+                                    None,
                                     ValueMode::ImmutableOwned,
                                 ),
+                                binding_span: None,
                                 config_qualifier: None,
                             }),
                             location.clone(),
@@ -449,7 +454,13 @@ fn range_loop_nested_if_body_routes_tail_to_step_block() {
                 node(
                     NodeKind::VariableDeclaration(Declaration {
                         id: tail_value,
-                        value: Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                        value: Expression::int(
+                            2,
+                            location.clone(),
+                            None,
+                            ValueMode::ImmutableOwned,
+                        ),
+                        binding_span: None,
                         config_qualifier: None,
                     }),
                     location.clone(),
@@ -836,8 +847,8 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
                 )),
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(4, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(4, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -961,6 +972,7 @@ fn break_targets_exit_block_in_collection_loop() {
                         vec![runtime_operand_item(Expression::bool(
                             true,
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         ))],
                         builtin_type_ids::BOOL,
@@ -1083,8 +1095,8 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
                 index: None,
             },
             range: range_loop_spec(
-                Expression::int(0, location.clone(), ValueMode::ImmutableOwned),
-                Expression::int(3, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(0, location.clone(), None, ValueMode::ImmutableOwned),
+                Expression::int(3, location.clone(), None, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),

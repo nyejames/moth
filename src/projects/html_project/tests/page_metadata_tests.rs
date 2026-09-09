@@ -242,6 +242,7 @@ fn renders_structural_string_reserved_values() {
     plan.plan_origin(
         origin,
         Default::default(),
+        None,
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -315,6 +316,7 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
         vec![MetadataResourceUse {
             origin,
             authored_location: metadata_location,
+            authored_span: None,
         }]
     );
     assert!(plan.uses_site_root);

@@ -30,9 +30,9 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
     wrapper_references: &[TemplateWrapperReference],
     string_table: &StringTable,
 ) -> ChildWrapperResult<TemplateIrNodeId> {
-    let child_location = store
+    let (child_location, child_span) = store
         .get_node(child_node_id)
-        .map(|node| node.location.to_owned())
+        .map(|node| (node.location.to_owned(), node.span))
         .ok_or_else(|| {
             internal_compiler_error(
                 "TIR child wrapper application: child node ID was not present in the store.",
@@ -51,6 +51,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                 &layout,
                 vec![current_child_node_id],
                 child_location.clone(),
+                child_span,
                 string_table,
                 false,
             )?;
@@ -62,6 +63,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                     occurrence_id,
                 },
                 child_location.clone(),
+                None,
             ));
         } else {
             let combined_template_id = build_tir_prepended_wrapper_template(
@@ -81,6 +83,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                     occurrence_id,
                 },
                 child_location.clone(),
+                None,
             ));
         }
     }
@@ -95,9 +98,9 @@ fn build_tir_prepended_wrapper_template(
     child_node_id: TemplateIrNodeId,
     child_location: SourceLocation,
 ) -> ChildWrapperResult<TemplateIrId> {
-    let wrapper_location = store
+    let (wrapper_location, wrapper_span) = store
         .get_template(wrapper_reference.root)
-        .map(|wrapper_template| wrapper_template.location.to_owned())
+        .map(|wrapper_template| (wrapper_template.location.to_owned(), wrapper_template.span))
         .ok_or_else(|| {
             internal_compiler_error(
                 "TIR child wrapper application: wrapper template ID was not present in the store.",
@@ -112,6 +115,7 @@ fn build_tir_prepended_wrapper_template(
             occurrence_id,
         },
         wrapper_location.to_owned(),
+        None,
     ));
 
     let combined_root = store.push_node(TemplateIrNode::new(
@@ -119,6 +123,7 @@ fn build_tir_prepended_wrapper_template(
             children: vec![wrapper_node_id, child_node_id],
         },
         child_location,
+        None,
     ));
 
     let mut summary = TemplateIrSummary::default();
@@ -131,5 +136,6 @@ fn build_tir_prepended_wrapper_template(
         TemplateType::String,
         summary,
         wrapper_location,
+        wrapper_span,
     )))
 }

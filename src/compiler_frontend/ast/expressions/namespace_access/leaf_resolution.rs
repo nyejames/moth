@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
@@ -57,6 +58,7 @@ pub(super) fn resolve_namespace_value_member(
     value_member: &NamespaceValueMember,
     member_name: StringId,
     member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
     expected_result_evidence_allowed: bool,
 ) -> Result<(), ExpressionParseError> {
     match value_member {
@@ -65,12 +67,17 @@ pub(super) fn resolve_namespace_value_member(
             symbol_path,
             member_name,
             member_location,
+            member_span,
             expected_result_evidence_allowed,
         ),
 
-        NamespaceValueMember::ExternalSymbol(symbol_id) => {
-            resolve_external_value_member(context, *symbol_id, member_name, member_location)
-        }
+        NamespaceValueMember::ExternalSymbol(symbol_id) => resolve_external_value_member(
+            context,
+            *symbol_id,
+            member_name,
+            member_location,
+            member_span,
+        ),
     }
 }
 
@@ -88,6 +95,7 @@ fn resolve_source_value_member(
     symbol_path: &InternedPath,
     member_name: StringId,
     member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
     expected_result_evidence_allowed: bool,
 ) -> Result<(), ExpressionParseError> {
     let LeafDispatchContext {
@@ -120,6 +128,7 @@ fn resolve_source_value_member(
             generic_template,
             visible_name: member_name,
             call_location: member_location.clone(),
+            call_span: member_span,
             context,
             expression,
             allow_boundary_catch: *allow_boundary_catch,
@@ -133,6 +142,7 @@ fn resolve_source_value_member(
             context,
             type_interner,
             member_location.clone(),
+            member_span,
         );
         token_stream.advance();
 
@@ -146,6 +156,7 @@ fn resolve_source_value_member(
             ExpressionOperandInput {
                 operand: reference_expression,
                 wrapper_location: member_location,
+                wrapper_span: member_span,
             },
         )
     }
@@ -165,6 +176,7 @@ fn resolve_external_value_member(
     symbol_id: ExternalSymbolId,
     member_name: StringId,
     member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let LeafDispatchContext {
         token_stream,
@@ -181,6 +193,7 @@ fn resolve_external_value_member(
                 function_id,
                 member_name,
                 member_location,
+                member_span,
                 token_stream,
                 context,
                 type_interner,
@@ -195,6 +208,7 @@ fn resolve_external_value_member(
                 constant_id,
                 member_name,
                 member_location,
+                member_span,
                 token_stream,
                 context,
                 type_interner,

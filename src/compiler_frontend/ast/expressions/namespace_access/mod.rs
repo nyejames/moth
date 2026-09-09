@@ -24,6 +24,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, NamespaceRecordSource,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -71,6 +72,10 @@ pub(super) fn parse_namespace_access(
 
     token_stream.advance(); // move from namespace name to '.'
     let mut dot_location = token_stream.current_location();
+    let mut dot_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance(); // move from '.' to first member name
 
     let mut current_record = root_record;
@@ -80,6 +85,14 @@ pub(super) fn parse_namespace_access(
             dot_location.clone()
         } else {
             token_stream.current_location()
+        };
+        let member_span = if matches!(token_stream.current_token_kind(), TokenKind::Eof) {
+            dot_span
+        } else {
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            ))
         };
         let TokenKind::Symbol(member_name) = token_stream.current_token_kind().to_owned() else {
             return Err(CompilerDiagnostic::invalid_field_access(
@@ -116,6 +129,10 @@ pub(super) fn parse_namespace_access(
                 if has_following_dot {
                     token_stream.advance(); // to '.'
                     dot_location = token_stream.current_location();
+                    dot_span = Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    ));
                     token_stream.advance(); // to next member name
                     current_record = child_record;
                     continue;
@@ -155,6 +172,7 @@ pub(super) fn parse_namespace_access(
                     value_member,
                     member_name,
                     member_location,
+                    member_span,
                     expected_result_evidence_allowed,
                 );
             }

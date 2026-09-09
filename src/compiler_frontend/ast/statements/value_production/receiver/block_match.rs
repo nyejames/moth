@@ -26,6 +26,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 
@@ -37,6 +38,7 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b> {
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
     pub(super) classification: IfHeaderClassification,
 }
 
@@ -55,6 +57,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         target,
         string_table,
         location,
+        span,
         classification,
     } = input;
 
@@ -92,6 +95,7 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         scrutinee: header.scrutinee,
         pattern: header.pattern,
         location,
+        span,
     }))
 }
 
@@ -105,6 +109,7 @@ struct BlockValueMatchParseInput<'a, 'b> {
     scrutinee: Expression,
     pattern: MatchPattern,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 type BlockValueMatchResult<T> = Result<T, ExpressionParseError>;
@@ -122,6 +127,7 @@ fn parse_block_value_match(
         scrutinee,
         pattern,
         location,
+        span,
     } = input;
 
     let receiver_kind = target.receiver_kind;
@@ -147,16 +153,17 @@ fn parse_block_value_match(
     validate_value_match_completeness(&arms, default.as_deref(), &location)?;
 
     if needs_slot_inference {
-        return Ok(ParsedReceiverValue::NeedsSlotInference(ValueBlock::Match(
-            ValueMatchBlock {
+        return Ok(ParsedReceiverValue::NeedsSlotInference {
+            block: ValueBlock::Match(ValueMatchBlock {
                 scrutinee,
                 arms,
                 default,
                 exhaustiveness: MatchExhaustiveness::HasDefault,
                 location,
                 result_type_ids: Vec::new(),
-            },
-        )));
+            }),
+            span,
+        });
     }
 
     let result_type_id = infer_value_match_result_type(
@@ -178,6 +185,7 @@ fn parse_block_value_match(
             location,
             result_type_ids,
         },
+        span,
         result_type_id,
         type_interner.environment(),
     )))

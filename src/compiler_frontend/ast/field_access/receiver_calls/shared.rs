@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -32,7 +33,6 @@ use crate::compiler_frontend::traits::definitions::{
 };
 use crate::compiler_frontend::traits::evidence::TraitEvidenceDefinition;
 use crate::compiler_frontend::value_mode::ValueMode;
-
 pub(super) struct TraitSurfaceReceiverMethod {
     pub(super) method_path: InternedPath,
     pub(super) signature: FunctionSignature,
@@ -131,16 +131,20 @@ fn declaration_for_trait_bound_parameter(
     diagnostic_type: DataType,
     value_mode: ValueMode,
     location: SourceLocation,
+    span: Option<SourceSpan>,
+    binding_span: Option<SourceSpan>,
 ) -> Declaration {
     Declaration {
         id,
         value: Expression::new(
             ExpressionKind::NoValue,
             location,
+            span,
             type_id,
             diagnostic_type,
             value_mode,
         ),
+        binding_span,
         config_qualifier: None,
     }
 }
@@ -167,6 +171,9 @@ pub(super) fn signature_from_trait_requirement(
         diagnostic_type_spelling(receiver_type_id, type_environment),
         receiver_mode,
         requirement.location.clone(),
+        requirement.span,
+        // Synthetic receiver has no authored binding token.
+        None,
     ));
 
     for parameter in &requirement.parameters {
@@ -181,6 +188,8 @@ pub(super) fn signature_from_trait_requirement(
             diagnostic_type_spelling(type_id, type_environment),
             parameter.value_mode.clone(),
             parameter.location.clone(),
+            parameter.span,
+            parameter.span,
         ));
     }
 

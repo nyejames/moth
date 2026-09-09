@@ -337,7 +337,9 @@ fn parser_tir_records_if_else_if_else_branch_chain() {
     assert!(parent_template.summary.has_control_flow);
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -371,7 +373,9 @@ fn template_tir_records_child_template_in_branch_body() {
     let store = store.borrow();
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -436,7 +440,9 @@ fn branch_chain_from_root(
         .expect("BranchChain node should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches.clone(), *fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches.clone(), *fallback),
         other => panic!("expected BranchChain node, found {other:?}"),
     }
 }
@@ -864,6 +870,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         DataType::StringSlice,
         builtin_type_ids::STRING,
         source_location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
@@ -872,6 +879,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let declaration = Declaration {
         id: source_path.clone(),
         value: source_expression,
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -996,8 +1004,10 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
                 },
                 ..Default::default()
             },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -1217,6 +1227,7 @@ fn build_template_with_direct_tir_root(
             phase: TemplateTirPhase::Parsed,
             context,
         },
+        span: None,
     }
 }
 
@@ -1245,7 +1256,7 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
-                Expression::int(42, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(42, location.clone(), None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
                 location.clone(),
@@ -1305,12 +1316,14 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         source: source.clone(),
         type_id: builtin_type_ids::STRING,
         location: location.clone(),
+        span: None,
     };
     let expression = Expression::reference_with_type_id(
         source_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
         location.clone(),
+        None,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
@@ -1412,6 +1425,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         },
         type_id: builtin_type_ids::STRING,
         location: location.clone(),
+        span: None,
     };
 
     let mut template = build_template_with_direct_tir_root(
@@ -1772,6 +1786,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -1832,6 +1847,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -1942,11 +1958,13 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         Declaration {
             id: scope.append(string_table.intern("wrapper")),
             value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: scope.append(string_table.intern("heading")),
             value: Expression::template(insert, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
     ];
@@ -2039,7 +2057,9 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
     );
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -2071,7 +2091,9 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
     assert!(parent_template.summary.has_control_flow);
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -2356,6 +2378,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper.clone(), ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let mut parent_tokens =
@@ -2376,6 +2399,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut construction_context = TemplateConstructionContext::new(
         Rc::clone(&shared_store),
         parent_tokens.current_location(),
+        None,
     );
 
     let _parsed_head = parse_template_head(
@@ -2435,6 +2459,7 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 

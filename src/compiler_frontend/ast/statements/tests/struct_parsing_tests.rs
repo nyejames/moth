@@ -43,9 +43,11 @@ fn body_local_struct_default_preserves_missing_template_authority() {
                     context: TemplateViewContext::default(),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -65,9 +67,11 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
             DataType::Bool,
             builtin_type_ids::BOOL,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableReference,
             ConstRecordState::RuntimeValue,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 

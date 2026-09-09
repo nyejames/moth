@@ -69,9 +69,7 @@ pub fn parse_file_headers_with_table(
     runtime_fragment_offset: usize,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let file_id = file_tokens.file_id.ok_or_else(|| {
-        CompilerError::compiler_error("header parsing requires a retained source file identity")
-    })?;
+    let file_id = file_tokens.file_id;
     let HeaderParseOptions { entry_file_id, .. } = options;
 
     let is_entry_file = entry_file_id.map_or_else(

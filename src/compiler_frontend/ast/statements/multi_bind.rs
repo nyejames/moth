@@ -35,6 +35,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     BindingTargetSyntax, parse_binding_target_syntax,
 };
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -75,6 +76,14 @@ pub(crate) fn parse_multi_bind_statement(
 
     validate_unique_target_names(&parsed_targets, string_table)?;
     validate_multi_bind_target_identifiers(&parsed_targets, context, string_table)?;
+    let first_target = parsed_targets
+        .first()
+        .expect("a parsed multi-bind must contain at least one target");
+    let node_location = first_target.location.clone();
+    let node_span = Some(SourceSpan::new(
+        context.shared.declaring_file_id,
+        first_target.span,
+    ));
     let target_names = parsed_targets
         .iter()
         .map(|target| target.name)
@@ -139,7 +148,8 @@ pub(crate) fn parse_multi_bind_statement(
             targets: resolved_targets.targets,
             value: rhs_expression,
         },
-        location: token_stream.current_location(),
+        location: node_location,
+        span: node_span,
         scope: context.scope.clone(),
     }))
 }
@@ -489,15 +499,22 @@ fn resolve_multi_bind_targets(
 
             // Build the declaration with the canonical slot TypeId directly.
             // diagnostic_type is display-only; semantic identity comes from type_id.
+            // The binding anchor is the target-name token, not the placeholder value span.
+            let target_span = Some(SourceSpan::new(
+                context.shared.declaring_file_id,
+                target_syntax.span,
+            ));
             new_declarations.push(Declaration {
                 id: target_id.to_owned(),
                 value: Expression::new(
                     ExpressionKind::NoValue,
                     target_syntax.location.clone(),
+                    target_span,
                     *slot_type,
                     target_data_type.to_owned(),
                     target_ownership.to_owned(),
                 ),
+                binding_span: target_span,
                 config_qualifier: None,
             });
 
@@ -507,6 +524,10 @@ fn resolve_multi_bind_targets(
                 value_mode: target_ownership,
                 kind: MultiBindTargetKind::Declaration,
                 location: target_syntax.location.clone(),
+                span: Some(SourceSpan::new(
+                    context.shared.declaring_file_id,
+                    target_syntax.span,
+                )),
             });
             continue;
         };
@@ -520,6 +541,7 @@ fn resolve_multi_bind_targets(
             slot_index,
             string_table,
             type_interner.environment(),
+            context.shared.declaring_file_id,
         )?);
     }
 
@@ -542,6 +564,7 @@ fn resolve_existing_target(
     _slot_index: usize,
     _string_table: &StringTable,
     _type_environment: &TypeEnvironment,
+    source_id: SourceId,
 ) -> MultiBindResult<MultiBindTarget> {
     if target_syntax.binding_mode.is_mutable() {
         return Err(CompilerDiagnostic::invalid_multi_bind(
@@ -589,6 +612,7 @@ fn resolve_existing_target(
         value_mode: existing_declaration.value.value_mode.to_owned(),
         kind: MultiBindTargetKind::Assignment,
         location: target_syntax.location.clone(),
+        span: Some(SourceSpan::new(source_id, target_syntax.span)),
     })
 }
 

@@ -302,6 +302,7 @@ fn resource_destination_collision_preflights_before_read() {
         .plan_origin(
             origin,
             SourceLocation::default(),
+            None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -363,6 +364,7 @@ fn missing_module_source_preflights_before_reading_other_records() {
             .plan_origin(
                 origin,
                 SourceLocation::default(),
+                None,
                 ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
                 &mut string_table,
                 ResourceUseKind::Executable,
@@ -413,6 +415,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
         .plan_origin(
             origin,
             SourceLocation::default(),
+            None,
             ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -460,6 +463,7 @@ fn successful_resource_emit_reads_and_writes_bytes() {
                 profile: BuildProfile::Dev,
             },
             setting_location: SourceLocation::default(),
+            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };
@@ -669,6 +673,7 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
                 profile: BuildProfile::Dev,
             },
             setting_location: SourceLocation::default(),
+            setting_span: None,
         }),
         write_mode: WriteMode::AlwaysWrite,
     };

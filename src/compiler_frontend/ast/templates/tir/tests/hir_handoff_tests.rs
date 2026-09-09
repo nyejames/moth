@@ -103,6 +103,7 @@ fn text_node_id(
             origin: TemplateSegmentOrigin::Body,
         },
         SourceLocation::default(),
+        None,
     ))
 }
 
@@ -114,6 +115,7 @@ fn finish_text_template(store: &mut TemplateIrStore, root: TemplateIrNodeId) -> 
         TemplateType::StringFunction,
         summarize_existing_root(store, root).expect("text template root is acyclic"),
         SourceLocation::default(),
+        None,
     ))
 }
 
@@ -134,6 +136,7 @@ fn bool_reference_expression(string_table: &mut StringTable, name: &str) -> Expr
         DataType::Bool,
         builtin_type_ids::BOOL,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -185,6 +188,7 @@ fn child_template_node_id(
             occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ))
 }
 
@@ -270,24 +274,28 @@ fn build_branch_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             default_slot,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         ),
         TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             positional_slot,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         ),
     ];
-    let root = builder.push_branch_chain_node(branches, None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(branches, None, None, SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
@@ -326,6 +334,7 @@ fn build_loop_wrapper_template(
             condition: Box::new(Expression::bool(
                 true,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         },
@@ -396,6 +405,7 @@ fn build_expression_wrapper_template(
             site_id: expression_site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let mut builder = TemplateIrBuilder::new(store);
     let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
@@ -510,6 +520,7 @@ fn build_parent_with_inherited_wrapper_and_overlay(
                 occurrence_id: child_occurrence_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let parent_template_id = finish_text_template(store, child_node);
         let wrapper_reference = TemplateWrapperReference::new(
@@ -562,6 +573,7 @@ fn build_parent_with_inherited_wrapper_set(
             occurrence_id: child_occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let parent_template_id = finish_text_template(store, child_node);
 
@@ -676,6 +688,7 @@ fn owned_handoff_preserves_structural_string_pieces() {
             ],
         },
         SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -689,6 +702,7 @@ fn owned_handoff_preserves_structural_string_pieces() {
             site_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = finish_text_template(&mut store.borrow_mut(), dynamic_node);
 
@@ -730,13 +744,18 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
         let occurrence_id = store_ref.next_slot_occurrence_id();
         let slot = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Slot {
-                placeholder: TirSlotPlaceholder::new(
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
                     SlotKey::Default,
                     occurrence_id,
                     SourceLocation::default(),
+                    None,
+                    None,
+                    None,
+                    false,
                 ),
             },
             SourceLocation::default(),
+            None,
         ));
         let summary = summarize_existing_root(&store_ref, slot).expect("slot root is acyclic");
         let parent_id = store_ref.push_template(TemplateIr::new(
@@ -745,6 +764,7 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
             TemplateType::StringFunction,
             summary,
             SourceLocation::default(),
+            None,
         ));
         let slot_overlay_id = store_ref
             .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
@@ -789,13 +809,18 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
         let occurrence_id = store_ref.next_slot_occurrence_id();
         let slot = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Slot {
-                placeholder: TirSlotPlaceholder::new(
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
                     SlotKey::Default,
                     occurrence_id,
                     SourceLocation::default(),
+                    None,
+                    None,
+                    None,
+                    false,
                 ),
             },
             SourceLocation::default(),
+            None,
         ));
         let parent_id = finish_text_template(&mut store_ref, slot);
         let context = slot_resolution_context(
@@ -838,6 +863,7 @@ fn owned_handoff_preserves_child_boundary() {
                 occurrence_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let summary =
             summarize_existing_root(&store_ref, child_node).expect("child root is acyclic");
@@ -847,6 +873,7 @@ fn owned_handoff_preserves_child_boundary() {
             TemplateType::StringFunction,
             summary,
             SourceLocation::default(),
+            None,
         ))
     };
     let handoff = {
@@ -891,6 +918,7 @@ fn parent_root_expression_overlay_applies_inside_child() {
                 site_id: child_site_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let child_template_id = finish_text_template(&mut store_ref, child_root);
         let child_node = child_template_node_id(
@@ -902,7 +930,12 @@ fn parent_root_expression_overlay_applies_inside_child() {
             &mut store_ref,
             vec![(
                 child_site_id,
-                Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
             )],
         );
         (parent_id, child_site_id, context)
@@ -943,6 +976,7 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
                 expression: Box::new(Expression::string_slice(
                     stale_structural_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 origin: TemplateSegmentOrigin::Body,
@@ -950,6 +984,7 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
                 site_id: leaf_site_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let leaf_template_id = finish_text_template(&mut store_ref, leaf_root);
         let middle_child = child_template_node_id(
@@ -970,6 +1005,7 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
                 Expression::string_slice(
                     effective_root_text,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
             )],
@@ -980,12 +1016,14 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
     let body = materialize_parent_handoff(store, root_id, &mut strings, context);
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
         template: middle_template,
+        ..
     }) = &body
     else {
         panic!("expected root child template handoff, got {body:?}");
     };
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
         template: leaf_template,
+        ..
     }) = &middle_template.body
     else {
         panic!(
@@ -1030,6 +1068,7 @@ fn runtime_child_reference_uses_structural_handoff() {
                 site_id: child_site_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let child_template_id = finish_text_template(&mut store_ref, child_root);
         let child_node = child_template_node_id(
@@ -1086,6 +1125,7 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
             TemplateType::StringFunction,
             TemplateIrSummary::empty(),
             SourceLocation::default(),
+            None,
         ));
         let child_node = child_template_node_id(
             &mut store_ref,
@@ -1097,6 +1137,7 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
             TemplateType::StringFunction,
             TemplateIrSummary::empty(),
             SourceLocation::default(),
+            None,
         ));
         (parent_id, empty_context)
     };
@@ -1180,7 +1221,7 @@ fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
     let Some(aggregate_wrapper) = aggregate_wrapper else {
         panic!("expected aggregate wrapper to remain present");
     };
-    let OwnedRuntimeTemplateNode::Sequence { children } = aggregate_wrapper.as_ref() else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = aggregate_wrapper.as_ref() else {
         panic!(
             "expected aggregate wrapper sequence, got {:?}",
             aggregate_wrapper
@@ -1209,12 +1250,13 @@ fn inherited_wrapper_handoff_injects_through_child_template() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate { template }) =
-        body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
+        template, ..
+    }) = body
     else {
         panic!("expected child wrapper handoff, got {:?}", body);
     };
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children }) =
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
         template.body
     else {
         panic!("expected nested child sequence, got {:?}", template.body);
@@ -1239,7 +1281,12 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
             &mut store_ref,
             vec![(
                 expression_site_id,
-                Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+                Expression::bool(
+                    true,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
             )],
         );
         let (parent_id, context) = build_parent_with_inherited_wrapper_and_overlay(
@@ -1257,7 +1304,8 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children }) = body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
+        body
     else {
         panic!("expected wrapper sequence, got {:?}", body);
     };
@@ -1269,7 +1317,7 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
         matches!(expression.kind, ExpressionKind::Bool(true)),
         "wrapper overlay should override the wrapper expression"
     );
-    let OwnedRuntimeTemplateNode::ChildTemplate { template } = &children[1] else {
+    let OwnedRuntimeTemplateNode::ChildTemplate { template, .. } = &children[1] else {
         panic!("expected child handoff, got {:?}", children[1]);
     };
     let OwnedRuntimeTemplateBody::Render(child_body) = &template.body else {
@@ -1309,7 +1357,8 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children }) = body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
+        body
     else {
         panic!("expected outer wrapper sequence, got {body:?}");
     };
@@ -1319,6 +1368,7 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
+        ..
     } = &children[1]
     else {
         panic!("expected inner wrapper sequence, got {:?}", children[1]);
@@ -1375,7 +1425,7 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
     // The original child is carried unwrapped beside the aggregate wrapper tree.
     assert_owned_text_node(&child, "child");
 
-    let OwnedRuntimeTemplateNode::Sequence { children } = wrapper.as_ref() else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapper.as_ref() else {
         panic!("expected outer wrapper sequence, got {:?}", wrapper);
     };
     assert_eq!(children.len(), 3);
@@ -1384,6 +1434,7 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
+        ..
     } = &children[1]
     else {
         panic!("expected inner wrapper sequence, got {:?}", children[1]);
@@ -1414,7 +1465,8 @@ fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children }) = body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
+        body
     else {
         panic!("expected slotless wrapper sequence, got {:?}", body);
     };
@@ -1441,7 +1493,8 @@ fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child()
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children }) = body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
+        body
     else {
         panic!("expected named-only wrapper sequence, got {:?}", body);
     };
@@ -1496,19 +1549,25 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
         let slot_occurrence_id = store_ref.next_slot_occurrence_id();
         let slot = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Slot {
-                placeholder: TirSlotPlaceholder::new(
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
                     SlotKey::Default,
                     slot_occurrence_id,
                     SourceLocation::default(),
+                    None,
+                    None,
+                    None,
+                    false,
                 ),
             },
             SourceLocation::default(),
+            None,
         ));
         let wrapper_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence {
                 children: vec![slot, TemplateIrNodeId::new(9999)],
             },
             SourceLocation::default(),
+            None,
         ));
         let wrapper_template_id = store_ref.push_template(TemplateIr::new(
             wrapper_root,
@@ -1516,6 +1575,7 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
             TemplateType::String,
             TemplateIrSummary::empty(),
             SourceLocation::default(),
+            None,
         ));
         build_parent_with_inherited_wrapper(
             &mut store_ref,
@@ -1550,6 +1610,7 @@ fn missing_child_in_wrapper_propagates_layout_error() {
                 occurrence_id: missing_child_occurrence_id,
             },
             SourceLocation::default(),
+            None,
         ));
         let wrapper_template_id = store_ref.push_template(TemplateIr::new(
             missing_child_node,
@@ -1557,6 +1618,7 @@ fn missing_child_in_wrapper_propagates_layout_error() {
             TemplateType::StringFunction,
             TemplateIrSummary::empty(),
             SourceLocation::default(),
+            None,
         ));
         build_parent_with_inherited_wrapper(
             &mut store_ref,
@@ -1586,6 +1648,7 @@ fn runtime_site_template(
     let runtime_site = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::RuntimeSlotSite { plan, site },
         SourceLocation::default(),
+        None,
     ));
     let template_id = store.push_template(TemplateIr::new(
         runtime_site,
@@ -1593,6 +1656,7 @@ fn runtime_site_template(
         TemplateType::StringFunction,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
     store
         .attach_runtime_slot_plan(template_id, plan)
@@ -1613,7 +1677,9 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
             key: SlotKey::Default,
             render_root,
             location: SourceLocation::default(),
+            span: None,
         }],
+        span: None,
     });
     let other_plan = store.push_slot_plan(TemplateSlotPlan {
         location: SourceLocation::default(),
@@ -1623,7 +1689,9 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
             key: SlotKey::Default,
             render_root,
             location: SourceLocation::default(),
+            span: None,
         }],
+        span: None,
     });
     let template_id = runtime_site_template(&mut store, other_plan, RuntimeSlotSiteId(0));
     store
@@ -1642,6 +1710,7 @@ fn handoff_rejects_out_of_range_runtime_slot_site() {
         location: SourceLocation::default(),
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
+        span: None,
     });
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
 
@@ -1664,7 +1733,9 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
             key: SlotKey::Default,
             render_root,
             location: SourceLocation::default(),
+            span: None,
         }],
+        span: None,
     });
     MalformedTirStore::new(&mut store).replace_slot_sites(
         plan,
@@ -1673,6 +1744,7 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
             key: SlotKey::Default,
             render_root,
             location: SourceLocation::default(),
+            span: None,
         }],
     );
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
@@ -1697,6 +1769,7 @@ fn handoff_rejects_mismatched_loop_header_shape() {
                 condition: Box::new(Expression::bool(
                     false,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             },
@@ -1707,6 +1780,7 @@ fn handoff_rejects_mismatched_loop_header_shape() {
             aggregate_wrapper: None,
         },
         SourceLocation::default(),
+        None,
     ));
     let template_id = finish_text_template(&mut store, loop_node);
     let view = view_for(&store, template_id, TemplateViewContext::default());
@@ -1733,6 +1807,7 @@ fn handoff_rejects_exact_view_child_cycle() {
         TemplateType::StringFunction,
         TemplateIrSummary::empty(),
         SourceLocation::default(),
+        None,
     ));
     assert_eq!(actual_id, template_id);
 

@@ -167,6 +167,7 @@ impl TraitEnvironment {
             parameters: Vec::new(),
             returns,
             location: location.clone(),
+            span: None,
         };
 
         let definition = ResolvedTraitDefinition {
@@ -516,11 +517,13 @@ pub(crate) fn requirement_parameter_from_type(
     value_mode: ValueMode,
     type_id: TypeId,
     location: SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> ResolvedTraitParameter {
     ResolvedTraitParameter {
         name,
         value_mode,
         type_id,
         location,
+        span,
     }
 }

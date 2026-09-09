@@ -381,6 +381,7 @@ fn parse_option_present_capture_if_header(
     let MatchPattern::OptionPresentCapture {
         name,
         binding_location,
+        binding_span,
         inner_type_id: capture_inner_type_id,
         location: pattern_location,
         ..
@@ -394,11 +395,11 @@ fn parse_option_present_capture_if_header(
         )
         .into());
     };
-
     let (then_context, pattern) = build_option_present_capture_scope_and_pattern(
         context,
         *name,
         binding_location,
+        *binding_span,
         *capture_inner_type_id,
         pattern_location,
         type_interner,

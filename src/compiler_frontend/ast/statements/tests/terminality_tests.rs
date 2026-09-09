@@ -23,6 +23,7 @@ fn int_return(line: i32) -> AstNode {
         NodeKind::Return(vec![Expression::int(
             line,
             test_source_location(line),
+            None,
             ValueMode::ImmutableOwned,
         )]),
         test_source_location(line),
@@ -35,11 +36,17 @@ fn assert_bool(condition: bool, line: i32) -> AstNode {
             condition: Expression::bool(
                 condition,
                 test_source_location(line),
+                None,
                 ValueMode::ImmutableOwned,
             ),
             // Terminality only inspects the condition; this fixture keeps a typed expression
             // placeholder because parsed assertions always carry the canonical optional value.
-            message: Expression::bool(true, test_source_location(line), ValueMode::ImmutableOwned),
+            message: Expression::bool(
+                true,
+                test_source_location(line),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
         },
         test_source_location(line),
     )
@@ -50,6 +57,7 @@ fn expression_statement(line: i32) -> AstNode {
         NodeKind::ExpressionStatement(Expression::int(
             line,
             test_source_location(line),
+            None,
             ValueMode::ImmutableOwned,
         )),
         test_source_location(line),
@@ -176,7 +184,12 @@ fn terminal_statement_after_fallthrough_statement_is_terminal() {
 fn if_requires_both_branches_to_terminate() {
     let terminal_both = node(
         NodeKind::If(
-            Expression::bool(true, test_source_location(1), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                test_source_location(1),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             vec![int_return(2)],
             Some(vec![int_return(3)]),
             test_if_branch_metadata(true),
@@ -186,7 +199,12 @@ fn if_requires_both_branches_to_terminate() {
 
     let terminal_then_only = node(
         NodeKind::If(
-            Expression::bool(true, test_source_location(4), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                test_source_location(4),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             vec![int_return(5)],
             Some(vec![expression_statement(6)]),
             test_if_branch_metadata(true),
@@ -196,7 +214,12 @@ fn if_requires_both_branches_to_terminate() {
 
     let no_else = node(
         NodeKind::If(
-            Expression::bool(true, test_source_location(7), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                test_source_location(7),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             vec![int_return(8)],
             None,
             test_if_branch_metadata(false),
@@ -236,11 +259,12 @@ fn if_requires_both_branches_to_terminate() {
 fn match_requires_all_arms_and_default_to_terminate() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -254,11 +278,12 @@ fn match_requires_all_arms_and_default_to_terminate() {
 
     let non_terminal_default = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(5), ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, test_source_location(5), None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(6),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -293,11 +318,12 @@ fn match_requires_all_arms_and_default_to_terminate() {
 fn exhaustive_choice_match_does_not_require_default() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,
@@ -323,11 +349,12 @@ fn exhaustive_choice_match_does_not_require_default() {
 fn match_marked_has_default_without_default_body_is_not_terminal() {
     let malformed_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+            scrutinee: Expression::int(1, test_source_location(1), None, ValueMode::ImmutableOwned),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Literal(Expression::int(
                     1,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
                 guard: None,

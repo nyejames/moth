@@ -39,7 +39,13 @@ use std::path::Path;
 fn text_declaration(path: &str, text: StringId, string_table: &mut StringTable) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
-        value: Expression::string_slice(text, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::string_slice(
+            text,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -68,6 +74,7 @@ fn structural_string_declaration(
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::structural_string(pieces, SourceLocation::default()),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -80,10 +87,12 @@ fn template_declaration(path: &str, string_table: &mut StringTable) -> Declarati
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::template(template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -341,11 +350,13 @@ fn record_declaration(
             InternedPath::from_single_str("Record", string_table),
             fields,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             true,
             None,
             TypeEnvironment::default().builtins().none,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -353,7 +364,8 @@ fn record_declaration(
 fn int_field(name: &str, location: SourceLocation, string_table: &mut StringTable) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(name, string_table),
-        value: Expression::int(7, location, ValueMode::ImmutableOwned),
+        value: Expression::int(7, location, None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -439,9 +451,11 @@ fn const_record_aliases_share_the_target_root() {
             DataType::Inferred,
             type_environment.anonymous_const_record_type(),
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             ConstRecordState::ConstRecord,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 

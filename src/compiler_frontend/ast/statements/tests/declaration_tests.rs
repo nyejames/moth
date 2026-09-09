@@ -493,7 +493,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             vec![],
             0,
         )
-        .with_declaring_file_id(Some(file_id));
+        .with_declaring_file_id(file_id);
         let initializer = super::declaration_initializer_stream(
             &source_path.append(name),
             declaration.initializer_tokens,
@@ -505,7 +505,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         .expect("initializer must retain its declaration's source owner");
         let terminator = initializer.tokens.last().unwrap();
         assert_eq!(terminator.kind, TokenKind::Eof);
-        assert_eq!(initializer.file_id, Some(file_id));
+        assert_eq!(initializer.file_id, file_id);
         sources
             .install_extended_spans(file_id, builder.freeze())
             .expect("the original table must install after the final span producer");

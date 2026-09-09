@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::{
     ExternalConstantId, ExternalConstantValue, ExternalFunctionId,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -33,6 +34,7 @@ pub(super) struct ExternalNamespaceFunctionMemberInput<'a, 'env> {
     pub(super) function_id: ExternalFunctionId,
     pub(super) member_name: StringId,
     pub(super) member_location: SourceLocation,
+    pub(super) member_span: Option<SourceSpan>,
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
@@ -54,6 +56,7 @@ pub(super) fn parse_external_namespace_function_member(
         function_id,
         member_name,
         member_location,
+        member_span,
         token_stream,
         context,
         type_interner,
@@ -97,6 +100,7 @@ pub(super) fn parse_external_namespace_function_member(
             external_function_id: function_id,
             external_function,
             call_location: member_location.clone(),
+            call_span: member_span.clone(),
             context,
             value_required: true,
             allow_boundary_catch: allow_boundary_catch
@@ -129,6 +133,7 @@ pub(super) struct ExternalNamespaceConstantMemberInput<'a, 'env> {
     pub(super) constant_id: ExternalConstantId,
     pub(super) member_name: StringId,
     pub(super) member_location: SourceLocation,
+    pub(super) member_span: Option<SourceSpan>,
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
@@ -150,6 +155,7 @@ pub(super) fn parse_external_namespace_constant_member(
         constant_id,
         member_name,
         member_location,
+        member_span,
         token_stream,
         context,
         type_interner,
@@ -157,7 +163,6 @@ pub(super) fn parse_external_namespace_constant_member(
         allow_boundary_catch,
         string_table,
     } = input;
-
     // Verify the external constant metadata is still registered.
     let Some(constant_definition) = context
         .external_package_registry
@@ -184,17 +189,21 @@ pub(super) fn parse_external_namespace_constant_member(
 
     let constant_expression = match constant_definition.value {
         ExternalConstantValue::Float(value) => {
-            Expression::float(value, member_location, value_mode)
+            Expression::float(value, member_location, member_span, value_mode)
         }
 
-        ExternalConstantValue::Int(value) => Expression::int(value, member_location, value_mode),
+        ExternalConstantValue::Int(value) => {
+            Expression::int(value, member_location, member_span, value_mode)
+        }
 
         ExternalConstantValue::StringSlice(value) => {
             let string_id = string_table.intern(value);
-            Expression::string_slice(string_id, member_location, value_mode)
+            Expression::string_slice(string_id, member_location, member_span, value_mode)
         }
 
-        ExternalConstantValue::Bool(value) => Expression::bool(value, member_location, value_mode),
+        ExternalConstantValue::Bool(value) => {
+            Expression::bool(value, member_location, member_span, value_mode)
+        }
     };
 
     push_expression_operand(

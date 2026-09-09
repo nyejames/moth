@@ -53,6 +53,7 @@ use crate::compiler_frontend::declaration_syntax::r#struct::{
     parse_struct_shell, validate_struct_default_values,
 };
 use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -140,12 +141,13 @@ fn reject_config_qualifiers_on_record_fields(
 
     for field in fields {
         if let Some(qualifier) = &field.config_qualifier {
-            return Err(CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                 field.id.name(),
                 InvalidConfigReason::ConfigQualifierInvalidPlacement,
                 qualifier.qualifier_location.clone(),
-            )
-            .into());
+            );
+            diagnostic.primary_span = qualifier.qualifier_span;
+            return Err(diagnostic.into());
         }
     }
 
@@ -184,6 +186,7 @@ pub(crate) struct ResolvedDeclaration {
     pub(crate) statement_kind: ResolvedDeclarationStatementKind,
     pub(crate) is_compile_time_binding: bool,
     pub(crate) binding_location: SourceLocation,
+    pub(crate) binding_span: Option<SourceSpan>,
 }
 
 /// Statement-level shape that declaration parsing discovered alongside the binding value.
@@ -227,6 +230,10 @@ pub(crate) fn new_declaration(
     // This differs from `declaration.value.location` (the initializer expression location)
     // and is used for immutable-assignment secondary labels pointing at the original binding.
     let binding_location = token_stream.current_location();
+    let binding_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
 
     // Move past the name
     token_stream.advance();
@@ -283,7 +290,9 @@ pub(crate) fn new_declaration(
                     function_signature.to_owned(),
                     function_type_id,
                     token_stream.current_location(),
+                    binding_span,
                 ),
+                binding_span,
                 config_qualifier: None,
             },
             statement_kind: ResolvedDeclarationStatementKind::Function {
@@ -292,6 +301,7 @@ pub(crate) fn new_declaration(
             },
             is_compile_time_binding: false,
             binding_location,
+            binding_span,
         });
     }
 
@@ -326,9 +336,8 @@ pub(crate) fn new_declaration(
     ) {
         context.emit_warning(warning);
     }
-
     let is_compile_time_binding = declaration_syntax.binding_mode.is_compile_time();
-    let declaration = resolve_declaration_syntax(
+    let mut declaration = resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
         &token_stream.path_syntax,
@@ -336,6 +345,10 @@ pub(crate) fn new_declaration(
         type_interner,
         string_table,
     )?;
+    // The binding anchor is the declaration-name token captured on entry, not the
+    // initializer value span. `resolve_declaration_syntax` leaves it empty for this
+    // body-local path; restore the exact anchor here.
+    declaration.binding_span = binding_span;
     let statement_kind = match &declaration.value.kind {
         ExpressionKind::StructDefinition(params) => {
             ResolvedDeclarationStatementKind::StructDefinition(params.to_owned())
@@ -348,6 +361,7 @@ pub(crate) fn new_declaration(
         statement_kind,
         is_compile_time_binding,
         binding_location,
+        binding_span,
     })
 }
 
@@ -400,12 +414,13 @@ pub fn resolve_declaration_syntax(
         && !config_resolution_context
         && !source_build_config_context
     {
-        return Err(CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
             qualified_name.name(),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
             qualifier.qualifier_location.clone(),
-        )
-        .into());
+        );
+        diagnostic.primary_span = qualifier.qualifier_span;
+        return Err(diagnostic.into());
     }
 
     // ----------------------------
@@ -512,6 +527,7 @@ pub fn resolve_declaration_syntax(
         return Ok(Declaration {
             id: qualified_name,
             value: parsed_initializer,
+            binding_span: None,
             config_qualifier,
         });
     }
@@ -586,12 +602,17 @@ pub fn resolve_declaration_syntax(
                 || declaration_location.clone(),
                 |qualifier| qualifier.qualifier_location.clone(),
             ),
+            declaration_syntax
+                .config_qualifier
+                .as_ref()
+                .and_then(|qualifier| qualifier.qualifier_span),
             type_interner,
             string_table,
         );
         return Ok(Declaration {
             id: qualified_name,
             value,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -654,6 +675,10 @@ pub fn resolve_declaration_syntax(
             Expression::struct_definition(
                 params,
                 initializer_stream.current_location(),
+                Some(SourceSpan::new(
+                    initializer_stream.file_id,
+                    declaration_syntax.span,
+                )),
                 value_mode.to_owned(),
             )
         }
@@ -844,6 +869,7 @@ pub fn resolve_declaration_syntax(
     Ok(Declaration {
         id: qualified_name,
         value: parsed_initializer,
+        binding_span: None,
         config_qualifier,
     })
 }

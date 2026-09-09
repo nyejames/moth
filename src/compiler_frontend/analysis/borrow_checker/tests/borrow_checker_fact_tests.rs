@@ -64,14 +64,14 @@ fn statement_terminator_and_value_facts_are_populated() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x.clone(),
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y.clone(),
-                    Expression::int(0, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(2), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
@@ -81,6 +81,7 @@ fn statement_terminator_and_value_facts_are_populated() {
                         vec![runtime_operand_item(Expression::bool(
                             true,
                             test_source_location(3),
+                            None,
                             ValueMode::ImmutableOwned,
                         ))],
                         builtin_type_ids::BOOL,
@@ -98,6 +99,7 @@ fn statement_terminator_and_value_facts_are_populated() {
                             value: Expression::int(
                                 2,
                                 test_source_location(4),
+                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -114,6 +116,7 @@ fn statement_terminator_and_value_facts_are_populated() {
                             value: Expression::int(
                                 3,
                                 test_source_location(5),
+                                None,
                                 ValueMode::ImmutableOwned,
                             ),
                         },
@@ -192,6 +195,7 @@ fn assertion_failure_message_is_collected_as_a_borrow_value_root() {
         ty: builtin_type_ids::STRING,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     };
     let terminator = HirTerminator::AssertFailure {
         message: message.clone(),
@@ -223,7 +227,7 @@ fn drop_statement_produces_statement_fact() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                Expression::int(1, test_source_location(1), None, ValueMode::MutableOwned),
             )),
             test_source_location(1),
         )],
@@ -257,6 +261,7 @@ fn drop_statement_produces_statement_fact() {
         id: HirNodeId(next_statement_id),
         kind: HirStatementKind::Drop(drop_local),
         location: test_source_location(2),
+        span: None,
     });
 
     let report = run_borrow_checker(&hir, &external_package_registry, &string_table)
@@ -291,7 +296,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     data.clone(),
-                    Expression::int(7, test_source_location(1), ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(1), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -383,7 +388,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     source.clone(),
-                    Expression::int(7, test_source_location(10), ValueMode::MutableOwned),
+                    Expression::int(7, test_source_location(10), None, ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -402,7 +407,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel,
-                    Expression::int(0, test_source_location(12), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(12), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(12),
             ),
@@ -1035,6 +1040,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             error_type_id: builtin_type_ids::STRING,
             handling: FallibleExpressionHandling::Propagate,
             location: test_source_location(2),
+            span: None,
         },
         &mut expression_types,
     );
@@ -1107,6 +1113,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::string_slice(
                         string_table.intern("hello"),
                         test_source_location(5),
+                        None,
                         ValueMode::MutableOwned,
                     ),
                 )),
@@ -1131,6 +1138,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                         FallibleExpressionHandling::Propagate,
                         &mut expression_types,
                         test_source_location(6),
+                        None,
                     ),
                 )),
                 test_source_location(6),
@@ -1138,7 +1146,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel_name,
-                    Expression::int(0, test_source_location(7), ValueMode::ImmutableOwned),
+                    Expression::int(0, test_source_location(7), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(7),
             ),
@@ -1147,11 +1155,13 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::string_slice(
                         string_table.intern("done"),
                         test_source_location(8),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                     Expression::string_slice(
                         string_table.intern("done"),
                         test_source_location(8),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 ]),

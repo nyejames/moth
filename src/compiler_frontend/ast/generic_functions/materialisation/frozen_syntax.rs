@@ -16,19 +16,32 @@ use std::sync::Arc;
 /// Owned frozen token buffer retained by one generic declaration artefact.
 ///
 /// WHAT: preserves the already-tokenized body as canonical [`Token`] values whose `StringId`
-///       payloads index one context-local immutable frozen string pool.
-/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `SourceId`, filesystem
-///      paths, or a mutable string table. Freezing remaps donor IDs into the pool once.
-///      Materialisation merges the pool into the fresh generated-local table once and remaps every
-///      token payload through that single pool remap, without running tokenization again.
+///       payloads index one context-local immutable frozen string pool, plus the exact donor
+///       `SourceId` that owns the body's spans and path rows.
+/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, filesystem paths,
+///      or a mutable string table. Freezing remaps donor string IDs into the pool once, while the
+///      donor `SourceId` is retained verbatim as the materialised owner. Materialisation merges
+///      the pool into the fresh generated-local table once and remaps every token payload through
+///      that single pool remap, without running tokenization again.
+/// OWNERSHIP: every materialised token stream carries this donor identity via
+///      `FileTokens::new_frozen(..., donor_file_id, ...)` and the frozen facts owner. The donor
+///      range is never silently remapped onto the requester call-site source, no magic identity
+///      is fabricated, and independent package/cross-module handles stay distinct. A future
+///      `FrozenIdentityContext` remap across compilation databases remains the only sanctioned
+///      rebinding; until that boundary lands, the donor identity is the explicit owner.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     /// Declaration-qualified stream path, such as `file/generic_function`.
     ///
     /// This path names the token stream's semantic declaration context. The owning source-file
-    /// identity deliberately remains on `GenericTemplateArtefact`, because token and path-row
-    /// locations are file-scoped rather than declaration-scoped.
+    /// identity lives in `donor_file_id`, because token and path-row locations are file-scoped
+    /// rather than declaration-scoped.
     pub(super) declaration_path: Box<[String]>,
+    /// Exact owning source identity captured from `FileTokens::file_id`.
+    ///
+    /// Retained verbatim so materialisation can restore a concrete `FileTokens::file_id` and a
+    /// matching frozen-facts owner.
+    pub(super) donor_file_id: crate::compiler_frontend::source::SourceId,
     pub(super) pool: Box<[String]>,
     pub(super) tokens: Box<[Token]>,
     /// Canonical table vocabulary retained only for the path rows referenced by this body.
@@ -127,6 +140,7 @@ impl StableBodySyntax {
 
         Ok(Self {
             declaration_path: stable_path(&tokens.src_path, string_table),
+            donor_file_id: tokens.file_id,
             pool: pool.finish(),
             tokens: frozen_tokens.into_boxed_slice(),
             path_syntax,
@@ -174,14 +188,22 @@ impl StableBodySyntax {
             .map(|reference| reference.materialise(&remap, string_table))
             .collect::<Result<Vec<_>, CompilerError>>()?;
         let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
+            self.donor_file_id,
             resolved_file_references,
         )?);
 
-        // The donor SourceId is deliberately not retained because published materialisation
-        // contexts can cross compilation databases. Phase 1F supplies the remapped consuming
-        // identity.
+        // Retain the captured donor identity as the explicit materialised owner. The donor range
+        // stays distinct from the requester call-site source; cross-database rebinding waits for
+        // the final `FrozenIdentityContext` migration, which is reported as the remaining
+        // prerequisite and must never be emulated with a magic identity or `None`.
         Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen(declaration_path, None, tokens, path_syntax),
+            file_tokens: FileTokens::new_frozen(
+                declaration_path,
+                self.donor_file_id,
+                None,
+                tokens,
+                path_syntax,
+            ),
             resolution_facts,
         })
     }

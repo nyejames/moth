@@ -254,7 +254,7 @@ fn resolve_struct_field_defaults(
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
-    declaring_file_id: Option<SourceId>,
+    declaring_file_id: SourceId,
 }
 
 fn inline_visible_constant_references(
@@ -278,6 +278,7 @@ fn inline_visible_constant_references(
                 .map(|declaration| {
                     let mut resolved = declaration.value.to_owned();
                     resolved.location = expression.location.clone();
+                    resolved.span = expression.span;
                     resolved
                 })
                 .unwrap_or_else(|| expression.to_owned()))
@@ -370,6 +371,7 @@ fn inline_visible_constant_references(
                         template_ir_store,
                         string_table,
                     )?,
+                    binding_span: field.binding_span,
                     config_qualifier: None,
                 });
             }
@@ -493,6 +495,7 @@ fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -
     let mut rewritten = Expression::new(
         kind,
         expression.location.clone(),
+        expression.span,
         expression.type_id,
         expression.diagnostic_type.to_owned(),
         expression.value_mode.to_owned(),

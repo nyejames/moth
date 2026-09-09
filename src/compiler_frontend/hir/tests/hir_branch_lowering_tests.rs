@@ -95,6 +95,7 @@ fn lowers_if_to_then_else_merge_blocks() {
                 vec![runtime_operand_item(Expression::bool(
                     true,
                     test_source_location(2),
+                    None,
                     ValueMode::ImmutableOwned,
                 ))],
                 builtin_type_ids::BOOL,
@@ -104,14 +105,14 @@ fn lowers_if_to_then_else_merge_blocks() {
             vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(2), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             )],
             Some(vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, test_source_location(3), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(3),
             )]),
@@ -170,7 +171,7 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
         },
         vec![node(
             NodeKind::If(
-                Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                Expression::bool(true, location.clone(), None, ValueMode::ImmutableOwned),
                 vec![],
                 None,
                 test_if_branch_metadata(false),
@@ -202,6 +203,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             NodeKind::Return(vec![Expression::bool(
                 true,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -214,6 +216,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             runtime_operand_item(Expression::bool(
                 false,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             runtime_function_call_item(
@@ -241,6 +244,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
                         location.clone(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     location.clone(),
@@ -331,6 +335,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             NodeKind::Return(vec![Expression::bool(
                 false,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -343,6 +348,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             runtime_operand_item(Expression::bool(
                 true,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
             runtime_function_call_item(
@@ -370,6 +376,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
                         location.clone(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                     location.clone(),
@@ -474,14 +481,14 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     lhs_name,
-                    Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::bool(false, location.clone(), None, ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     rhs_name,
-                    Expression::bool(true, location.clone(), ValueMode::MutableOwned),
+                    Expression::bool(true, location.clone(), None, ValueMode::MutableOwned),
                 )),
                 location.clone(),
             ),
@@ -492,6 +499,7 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
                         NodeKind::ExpressionStatement(Expression::int(
                             1,
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         )),
                         location.clone(),
@@ -580,6 +588,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                     vec![runtime_operand_item(Expression::bool(
                         true,
                         location.clone(),
+                        None,
                         ValueMode::ImmutableOwned,
                     ))],
                     builtin_type_ids::BOOL,
@@ -596,6 +605,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             })),
         },
         location.clone(),
+        None,
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -611,14 +621,14 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     left_name,
-                    Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(1, location.clone(), None, ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     right_name,
-                    Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(2, location.clone(), None, ValueMode::ImmutableOwned),
                 )),
                 location.clone(),
             ),
@@ -690,6 +700,7 @@ fn assertion_failure_uses_message_value_block_tail() {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         )],
                         location: location.clone(),
@@ -701,6 +712,7 @@ fn assertion_failure_uses_message_value_block_tail() {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         )],
                         location: location.clone(),
@@ -715,6 +727,7 @@ fn assertion_failure_uses_message_value_block_tail() {
             })),
         },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -813,6 +826,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("message"),
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )]),
             location.clone(),
@@ -841,7 +855,12 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    true,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 message: Expression::coerced(message, option_string),
             },
             location.clone(),
@@ -897,6 +916,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         )],
                         location: location.clone(),
@@ -908,6 +928,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
                             location.clone(),
+                            None,
                             ValueMode::ImmutableOwned,
                         )],
                         location: location.clone(),
@@ -922,6 +943,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
             })),
         },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -946,7 +968,12 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(
+                    false,
+                    location.clone(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 message,
             },
             location.clone(),
@@ -1000,6 +1027,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                     vec![runtime_operand_item(Expression::bool(
                         true,
                         test_source_location(8),
+                        None,
                         ValueMode::ImmutableOwned,
                     ))],
                     builtin_type_ids::BOOL,
@@ -1010,6 +1038,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                     NodeKind::Return(vec![Expression::int(
                         1,
                         test_source_location(8),
+                        None,
                         ValueMode::ImmutableOwned,
                     )]),
                     test_source_location(8),
@@ -1018,6 +1047,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                     NodeKind::Return(vec![Expression::int(
                         2,
                         test_source_location(9),
+                        None,
                         ValueMode::ImmutableOwned,
                     )]),
                     test_source_location(9),

@@ -19,20 +19,20 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveArgumentType, StyleDirectiveArgumentValue, StyleDirectiveEffects,
     StyleDirectiveHandlerSpec,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
-
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
-#[derive(Clone)]
 struct ParsedHandlerDirectiveArgument {
     value: Option<StyleDirectiveArgumentValue>,
     error_location: SourceLocation,
+    error_span: Option<SourceSpan>,
 }
 
 pub(super) fn apply_handler_style_directive(
@@ -58,11 +58,12 @@ pub(super) fn apply_handler_style_directive(
     if let Some(factory) = handler_spec.formatter_factory {
         let formatter = factory(parsed_argument.value.as_ref()).map_err(|message| {
             let message_id = string_table.get_or_intern(message);
-            TemplateError::from(CompilerDiagnostic::invalid_template_directive(
+            let diagnostic = CompilerDiagnostic::invalid_template_directive(
                 Some(string_table.intern(directive_name)),
                 InvalidTemplateDirectiveReason::invalid_argument_with_detail(message_id),
-                parsed_argument.error_location,
-            ))
+                parsed_argument.error_location.clone(),
+            );
+            TemplateError::from(with_argument_span(diagnostic, parsed_argument.error_span))
         })?;
 
         build_state.style.formatter = Some(formatter.clone());
@@ -94,7 +95,6 @@ fn apply_style_directive_effects(
 
 /// Parses the optional handler argument and validates whether this directive
 /// accepts one. Early exits keep the no-argument and invalid-argument cases
-/// distinct from later normalization.
 fn parse_optional_handler_style_argument(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -104,6 +104,7 @@ fn parse_optional_handler_style_argument(
     string_table: &mut StringTable,
 ) -> HandlerDirectiveResult<ParsedHandlerDirectiveArgument> {
     let default_location = token_stream.current_location();
+    let default_span = current_token_source_span(token_stream);
     let directive_name_id = string_table.intern(directive_name);
 
     let Some(expression) = parse_optional_parenthesized_expression(
@@ -117,19 +118,24 @@ fn parse_optional_handler_style_argument(
         return Ok(ParsedHandlerDirectiveArgument {
             value: None,
             error_location: default_location,
+            error_span: default_span,
         });
     };
 
     let Some(argument_type) = argument_type else {
-        return Err(CompilerDiagnostic::invalid_template_directive(
-            Some(string_table.intern(directive_name)),
-            InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
-            default_location,
+        return Err(with_argument_span(
+            CompilerDiagnostic::invalid_template_directive(
+                Some(string_table.intern(directive_name)),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                default_location,
+            ),
+            default_span,
         )
         .into());
     };
 
     let argument_location = expression.location.clone();
+    let argument_span = expression.span;
 
     let argument_is_compile_time_constant = expression
         .const_value_kind_with_template_classifier(&mut |template| {
@@ -138,10 +144,13 @@ fn parse_optional_handler_style_argument(
         .is_compile_time_value();
 
     if !argument_is_compile_time_constant {
-        return Err(CompilerDiagnostic::invalid_template_directive(
-            Some(string_table.intern(directive_name)),
-            InvalidTemplateDirectiveReason::invalid_argument(),
-            argument_location,
+        return Err(with_argument_span(
+            CompilerDiagnostic::invalid_template_directive(
+                Some(string_table.intern(directive_name)),
+                InvalidTemplateDirectiveReason::invalid_argument(),
+                argument_location.clone(),
+            ),
+            argument_span,
         )
         .into());
     }
@@ -151,23 +160,23 @@ fn parse_optional_handler_style_argument(
         argument_type,
         directive_name,
         &argument_location,
+        argument_span,
         string_table,
     )?;
 
     Ok(ParsedHandlerDirectiveArgument {
         value: Some(normalized),
         error_location: argument_location,
+        error_span: argument_span,
     })
 }
 
-/// Normalizes a compile-time handler directive argument.
-///
-/// Early returns keep each rejected argument-kind branch close to its diagnostic.
 fn normalize_provided_style_argument_value(
     expression: Expression,
     argument_type: StyleDirectiveArgumentType,
     directive_name: &str,
     argument_location: &SourceLocation,
+    argument_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> HandlerDirectiveResult<StyleDirectiveArgumentValue> {
     match argument_type {
@@ -175,10 +184,13 @@ fn normalize_provided_style_argument_value(
             ExpressionKind::StringSlice(text) => Ok(StyleDirectiveArgumentValue::String(
                 string_table.resolve(text).to_owned(),
             )),
-            _ => Err(CompilerDiagnostic::invalid_template_directive(
-                Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::invalid_argument(),
-                argument_location.clone(),
+            _ => Err(with_argument_span(
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(string_table.intern(directive_name)),
+                    InvalidTemplateDirectiveReason::invalid_argument(),
+                    argument_location.clone(),
+                ),
+                argument_span,
             )
             .into()),
         },
@@ -187,10 +199,13 @@ fn normalize_provided_style_argument_value(
             ExpressionKind::Template(template) => Ok(StyleDirectiveArgumentValue::Template(
                 Box::new(*template.to_owned()),
             )),
-            _ => Err(CompilerDiagnostic::invalid_template_directive(
-                Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::invalid_argument(),
-                argument_location.clone(),
+            _ => Err(with_argument_span(
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(string_table.intern(directive_name)),
+                    InvalidTemplateDirectiveReason::invalid_argument(),
+                    argument_location.clone(),
+                ),
+                argument_span,
             )
             .into()),
         },
@@ -198,22 +213,45 @@ fn normalize_provided_style_argument_value(
         StyleDirectiveArgumentType::Number => match expression.kind {
             ExpressionKind::Int(value) => Ok(StyleDirectiveArgumentValue::Number(value as f64)),
             ExpressionKind::Float(value) => Ok(StyleDirectiveArgumentValue::Number(value)),
-            _ => Err(CompilerDiagnostic::invalid_template_directive(
-                Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::invalid_argument(),
-                argument_location.clone(),
+            _ => Err(with_argument_span(
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(string_table.intern(directive_name)),
+                    InvalidTemplateDirectiveReason::invalid_argument(),
+                    argument_location.clone(),
+                ),
+                argument_span,
             )
             .into()),
         },
 
         StyleDirectiveArgumentType::Bool => match expression.kind {
             ExpressionKind::Bool(value) => Ok(StyleDirectiveArgumentValue::Bool(value)),
-            _ => Err(CompilerDiagnostic::invalid_template_directive(
-                Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::invalid_argument(),
-                argument_location.clone(),
+            _ => Err(with_argument_span(
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(string_table.intern(directive_name)),
+                    InvalidTemplateDirectiveReason::invalid_argument(),
+                    argument_location.clone(),
+                ),
+                argument_span,
             )
             .into()),
         },
     }
+}
+
+fn current_token_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ))
+}
+
+fn with_argument_span(
+    mut diagnostic: CompilerDiagnostic,
+    argument_span: Option<SourceSpan>,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = argument_span;
+    }
+    diagnostic
 }

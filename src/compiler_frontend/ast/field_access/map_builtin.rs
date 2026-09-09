@@ -56,6 +56,7 @@ pub(super) fn parse_map_builtin_member_typed(
         receiver_type_id,
         member_name,
         member_location,
+        member_span,
         receiver_access_mode,
         authored_marker_location,
         scope_context,
@@ -129,12 +130,14 @@ pub(super) fn parse_map_builtin_member_typed(
             vec![int_type_id],
             type_interner.environment_mut_for_derived_types(),
             member_location.clone(),
+            member_span,
         );
 
         return Ok(Some(AstNode {
             kind: NodeKind::ExpressionStatement(builtin_expression),
             scope: scope_context.scope.to_owned(),
             location: member_location,
+            span: member_span,
         }));
     }
 
@@ -294,11 +297,13 @@ pub(super) fn parse_map_builtin_member_typed(
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_location.clone(),
+        member_span,
     );
 
     Ok(Some(AstNode {
         kind: NodeKind::ExpressionStatement(builtin_expression),
         scope: scope_context.scope.to_owned(),
         location: member_location,
+        span: member_span,
     }))
 }

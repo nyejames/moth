@@ -39,6 +39,7 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
     pub(super) visible_name: StringId,
     pub(super) call_location: SourceLocation,
+    pub(super) call_span: Option<SourceSpan>,
     pub(super) context: &'a ScopeContext,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
@@ -65,6 +66,7 @@ pub(super) fn parse_source_callable_member(
         generic_template,
         visible_name,
         call_location,
+        call_span,
         context,
         expression,
         allow_boundary_catch,
@@ -82,9 +84,6 @@ pub(super) fn parse_source_callable_member(
     //  Generic source call
     // ------------------------
     if let Some(template) = generic_template {
-        let call_span = token_stream
-            .file_id
-            .map(|source| SourceSpan::new(source, token_stream.current_token().span));
         match token_stream.peek_next_token() {
             // Explicit call-site type arguments are not part of the Alpha surface.
             // Reject the known foreign spellings before they can be interpreted as
@@ -96,12 +95,10 @@ pub(super) fn parse_source_callable_member(
                     .map(|token| token.location.clone())
                     .unwrap_or_else(|| call_location.clone());
 
-                let explicit_syntax_span = token_stream.file_id.and_then(|source| {
-                    token_stream
-                        .tokens
-                        .get(token_stream.index + 1)
-                        .map(|token| SourceSpan::new(source, token.span))
-                });
+                let explicit_syntax_span = token_stream
+                    .tokens
+                    .get(token_stream.index + 1)
+                    .map(|token| SourceSpan::new(token_stream.file_id, token.span));
                 return Err(with_generic_primary_span(
                     explicit_generic_call_type_arguments_error(
                         visible_name,
@@ -183,6 +180,7 @@ pub(super) fn parse_source_callable_member(
         token_stream,
         id: function_path,
         call_location,
+        call_span,
         context,
         signature,
         value_required: true,

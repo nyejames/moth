@@ -372,11 +372,13 @@ pub(crate) fn build_range_iteration_bindings(
             ConstRangeIterationValue::Int(value) => Expression::int(
                 value,
                 item.value.location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
             ConstRangeIterationValue::Float(value) => Expression::float(
                 value,
                 item.value.location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
         }
@@ -393,6 +395,7 @@ pub(crate) fn build_range_iteration_bindings(
             value: Expression::int(
                 zero_based_index as i32,
                 index.value.location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(range_provenance.clone()),
@@ -428,6 +431,7 @@ pub(crate) fn build_collection_iteration_bindings(
             value: Expression::int(
                 zero_based_index as i32,
                 index.value.location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(iterable_provenance.clone()),

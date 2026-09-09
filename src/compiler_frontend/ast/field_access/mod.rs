@@ -21,6 +21,7 @@ pub(crate) use parse_chain::{
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -73,6 +74,7 @@ pub(super) struct MemberStepContext<'a> {
     pub receiver_type_id: TypeId,
     pub member_name: StringId,
     pub member_location: SourceLocation,
+    pub member_span: Option<SourceSpan>,
     pub receiver_access_mode: ReceiverAccessMode,
     /// The authored `~` marker location when the chain was entered through explicit mutable
     /// receiver access. Authored-marker receiver diagnostics point here instead of the method

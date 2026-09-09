@@ -16,6 +16,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
 use std::path::PathBuf;
 
@@ -34,6 +35,7 @@ pub(crate) fn js_runtime_asset_identity(
     logical_source_path: &PortableResourcePath,
     canonical_source_path: PathBuf,
     authored_import_location: SourceLocation,
+    authored_import_span: Option<SourceSpan>,
 ) -> Result<RuntimeAssetIdentity, CompilerError> {
     let declared_output_path = js_runtime_asset_output_path(logical_source_path);
     let logical_path = PortableResourcePath::from_relative_logical_path(&declared_output_path)?;
@@ -48,6 +50,7 @@ pub(crate) fn js_runtime_asset_identity(
         canonical_source_path,
         asset_kind: String::from("js"),
         authored_import_location,
+        authored_import_span,
     })
 }
 

@@ -35,6 +35,7 @@ impl Expression {
         Self::new(
             ExpressionKind::Runtime(rpn),
             location,
+            None,
             type_id,
             data_type,
             value_mode,
@@ -46,6 +47,7 @@ impl Expression {
         Self::new(
             ExpressionKind::StructuralString { pieces },
             location,
+            None,
             builtin_type_ids::STRING,
             DataType::StringSlice,
             ValueMode::ImmutableOwned,
@@ -64,6 +66,7 @@ impl Expression {
             data_type,
             type_id,
             location,
+            None,
             value_mode,
             ConstRecordState::RuntimeValue,
         )
@@ -164,6 +167,7 @@ impl Expression {
             DataType::Inferred,
             type_id,
             location,
+            None,
             value_mode,
         )
     }
@@ -203,6 +207,7 @@ fn call_expression(
     Expression::new(
         kind,
         location,
+        None,
         expression_type_id,
         // Test-only fallback: exact diagnostic spelling requires a TypeEnvironment.
         // Call-site diagnostics should render from canonical TypeId.

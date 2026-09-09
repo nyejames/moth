@@ -35,6 +35,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
     ReservedNameOwner,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_statement_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
@@ -241,6 +242,10 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::Break,
                     location: token_stream.current_location(),
+                    span: Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    )),
                     scope: context.scope.clone(),
                 });
                 token_stream.advance();
@@ -259,6 +264,10 @@ pub(crate) fn parse_function_body_statements(
                 body_nodes.push(AstNode {
                     kind: NodeKind::Continue,
                     location: token_stream.current_location(),
+                    span: Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    )),
                     scope: context.scope.clone(),
                 });
                 token_stream.advance();
@@ -266,6 +275,7 @@ pub(crate) fn parse_function_body_statements(
 
             TokenKind::Then => {
                 let then_location = token_stream.current_location();
+                let then_span = token_stream.current_token().span;
                 token_stream.advance();
 
                 let Some(active_target) = &context.active_value_target else {
@@ -321,6 +331,7 @@ pub(crate) fn parse_function_body_statements(
                         location: then_location.clone(),
                     }),
                     location: then_location.clone(),
+                    span: Some(SourceSpan::new(token_stream.file_id, then_span)),
                     scope: context.scope.clone(),
                 });
             }
@@ -363,6 +374,8 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 }
 
+                let fragment_location = token_stream.current_location();
+                let fragment_span = token_stream.current_token().span;
                 let template = Template::new_with_type_interner(
                     token_stream,
                     &context,
@@ -371,11 +384,11 @@ pub(crate) fn parse_function_body_statements(
                     string_table,
                 )?;
                 let expression = Expression::template(template, ValueMode::MutableOwned);
-                let location = token_stream.current_location();
 
                 body_nodes.push(AstNode {
                     kind: NodeKind::PushStartRuntimeFragment(expression),
-                    location,
+                    location: fragment_location,
+                    span: Some(SourceSpan::new(token_stream.file_id, fragment_span)),
                     scope: context.scope.clone(),
                 })
             }
@@ -400,9 +413,12 @@ pub(crate) fn parse_function_body_statements(
                     string_table,
                 )?;
 
+                let location = expression.location.clone();
+                let span = expression.span;
                 body_nodes.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
-                    location: token_stream.current_location(),
+                    location,
+                    span,
                     scope: context.scope.clone(),
                 });
             }

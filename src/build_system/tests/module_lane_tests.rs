@@ -87,6 +87,7 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
         canonical_source_path,
         asset_kind: "js".to_owned(),
         authored_import_location: SourceLocation::default(),
+        authored_import_span: None,
     }
 }
 
@@ -106,6 +107,7 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
             ty: NONE,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         }),
     }];
     module.functions = vec![HirFunction {
@@ -157,12 +159,14 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
                         ty: NONE,
                         value_kind: ValueKind::Const,
                         region: RegionId(0),
+                        span: None,
                     },
                 }],
             },
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
+            span: None,
         }),
         location: SourceLocation::new(
             source_scope.clone(),
@@ -175,6 +179,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
                 char_column: 8,
             },
         ),
+        span: None,
     });
     hir_module.blocks[0].statements.push(HirStatement {
         id: HirNodeId(2),
@@ -184,6 +189,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
+            span: None,
         }),
         location: SourceLocation::new(
             source_scope,
@@ -196,6 +202,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
                 char_column: 8,
             },
         ),
+        span: None,
     });
 
     // Seed the merged table so the local "start_entry" id shifts during merge, proving the remap
@@ -240,6 +247,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
                     char_column: 10,
                 },
             ),
+            span: None,
         }],
     );
 
@@ -339,6 +347,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             result: None,
         },
         location: SourceLocation::default(),
+        span: None,
     });
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
@@ -1375,6 +1384,7 @@ fn lane_module_with_generated_and_cross_module_calls(
                 result: None,
             },
             location: SourceLocation::default(),
+            span: None,
         });
     }
     for (index, origin) in cross_module_calls.iter().enumerate() {
@@ -1386,6 +1396,7 @@ fn lane_module_with_generated_and_cross_module_calls(
                 result: None,
             },
             location: SourceLocation::default(),
+            span: None,
         });
     }
     let function_link_facts = collect_module_function_link_facts(&hir_module)

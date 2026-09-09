@@ -24,7 +24,7 @@ use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
-use crate::compiler_frontend::source::LocalSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -38,6 +38,10 @@ pub struct ChoiceVariant {
     pub id: StringId,
     pub payload: ChoiceVariantPayload,
     pub location: SourceLocation,
+    /// Exact authored variant-name span, when this shell still has its source identity.
+    ///
+    /// Header/import/materialisation boundaries use `None` when no owning source exists.
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]

@@ -9,6 +9,7 @@ use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::output_path::{canonicalize_output_path, normalize_relative_path};
 use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::utilities::basic::normalize_path;
 
 use std::collections::BTreeSet;
@@ -116,6 +117,7 @@ pub struct ValidatedOutputFolder {
     pub relative_path: PathBuf,
     pub resolved_path: PathBuf,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Validated development and release output settings produced during bootstrap.
@@ -144,11 +146,11 @@ impl ValidatedDirectoryOutputSettings {
             entry_root,
             owner,
             setting_location: folder.location.clone(),
+            setting_span: folder.span,
         }
     }
 }
 
-/// Complete output plan for a validated directory project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedOutputPlan {
     pub output_root: PathBuf,
@@ -156,6 +158,7 @@ pub struct ValidatedOutputPlan {
     pub entry_root: PathBuf,
     pub owner: OutputOwner,
     pub setting_location: SourceLocation,
+    pub setting_span: Option<SourceSpan>,
 }
 
 /// Explicit output plan for a single-file command.
@@ -165,6 +168,8 @@ pub struct SingleFileOutputPlan {
     pub project_root: Option<PathBuf>,
     pub owner: OutputOwner,
     pub setting_location: SourceLocation,
+    /// Single-file paths are command/filesystem facts, never authored config spans.
+    pub setting_span: Option<SourceSpan>,
 }
 
 /// The output plan consumed by the writer.
@@ -209,6 +214,13 @@ impl OutputPlan {
             Self::SingleFile(plan) => &plan.setting_location,
         }
     }
+
+    pub(crate) fn setting_span(&self) -> Option<SourceSpan> {
+        match self {
+            Self::Directory(plan) => plan.setting_span,
+            Self::SingleFile(plan) => plan.setting_span,
+        }
+    }
 }
 
 // -------------------------
@@ -247,6 +259,7 @@ pub(crate) fn classify_output_folder(
         relative_path,
         resolved_path,
         location: SourceLocation::default(),
+        span: None,
     })
 }
 

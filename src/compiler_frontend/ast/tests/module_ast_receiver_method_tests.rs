@@ -179,10 +179,12 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::NONE,
                 DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );
@@ -193,10 +195,12 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::NONE,
                 DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );
@@ -226,10 +230,12 @@ fn non_recursive_runtime_structs_are_allowed() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 SourceLocation::default(),
+                None,
                 builtin_type_ids::INT,
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );

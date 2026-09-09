@@ -69,6 +69,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 key: draft.placeholder.key.clone(),
                 render_root,
                 location: draft.placeholder.location.clone(),
+                span: draft.placeholder.span,
             });
         }
 
@@ -103,18 +104,20 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
     ) -> Result<TemplateIrNodeId, TemplateError> {
         let mut fill_roots = Vec::new();
 
-        for source in self
-            .sources
-            .iter()
-            .filter(|source| source.source.target == placeholder.key)
-        {
+        for source_index in 0..self.sources.len() {
+            if self.sources[source_index].source.target != placeholder.key {
+                continue;
+            }
+
+            let source = self.sources[source_index].clone();
             let source_root = push_runtime_slot_contribution_source(
                 self.store,
                 self.slot_plan_id,
                 source.source.source,
-                location.clone(),
+                source.source.location.clone(),
+                source.source.span,
             );
-            let wrapped_root = self.apply_site_wrappers(placeholder, source, source_root)?;
+            let wrapped_root = self.apply_site_wrappers(placeholder, &source, source_root)?;
             fill_roots.push(wrapped_root);
         }
 
@@ -277,6 +280,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 occurrence_id,
             },
             location,
+            None,
         ))
     }
 }
@@ -303,6 +307,7 @@ fn inject_runtime_slot_fill(
             "Child-wrapper TIR path could not read the wrapper root node.",
         )
     })?;
+    let span = node.span;
     let location = node.location.clone();
 
     match node.kind {
@@ -341,6 +346,7 @@ fn inject_runtime_slot_fill(
                         children: injected_children,
                     },
                     location,
+                    None,
                 )),
                 changed: true,
             })
@@ -381,12 +387,17 @@ fn inject_runtime_slot_fill(
                         occurrence_id,
                     },
                     location,
+                    span,
                 )),
                 changed: true,
             })
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches,
+            fallback,
+            else_marker,
+        } => {
             let mut branch_results = Vec::with_capacity(branches.len());
             let mut changed = false;
             for branch in branches {
@@ -402,6 +413,7 @@ fn inject_runtime_slot_fill(
                     branch.selector,
                     injected_body.root,
                     branch.location,
+                    branch.span,
                     branch.selector_site_id,
                 ));
             }
@@ -430,11 +442,12 @@ fn inject_runtime_slot_fill(
 
             let injected_branches = branch_results
                 .into_iter()
-                .map(|(selector, body, location, selector_site_id)| {
+                .map(|(selector, body, location, span, selector_site_id)| {
                     crate::compiler_frontend::ast::templates::tir::TemplateIrBranch::new(
                         selector,
                         body,
                         location,
+                        span,
                         selector_site_id,
                     )
                 })
@@ -445,8 +458,10 @@ fn inject_runtime_slot_fill(
                     TemplateIrNodeKind::BranchChain {
                         branches: injected_branches,
                         fallback: injected_fallback,
+                        else_marker,
                     },
                     location,
+                    span,
                 )),
                 changed: true,
             })
@@ -489,6 +504,7 @@ fn inject_runtime_slot_fill(
                         aggregate_wrapper: injected_aggregate,
                     },
                     location,
+                    span,
                 )),
                 changed: true,
             })
@@ -505,6 +521,7 @@ fn empty_render_root(store: &mut TemplateIrStore, location: &SourceLocation) -> 
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         location.clone(),
+        None,
     ))
 }
 
@@ -519,6 +536,7 @@ fn collapse_render_roots(
         _ => store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: roots },
             location,
+            None,
         )),
     }
 }

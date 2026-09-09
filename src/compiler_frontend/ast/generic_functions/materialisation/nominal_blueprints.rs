@@ -244,10 +244,12 @@ pub(super) fn materialised_nominal_declaration(
         value: Expression::new(
             ExpressionKind::NoValue,
             Default::default(),
+            None,
             type_id,
             diagnostic_type,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     })
 }
@@ -310,6 +312,7 @@ pub(super) fn materialised_struct_fields(
             Expression::new(
                 ExpressionKind::NoValue,
                 field.location.clone(),
+                None,
                 field.type_id,
                 diagnostic_type_spelling(field.type_id, type_environment),
                 ValueMode::ImmutableReference,
@@ -320,6 +323,7 @@ pub(super) fn materialised_struct_fields(
         declarations.push(Declaration {
             id: field.name.clone(),
             value,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -1305,6 +1309,7 @@ fn intern_materialisation_nominal(
                             string_table,
                         )?,
                         location: Default::default(),
+                        span: None,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -1341,6 +1346,7 @@ fn intern_materialisation_nominal(
                                         string_table,
                                     )?,
                                     location: Default::default(),
+                                    span: None,
                                 })
                             })
                             .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -1351,6 +1357,7 @@ fn intern_materialisation_nominal(
                         tag: variant.tag,
                         payload,
                         location: Default::default(),
+                        span: None,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;

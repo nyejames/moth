@@ -19,6 +19,7 @@ fn assertion_failure_message_contributes_loaded_local_metadata() {
         ty: builtin_type_ids::STRING,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     };
     let terminator = HirTerminator::AssertFailure {
         message,

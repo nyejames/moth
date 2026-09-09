@@ -324,6 +324,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             default_value: Some(Expression::int(
                 2,
                 Default::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )),
         },

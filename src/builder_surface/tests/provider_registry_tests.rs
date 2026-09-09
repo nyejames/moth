@@ -100,6 +100,7 @@ fn fixture_js_runtime_asset(
         canonical_source_path,
         asset_kind: "js".to_owned(),
         authored_import_location: SourceLocation::default(),
+        authored_import_span: None,
     }
 }
 
@@ -229,6 +230,7 @@ fn dummy_provider_resolves_import_with_all_fields() {
             .expect("fixture logical path should be portable"),
         canonical_source_path: PathBuf::from("/test/dummy.js"),
         source_location: SourceLocation::default(),
+        source_span: None,
     };
 
     let result = provider.resolve_external_import(request, &mut context);

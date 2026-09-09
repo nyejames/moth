@@ -76,11 +76,21 @@ fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldCont
 }
 
 fn int_expression(value: i32) -> Expression {
-    Expression::int(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::int(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
@@ -190,15 +200,9 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
     );
     let mut resource_table = ModuleResourceTable::new();
     let resource = resource_table.intern_origin(resource_origin, SourceLocation::default());
-    let structural_expression = Expression::new(
-        crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
-            pieces: vec![ConstStringPiece::Resource(resource), ConstStringPiece::SiteRoot],
-        },
-        SourceLocation::default(),
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    );
+    let structural_expression = Expression::new(crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
+        pieces: vec![ConstStringPiece::Resource(resource), ConstStringPiece::SiteRoot],
+    }, SourceLocation::default(), None, builtin_type_ids::STRING, DataType::StringSlice, ValueMode::ImmutableOwned);
 
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -422,10 +426,15 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
             TemplateBranchSelector::Bool(bool_expression(selected)),
             selected_slot,
             location.clone(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_slot), location.clone());
+        let root = builder.push_branch_chain_node(
+            vec![branch],
+            Some(fallback_slot),
+            None,
+            location.clone(),
+        );
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -606,6 +615,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
         let aggregate_output = builder.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
             location.clone(),
+            None,
         ));
         let open = builder.push_text_node(
             string_table.intern("<"),
@@ -668,9 +678,10 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
             TemplateBranchSelector::Bool(bool_expression(false)),
             hidden_slot,
             location.clone(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, location.clone());
+        let root = builder.push_branch_chain_node(vec![branch], None, None, location.clone());
         builder.finish_template(
             root,
             Style::default(),
@@ -735,9 +746,11 @@ fn final_view_fold_branch_selects_body() {
             TemplateBranchSelector::Bool(bool_expression(true)),
             yes_node,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+        let root =
+            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
 
         builder.finish_template(
             root,
@@ -774,9 +787,11 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+        let root =
+            builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
 
         builder.finish_template(
             root,
@@ -820,11 +835,13 @@ fn final_view_fold_false_branch_selects_fallback() {
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             SourceLocation::default(),
+            None,
             builder.store.next_expression_site_id(),
         );
         let root = builder.push_branch_chain_node(
             vec![branch],
             Some(fallback_node),
+            None,
             SourceLocation::default(),
         );
 
@@ -930,6 +947,7 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
                 DataType::Int,
                 builtin_type_ids::INT,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
@@ -942,16 +960,32 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
             bindings: Box::new(LoopBindings {
                 item: Some(Declaration {
                     id: item_path,
-                    value: Expression::int(0, SourceLocation::default(), ValueMode::ImmutableOwned),
+                    value: Expression::int(
+                        0,
+                        SourceLocation::default(),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
+                    binding_span: None,
                     config_qualifier: None,
                 }),
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::int(0, SourceLocation::default(), ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(range_provenance.clone()),
-                end: Expression::int(2, SourceLocation::default(), ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(range_provenance),
+                start: Expression::int(
+                    0,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .with_synthetic_interface_provenance(range_provenance.clone()),
+                end: Expression::int(
+                    2,
+                    SourceLocation::default(),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .with_synthetic_interface_provenance(range_provenance),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -1140,6 +1174,7 @@ fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
             SourceLocation::default(),
+            None,
         ));
 
         let mut builder = TemplateIrBuilder::new(store);
@@ -1219,6 +1254,7 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
         let aggregate_node = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
             SourceLocation::default(),
+            None,
         ));
 
         let mut builder = TemplateIrBuilder::new(store);
@@ -1345,10 +1381,12 @@ fn final_view_runtime_slot_application_requires_handoff() {
                 text: OwnedFoldedString::Text("<shell>".to_owned()),
                 reactive_subscription: None,
                 location: SourceLocation::default(),
+                span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
             location: SourceLocation::default(),
+            span: None,
         };
         let expression =
             Expression::runtime_slot_application_handoff(handoff, ValueMode::ImmutableOwned);

@@ -93,6 +93,7 @@ impl<'a> HirBuilder<'a> {
                             value: lowered.value,
                         },
                         location: node.location.to_owned(),
+                        span: None,
                     };
 
                     self.side_table
@@ -126,6 +127,7 @@ impl<'a> HirBuilder<'a> {
                             value: lowered.value,
                         },
                         location: node.location.to_owned(),
+                        span: None,
                     };
                     self.side_table
                         .map_statement(&node.location, &assign_statement);
@@ -176,6 +178,7 @@ impl<'a> HirBuilder<'a> {
                         value: lowered.value,
                     },
                     location: place.location.to_owned(),
+                    span: None,
                 };
 
                 self.side_table
@@ -270,6 +273,7 @@ impl<'a> HirBuilder<'a> {
                 value: lowered.value,
             },
             location: location.to_owned(),
+            span: None,
         };
         self.side_table.map_statement(location, &assign_statement);
 

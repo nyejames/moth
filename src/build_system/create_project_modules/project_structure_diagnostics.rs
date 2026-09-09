@@ -27,7 +27,16 @@ pub(super) fn config_diagnostic_messages(
     // file-level location here so diagnostics never carry SourceLocation IDs from another table.
     let key_id = string_table.intern(key);
     let location = SourceLocation::from_path(&config.config_file_path(), string_table);
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, location);
+    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, location);
+    // The span is a compact source identity, not a string-table ID, so the retained authored
+    // key span travels safely while the location stays boundary-local. Keys without authored
+    // source (missing file, defaults) stay spanless rather than gaining a fabricated span.
+    diagnostic.primary_span = config.setting_span(key);
+    if let Some(span) = diagnostic.primary_span {
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = Some(span);
+        }
+    }
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }

@@ -36,8 +36,10 @@ fn sidecar_structural_statement(pieces: Vec<ConstStringPiece>) -> HirStatement {
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         }),
         location: SourceLocation::default(),
+        span: None,
     }
 }
 

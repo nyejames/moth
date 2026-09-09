@@ -1318,6 +1318,7 @@ fn replace_inactive_assertion_message(message: &mut Expression) {
     let inert_message = Expression::new(
         ExpressionKind::OptionNone,
         message.location.clone(),
+        message.span,
         message.type_id,
         message.diagnostic_type.clone(),
         ValueMode::ImmutableOwned,

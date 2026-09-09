@@ -25,6 +25,7 @@ use crate::compiler_frontend::project_globals::{
 };
 use crate::compiler_frontend::public_interface::portable_source_location;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
@@ -192,6 +193,7 @@ pub(super) struct EffectiveProjectField {
     pub(super) type_identity: CanonicalTypeIdentity,
     pub(super) value: PublicFoldedValue,
     pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
     pub(super) fingerprint: BuildConfigFingerprint,
     pub(super) kind: EffectiveProjectFieldKind,
 }
@@ -268,6 +270,7 @@ pub(super) fn effective_project_fields(
             true,
             Some(PrimitiveBuildValue::String(config.project_name.clone())),
             config.setting_location_or_config_file("name", string_table),
+            config.setting_span("name"),
         )?,
     )?;
 
@@ -287,6 +290,7 @@ pub(super) fn effective_project_fields(
             true,
             Some(PrimitiveBuildValue::String(entry_root.to_owned())),
             config.setting_location_or_config_file("entry_root", string_table),
+            config.setting_span("entry_root"),
         )?,
     )?;
 
@@ -301,6 +305,7 @@ pub(super) fn effective_project_fields(
                 false,
                 config.version.clone().map(PrimitiveBuildValue::String),
                 config.setting_location_or_config_file("version", string_table),
+                config.setting_span("version"),
             )?,
         )?;
     }
@@ -314,6 +319,7 @@ pub(super) fn effective_project_fields(
                 false,
                 config.author.clone().map(PrimitiveBuildValue::String),
                 config.setting_location_or_config_file("author", string_table),
+                config.setting_span("author"),
             )?,
         )?;
     }
@@ -327,6 +333,7 @@ pub(super) fn effective_project_fields(
                 false,
                 config.license.clone().map(PrimitiveBuildValue::String),
                 config.setting_location_or_config_file("license", string_table),
+                config.setting_span("license"),
             )?,
         )?;
     }
@@ -353,6 +360,7 @@ pub(super) fn effective_project_fields(
                     "template_const_loop_iteration_limit",
                     string_table,
                 ),
+                config.setting_span("template_const_loop_iteration_limit"),
             )?,
         )?;
     }
@@ -383,6 +391,7 @@ fn effective_project_field_from_resolution_record(
         type_identity: canonical_type_identity_for_build_input(record.contract),
         value,
         location: record.qualifier_location.clone(),
+        span: record.qualifier_span,
         fingerprint: record.fingerprint,
         kind: EffectiveProjectFieldKind::DirectConfig {
             contract: record.contract,
@@ -401,6 +410,7 @@ fn effective_fixed_project_field(
     required: bool,
     primitive_value: Option<PrimitiveBuildValue>,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<EffectiveProjectField, CompilerError> {
     let build_name = BuildInputName::new(name).expect("compiler-owned project field name is valid");
     let value = public_folded_value_for_build_input(build_input_type, primitive_value.as_ref())?;
@@ -410,6 +420,7 @@ fn effective_fixed_project_field(
         type_identity: canonical_type_identity_for_build_input(build_input_type),
         value,
         location,
+        span,
         fingerprint,
         kind: EffectiveProjectFieldKind::FixedPrimitive {
             value_type: build_input_type,
@@ -434,12 +445,11 @@ fn effective_project_field_from_metadata(field: &ProjectMetadataField) -> Effect
         type_identity: field.type_identity.clone(),
         value: field.value.clone(),
         location: field.location.clone(),
+        span: field.span,
         fingerprint,
         kind,
     }
 }
-
-/// Convert fixed primitive fields in one effective snapshot into fixed provider facts.
 pub(super) fn fixed_project_contract_facts(
     fields: &[EffectiveProjectField],
 ) -> Vec<BuildConfigContractFact> {
@@ -455,13 +465,17 @@ pub(super) fn fixed_project_contract_facts(
                 return None;
             };
             let name = BuildInputName::new(&field.name).ok()?;
-            Some(BuildConfigContractFact::new(
+            let mut fact = BuildConfigContractFact::new(
                 name,
                 *value_type,
                 *required,
                 value.clone(),
                 field.location.clone(),
-            ))
+            );
+            if let Some(span) = field.span {
+                fact = fact.with_source_span(span);
+            }
+            Some(fact)
         })
         .collect()
 }
@@ -484,22 +498,24 @@ pub(super) fn direct_project_contract_facts(
             else {
                 return None;
             };
-            Some(
-                BuildConfigContractFact::new(
-                    BuildInputName::new(&field.name)
-                        .expect("effective direct project field has a valid name"),
-                    *contract,
-                    *required,
-                    default.clone(),
-                    field.location.clone(),
-                )
-                .with_resolved_provider(
-                    value.clone(),
-                    *origin,
-                    field.fingerprint,
-                    value_location.clone(),
-                ),
+            let mut fact = BuildConfigContractFact::new(
+                BuildInputName::new(&field.name)
+                    .expect("effective direct project field has a valid name"),
+                *contract,
+                *required,
+                default.clone(),
+                field.location.clone(),
             )
+            .with_resolved_provider(
+                value.clone(),
+                *origin,
+                field.fingerprint,
+                value_location.clone(),
+            );
+            if let Some(span) = field.span {
+                fact = fact.with_source_span(span);
+            }
+            Some(fact)
         })
         .collect()
 }
@@ -767,7 +783,7 @@ pub(super) fn build_config_resolution_messages(
         let first_description = string_table.get_or_intern(describe_build_config_contract(first));
         let conflicting_description =
             string_table.get_or_intern(describe_build_config_contract(conflicting));
-        CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
             Some(key),
             InvalidConfigReason::ConfigContractConflict {
                 first: first_description,
@@ -781,17 +797,39 @@ pub(super) fn build_config_resolution_messages(
                 first.location().clone(),
                 Some(DiagnosticLabelMessage::PreviousDeclaration),
             ),
-        ])
+        ]);
+        if let Some(span) = conflicting.source_span() {
+            diagnostic.primary_span = Some(span);
+            if let Some(primary_label) = diagnostic.labels.get_mut(0) {
+                primary_label.span = Some(span);
+            }
+        }
+        if let Some(span) = first.source_span() {
+            if let Some(first_label) = diagnostic.labels.get_mut(1) {
+                first_label.span = Some(span);
+            }
+        }
+        diagnostic
     } else if let Some(contract) = error.contract_fact() {
         if let Some(provided) = error.provided_type() {
             let provided_name = string_table.intern(provided.name());
             let expected_name =
                 string_table.get_or_intern(build_input_type_name(contract.value_type()));
+            let primary_span = contract.source_span();
             let mut labels = vec![DiagnosticLabel::primary(contract.location().clone())];
+            labels[0].span = primary_span;
             if let Some(BuildConfigValueLocation::Source(location)) = error.value_location() {
-                labels.push(DiagnosticLabel::secondary(location.clone(), None));
+                let mut related = DiagnosticLabel::secondary(location.clone(), None);
+                // The default value lives at the contract's own authored location, so only
+                // that alias may reuse the contract span. Any other source spot has no
+                // retained span here and stays spanless rather than gaining a fabricated one.
+                // Command values never reach this branch and stay spanless via `None`.
+                if *location == *contract.location() {
+                    related.span = primary_span;
+                }
+                labels.push(related);
             }
-            CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                 Some(key),
                 InvalidConfigReason::ConfigInputTypeMismatch {
                     provided: provided_name,
@@ -800,7 +838,9 @@ pub(super) fn build_config_resolution_messages(
                 },
                 contract.location().clone(),
             )
-            .with_labels(labels)
+            .with_labels(labels);
+            diagnostic.primary_span = primary_span;
+            diagnostic
         } else {
             let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                 Some(key),
@@ -812,6 +852,11 @@ pub(super) fn build_config_resolution_messages(
                 BuildConfigResolutionError::MissingRequiredValue { .. }
             ) {
                 diagnostic.primary_span = contract.source_span();
+                if let Some(span) = diagnostic.primary_span {
+                    if let Some(primary_label) = diagnostic.labels.first_mut() {
+                        primary_label.span = Some(span);
+                    }
+                }
             }
             diagnostic
         }

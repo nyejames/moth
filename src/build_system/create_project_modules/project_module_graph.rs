@@ -158,10 +158,10 @@ pub(crate) struct ProjectModuleGraph {
     entry_modules: Vec<ModuleId>,
     facade: Option<ModuleId>,
     dependencies: ProjectModuleDependencies,
-    // Retained authored source location for each inserted provider-before-consumer edge, keyed
-    // by the (provider, consumer) `ModuleId` pair. Only the first observation in deterministic
-    // merge order is retained; duplicate observations are idempotent for the edge and never
-    // overwrite the retained location. Source locations are never used for edge identity.
+    // Retained authored source location for each inserted provider-before-consumer edge,
+    // keyed by the (provider, consumer) `ModuleId` pair. Only the first observation in
+    // deterministic merge order is retained; duplicate observations are idempotent for the edge
+    // and never overwrite retained provenance. Provenance is never used for edge identity.
     edge_source_locations: BTreeMap<(ModuleId, ModuleId), SourceLocation>,
 }
 
@@ -515,9 +515,10 @@ impl ProjectModuleGraph {
     ///
     /// WHAT: the production edge-insertion path maps already-resolved `ModuleId`
     ///       identities to the low-level [`add_dependency_edge`] inserter and, for a newly
-    ///       inserted edge, retains the exact authored `SourceLocation` carried by the
-    ///       dependency reference. Duplicate observations are idempotent for the edge and never
-    ///       overwrite the retained location; source locations are never used for edge identity.
+    ///       inserted edge, retains the exact authored `SourceLocation`
+    ///       carried by the dependency reference. Duplicate observations are
+    ///       idempotent for the edge and never overwrite retained provenance; provenance is
+    ///       never used for edge identity.
     /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method so
     ///      the graph stays the single owner of both edge adjacency and retained provenance.
     pub(crate) fn add_resolved_dependency_edge(

@@ -25,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
@@ -62,14 +63,19 @@ pub fn try_parse_multi_bind_value_block(
 
     Some(parsed.and_then(|parsed| match parsed {
         ParsedReceiverValue::Complete(expression) => Ok(expression),
-        ParsedReceiverValue::NeedsSlotInference(block) => {
-            finalize_inferred_value_block(block, known_slot_types, target_count, type_interner)
-        }
+        ParsedReceiverValue::NeedsSlotInference { block, span } => finalize_inferred_value_block(
+            block,
+            span,
+            known_slot_types,
+            target_count,
+            type_interner,
+        ),
     }))
 }
 
 fn finalize_inferred_value_block(
     block: ValueBlock,
+    span: Option<SourceSpan>,
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
@@ -89,6 +95,7 @@ fn finalize_inferred_value_block(
             let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
             Ok(build_value_if_expression(
                 value_if,
+                span,
                 result_type_id,
                 type_interner.environment(),
             ))
@@ -107,6 +114,7 @@ fn finalize_inferred_value_block(
             let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
             Ok(build_value_match_expression(
                 value_match,
+                span,
                 result_type_id,
                 type_interner.environment(),
             ))

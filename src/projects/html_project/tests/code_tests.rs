@@ -86,6 +86,7 @@ fn text_code_formatter_escapes_html_without_highlighting() {
         pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
             text: id,
             location: SourceLocation::default(),
+            span: None,
         })],
     };
 
@@ -125,8 +126,8 @@ fn code_formatter_wraps_opaque_pieces_inside_the_code_block() {
             FormatterInputPiece::Text(FormatterTextPiece {
                 text: text_id,
                 location: SourceLocation::default(),
+                span: None,
             }),
-            FormatterInputPiece::Opaque(opaque),
         ],
     };
 
@@ -877,6 +878,7 @@ fn escape_html_formatter_covers_all_special_chars_and_unicode() {
         pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
             text: id,
             location: SourceLocation::default(),
+            span: None,
         })],
     };
 

@@ -175,6 +175,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(Declaration {
             id: local_path,
             value,
+            binding_span: None,
             config_qualifier: None,
         })
     }
@@ -317,6 +318,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 return Ok(Expression::anonymous_const_record(
                     projected_fields,
                     location.clone(),
+                    None,
                     ValueMode::ImmutableReference,
                     expected_type_id,
                 ));
@@ -438,6 +440,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     Ok(Expression::new(
         kind,
         location.clone(),
+        None,
         expected_type_id,
         diagnostic_type_spelling(expected_type_id, materialiser.type_environment()),
         ValueMode::ImmutableReference,
@@ -478,6 +481,7 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
                 string_table,
                 location,
             )?,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -513,6 +517,7 @@ fn materialize_public_anonymous_record_fields<M: FoldedValueMaterialiser>(
                 string_table,
                 location,
             )?,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -549,6 +554,7 @@ pub(in crate::compiler_frontend::ast) fn materialize_public_const_template<
             context: TemplateViewContext::default(),
         },
         location,
+        span: None,
     })
 }
 
@@ -581,6 +587,7 @@ fn materialize_public_const_template_in_store<M: FoldedValueMaterialiser>(
                 store.push_node(TemplateIrNode::new(
                     TemplateIrNodeKind::Slot { placeholder },
                     location.clone(),
+                    None,
                 ))
             }
         };
@@ -590,6 +597,7 @@ fn materialize_public_const_template_in_store<M: FoldedValueMaterialiser>(
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children },
         location.clone(),
+        None,
     ));
     let kind = match &template.kind {
         PublicConstTemplateKind::Wrapper => TemplateType::String,
@@ -598,7 +606,14 @@ fn materialize_public_const_template_in_store<M: FoldedValueMaterialiser>(
         }
     };
     let summary = summarize_existing_root(store, root)?;
-    let mut template_ir = TemplateIr::new(root, Style::default(), kind, summary, location.clone());
+    let mut template_ir = TemplateIr::new(
+        root,
+        Style::default(),
+        kind,
+        summary,
+        location.clone(),
+        None,
+    );
     let conditional_wrappers = materialize_public_wrapper_references(
         materialiser,
         &template.conditional_child_wrappers,
@@ -637,6 +652,7 @@ fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
                     origin: TemplateSegmentOrigin::Head,
                 },
                 location.clone(),
+                None,
             )));
         }
         OwnedFoldedString::Pieces(pieces) => {
@@ -678,12 +694,14 @@ fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
                 origin: TemplateSegmentOrigin::Head,
             },
             location.clone(),
+            None,
         )));
     }
 
     let expression = Expression::new(
         ExpressionKind::StructuralString { pieces },
         location.clone(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableReference,
@@ -697,6 +715,7 @@ fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
             site_id,
         },
         location.clone(),
+        None,
     )))
 }
 
@@ -728,6 +747,7 @@ fn materialize_public_const_template_slot<M: FoldedValueMaterialiser>(
         materialize_public_slot_key(&slot.key, string_table),
         store.next_slot_occurrence_id(),
         location.clone(),
+        None,
         applied_set,
         child_set,
         slot.skip_parent_child_wrappers,

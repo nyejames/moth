@@ -16,6 +16,7 @@ use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::super::LoweredExpression;
@@ -41,6 +42,7 @@ impl<'a> HirBuilder<'a> {
         target: CallTarget,
         args: &[CallArgument],
         context: FallibleBranchingContext<'_>,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let FallibleBranchingContext {
             result_type_ids,
@@ -55,23 +57,26 @@ impl<'a> HirBuilder<'a> {
         let validate_float_success =
             matches!(&target, CallTarget::External(_)) && self.type_id_is_float(ok_type);
         let result_local =
-            self.emit_result_call_to_current_block(target, args, carrier_type, location)?;
+            self.emit_result_call_to_current_block(target, args, carrier_type, location, span)?;
         let current_block = self.current_block_id_or_error(location)?;
 
-        self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
-            current_block,
-            result_local,
-            handled_result: FallibleBranchingContext {
-                result_type_ids,
-                handling,
-                carrier_type,
-                ok_type,
-                err_type,
-                value_required,
-                location,
-                validate_float_success,
+        self.lower_fallible_carrier_with_branching(
+            FallibleCarrierBranchingContext {
+                current_block,
+                result_local,
+                handled_result: FallibleBranchingContext {
+                    result_type_ids,
+                    handling,
+                    carrier_type,
+                    ok_type,
+                    err_type,
+                    value_required,
+                    location,
+                    validate_float_success,
+                },
             },
-        })
+            span,
+        )
     }
 
     /// Lowers the catch/recovery path for a fallible carrier.
@@ -85,6 +90,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_fallible_carrier_with_branching(
         &mut self,
         context: FallibleCarrierBranchingContext<'_>,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let FallibleCarrierBranchingContext {
             current_block,
@@ -111,7 +117,7 @@ impl<'a> HirBuilder<'a> {
         let error_block = self.create_block(error_region, location, "fallible-handled-err")?;
         let merge_block = self.create_block(region, location, "fallible-handled-merge")?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::FallibleBranch {
                 result: result_for_test,
@@ -119,6 +125,7 @@ impl<'a> HirBuilder<'a> {
                 error_block,
             },
             location,
+            span,
         )?;
 
         let result_locals = if value_required && !self.is_unit_type(ok_type) {
@@ -147,7 +154,7 @@ impl<'a> HirBuilder<'a> {
                 success_region,
             );
             let success_payload = if validate_float_success {
-                self.emit_validated_float_value(success_payload, location)?
+                self.emit_validated_float_value(success_payload, location, span)?
             } else {
                 success_payload
             };
@@ -194,6 +201,7 @@ impl<'a> HirBuilder<'a> {
                         err_type,
                         false,
                         Some(location.to_owned()),
+                        None,
                     )?;
 
                     self.emit_assign_local_statement(handler_error_local, error_payload, location)?;

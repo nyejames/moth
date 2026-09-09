@@ -7,9 +7,9 @@
 //! WHY: These shapes are intentionally narrow so formatters operate on text and
 //! opaque anchors only, without reaching into template internals.
 
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 // -------------------------
 //  Formatter Anchors
 // -------------------------
@@ -77,6 +77,7 @@ pub enum FormatterInputPiece {
 pub struct FormatterTextPiece {
     pub text: StringId,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Formatter output — newly generated text and preserved opaque anchors.
@@ -102,6 +103,7 @@ pub enum FormatterOutputPiece {
 pub(crate) fn output_to_input(
     output: FormatterOutput,
     representative_location: &SourceLocation,
+    representative_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> FormatterInput {
     let pieces = output
@@ -111,6 +113,7 @@ pub(crate) fn output_to_input(
             FormatterOutputPiece::Text(text) => FormatterInputPiece::Text(FormatterTextPiece {
                 text: string_table.intern(&text),
                 location: representative_location.clone(),
+                span: representative_span,
             }),
 
             FormatterOutputPiece::Opaque(anchor) => FormatterInputPiece::Opaque(anchor),

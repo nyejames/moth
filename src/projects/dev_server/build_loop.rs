@@ -127,6 +127,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                         entry_file,
                         &mut build_result.string_table,
                     ),
+                    setting_span: None,
                 })
             };
             write_project_outputs(

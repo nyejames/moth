@@ -463,6 +463,7 @@ fn assertion_message_expression(
             ty: option_string,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         },
         HirAssertionMessageEvaluation::Folded | HirAssertionMessageEvaluation::Runtime => {
             let value = HirExpression {
@@ -475,6 +476,7 @@ fn assertion_message_expression(
                     ValueKind::RValue
                 },
                 region: RegionId(0),
+                span: None,
             };
             HirExpression {
                 id: HirValueId(12),
@@ -486,6 +488,7 @@ fn assertion_message_expression(
                 ty: option_string,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             }
         }
     }
@@ -535,6 +538,7 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, location: SourceLocation) -> 
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     };
     let right = HirExpression {
         id: HirValueId(id + 101),
@@ -542,6 +546,7 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, location: SourceLocation) -> 
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     };
     let result = LocalId(9000);
 
@@ -554,6 +559,7 @@ fn numeric_op_statement(id: u32, op: HirNumericOp, location: SourceLocation) -> 
             result,
         },
         location,
+        span: None,
     }
 }
 
@@ -569,6 +575,7 @@ fn float_statement(
         ty: builtin_type_ids::FLOAT,
         value_kind: ValueKind::Const,
         region: RegionId(0),
+        span: None,
     };
     let result = LocalId(9000);
 
@@ -587,6 +594,7 @@ fn float_statement(
             },
         },
         location,
+        span: None,
     }
 }
 
@@ -597,6 +605,7 @@ fn unit_expression(id: u32) -> HirExpression {
         ty: builtin_type_ids::NONE,
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     }
 }
 

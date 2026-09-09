@@ -86,6 +86,7 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
             resource_id: live_id,
             owner: crate::compiler_frontend::hir::ids::FunctionId(0),
             location: SourceLocation::default(),
+            span: None,
         });
 
     let mut union = ResourceOriginUnion::new();

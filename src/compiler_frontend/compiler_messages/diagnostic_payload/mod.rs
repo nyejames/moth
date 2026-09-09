@@ -5,7 +5,6 @@
 //! pre-rendered strings or generic argument maps.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
@@ -192,13 +191,11 @@ pub enum DiagnosticPayload {
     MoveWhileBorrowed {
         place: DiagnosticPlace,
         existing_access: BorrowAccessKind,
-        borrow_location: Option<SourceLocation>,
     },
 
     WholeObjectBorrowConflict {
         whole_place: DiagnosticPlace,
         part_place: DiagnosticPlace,
-        part_location: Option<SourceLocation>,
     },
 
     InvalidMutableAccess {

@@ -166,6 +166,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             value: Expression::new(
                                 ExpressionKind::NoValue,
                                 header.name_location.to_owned(),
+                                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                                 struct_type_id,
                                 DataType::runtime_struct(
                                     header.tokens.src_path.to_owned(),
@@ -173,6 +174,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 ),
                                 ValueMode::ImmutableReference,
                             ),
+                            binding_span: Some(SourceSpan::new(
+                                header.tokens.file_id,
+                                header.name_span,
+                            )),
                             config_qualifier: None,
                         },
                     )
@@ -215,6 +220,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             value: Expression::new(
                                 ExpressionKind::NoValue,
                                 header.name_location.to_owned(),
+                                Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                                 choice_type_id,
                                 DataType::Choices {
                                     nominal_path: header.tokens.src_path.to_owned(),
@@ -223,6 +229,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 },
                                 ValueMode::ImmutableReference,
                             ),
+                            binding_span: Some(SourceSpan::new(
+                                header.tokens.file_id,
+                                header.name_span,
+                            )),
                             config_qualifier: None,
                         },
                     )
@@ -551,6 +561,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     tag,
                     payload,
                     location: variant.location.clone(),
+                    span: variant.span,
                 });
             }
 
@@ -585,6 +596,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         header.name_location.to_owned(),
+                        Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                         choice_type_id,
                         DataType::Choices {
                             nominal_path: header.tokens.src_path.to_owned(),
@@ -593,6 +605,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         },
                         ValueMode::ImmutableReference,
                     ),
+                    binding_span: Some(SourceSpan::new(header.tokens.file_id, header.name_span)),
                     config_qualifier: None,
                 },
             )
@@ -984,6 +997,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 tag,
                                 payload,
                                 location: variant.location.clone(),
+                                span: variant.span,
                             });
                         }
                         self.type_environment.update_choice_variants(
@@ -1250,21 +1264,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             emit_warnings,
                         )
                         .map_err(|mut messages| {
-                            if let Some(source) = header.tokens.file_id {
-                                let variant_span = SourceSpan::new(source, variant.span);
-                                for diagnostic in &mut messages.diagnostics {
-                                    if diagnostic
-                                        .labels
-                                        .iter()
-                                        .any(|label| label.span == Some(variant_span))
-                                    {
-                                        continue;
-                                    }
-                                    let mut label =
-                                        DiagnosticLabel::secondary(variant.location.clone(), None);
-                                    label.span = Some(variant_span);
-                                    diagnostic.labels.push(label);
+                            let variant_span = SourceSpan::new(header.tokens.file_id, variant.span);
+                            for diagnostic in &mut messages.diagnostics {
+                                if diagnostic
+                                    .labels
+                                    .iter()
+                                    .any(|label| label.span == Some(variant_span))
+                                {
+                                    continue;
                                 }
+                                let mut label =
+                                    DiagnosticLabel::secondary(variant.location.clone(), None);
+                                label.span = Some(variant_span);
+                                diagnostic.labels.push(label);
                             }
                             messages
                         })?;
@@ -1278,6 +1290,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 id: variant.id,
                 payload,
                 location: variant.location.clone(),
+                span: Some(SourceSpan::new(header.tokens.file_id, variant.span)),
             });
         }
 

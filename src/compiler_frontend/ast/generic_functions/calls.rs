@@ -169,6 +169,7 @@ fn parse_generic_function_call(
         args: arguments,
         result_type_ids: inference.signature.success_return_type_ids(),
         call_location: call_location.clone(),
+        call_span,
     };
 
     let expression = finish_generic_function_call(GenericFunctionCallFinishInput {
@@ -266,6 +267,7 @@ fn validate_generic_function_template_call(
         args: arguments,
         result_type_ids: inference.signature.success_return_type_ids(),
         call_location: call_location.clone(),
+        call_span,
     };
 
     finish_generic_function_call(GenericFunctionCallFinishInput {
@@ -648,7 +650,7 @@ fn collect_call_argument_bindings(
             template_type_id,
             argument.value.type_id,
             argument.location.clone(),
-            None,
+            argument.value.span,
         )?;
     }
 

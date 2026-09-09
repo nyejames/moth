@@ -41,13 +41,16 @@ pub(super) fn check_shared_access(
                 .diagnostics
                 .local_place(check.layout.local_ids[root_index]);
             let existing_location = check.tracker.access_location(root_index).cloned();
+            let existing_span = check.tracker.access_span(root_index);
             return Err(check.context.diagnostics.shared_mutable_conflict(
                 place,
                 borrow_access_kind(existing),
                 BorrowAccessKind::Shared,
                 None,
                 existing_location,
+                existing_span,
                 check.location.clone(),
+                check.span,
             ));
         }
 
@@ -71,13 +74,18 @@ pub(super) fn check_shared_access(
                 BorrowAccessKind::Shared,
                 Some(conflicting_place),
                 None,
+                None,
                 check.location.clone(),
+                check.span,
             ));
         }
 
-        check
-            .tracker
-            .record(root_index, AccessKind::Shared, check.location.clone());
+        check.tracker.record(
+            root_index,
+            AccessKind::Shared,
+            check.location.clone(),
+            check.span,
+        );
     }
 
     Ok(())
@@ -111,12 +119,15 @@ pub(super) fn check_mutable_access(
                 .diagnostics
                 .local_place(check.layout.local_ids[root_index]);
             let existing_location = check.tracker.access_location(root_index).cloned();
+            let existing_span = check.tracker.access_span(root_index);
             if existing == AccessKind::Mutable {
                 return Err(check.context.diagnostics.multiple_mutable_borrows(
                     place,
                     None,
                     existing_location,
+                    existing_span,
                     check.location.clone(),
+                    check.span,
                 ));
             }
 
@@ -126,7 +137,9 @@ pub(super) fn check_mutable_access(
                 BorrowAccessKind::Mutable,
                 None,
                 existing_location,
+                existing_span,
                 check.location.clone(),
+                check.span,
             ));
         }
 
@@ -140,7 +153,9 @@ pub(super) fn check_mutable_access(
                 InvalidMutableAccessReason::ImmutablePlace,
                 None,
                 None,
+                None,
                 check.location.clone(),
+                check.span,
             ));
         }
 
@@ -190,7 +205,9 @@ pub(super) fn check_mutable_access(
                         BorrowAccessKind::Mutable,
                         conflicting_place,
                         None,
+                        None,
                         check.location.clone(),
+                        check.span,
                     ));
                 }
 
@@ -213,14 +230,19 @@ pub(super) fn check_mutable_access(
                     InvalidMutableAccessReason::AliasedValueRequiresExclusiveAccess,
                     conflicting_place,
                     conflicting_location,
+                    None,
                     check.location.clone(),
+                    check.span,
                 ));
             }
         }
 
-        check
-            .tracker
-            .record(root_index, AccessKind::Mutable, check.location.clone());
+        check.tracker.record(
+            root_index,
+            AccessKind::Mutable,
+            check.location.clone(),
+            check.span,
+        );
     }
 
     Ok(())
@@ -243,6 +265,7 @@ pub(super) fn probe_mutable_access(
         block_id: check.block_id,
         tracker: &mut tracker,
         location: check.location.clone(),
+        span: check.span,
         stats: &mut stats,
         actor_index_hint: check.actor_index_hint,
         current_order: check.current_order,

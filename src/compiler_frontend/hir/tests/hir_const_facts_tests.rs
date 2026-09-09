@@ -49,6 +49,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             value: AstConstFactValue::Expression(Box::new(Expression::string_slice(
                 string_table.intern("Moth"),
                 test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
             ))),
             location: test_source_location(2),
@@ -65,6 +66,7 @@ fn projects_ast_const_facts_into_hir_metadata() {
             value: AstConstFactValue::Expression(Box::new(Expression::int(
                 42,
                 test_source_location(3),
+                None,
                 ValueMode::ImmutableOwned,
             ))),
             location: test_source_location(3),
@@ -149,6 +151,7 @@ fn remaps_const_fact_keys_and_payload_paths() {
             value: AstConstFactValue::Expression(Box::new(Expression::int(
                 1,
                 location.clone(),
+                None,
                 ValueMode::ImmutableOwned,
             ))),
             location,

@@ -124,10 +124,10 @@ pub(crate) fn validate_trait_evidence(
         };
         let target = resolve_conformance_target(&conformance.target, target_context).map_err(
             |mut diagnostic| {
-                if let Some(source) = header.tokens.file_id {
-                    diagnostic.primary_span =
-                        Some(SourceSpan::new(source, conformance.target.span));
-                }
+                diagnostic.primary_span = Some(SourceSpan::new(
+                    header.tokens.file_id,
+                    conformance.target.span,
+                ));
                 diagnostic
             },
         )?;
@@ -140,9 +140,8 @@ pub(crate) fn validate_trait_evidence(
                 input.string_table,
             )
             .map_err(|mut diagnostic| {
-                if let Some(source) = header.tokens.file_id {
-                    diagnostic.primary_span = Some(SourceSpan::new(source, trait_ref.span));
-                }
+                diagnostic.primary_span =
+                    Some(SourceSpan::new(header.tokens.file_id, trait_ref.span));
                 diagnostic
             })?;
 
@@ -209,10 +208,7 @@ pub(crate) fn validate_trait_evidence(
                 source_file: conformance_source_file.clone(),
                 declaration_location: conformance.target.location.clone(),
                 trait_location: trait_ref.location.clone(),
-                trait_span: header
-                    .tokens
-                    .file_id
-                    .map(|source| SourceSpan::new(source, trait_ref.span)),
+                trait_span: Some(SourceSpan::new(header.tokens.file_id, trait_ref.span)),
             });
         }
     }
@@ -265,9 +261,7 @@ fn attach_trait_reference_span(
     header: &Header,
     trait_ref: &super::super::syntax::TraitReferenceSyntax,
 ) {
-    if let Some(source) = header.tokens.file_id {
-        diagnostic.primary_span = Some(SourceSpan::new(source, trait_ref.span));
-    }
+    diagnostic.primary_span = Some(SourceSpan::new(header.tokens.file_id, trait_ref.span));
 }
 
 fn find_incompatible_evidence(

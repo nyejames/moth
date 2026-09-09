@@ -169,12 +169,17 @@ pub(super) fn handle_template_value_in_template_head(
     // TIR-native slot routing bucket them by the helper's target slot key
     // rather than treating them as loose fill content.
     if matches!(&template_kind, TemplateType::SlotInsert(_)) {
-        construction_context.record_insert_contribution(child_reference.root, location.to_owned());
+        construction_context.record_insert_contribution(
+            child_reference.root,
+            location.to_owned(),
+            source_span,
+        );
     } else {
         construction_context.record_child_template(
             child_reference,
             TemplateSegmentOrigin::Head,
             location.to_owned(),
+            source_span,
         );
     }
 
@@ -248,9 +253,12 @@ pub(super) fn push_template_head_expression(
     match &snapshot_expression.kind {
         ExpressionKind::StringSlice(text) => {
             let byte_len = string_table.resolve(*text).len();
-            target
-                .construction_context
-                .record_head_text(*text, byte_len, location.to_owned());
+            target.construction_context.record_head_text(
+                *text,
+                byte_len,
+                location.to_owned(),
+                source_span,
+            );
         }
 
         _ => {
@@ -258,6 +266,7 @@ pub(super) fn push_template_head_expression(
                 snapshot_expression.clone(),
                 None,
                 location.to_owned(),
+                source_span,
             );
         }
     }
@@ -297,8 +306,8 @@ pub(super) fn push_template_head_reactive_subscription(
         source,
         type_id: expression.type_id,
         location: location.to_owned(),
+        span: source_span,
     };
-
     // Reactive literal text in the head is recorded as a Text node carrying the
     // subscription in the store side-table, not as a dynamic-expression anchor.
     // The dependency remains available to reactive metadata and HIR invalidation.
@@ -310,6 +319,7 @@ pub(super) fn push_template_head_reactive_subscription(
                 byte_len,
                 Some(subscription.clone()),
                 location.to_owned(),
+                source_span,
             );
         }
         _ => {
@@ -317,6 +327,7 @@ pub(super) fn push_template_head_reactive_subscription(
                 expression.clone(),
                 Some(subscription.clone()),
                 location.to_owned(),
+                source_span,
             );
         }
     }
@@ -338,9 +349,10 @@ pub(super) fn push_template_head_path_expression(
 ) -> HeadExpressionResult<()> {
     let value_mode = ValueMode::ImmutableOwned;
     let location = token_stream.current_location();
-    let source_span = token_stream
-        .file_id
-        .map(|source| SourceSpan::new(source, token_stream.current_token().span));
+    let source_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let expression = resolve_file_value(
         path_syntax,
         token_stream,

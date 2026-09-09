@@ -36,11 +36,7 @@ pub(crate) fn prepare_moth_template_file(
     mut file_tokens: FileTokens,
     string_table: &mut StringTable,
 ) -> Result<FileFrontendPrepareOutput, CompilerError> {
-    let file_id = file_tokens.file_id.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "Moth template preparation requires a retained source file identity",
-        )
-    })?;
+    let file_id = file_tokens.file_id;
     let token_count = file_tokens.length;
     let token_stats = file_tokens.token_stats;
     let path_syntax = PreparedFilePathSyntax::from_file_tokens(&mut file_tokens)?;

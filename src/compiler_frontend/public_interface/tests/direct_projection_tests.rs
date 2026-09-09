@@ -157,6 +157,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -170,10 +171,12 @@ fn field_declaration_no_default(
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -183,6 +186,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
         name: path(name, string_table),
         type_id,
         location: SourceLocation::default(),
+        span: None,
     }
 }
 #[test]
@@ -270,7 +274,13 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     let max_size_constant = Declaration {
         id: InternedPath::from_single_str("MaxSize", &mut string_table),
-        value: Expression::int(256, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            256,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let module_constants = vec![max_size_constant];
@@ -482,10 +492,12 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         id: path("this", &mut string_table),
         value: Expression::no_value_with_type_id(
             SourceLocation::default(),
+            None,
             DataType::Inferred,
             struct_type_id,
             ValueMode::MutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let method_signature = FunctionSignature {
@@ -711,6 +723,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
             Expression::string_slice(
                 string_table.intern("default-prefix"),
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
@@ -721,7 +734,12 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(
+                42,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             &mut string_table,
         ),
         field_declaration_no_default("subject", string_id, &mut string_table),
@@ -823,13 +841,23 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_declaration_with_default(
             "x",
             int_id,
-            Expression::int(10, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(
+                10,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             &mut string_table,
         ),
         field_declaration_with_default(
             "flag",
             bool_id,
-            Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::bool(
+                true,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             &mut string_table,
         ),
         field_declaration_no_default("label", string_id, &mut string_table),
@@ -916,9 +944,11 @@ fn choice_payload_fields_remain_default_free() {
                 name: path("value", &mut string_table),
                 type_id: int_id,
                 location: SourceLocation::default(),
+                span: None,
             }]),
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let choice_path = path("Option", &mut string_table);
@@ -1011,6 +1041,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 Expression::string_slice(
                     string_table.intern("fallback"),
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 &mut string_table,

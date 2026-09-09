@@ -103,8 +103,10 @@ fn children_directive_accepts_const_string_reference() {
                 },
                 ..Default::default()
             },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 

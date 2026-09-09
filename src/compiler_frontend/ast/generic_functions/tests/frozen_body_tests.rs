@@ -29,7 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -197,9 +197,7 @@ fn capture_test_body(
     source_table: &StringTable,
 ) -> StableBodySyntax {
     let tokens = original.clone();
-    let source_file_id = tokens
-        .file_id
-        .expect("ordinary frozen-body fixture should retain source identity");
+    let source_file_id = tokens.file_id;
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     for (path_syntax, _) in tokens.path_syntax.iter() {
@@ -342,7 +340,7 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         value: Some(value),
     } = materialised
         .resolution_facts
-        .lookup(None, path_id)
+        .lookup(materialised.file_tokens.file_id, path_id)
         .expect("materialised content row should be readable")
         .expect("materialised content row should be retained")
         .outcome
@@ -438,8 +436,14 @@ fn every_token_payload_round_trips_through_the_frozen_buffer() {
         .materialise(&generated_source_file, &mut generated_table)
         .expect("frozen body should materialise");
     assert_eq!(
-        materialised.file_tokens.file_id, None,
-        "materialised generic syntax must not fabricate a compilation-root identity",
+        materialised.file_tokens.file_id,
+        SourceId::COMPILATION_ROOT,
+        "materialised generic syntax must retain its concrete donor identity",
+    );
+    assert_eq!(
+        materialised.resolution_facts.frozen_owner(),
+        Some(SourceId::COMPILATION_ROOT),
+        "materialised facts must carry the same explicit owner as the token stream",
     );
 
     let original_text = tokens
@@ -646,10 +650,11 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     let materialised = frozen
         .materialise(&generated_source_file, &mut generated_table)
         .expect("remapping fixture body should materialise");
+    let materialised_owner = materialised.file_tokens.file_id;
     let resolve_resource = |path_id| {
         let reference = materialised
             .resolution_facts
-            .lookup(None, path_id)
+            .lookup(materialised_owner, path_id)
             .expect("materialised facts should accept a compact handle")
             .expect("materialised facts should retain each compact row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -674,7 +679,7 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
     assert!(
         materialised
             .resolution_facts
-            .lookup(None, second_donor_path)
+            .lookup(materialised_owner, second_donor_path)
             .expect("materialised facts should accept a donor handle lookup")
             .is_none(),
         "a donor handle that differs from its compact handle must not select a retained row"
@@ -1003,9 +1008,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
             }
         }
         assert!(replaced, "the placeholder body literal should be present");
-        let body_file_id = body
-            .file_id
-            .expect("ordinary materialisation fixture should retain source identity");
+        let body_file_id = body.file_id;
         let body = FileTokens::new_with_identity(
             body.src_path.clone(),
             body_file_id,
@@ -1306,7 +1309,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let reference = body
             .resolution_facts()
             .expect("materialised body should carry its Stage 0 facts")
-            .lookup(None, path_id)
+            .lookup(body.tokens().file_id, path_id)
             .expect("materialised body facts should accept its compact handle")
             .expect("materialised body should retain its path row");
         let Stage0ResolvedFileReferenceOutcome::Resource {
@@ -1740,10 +1743,13 @@ fn frozen_resource_reference(
 
 #[test]
 fn frozen_generic_rejects_absent_path_handle() {
-    let error = match Stage0ResolutionFacts::frozen_generic(vec![frozen_resource_reference(
-        PathSyntaxId::NONE,
-        "assets/missing.svg",
-    )]) {
+    let error = match Stage0ResolutionFacts::frozen_generic(
+        SourceId::COMPILATION_ROOT,
+        vec![frozen_resource_reference(
+            PathSyntaxId::NONE,
+            "assets/missing.svg",
+        )],
+    ) {
         Ok(_) => panic!("frozen generic facts must reject an absent path handle"),
         Err(error) => error,
     };
@@ -1754,16 +1760,32 @@ fn frozen_generic_rejects_absent_path_handle() {
 }
 
 #[test]
-fn ordinary_stage0_lookup_rejects_absent_source_identity() {
+fn ordinary_stage0_lookup_returns_empty_for_unknown_row() {
     let facts = Stage0ResolutionFacts::ordinary(
         ResolvedFileReferenceTable::new(),
         SourceDatabase::empty().into(),
     );
-    let error = match facts.lookup(None, PathSyntaxId::NONE) {
-        Ok(_) => panic!("ordinary Stage 0 lookup must reject an absent source identity"),
-        Err(error) => error,
-    };
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert!(
+        facts
+            .lookup(SourceId::COMPILATION_ROOT, PathSyntaxId::NONE)
+            .expect("ordinary Stage 0 lookup with its declaring SourceId should succeed")
+            .is_none(),
+        "ordinary Stage 0 lookup for an unknown row should return no view",
+    );
+}
+
+#[test]
+fn frozen_generic_lookup_requires_retained_owner() {
+    let owner = SourceId::COMPILATION_ROOT;
+    let facts = Stage0ResolutionFacts::frozen_generic(owner, Vec::new())
+        .expect("empty frozen facts should build");
+    assert_eq!(facts.frozen_owner(), Some(owner));
+    assert!(
+        facts
+            .lookup(SourceId::from_index(7), PathSyntaxId::NONE)
+            .is_err(),
+        "frozen lookup must reject a non-owning SourceId so donor and requester stay distinct",
+    );
 }
 
 #[test]
@@ -1774,10 +1796,13 @@ fn frozen_generic_rejects_duplicate_compact_path_handle() {
         SourceLocation::default(),
         LocalSpan::source_start(),
     );
-    let error = match Stage0ResolutionFacts::frozen_generic(vec![
-        frozen_resource_reference(path_id, "assets/first.svg"),
-        frozen_resource_reference(path_id, "assets/second.svg"),
-    ]) {
+    let error = match Stage0ResolutionFacts::frozen_generic(
+        SourceId::COMPILATION_ROOT,
+        vec![
+            frozen_resource_reference(path_id, "assets/first.svg"),
+            frozen_resource_reference(path_id, "assets/second.svg"),
+        ],
+    ) {
         Ok(_) => panic!("frozen generic facts must reject duplicate compact path handles"),
         Err(error) => error,
     };
@@ -1792,6 +1817,7 @@ fn invalid_frozen_token_index_returns_compiler_error() {
     let mut string_table = StringTable::new();
     let frozen = StableBodySyntax {
         declaration_path: Box::new([]),
+        donor_file_id: SourceId::COMPILATION_ROOT,
         pool: Box::new([]),
         tokens: Box::new([Token::new(
             TokenKind::Symbol(StringId::from_index(0)),
@@ -1815,6 +1841,7 @@ fn invalid_frozen_location_index_returns_compiler_error() {
     let mut string_table = StringTable::new();
     let frozen = StableBodySyntax {
         declaration_path: Box::new([]),
+        donor_file_id: SourceId::COMPILATION_ROOT,
         pool: Box::new([]),
         tokens: Box::new([Token::new(
             TokenKind::Eof,
@@ -1842,6 +1869,7 @@ fn frozen_body_rejects_token_scope_outside_the_materialised_source_identity() {
     let mut string_table = StringTable::new();
     let frozen = StableBodySyntax {
         declaration_path: Box::new(["src/@mod.moth".to_owned()]),
+        donor_file_id: SourceId::COMPILATION_ROOT,
         pool: Box::new(["other.moth".to_owned()]),
         tokens: Box::new([Token::new(
             TokenKind::Eof,

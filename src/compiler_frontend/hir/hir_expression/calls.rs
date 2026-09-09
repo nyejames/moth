@@ -26,6 +26,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, Va
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
@@ -47,6 +48,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         _result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let mut lowered_args = Vec::with_capacity(args.len());
 
@@ -69,20 +71,20 @@ impl<'a> HirBuilder<'a> {
                 result: Some(result_local),
             },
             location: location.to_owned(),
+            span,
         };
         self.side_table.map_statement(location, &call_statement);
         self.emit_statement_to_current_block(call_statement, location)?;
 
         let region = self.current_region_or_error(location)?;
         let raw_value = self.make_local_load_expression(result_local, float_type, location, region);
-        let validated_value = self.emit_validated_float_value(raw_value, location)?;
+        let validated_value = self.emit_validated_float_value(raw_value, location, span)?;
 
         Ok(LoweredExpression {
             prelude: vec![],
             value: validated_value,
         })
     }
-
     pub(crate) fn lower_receiver_method_call_expression(
         &mut self,
         method_path: &InternedPath,
@@ -90,15 +92,15 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let target = self.resolve_call_target_or_error(method_path, location)?;
         let mut full_args = Vec::with_capacity(args.len() + 1);
         full_args.push(Self::shared_call_argument(receiver.clone(), location));
         full_args.extend(args.iter().cloned());
 
-        self.lower_call_expression(target, &full_args, result_type_ids, location)
+        self.lower_call_expression(target, &full_args, result_type_ids, location, span)
     }
-
     pub(crate) fn lower_collection_builtin_call_expression(
         &mut self,
         op: CollectionBuiltinOp,
@@ -106,6 +108,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let receiver_argument = if op.requires_mutable_receiver() {
             Self::mutable_call_argument(receiver.clone(), location)
@@ -124,12 +127,12 @@ impl<'a> HirBuilder<'a> {
             CollectionBuiltinOp::Remove => ExternalFunctionId::CollectionRemove,
             CollectionBuiltinOp::Length => ExternalFunctionId::CollectionLength,
         };
-
         self.lower_call_expression(
             CallTarget::External(id),
             &full_args,
             result_type_ids,
             location,
+            span,
         )
     }
 
@@ -147,6 +150,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let mut prelude = Vec::new();
         let hir_op = hir_map_op_from_builtin(op);
@@ -191,6 +195,7 @@ impl<'a> HirBuilder<'a> {
                 result,
             },
             location: location.to_owned(),
+            span,
         };
 
         self.side_table.map_statement(location, &statement);
@@ -222,6 +227,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         let mut prelude = Vec::new();
         let mut lowered_args = Vec::with_capacity(args.len());
@@ -281,6 +287,7 @@ impl<'a> HirBuilder<'a> {
                     result: None,
                 },
                 location: location.to_owned(),
+                span,
             };
 
             self.side_table.map_statement(location, &statement);
@@ -302,6 +309,7 @@ impl<'a> HirBuilder<'a> {
                 result: Some(temp_local),
             },
             location: location.to_owned(),
+            span,
         };
 
         self.side_table.map_statement(location, &statement);
@@ -394,6 +402,7 @@ impl<'a> HirBuilder<'a> {
                 value,
             },
             location: argument.location.to_owned(),
+            span: None,
         };
         self.side_table
             .map_statement(&argument.location, &assign_statement);

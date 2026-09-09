@@ -257,9 +257,7 @@ fn parse_call_arguments_inner(
             {
                 let target_location = token_stream.current_location();
                 let target_span = token_stream.tokens[token_stream.index].span;
-                let target_source_span = token_stream
-                    .file_id
-                    .map(|source| SourceSpan::new(source, target_span));
+                let target_source_span = Some(SourceSpan::new(token_stream.file_id, target_span));
                 let target_name = *name;
                 token_stream.advance();
                 token_stream.advance();

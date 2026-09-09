@@ -45,6 +45,7 @@ fn push_text_node(
             origin: TemplateSegmentOrigin::Body,
         },
         SourceLocation::default(),
+        None,
     ))
 }
 
@@ -59,6 +60,7 @@ fn push_template_entry(
         kind,
         TemplateIrSummary::default(),
         SourceLocation::default(),
+        None,
     ))
 }
 
@@ -83,6 +85,7 @@ fn same_store_wrapper_reference_is_normalized_without_materialization() {
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         SourceLocation::default(),
+        None,
     ));
     let template_id = push_template_entry(&mut store, root, TemplateType::String);
     let context = TemplateViewContext::default();
@@ -94,6 +97,7 @@ fn same_store_wrapper_reference_is_normalized_without_materialization() {
             context,
         },
         location: SourceLocation::default(),
+        span: None,
     };
 
     let reference = wrapper_reference_for_template(&template, &store)
@@ -111,6 +115,7 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         SourceLocation::default(),
+        None,
     ));
     let template_id = push_template_entry(&mut store, root, TemplateType::String);
     let missing_context_template = crate::compiler_frontend::ast::templates::template::Template {
@@ -123,6 +128,7 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
             },
         },
         location: SourceLocation::default(),
+        span: None,
     };
     let missing_context_error = wrapper_reference_for_template(&missing_context_template, &store)
         .expect_err("missing view context should be rejected");
@@ -142,6 +148,7 @@ fn wrapper_reference_rejects_missing_view_context_and_missing_template() {
             context: TemplateViewContext::default(),
         },
         location: SourceLocation::default(),
+        span: None,
     };
     let missing_template_error = wrapper_reference_for_template(&missing_template, &empty_store)
         .expect_err("missing template should be rejected");
@@ -162,6 +169,7 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
     let child_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
         SourceLocation::default(),
+        None,
     ));
     let child_template_id = push_template_entry(&mut store, child_root, TemplateType::String);
     let parser_reference =
@@ -173,6 +181,7 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
             occurrence_id: parser_occurrence_id,
         },
         SourceLocation::default(),
+        None,
     ));
     let body_node = push_text_node(&mut store, &mut string_table, "body");
 
@@ -296,6 +305,7 @@ fn trim_whitespace_rejects_every_malformed_reference_branch() {
             children: vec![TemplateIrNodeId::new(99)],
         },
         SourceLocation::default(),
+        None,
     ));
     let missing_child_error = trim_whitespace_before_loop_control_boundary(
         body_root,

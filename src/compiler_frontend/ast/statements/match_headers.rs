@@ -30,6 +30,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
@@ -105,6 +106,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     match_context: &ScopeContext,
     capture_name: StringId,
     binding_location: &SourceLocation,
+    binding_span: Option<SourceSpan>,
     inner_type_id: TypeId,
     pattern_location: &SourceLocation,
     type_interner: &mut AstTypeInterner<'_>,
@@ -131,10 +133,12 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         value: Expression::new(
             ExpressionKind::NoValue,
             binding_location.clone(),
+            binding_span,
             inner_type_id,
             capture_data_type,
             ValueMode::ImmutableOwned,
         ),
+        binding_span,
         config_qualifier: None,
     };
 
@@ -147,6 +151,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         inner_type_id,
         location: pattern_location.clone(),
         binding_location,
+        binding_span,
     };
 
     Ok((arm_scope, pattern))
@@ -333,6 +338,7 @@ fn parse_match_pattern_header(
             let (arm_scope, pattern) = if let MatchPattern::OptionPresentCapture {
                 name,
                 binding_location,
+                binding_span,
                 inner_type_id: capture_inner_type_id,
                 location: pattern_location,
                 ..
@@ -342,6 +348,7 @@ fn parse_match_pattern_header(
                     match_context,
                     *name,
                     binding_location,
+                    *binding_span,
                     *capture_inner_type_id,
                     pattern_location,
                     type_interner,
@@ -465,10 +472,12 @@ fn build_arm_scope_with_choice_captures(
             value: Expression::new(
                 ExpressionKind::NoValue,
                 capture.binding_location.clone(),
+                capture.binding_span,
                 capture.type_id,
                 diagnostic_type_spelling(capture.type_id, type_environment),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: capture.binding_span,
             config_qualifier: None,
         };
 
@@ -479,6 +488,9 @@ fn build_arm_scope_with_choice_captures(
             type_id: capture.type_id,
             binding_path,
             location: capture.location,
+            span: capture.span,
+            binding_location: capture.binding_location,
+            binding_span: capture.binding_span,
         });
     }
 
@@ -489,6 +501,7 @@ fn build_arm_scope_with_choice_captures(
             tag: parsed_pattern.tag,
             captures,
             location: parsed_pattern.location,
+            span: parsed_pattern.span,
         },
     ))
 }
@@ -510,6 +523,7 @@ fn choice_variants_for_type(type_id: TypeId, env: &TypeEnvironment) -> Vec<Choic
                     id: variant.name,
                     payload: convert_choice_payload(&variant.payload, env),
                     location: variant.location.clone(),
+                    span: variant.span,
                 })
                 .collect()
         })
@@ -530,10 +544,12 @@ fn convert_choice_payload(
                     value: Expression::new(
                         ExpressionKind::NoValue,
                         field.location.clone(),
+                        field.span,
                         field.type_id,
                         diagnostic_type_spelling(field.type_id, type_environment),
                         ValueMode::ImmutableOwned,
                     ),
+                    binding_span: field.span,
                     config_qualifier: None,
                 })
                 .collect(),

@@ -70,7 +70,12 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(
+        value,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 /// Builds a runtime (non-const) string reference expression.
@@ -78,6 +83,7 @@ fn runtime_string_expression() -> Expression {
     Expression::new(
         ExpressionKind::Reference(InternedPath::new()),
         SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -240,9 +246,10 @@ fn build_false_no_else_branch_template(
         TemplateBranchSelector::Bool(bool_expression(false)),
         body_node,
         SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, SourceLocation::default());
     builder.finish_template(
         root,
         Style::default(),
@@ -576,6 +583,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 Expression::string_slice(
                     outer_expression,
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 TemplateSegmentOrigin::Body,
@@ -707,6 +715,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 Box::new(Expression::string_slice(
                     string_table.intern("outer-overlay"),
                     SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -855,7 +864,7 @@ fn assert_text_body(body: &OwnedRuntimeTemplateBody, expected: &str, string_tabl
         OwnedRuntimeTemplateNode::Text { text, .. } => {
             assert_eq!(text.clone().into_text().as_deref(), Some(expected));
         }
-        OwnedRuntimeTemplateNode::Sequence { children } if children.len() == 1 => {
+        OwnedRuntimeTemplateNode::Sequence { children, .. } if children.len() == 1 => {
             assert_text_node(&children[0], expected, string_table);
         }
         other => panic!("expected Text or single-child sequence, got {:?}", other),
@@ -1028,7 +1037,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 
     let handoff = handoff_fixture(&fixture, &mut string_table);
     let outer = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = outer else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = outer else {
         panic!("expected the outer wrapper sequence, got {outer:?}");
     };
     assert_eq!(children.len(), 4);
@@ -1043,6 +1052,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
+        ..
     } = &children[1]
     else {
         panic!("expected the nested occurrence wrapper in the handoff");
@@ -1135,6 +1145,7 @@ fn prepared_fold_applies_wrapper_expression_overlay() {
         Expression::string_slice(
             wrapper_text,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
         None,
@@ -1162,6 +1173,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         Some(Expression::string_slice(
             outer_text,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         )),
     );
@@ -1186,6 +1198,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         Expression::string_slice(
             wrapper_text,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
         Some(runtime_string_expression()),
@@ -1210,7 +1223,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
 
     let handoff = handoff_fixture(&runtime_outer_fixture, &mut string_table);
     let wrapped = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = wrapped else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!(
             "expected wrapper sequence in the owned handoff, got {:?}",
             wrapped
@@ -1218,7 +1231,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     };
     let expression_node = match children.first() {
         Some(OwnedRuntimeTemplateNode::DynamicExpression { .. }) => &children[0],
-        Some(OwnedRuntimeTemplateNode::Sequence { children }) if children.len() == 1 => {
+        Some(OwnedRuntimeTemplateNode::Sequence { children, .. }) if children.len() == 1 => {
             &children[0]
         }
         Some(other) => {
@@ -1247,6 +1260,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
         Expression::string_slice(
             wrapper_text,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
         None,
@@ -1294,12 +1308,12 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
 
     let handoff = handoff_fixture(&fixture, &mut string_table);
     let wrapped = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = wrapped else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!("expected wrapper handoff sequence, got {wrapped:?}");
     };
     let expression_node = match children.first() {
         Some(OwnedRuntimeTemplateNode::DynamicExpression { .. }) => &children[0],
-        Some(OwnedRuntimeTemplateNode::Sequence { children }) if children.len() == 1 => {
+        Some(OwnedRuntimeTemplateNode::Sequence { children, .. }) if children.len() == 1 => {
             &children[0]
         }
         Some(other) => panic!("expected structural wrapper expression, got {other:?}"),
@@ -1345,6 +1359,7 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         tir.attach_runtime_slot_plan(source_template_id, slot_plan_id)
             .expect("source template should accept the committed slot plan");

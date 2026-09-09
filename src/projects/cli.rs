@@ -516,6 +516,7 @@ fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan
             &build_result.config.entry_dir,
             &mut build_result.string_table,
         ),
+        setting_span: None,
     }))
 }
 

@@ -56,6 +56,7 @@ pub(crate) fn resolve_choice_variant_payload_types(
             id: variant.id,
             payload,
             location: variant.location.clone(),
+            span: variant.span,
         });
     }
 

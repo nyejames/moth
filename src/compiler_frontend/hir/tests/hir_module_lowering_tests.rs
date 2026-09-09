@@ -166,6 +166,7 @@ fn lowers_module_constants_into_hir_const_pool() {
             Expression::string_slice(
                 string_table.intern("Moth"),
                 test_source_location(1),
+                None,
                 ValueMode::ImmutableOwned,
             ),
         ),
@@ -253,7 +254,7 @@ fn start_function_can_reference_module_constant() {
         &mut ast,
         make_test_variable(
             third_const,
-            Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
+            Expression::int(3, test_source_location(1), None, ValueMode::ImmutableOwned),
         ),
     );
 
@@ -349,6 +350,7 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
                 super::symbol("Page", &mut string_table),
                 vec![make_test_variable(body_field, template_constant)],
                 test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
                 true,
                 None,
@@ -490,14 +492,25 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
                 vec![
                     make_test_variable(
                         x_field,
-                        Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned),
+                        Expression::int(
+                            5,
+                            test_source_location(2),
+                            None,
+                            ValueMode::ImmutableOwned,
+                        ),
                     ),
                     make_test_variable(
                         y_field,
-                        Expression::int(99, test_source_location(2), ValueMode::ImmutableOwned),
+                        Expression::int(
+                            99,
+                            test_source_location(2),
+                            None,
+                            ValueMode::ImmutableOwned,
+                        ),
                     ),
                 ],
                 test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
                 true,
                 None,
@@ -1180,6 +1193,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(text_node),
         location: test_source_location(2),
+        span: None,
     };
 
     let start_function = function_node(
@@ -1269,6 +1283,7 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(text_node),
         location: test_source_location(2),
+        span: None,
     };
 
     let start_function = function_node(

@@ -249,10 +249,15 @@ pub(crate) fn signature_member_to_declaration(
         Err(diagnostic) => return Err(diagnostic),
     };
 
+    let member_span = Some(SourceSpan::new(
+        expression_context.shared.declaring_file_id,
+        member.span,
+    ));
     let mut value = if member.default_tokens.is_empty() {
         Expression::new(
             ExpressionKind::NoValue,
             member.location.clone(),
+            member_span,
             type_id,
             data_type,
             member.value_mode.clone(),
@@ -278,6 +283,7 @@ pub(crate) fn signature_member_to_declaration(
     Ok(Declaration {
         id: member.id.clone(),
         value,
+        binding_span: member_span,
         config_qualifier: None,
     })
 }
@@ -296,11 +302,7 @@ fn signature_member_error_with_span(
         return error;
     };
 
-    let Some(source) = expression_context.shared.declaring_file_id else {
-        return ExpressionParseError::Diagnostic(diagnostic);
-    };
-
-    let member_span = SourceSpan::new(source, member.span);
+    let member_span = SourceSpan::new(expression_context.shared.declaring_file_id, member.span);
     if diagnostic.primary_span.is_none() && diagnostic.primary_location == member.location {
         diagnostic.primary_span = Some(member_span);
     } else if !diagnostic

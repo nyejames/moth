@@ -21,13 +21,16 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
                 kind: NodeKind::Return(vec![Expression::int(
                     1,
                     location.clone(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )]),
                 location: location.clone(),
+                span: None,
                 scope: nested_scope.clone(),
             }],
         },
         location: location.clone(),
+        span: None,
         scope: nested_scope,
     };
     let value = Expression::new(
@@ -39,6 +42,7 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
             })),
         },
         location,
+        None,
         builtin_type_ids::INT,
         DataType::Int,
         ValueMode::ImmutableOwned,
@@ -68,14 +72,15 @@ fn inactive_static_branch_drops_nested_provenance() {
     let then_scope = InternedPath::from_single_str("then", &mut string_table);
     let else_scope = InternedPath::from_single_str("else", &mut string_table);
     let nested_scope = InternedPath::from_single_str("nested", &mut string_table);
-    let nested_condition = Expression::bool(true, location.clone(), ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            SyntheticInterfaceMemberIdentity::new(
-                SyntheticInterfaceClass::ProjectContext,
-                "source-config",
-                "enabled",
-            ),
-        ));
+    let nested_condition =
+        Expression::bool(true, location.clone(), None, ValueMode::ImmutableOwned)
+            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                SyntheticInterfaceMemberIdentity::new(
+                    SyntheticInterfaceClass::ProjectContext,
+                    "source-config",
+                    "enabled",
+                ),
+            ));
     let nested_if = AstNode {
         kind: NodeKind::If(
             nested_condition,
@@ -88,11 +93,12 @@ fn inactive_static_branch_drops_nested_provenance() {
             ),
         ),
         location: location.clone(),
+        span: None,
         scope: nested_scope,
     };
     let outer_if = AstNode {
         kind: NodeKind::If(
-            Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+            Expression::bool(false, location.clone(), None, ValueMode::ImmutableOwned),
             vec![nested_if],
             Some(Vec::new()),
             IfBranchMetadata::new(
@@ -102,11 +108,13 @@ fn inactive_static_branch_drops_nested_provenance() {
             ),
         ),
         location: location.clone(),
+        span: None,
         scope: then_scope,
     };
     let mut ast = vec![AstNode {
         kind: NodeKind::Function(function_path, FunctionSignature::default(), vec![outer_if]),
         location,
+        span: None,
         scope: else_scope,
     }];
 

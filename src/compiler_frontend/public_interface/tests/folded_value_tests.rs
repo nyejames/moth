@@ -139,7 +139,13 @@ fn constant_record_owns_scalar_int_folded_value() {
     let value_path = InternedPath::from_single_str("value", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            42,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -173,10 +179,14 @@ fn public_constant_record_retains_project_context_provenance() {
     );
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                member.clone(),
-            )),
+        value: Expression::int(
+            7,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(member.clone())),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -212,12 +222,24 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
     let char_path = InternedPath::from_single_str("letter", &mut string_table);
     let bool_decl = Declaration {
         id: bool_path,
-        value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::bool(
+            true,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let char_decl = Declaration {
         id: char_path,
-        value: Expression::char('A', SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::char(
+            'A',
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let module_constants = vec![bool_decl, char_decl];
@@ -255,7 +277,13 @@ fn constant_record_owns_scalar_float_folded_value() {
     let value_path = InternedPath::from_single_str("pi", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(3.5, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::float(
+            3.5,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -288,7 +316,13 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     let value_path = InternedPath::from_single_str("zero", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(-0.0, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::float(
+            -0.0,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -333,8 +367,10 @@ fn join_rejects_non_finite_float_value_as_internal_invariant() {
         value: Expression::float(
             f64::NAN,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -369,8 +405,10 @@ fn constant_record_owns_folded_template_string_value() {
         value: Expression::string_slice(
             folded_text,
             SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -413,11 +451,13 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
                 name: title_path,
                 type_id: string_id,
                 location: SourceLocation::default(),
+                span: None,
             },
             FieldDefinition {
                 name: year_path,
                 type_id: int_id,
                 location: SourceLocation::default(),
+                span: None,
             },
         ]),
         None,
@@ -430,13 +470,21 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
             value: Expression::string_slice(
                 title_text,
                 SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("year", &mut string_table),
-            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(
+                2026,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
     ];
@@ -445,6 +493,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         struct_path,
         fields,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -455,6 +504,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: struct_instance,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -508,6 +558,7 @@ fn constant_record_owns_recursive_const_record_fields() {
             name: inner_field_path,
             type_id: none_id,
             location: SourceLocation::default(),
+            span: None,
         }]),
         None,
     );
@@ -519,19 +570,27 @@ fn constant_record_owns_recursive_const_record_fields() {
             name: depth_path,
             type_id: int_id,
             location: SourceLocation::default(),
+            span: None,
         }]),
         None,
     );
 
     let inner_fields = vec![Declaration {
         id: InternedPath::from_single_str("depth", &mut string_table),
-        value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            7,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }];
     let inner_instance = Expression::struct_instance(
         inner_path,
         inner_fields,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -541,12 +600,14 @@ fn constant_record_owns_recursive_const_record_fields() {
     let outer_fields = vec![Declaration {
         id: InternedPath::from_single_str("inner", &mut string_table),
         value: inner_instance,
+        binding_span: None,
         config_qualifier: None,
     }];
     let outer_instance = Expression::struct_instance(
         outer_path,
         outer_fields,
         SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -557,6 +618,7 @@ fn constant_record_owns_recursive_const_record_fields() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: outer_instance,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -611,12 +673,14 @@ fn constant_record_owns_choice_with_stable_variant_name() {
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
             location: SourceLocation::default(),
+            span: None,
         },
         ChoiceVariantDefinition {
             name: string_table.intern("Inactive"),
             tag: 1,
             payload: ChoiceVariantPayloadDefinition::Unit,
             location: SourceLocation::default(),
+            span: None,
         },
     ]);
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
@@ -633,6 +697,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
         diagnostic_type: DataType::Inferred,
         type_id: choice_type_id,
         location: SourceLocation::default(),
+        span: None,
         value_mode: ValueMode::ImmutableOwned,
     });
 
@@ -640,6 +705,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: choice_expr,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -679,14 +745,30 @@ fn constant_record_owns_collection_of_folded_values() {
     let mut env = TypeEnvironment::new();
 
     let items = vec![
-        Expression::int(10, SourceLocation::default(), ValueMode::ImmutableOwned),
-        Expression::int(20, SourceLocation::default(), ValueMode::ImmutableOwned),
-        Expression::int(30, SourceLocation::default(), ValueMode::ImmutableOwned),
+        Expression::int(
+            10,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        Expression::int(
+            20,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        Expression::int(
+            30,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
     ];
     let collection_type_id = env.intern_collection(env.builtins().int, None);
     let collection_expr = Expression::new(
         ExpressionKind::Collection(items),
         SourceLocation::default(),
+        None,
         collection_type_id,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -696,6 +778,7 @@ fn constant_record_owns_collection_of_folded_values() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: collection_expr,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -734,13 +817,19 @@ fn constant_record_owns_option_some_value() {
     let int_id = env.builtins().int;
     let option_type_id = env.intern_option(int_id);
 
-    let inner = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let inner = Expression::int(
+        42,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let coerced = Expression::coerced(inner, option_type_id);
 
     let value_path = InternedPath::from_single_str("maybe_value", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
         value: coerced,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -776,7 +865,12 @@ fn constant_record_owns_nested_option_some_value() {
     let inner_option_id = env.intern_option(int_id);
     let outer_option_id = env.intern_option(inner_option_id);
 
-    let inner = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let inner = Expression::int(
+        7,
+        SourceLocation::default(),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let inner_option = Expression::coerced(inner, inner_option_id);
     let outer_option = Expression::coerced(inner_option, outer_option_id);
 
@@ -784,6 +878,7 @@ fn constant_record_owns_nested_option_some_value() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: outer_option,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -829,12 +924,14 @@ fn constant_record_projects_option_none_value() {
         DataType::Int,
         &mut env,
         SourceLocation::default(),
+        None,
     );
 
     let value_path = InternedPath::from_single_str("absent", &mut string_table);
     let module_constants = vec![Declaration {
         id: value_path,
         value: none_expr,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -877,12 +974,24 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let module_constants = vec![
         Declaration {
             id: public_path.clone(),
-            value: Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(
+                1,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: private_path,
-            value: Expression::int(2, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(
+                2,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
     ];
@@ -949,13 +1058,25 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
     let dup_path = InternedPath::from_single_str("dup", &mut string_table);
     let decl = Declaration {
         id: dup_path,
-        value: Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            1,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let duplicate_path = InternedPath::from_single_str("dup", &mut string_table);
     let duplicate = Declaration {
         id: duplicate_path,
-        value: Expression::int(2, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(
+            2,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     };
     let module_constants = vec![decl, duplicate];
@@ -1016,6 +1137,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
             &mut string_table,
         )),
         SourceLocation::default(),
+        None,
         int_id,
         DataType::Int,
         ValueMode::ImmutableOwned,
@@ -1025,6 +1147,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: reference_expr,
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -1115,12 +1238,19 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
 
     let enabled_fields = vec![Declaration {
         id: InternedPath::from_single_str("enabled", &mut string_table),
-        value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::bool(
+            true,
+            SourceLocation::default(),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
         config_qualifier: None,
     }];
     let nested_record = Expression::new(
         ExpressionKind::StructInstance(enabled_fields),
         SourceLocation::default(),
+        None,
         marker,
         DataType::None,
         ValueMode::ImmutableOwned,
@@ -1129,18 +1259,26 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
     let fields = vec![
         Declaration {
             id: InternedPath::from_single_str("year", &mut string_table),
-            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(
+                2026,
+                SourceLocation::default(),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("flags", &mut string_table),
             value: nested_record,
+            binding_span: None,
             config_qualifier: None,
         },
     ];
     let record = Expression::new(
         ExpressionKind::StructInstance(fields),
         SourceLocation::default(),
+        None,
         marker,
         DataType::None,
         ValueMode::ImmutableOwned,
@@ -1150,6 +1288,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
     let module_constants = vec![Declaration {
         id: value_path,
         value: record,
+        binding_span: None,
         config_qualifier: None,
     }];
 

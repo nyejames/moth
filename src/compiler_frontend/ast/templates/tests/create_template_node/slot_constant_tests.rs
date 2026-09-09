@@ -101,6 +101,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
     let declarations = vec![Declaration {
         id: scope.append(string_table.intern("header")),
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -180,8 +181,10 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
                     },
                     ..Default::default()
                 },
+                None,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
@@ -200,8 +203,10 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
                     },
                     ..Default::default()
                 },
+                None,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         },
     ];

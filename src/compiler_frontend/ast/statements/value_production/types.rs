@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Fallibl
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
@@ -117,7 +118,10 @@ pub enum ValueBlock {
 #[derive(Debug)]
 pub enum ParsedReceiverValue {
     Complete(Expression),
-    NeedsSlotInference(ValueBlock),
+    NeedsSlotInference {
+        block: ValueBlock,
+        span: Option<SourceSpan>,
+    },
 }
 
 /// Single `if` value-producing block.

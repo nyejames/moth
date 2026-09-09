@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -103,11 +104,14 @@ pub fn evaluate_expression(
         *expected_type = ExpectedType::Known(resolved_type);
     }
 
+    let stack_span = rpn_items.iter().find_map(|item| match item {
+        ExpressionRpnItem::Operand(expression) => expression.span,
+        ExpressionRpnItem::Operator { .. } => None,
+    });
     // Runtime RPN needs an owned value mode for the final expression node.
     let value_mode = value_mode.as_owned();
     eval_log!("Attempting to Fold: ", Pretty rpn_items);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
-
     let fold_outcome = constant_fold(rpn_items, string_table)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
     eval_log!("Stack after folding: ", Pretty fold_outcome);
@@ -157,6 +161,7 @@ pub fn evaluate_expression(
         resolved_type,
         value_mode,
         location.clone(),
+        stack_span,
     )?)
 }
 
@@ -171,12 +176,14 @@ fn runtime_expression_from_items(
     type_id: TypeId,
     value_mode: ValueMode,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<Expression, CompilerError> {
     Ok(Expression::runtime_with_type_id(
         ExpressionRpn { items },
         diagnostic_type,
         type_id,
         location,
+        span,
         value_mode,
     ))
 }

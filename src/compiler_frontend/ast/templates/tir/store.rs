@@ -47,6 +47,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_are_equivalent;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 pub(crate) use control_flow::ControlFlowBodyKind;
@@ -314,6 +315,7 @@ impl TemplateIrStore {
             kind: source_template.kind.clone(),
             summary,
             location: source_template.location.clone(),
+            span: source_template.span,
             conditional_child_wrapper_set: source_template.conditional_child_wrapper_set,
             runtime_slot_plan: source_template.runtime_slot_plan,
         })
@@ -456,6 +458,7 @@ impl TemplateIrStore {
         &mut self,
         placeholder: &SlotPlaceholder,
         location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<TirSlotPlaceholder, TemplateError> {
         let occurrence_id = self.next_slot_occurrence_id();
         let applied_child_wrapper_set =
@@ -467,6 +470,7 @@ impl TemplateIrStore {
             placeholder.key.to_owned(),
             occurrence_id,
             location,
+            span,
             applied_child_wrapper_set,
             child_wrapper_set,
             placeholder.skip_parent_child_wrappers,

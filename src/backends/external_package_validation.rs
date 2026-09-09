@@ -9,7 +9,21 @@
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableExternalCall};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+fn with_optional_primary_span(
+    mut diagnostic: CompilerDiagnostic,
+    span: Option<SourceSpan>,
+) -> CompilerDiagnostic {
+    if let Some(span) = span {
+        diagnostic.primary_span = Some(span);
+        if let Some(primary_label) = diagnostic.labels.first_mut() {
+            primary_label.span = Some(span);
+        }
+    }
+    diagnostic
+}
 
 /// Backend target for external-package support validation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,10 +108,13 @@ fn unsupported_external_function_diagnostic(
 
     let package_path = registry.resolve_function_package(call.function_id);
 
-    CompilerDiagnostic::unsupported_external_function(
-        string_table.intern(&function_name),
-        package_path.map(|path| string_table.intern(path)),
-        string_table.intern(target.as_str()),
-        call.location.clone(),
+    with_optional_primary_span(
+        CompilerDiagnostic::unsupported_external_function(
+            string_table.intern(&function_name),
+            package_path.map(|path| string_table.intern(path)),
+            string_table.intern(target.as_str()),
+            call.location.clone(),
+        ),
+        call.span,
     )
 }

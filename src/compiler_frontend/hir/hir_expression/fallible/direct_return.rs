@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::return_hir_transformation_error;
@@ -26,6 +27,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value: &Expression,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<bool, CompilerError> {
         let Some(result_carrier) = self.emit_result_propagation_carrier_to_current_block(value)?
         else {
@@ -33,7 +35,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         let propagation_location = value.propagation_location().unwrap_or(location);
-        self.emit_result_carrier_direct_return(result_carrier, propagation_location)?;
+        self.emit_result_carrier_direct_return(result_carrier, propagation_location, span)?;
         Ok(true)
     }
 
@@ -45,6 +47,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         result_carrier: EmittedFallibleCarrier,
         location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let current_function_id = self.current_function_id_or_error(location)?;
         let current_return_type = self
@@ -82,6 +85,7 @@ impl<'a> HirBuilder<'a> {
             result_carrier.result_local,
             result_carrier.carrier_type,
             location,
+            span,
             "return-fallible-ok",
             "return-fallible-err",
         )?;
@@ -104,12 +108,13 @@ impl<'a> HirBuilder<'a> {
             success_region,
         );
         if result_carrier.validate_float_success {
-            success_payload = self.emit_validated_float_value(success_payload, location)?;
+            success_payload = self.emit_validated_float_value(success_payload, location, span)?;
         }
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             branch.success_block,
             HirTerminator::ReturnSuccess(success_payload),
             location,
+            span,
         )?;
 
         self.emit_result_carrier_error_return(
@@ -119,6 +124,7 @@ impl<'a> HirBuilder<'a> {
             current_error_type,
             result_carrier.err_type,
             location,
+            span,
         )?;
 
         self.set_current_block(branch.success_block, location)

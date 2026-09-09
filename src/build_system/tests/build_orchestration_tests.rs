@@ -1959,6 +1959,7 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 entry_root: entry_root.clone(),
                 owner,
                 setting_location: SourceLocation::default(),
+                setting_span: None,
             }),
             write_mode: WriteMode::AlwaysWrite,
         };

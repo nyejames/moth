@@ -29,11 +29,11 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn int_expr(value: i32, location: SourceLocation) -> Expression {
-    Expression::int(value, location, ValueMode::ImmutableOwned)
+    Expression::int(value, location, None, ValueMode::ImmutableOwned)
 }
 
 fn float_expr(value: f64, location: SourceLocation) -> Expression {
-    Expression::float(value, location, ValueMode::ImmutableOwned)
+    Expression::float(value, location, None, ValueMode::ImmutableOwned)
 }
 
 fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, NumericFailureMode)> {

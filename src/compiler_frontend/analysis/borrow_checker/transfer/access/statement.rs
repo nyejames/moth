@@ -10,6 +10,7 @@ use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
+use crate::compiler_frontend::source::SourceSpan;
 
 pub(crate) fn transfer_statement(
     context: &BorrowTransferContext<'_>,
@@ -30,6 +31,7 @@ pub(crate) fn transfer_statement(
     match &statement.kind {
         HirStatementKind::Assign { target, value } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let pending_invalidations = reactive_assignment_invalidations(
                 context,
                 layout,
@@ -37,6 +39,7 @@ pub(crate) fn transfer_statement(
                 statement.id,
                 target,
                 location.clone(),
+                statement.span,
             )?;
 
             {
@@ -47,6 +50,7 @@ pub(crate) fn transfer_statement(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
+                    span,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -66,6 +70,7 @@ pub(crate) fn transfer_statement(
                     block_id,
                     tracker: &mut tracker,
                     location: location.clone(),
+                    span,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -88,6 +93,7 @@ pub(crate) fn transfer_statement(
                     tracker: &mut tracker,
                     value_fact_buffer,
                     location,
+                    span,
                     stats,
                 },
                 target,
@@ -102,6 +108,7 @@ pub(crate) fn transfer_statement(
             result,
         } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let semantics = resolve_call_semantics(context, target, args.len(), location.clone())?;
             let call_args = args
                 .iter()
@@ -127,6 +134,7 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
+                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -144,6 +152,7 @@ pub(crate) fn transfer_statement(
             result,
         } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let mut call_args = Vec::with_capacity(args.len() + 1);
             call_args.push(CallArgumentTransfer {
                 argument: receiver,
@@ -167,6 +176,7 @@ pub(crate) fn transfer_statement(
                 *op,
                 receiver,
                 location.clone(),
+                statement.span,
             )?;
 
             transfer_call_arguments_and_result(
@@ -178,6 +188,7 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
+                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -190,6 +201,7 @@ pub(crate) fn transfer_statement(
 
         HirStatementKind::CastOp { source, result, .. } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -199,6 +211,7 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
+                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -214,6 +227,7 @@ pub(crate) fn transfer_statement(
         HirStatementKind::FormatFloat { source, result, .. }
         | HirStatementKind::ValidateFloat { source, result, .. } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -223,6 +237,7 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
+                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -239,6 +254,7 @@ pub(crate) fn transfer_statement(
             operands, result, ..
         } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let arguments = numeric_op_arguments(operands);
             let call_args = arguments
                 .iter()
@@ -257,6 +273,7 @@ pub(crate) fn transfer_statement(
                     current_order: statement_order,
                     tracker: &mut tracker,
                     location,
+                    span,
                     stats,
                     value_fact_buffer,
                 },
@@ -268,6 +285,7 @@ pub(crate) fn transfer_statement(
 
         HirStatementKind::Expr(expression) => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {
                 context,
                 layout,
@@ -275,6 +293,7 @@ pub(crate) fn transfer_statement(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -293,6 +312,7 @@ pub(crate) fn transfer_statement(
 
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             let location = context.diagnostics.statement_error_location(statement);
+            let span = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {
                 context,
                 layout,
@@ -300,6 +320,7 @@ pub(crate) fn transfer_statement(
                 block_id,
                 tracker: &mut tracker,
                 location: location.clone(),
+                span,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -417,6 +438,7 @@ struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
     current_order: i32,
     tracker: &'tracker mut StatementAccessTracker,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     stats: &'stats mut BlockTransferStats,
     value_fact_buffer: &'facts mut ValueFactBuffer,
 }
@@ -476,6 +498,7 @@ fn transfer_call_arguments_and_result(
                 block_id: input.block_id,
                 tracker: input.tracker,
                 location: argument_location.clone(),
+                span: arg.argument.span,
                 current_order: input.current_order,
                 stats: input.stats,
                 value_fact_buffer: input.value_fact_buffer,
@@ -512,6 +535,7 @@ fn record_call_argument_reads(
             block_id: input.block_id,
             tracker: input.tracker,
             location: argument_location.clone(),
+            span: argument.span,
             current_order: input.current_order,
             stats: input.stats,
             value_fact_buffer: input.value_fact_buffer,
@@ -527,6 +551,7 @@ fn record_call_argument_reads(
             input.state,
             place,
             argument_location.clone(),
+            argument.span,
             &input.context.diagnostics,
         )?;
         arg_roots.union_with(&place_roots);
@@ -540,6 +565,7 @@ fn record_call_argument_reads(
         block_id: input.block_id,
         tracker: input.tracker,
         location: argument_location.clone(),
+        span: argument.span,
         current_order: input.current_order,
         stats: input.stats,
         value_fact_buffer: input.value_fact_buffer,
@@ -566,9 +592,10 @@ fn transfer_call_argument_access(
                 input.state,
                 argument,
                 argument_location.clone(),
+                argument.span,
                 &input.context.diagnostics,
             )?;
-            check_call_mutable_borrow(input, &mutable_roots, argument_location)?;
+            check_call_mutable_borrow(input, &mutable_roots, argument_location, argument.span)?;
             input.value_fact_buffer.record(
                 argument.id,
                 ValueAccessClassification::MutableArgument,
@@ -583,6 +610,7 @@ fn transfer_call_argument_access(
                 input.state,
                 argument,
                 argument_location.clone(),
+                argument.span,
                 &input.context.diagnostics,
             )?;
             check_call_may_consume(
@@ -590,6 +618,7 @@ fn transfer_call_argument_access(
                 argument,
                 &mutable_roots,
                 argument_location,
+                argument.span,
                 fallback_effect,
             )?;
             input.value_fact_buffer.record(
@@ -663,6 +692,7 @@ fn check_call_mutable_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     mutable_roots: &RootSet,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     if mutable_roots.is_empty() {
         return Ok(());
@@ -675,6 +705,7 @@ fn check_call_mutable_borrow(
         block_id: input.block_id,
         tracker: input.tracker,
         location,
+        span,
         stats: input.stats,
         actor_index_hint: None,
         current_order: input.current_order,
@@ -696,6 +727,7 @@ fn check_call_may_consume(
     argument: &HirExpression,
     mutable_roots: &RootSet,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
     if mutable_roots.is_empty() {
@@ -711,7 +743,7 @@ fn check_call_may_consume(
             .reactive_source_id_for_local(input.layout.local_ids[root_index])
             .is_some()
     }) {
-        return check_call_borrow_fallback(input, mutable_roots, location, fallback_effect);
+        return check_call_borrow_fallback(input, mutable_roots, location, span, fallback_effect);
     }
 
     let move_decision = classify_move_decision(
@@ -727,7 +759,7 @@ fn check_call_may_consume(
                 OptionalTransferStatus::Borrow,
                 mutable_roots,
             );
-            check_call_borrow_fallback(input, mutable_roots, location, fallback_effect)
+            check_call_borrow_fallback(input, mutable_roots, location, span, fallback_effect)
         }
         MoveDecision::Move => {
             let mut check = AccessCheckContext {
@@ -737,6 +769,7 @@ fn check_call_may_consume(
                 block_id: input.block_id,
                 tracker: input.tracker,
                 location: location.clone(),
+                span,
                 stats: input.stats,
                 actor_index_hint: None,
                 current_order: input.current_order,
@@ -753,7 +786,13 @@ fn check_call_may_consume(
                     OptionalTransferStatus::Borrow,
                     mutable_roots,
                 );
-                return check_call_borrow_fallback(input, mutable_roots, location, fallback_effect);
+                return check_call_borrow_fallback(
+                    input,
+                    mutable_roots,
+                    location,
+                    span,
+                    fallback_effect,
+                );
             }
 
             input.value_fact_buffer.record_optional_transfer(
@@ -772,12 +811,13 @@ fn check_call_borrow_fallback(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
     if matches!(fallback_effect, ArgEffect::SharedBorrow) {
-        check_call_shared_borrow(input, roots, location)
+        check_call_shared_borrow(input, roots, location, span)
     } else {
-        check_call_mutable_borrow(input, roots, location)
+        check_call_mutable_borrow(input, roots, location, span)
     }
 }
 
@@ -785,6 +825,7 @@ fn check_call_shared_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     if roots.is_empty() {
         return Ok(());
@@ -797,6 +838,7 @@ fn check_call_shared_borrow(
         block_id: input.block_id,
         tracker: input.tracker,
         location,
+        span,
         stats: input.stats,
         actor_index_hint: None,
         current_order: input.current_order,
@@ -892,6 +934,7 @@ fn reactive_assignment_invalidations(
     statement_id: HirNodeId,
     target: &HirPlace,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     match target {
         HirPlace::Local(local_id) => {
@@ -919,6 +962,7 @@ fn reactive_assignment_invalidations(
                 source,
                 kind: ReactiveInvalidationKind::Assignment,
                 location,
+                span,
             }])
         }
 
@@ -928,6 +972,7 @@ fn reactive_assignment_invalidations(
                 state,
                 target,
                 location.clone(),
+                span,
                 &context.diagnostics,
             )?;
             let kind = match target {
@@ -942,6 +987,7 @@ fn reactive_assignment_invalidations(
                 statement_id,
                 ReactiveInvalidationKind::PlaceWrite(kind),
                 location,
+                span,
             ))
         }
     }
@@ -955,6 +1001,7 @@ fn reactive_map_mutation_invalidations(
     op: HirMapOp,
     receiver: &HirExpression,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     if !op.requires_mutable_receiver() {
         return Ok(Vec::new());
@@ -965,6 +1012,7 @@ fn reactive_map_mutation_invalidations(
         state,
         receiver,
         location.clone(),
+        receiver.span,
         &context.diagnostics,
     )?;
     Ok(invalidations_for_roots(
@@ -974,6 +1022,7 @@ fn reactive_map_mutation_invalidations(
         statement_id,
         ReactiveInvalidationKind::MapMutation(op),
         location,
+        span,
     ))
 }
 
@@ -1004,6 +1053,7 @@ fn reactive_mutable_call_invalidations(
             state,
             arg.argument,
             argument_location.clone(),
+            arg.argument.span,
             &context.diagnostics,
         )?;
         invalidations.extend(invalidations_for_roots(
@@ -1016,6 +1066,7 @@ fn reactive_mutable_call_invalidations(
                 argument_index,
             },
             argument_location,
+            arg.argument.span,
         ));
     }
 
@@ -1029,6 +1080,7 @@ fn invalidations_for_roots(
     statement_id: HirNodeId,
     kind: ReactiveInvalidationKind,
     location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Vec<ReactiveInvalidationFact> {
     let mut sources = roots
         .iter_ones()
@@ -1048,6 +1100,7 @@ fn invalidations_for_roots(
             source,
             kind: kind.clone(),
             location: location.clone(),
+            span,
         })
         .collect()
 }

@@ -15,6 +15,7 @@ fn apply_default_template_body_whitespace(input: &str) -> String {
             pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
                 text: input_id,
                 location: SourceLocation::default(),
+                span: None,
             })],
         },
         &[TemplateWhitespacePassProfile::default_template_body()],

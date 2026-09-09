@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidConfigReason, InvalidOutputFolderReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use saying::say;
@@ -152,6 +153,7 @@ pub(crate) fn prepare_output_cleanup(
     entry_root: Option<&Path>,
     owner: OutputOwner,
     setting_location: &SourceLocation,
+    setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
     string_table: &StringTable,
 ) -> Result<PreparedOutputCleanup, CompilerMessages> {
@@ -176,6 +178,7 @@ pub(crate) fn prepare_output_cleanup(
                     profile,
                     owner,
                     setting_location,
+                    setting_span,
                     string_table,
                 ));
             }
@@ -191,6 +194,7 @@ pub(crate) fn prepare_output_cleanup(
                 existing_profile,
                 owner,
                 setting_location,
+                setting_span,
                 string_table,
             ));
         }
@@ -860,6 +864,7 @@ fn manifest_owner_conflict_messages(
     existing_profile: &str,
     active_owner: OutputOwner,
     setting_location: &SourceLocation,
+    setting_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> CompilerMessages {
     let mut diagnostic_table = string_table.clone();
@@ -870,8 +875,14 @@ fn manifest_owner_conflict_messages(
         active_builder: diagnostic_table.intern(active_owner.builder.manifest_name()),
         active_profile: diagnostic_table.intern(build_profile_manifest_name(active_owner.profile)),
     };
-    let diagnostic =
+    let mut diagnostic =
         CompilerDiagnostic::invalid_config_reason(None, reason, setting_location.clone());
+    diagnostic.primary_span = setting_span;
+    if let Some(span) = setting_span {
+        if let Some(label) = diagnostic.labels.first_mut() {
+            label.span = Some(span);
+        }
+    }
     CompilerMessages::from_diagnostic(diagnostic, diagnostic_table)
 }
 

@@ -38,8 +38,8 @@ use crate::compiler_frontend::ast::templates::tir::view::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -309,7 +309,9 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
             reference: *reference,
         },
         TemplateIrNodeKind::Sequence { children } => FormatterChildFact::Sequence(children.clone()),
-        TemplateIrNodeKind::BranchChain { branches, fallback } => FormatterChildFact::BranchChain {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => FormatterChildFact::BranchChain {
             branch_bodies: branches.iter().map(|branch| branch.body).collect(),
             fallback: *fallback,
         },
@@ -622,6 +624,7 @@ fn format_tir_node(
                             children: replacement_nodes,
                         },
                         location,
+                        None,
                     ),
                     None,
                 )?
@@ -750,6 +753,7 @@ fn format_tir_sequence(
                     children: new_children,
                 },
                 location,
+                None,
             ),
             None,
         )?
@@ -882,6 +886,8 @@ fn process_formatter_run(
         return Ok((Vec::new(), Vec::new(), false));
     }
 
+    let representative_span = representative_span_for_run(formatter_store, run, string_table)?;
+
     let mut input_pieces: Vec<FormatterInputPiece> = Vec::with_capacity(run.len());
     let mut anchor_side_table: Vec<TemplateIrNodeId> = Vec::with_capacity(run.len());
     let mut run_reactive_subscription: Option<ReactiveSubscription> = None;
@@ -903,6 +909,7 @@ fn process_formatter_run(
                 input_pieces.push(FormatterInputPiece::Text(FormatterTextPiece {
                     text: *text,
                     location: node.location.clone(),
+                    span: node.span,
                 }));
             }
 
@@ -931,7 +938,12 @@ fn process_formatter_run(
     let mut formatter_warnings = Vec::new();
 
     if let Some(fmt) = formatter {
-        let next_input = output_to_input(output, representative_location, string_table);
+        let next_input = output_to_input(
+            output,
+            representative_location,
+            representative_span,
+            string_table,
+        );
         let formatter_result = fmt.formatter.format(next_input, string_table)?;
 
         formatter_warnings.extend(formatter_result.warnings);
@@ -940,7 +952,12 @@ fn process_formatter_run(
 
     // 3. Post-format whitespace passes.
     if !post_format_passes.is_empty() {
-        let post_input = output_to_input(output, representative_location, string_table);
+        let post_input = output_to_input(
+            output,
+            representative_location,
+            representative_span,
+            string_table,
+        );
 
         output = apply_whitespace_passes_to_input(
             post_input,
@@ -1005,6 +1022,7 @@ fn output_to_tir_nodes(
                             origin: TemplateSegmentOrigin::Body,
                         },
                         representative_location.clone(),
+                        None,
                     ),
                     run_reactive_subscription.clone(),
                 )?);
@@ -1020,6 +1038,7 @@ fn output_to_tir_nodes(
                             pieces: vec![ConstStringPiece::SiteRoot],
                         },
                         representative_location.clone(),
+                        None,
                         builtin_type_ids::STRING,
                         DataType::StringSlice,
                         ValueMode::ImmutableOwned,
@@ -1034,6 +1053,7 @@ fn output_to_tir_nodes(
                                 site_id,
                             },
                             representative_location.clone(),
+                            None,
                         ),
                         None,
                     )?);
@@ -1156,6 +1176,26 @@ fn representative_location_for_run(
 
     // Fall back to the first text/child/dynamic node location.
     Ok(fallback_location.unwrap_or_default())
+}
+
+/// Selects the first authored span in a formatter run for adapter diagnostics.
+///
+/// Formatter output itself is synthetic and receives no durable TIR span, but
+/// intermediate formatter input retains the run's authored provenance.
+fn representative_span_for_run(
+    formatter_store: &FormatterStore<'_>,
+    run: &[TemplateIrNodeId],
+    string_table: &StringTable,
+) -> Result<Option<SourceSpan>, CompilerMessages> {
+    for &node_id in run {
+        let node = formatter_store
+            .effective_node(node_id)
+            .map_err(|error| compiler_error_messages(error, string_table))?;
+        if node.span.is_some() {
+            return Ok(node.span);
+        }
+    }
+    Ok(None)
 }
 
 /// Derives a representative location for a single body-eligible node.

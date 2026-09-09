@@ -13,6 +13,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
 
@@ -91,12 +92,14 @@ pub struct ExternalImportRequest {
     /// WHAT: the forward-slash spelling Stage 0 derives from the canonical file, independent
     ///       of the checkout root the file was found under.
     /// WHY: stable package and runtime-asset identity must come from this spelling; the
-    ///      canonical path varies per checkout and must remain a byte-source IO fact only.
+    ///       canonical path varies per checkout and must remain a byte-source IO fact only.
     pub(crate) logical_source_path: PortableResourcePath,
     /// Canonical absolute path to the external source file.
     pub canonical_source_path: PathBuf,
-    /// Source location of the import statement in the requesting Moth file.
+    /// Legacy source location of the import statement in the requesting Moth file.
     pub source_location: SourceLocation,
+    /// Exact authored source span of the import statement, when the request has a source owner.
+    pub source_span: Option<SourceSpan>,
 }
 
 /// Mutable context available during provider resolution.
@@ -170,8 +173,10 @@ pub struct RuntimeAssetIdentity {
     /// General asset category used by backends to decide emission strategy.
     /// Examples: `"js"`, `"wit"`, `"rust"`.
     pub asset_kind: String,
-    /// Authored location of the import that requested the asset, for conflict diagnostics.
+    /// Legacy authored location of the import that requested the asset, for conflict diagnostics.
     pub authored_import_location: SourceLocation,
+    /// Exact authored span of the import that requested the asset, when source-owned.
+    pub authored_import_span: Option<SourceSpan>,
 }
 
 /// A runtime module import required by an external resolved import.

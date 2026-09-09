@@ -799,6 +799,7 @@ fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
         ty: builtin_type_ids::BOOL,
         value_kind: ValueKind::RValue,
         region: child,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![
@@ -929,6 +930,7 @@ fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
                         ty: builtin_type_ids::BOOL,
                         value_kind: ValueKind::RValue,
                         region: child,
+                        span: None,
                     },
                     then_block: HirBlockId(2),
                     else_block: HirBlockId(3),
@@ -1016,6 +1018,7 @@ fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
                         ty: builtin_type_ids::BOOL,
                         value_kind: ValueKind::RValue,
                         region: child,
+                        span: None,
                     },
                     then_block: HirBlockId(1),
                     else_block: HirBlockId(1),
@@ -1074,6 +1077,7 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let module = module_with_block(HirBlock {
         id: HirBlockId(0),
@@ -1086,6 +1090,7 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
                 value: expression,
             },
             location: SourceLocation::default(),
+            span: None,
         }],
         terminator: HirTerminator::Return(load_expression(3, target, region)),
     });
@@ -1132,6 +1137,7 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
                     value: int_expression(0, 1, region),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
             HirStatement {
                 id: HirNodeId(1),
@@ -1141,6 +1147,7 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
                     result: Some(result_local),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ],
         terminator: HirTerminator::Return(load_expression(3, result_local, region)),
@@ -1217,6 +1224,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
                     value: int_expression(0, 1, region),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
             HirStatement {
                 id: HirNodeId(1),
@@ -1226,6 +1234,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
                     result: Some(result_local),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ],
         terminator: HirTerminator::Return(load_expression(3, result_local, region)),
@@ -1292,6 +1301,7 @@ fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
                     value: int_expression(0, 1, region),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
             HirStatement {
                 id: HirNodeId(1),
@@ -1301,6 +1311,7 @@ fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
                     result: Some(result_local),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ],
         terminator: HirTerminator::Return(load_expression(3, result_local, region)),
@@ -1388,6 +1399,7 @@ fn jump_argument_fixture(args: Vec<LocalId>) -> (HirModule, HirFunction) {
                         value: int_expression(1, 7, child),
                     },
                     location: SourceLocation::default(),
+                    span: None,
                 }],
                 terminator: HirTerminator::Jump {
                     target: HirBlockId(1),
@@ -1437,6 +1449,7 @@ fn self_copy_and_disjoint_jump_argument_fixture() -> (HirModule, HirFunction) {
                         value: int_expression(1, 7, child),
                     },
                     location: SourceLocation::default(),
+                    span: None,
                 }],
                 terminator: HirTerminator::Jump {
                     target: HirBlockId(1),
@@ -1489,6 +1502,7 @@ fn multi_jump_argument_fixture() -> (HirModule, HirFunction) {
                             value: int_expression(1, 7, child),
                         },
                         location: SourceLocation::default(),
+                        span: None,
                     },
                     HirStatement {
                         id: HirNodeId(1),
@@ -1497,6 +1511,7 @@ fn multi_jump_argument_fixture() -> (HirModule, HirFunction) {
                             value: int_expression(2, 9, child),
                         },
                         location: SourceLocation::default(),
+                        span: None,
                     },
                 ],
                 terminator: HirTerminator::Jump {
@@ -1540,6 +1555,7 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
         ty: builtin_type_ids::BOOL,
         value_kind: ValueKind::Const,
         region: parent,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![
@@ -1555,6 +1571,7 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
                             value: int_expression(0, 1, parent),
                         },
                         location: SourceLocation::default(),
+                        span: None,
                     },
                     HirStatement {
                         id: HirNodeId(1),
@@ -1563,6 +1580,7 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
                             value: int_expression(1, 2, parent),
                         },
                         location: SourceLocation::default(),
+                        span: None,
                     },
                 ],
                 terminator: HirTerminator::If {
@@ -1608,6 +1626,7 @@ fn hir_structural_string_return_fixture(value_kind: ValueKind) -> (HirModule, Hi
         ty: builtin_type_ids::STRING,
         value_kind,
         region,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![HirBlock {
@@ -1638,6 +1657,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let load = HirExpression {
         id: HirValueId(1),
@@ -1645,6 +1665,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Place,
         region,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![HirBlock {
@@ -1656,6 +1677,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
                 mutable: true,
                 region,
                 source_info: None,
+                span: None,
             }],
             statements: vec![HirStatement {
                 id: HirNodeId(0),
@@ -1664,6 +1686,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
                     value: literal,
                 },
                 location: SourceLocation::default(),
+                span: None,
             }],
             terminator: HirTerminator::Return(load),
         }],
@@ -1705,6 +1728,7 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
         mutable: true,
         region,
         source_info: None,
+        span: None,
     }
 }
 
@@ -1715,6 +1739,7 @@ fn int_expression(id: u32, value: i32, region: RegionId) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     }
 }
 
@@ -1725,6 +1750,7 @@ fn load_expression(id: u32, local: LocalId, region: RegionId) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::Place,
         region,
+        span: None,
     }
 }
 

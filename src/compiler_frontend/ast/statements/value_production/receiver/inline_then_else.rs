@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -48,6 +49,8 @@ pub(super) struct InlineThenElseInput<'a, 'b> {
 
 /// Output of the shared inline then/else parser.
 pub(super) struct InlineThenElseOutput {
+    pub(super) then_span: Option<SourceSpan>,
+    pub(super) else_span: Option<SourceSpan>,
     pub(super) then_values: Vec<Expression>,
     pub(super) else_values: Vec<Expression>,
     pub(super) result_type_id: Option<TypeId>,
@@ -56,6 +59,8 @@ pub(super) struct InlineThenElseOutput {
 }
 
 struct ParsedInlineBranchValues {
+    then_span: Option<SourceSpan>,
+    else_span: Option<SourceSpan>,
     then_values: Vec<Expression>,
     else_values: Vec<Expression>,
     generic_request_ranges: IfGenericRequestRanges,
@@ -91,6 +96,10 @@ fn parse_inline_then_else_with_target(
 ) -> InlineThenElseResult<ParsedInlineBranchValues> {
     let then_request_start = then_context.generic_request_checkpoint();
     let then_location = token_stream.current_location();
+    let then_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance(); // consume `then`
 
     if token_stream.current_token_kind() == &TokenKind::Newline {
@@ -122,6 +131,10 @@ fn parse_inline_then_else_with_target(
     let then_request_end = then_context.generic_request_checkpoint();
 
     require_else_inline(token_stream, &then_location)?;
+    let else_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance(); // consume `else`
 
     reject_else_then(token_stream)?;
@@ -141,6 +154,8 @@ fn parse_inline_then_else_with_target(
     Ok(ParsedInlineBranchValues {
         then_values,
         else_values,
+        then_span,
+        else_span,
         generic_request_ranges: IfGenericRequestRanges {
             then_branch: GenericRequestRange::new(then_request_start, then_request_end),
             else_branch: GenericRequestRange::new(then_request_end, else_request_end),
@@ -180,6 +195,8 @@ pub(super) fn parse_inline_then_else(
         )?;
         if target.needs_slot_inference() {
             return Ok(InlineThenElseOutput {
+                then_span: parsed.then_span,
+                else_span: parsed.else_span,
                 then_values: parsed.then_values,
                 else_values: parsed.else_values,
                 result_type_id: None,
@@ -194,6 +211,8 @@ pub(super) fn parse_inline_then_else(
             .intern_tuple(result_type_ids.clone());
 
         return Ok(InlineThenElseOutput {
+            then_span: parsed.then_span,
+            else_span: parsed.else_span,
             then_values: parsed.then_values,
             else_values: parsed.else_values,
             result_type_id: Some(result_type_id),
@@ -203,6 +222,10 @@ pub(super) fn parse_inline_then_else(
     }
 
     let then_location = token_stream.current_location();
+    let then_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let then_request_start = then_context.generic_request_checkpoint();
     token_stream.advance(); // consume `then`
 
@@ -264,6 +287,10 @@ pub(super) fn parse_inline_then_else(
     let then_request_end = then_context.generic_request_checkpoint();
 
     require_else_inline(token_stream, &then_location)?;
+    let else_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     token_stream.advance(); // consume `else`
 
     reject_else_then(token_stream)?;
@@ -329,6 +356,8 @@ pub(super) fn parse_inline_then_else(
     )?;
 
     Ok(InlineThenElseOutput {
+        then_span,
+        else_span,
         then_values: vec![then_expr],
         else_values: vec![else_expr],
         result_type_id: Some(result_type_id),

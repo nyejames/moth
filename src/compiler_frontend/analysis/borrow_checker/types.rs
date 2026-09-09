@@ -9,6 +9,7 @@ use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::FxHashMap;
 
@@ -174,6 +175,7 @@ pub(crate) struct ReactiveInvalidationFact {
     pub source: ReactiveSourceId,
     pub kind: ReactiveInvalidationKind,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

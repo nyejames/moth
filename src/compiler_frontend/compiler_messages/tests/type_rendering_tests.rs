@@ -103,6 +103,7 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
                 location: SourceLocation::default(),
+                span: None,
             },
             ChoiceVariantDefinition {
                 name: failed,
@@ -111,6 +112,7 @@ fn diagnostic_render_context_renders_nominal_struct_and_choice_names() {
                     fields: Box::new([]),
                 },
                 location: SourceLocation::default(),
+                span: None,
             },
         ]
         .into_boxed_slice(),

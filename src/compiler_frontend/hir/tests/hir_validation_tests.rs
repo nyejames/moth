@@ -51,6 +51,7 @@ fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
     AstNode {
         kind,
         location,
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -59,6 +60,7 @@ fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {
     Declaration {
         id: name,
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -136,6 +138,7 @@ fn validation_error_for_injected_local_type(
         mutable: false,
         region: entry_block.region,
         source_info: Some(test_source_location(20)),
+        span: None,
     });
 
     validate_module_for_tests(&module, &string_table, &type_environment)
@@ -157,12 +160,14 @@ fn inject_collection_expression_statement(
         ty: collection_type_id,
         value_kind: ValueKind::RValue,
         region: entry_block.region,
+        span: None,
     };
 
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -186,6 +191,7 @@ fn int_expression(
         ty: type_id,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     }
 }
 
@@ -205,6 +211,7 @@ fn float_expression(
         ty: type_id,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     }
 }
 
@@ -248,6 +255,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
         ty: option_string,
         value_kind: ValueKind::RValue,
         region: entry_block.region,
+        span: None,
     };
 
     module
@@ -283,6 +291,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         mutable: false,
         region: entry_region,
         source_info: Some(location.clone()),
+        span: None,
     });
 
     let left = int_expression(
@@ -311,6 +320,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
             result: result_local,
         },
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -362,6 +372,7 @@ fn validator_rejects_plain_numeric_binop() {
         ty: int_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module
         .side_table
@@ -371,6 +382,7 @@ fn validator_rejects_plain_numeric_binop() {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -399,6 +411,7 @@ fn append_expression_for_validation(
         ty: left_type,
         value_kind: ValueKind::Const,
         region: entry_region,
+        span: None,
     };
     module.side_table.map_value(location, left.id, location);
 
@@ -420,6 +433,7 @@ fn append_expression_for_validation(
         ty: result_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module
         .side_table
@@ -443,6 +457,7 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
         id: HirNodeId(9013),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -468,6 +483,7 @@ fn validator_rejects_string_append_with_non_string_result() {
         id: HirNodeId(9014),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -497,6 +513,7 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
         id: HirNodeId(9015),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -537,6 +554,7 @@ fn validator_rejects_plain_numeric_unary_op() {
         ty: int_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module
         .side_table
@@ -546,6 +564,7 @@ fn validator_rejects_plain_numeric_unary_op() {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -575,6 +594,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         ty: string_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module.side_table.map_value(&location, left.id, &location);
     let right = HirExpression {
@@ -583,6 +603,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         ty: string_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module.side_table.map_value(&location, right.id, &location);
 
@@ -596,6 +617,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         ty: string_type,
         value_kind: ValueKind::RValue,
         region: entry_region,
+        span: None,
     };
     module
         .side_table
@@ -605,6 +627,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
     module.side_table.map_statement(&location, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -646,6 +669,7 @@ fn inject_float_statement(
             mutable: false,
             region: entry_region,
             source_info: Some(location.clone()),
+            span: None,
         });
     }
 
@@ -667,6 +691,7 @@ fn inject_float_statement(
             _ => panic!("inject_float_statement only supports FormatFloat and ValidateFloat"),
         },
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(location, &statement);
@@ -690,6 +715,7 @@ fn validator_accepts_format_float_trap() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::Trap,
             result: LocalId(0),
@@ -718,6 +744,7 @@ fn validator_accepts_validate_float_trap() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::Trap,
             result: LocalId(0),
@@ -746,6 +773,7 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::Trap,
             result: LocalId(0),
@@ -783,6 +811,7 @@ fn validator_accepts_format_float_return_error_with_carrier() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::ReturnError,
             result: LocalId(0),
@@ -811,6 +840,7 @@ fn validator_rejects_format_float_return_error_without_carrier() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::ReturnError,
             result: LocalId(0),
@@ -845,6 +875,7 @@ fn validator_rejects_validate_float_return_error_without_carrier() {
                 ty: type_environment.builtins().float,
                 value_kind: ValueKind::RValue,
                 region: RegionId(0),
+                span: None,
             },
             failure_mode: NumericFailureMode::ReturnError,
             result: LocalId(0),
@@ -946,6 +977,7 @@ fn validator_rejects_non_literal_match_pattern() {
             ty: local_ty,
             value_kind: ValueKind::Const,
             region,
+            span: None,
         },
         arms: vec![HirMatchArm {
             pattern: HirPattern::Literal(HirExpression {
@@ -954,6 +986,7 @@ fn validator_rejects_non_literal_match_pattern() {
                 ty: local_ty,
                 value_kind: ValueKind::Place,
                 region,
+                span: None,
             }),
             guard: None,
             body: start.entry,
@@ -982,7 +1015,7 @@ fn validator_rejects_missing_side_table_mappings() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(4), ValueMode::ImmutableOwned),
+                    Expression::int(1, test_source_location(4), None, ValueMode::ImmutableOwned),
                 )),
                 test_source_location(4),
             ),
@@ -1036,6 +1069,7 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         mutable: false,
         region: entry_block.region,
         source_info: Some(test_source_location(20)),
+        span: None,
     });
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -1258,11 +1292,13 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
         ty: generic_type_id,
         value_kind: ValueKind::Const,
         region: entry_block.region,
+        span: None,
     };
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -1305,11 +1341,13 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
         ty: marker,
         value_kind: ValueKind::Const,
         region: entry_block.region,
+        span: None,
     };
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -1633,12 +1671,14 @@ fn hir_variant_construct_option_invalid_index_rejected() {
         ty: option_ty,
         value_kind: ValueKind::Const,
         region,
+        span: None,
     };
 
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -1704,12 +1744,14 @@ fn hir_variant_construct_result_invalid_index_rejected() {
         ty: result_ty,
         value_kind: ValueKind::Const,
         region,
+        span: None,
     };
 
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -1746,15 +1788,18 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
+                    binding_span: None,
                     config_qualifier: None,
                 }],
             },
             location: test_source_location(2),
+            span: None,
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(2),
+            span: None,
         },
     ];
 
@@ -1812,18 +1857,21 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                     ty: string_ty,
                     value_kind: ValueKind::Const,
                     region,
+                    span: None,
                 },
             }],
         },
         ty: string_ty,
         value_kind: ValueKind::Const,
         region,
+        span: None,
     };
 
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -1860,15 +1908,18 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
                     ),
+                    binding_span: None,
                     config_qualifier: None,
                 }],
             },
             location: test_source_location(2),
+            span: None,
         },
         ChoiceVariant {
             id: err_name,
             payload: ChoiceVariantPayload::Unit,
             location: test_source_location(2),
+            span: None,
         },
     ];
 
@@ -1927,18 +1978,21 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                     ty: bool_ty,
                     value_kind: ValueKind::Const,
                     region,
+                    span: None,
                 },
             }],
         },
         ty: string_ty,
         value_kind: ValueKind::Const,
         region,
+        span: None,
     };
 
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(&location, &statement);
@@ -2026,6 +2080,7 @@ fn inject_nonfinite_float_expression(
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
         location: location.clone(),
+        span: None,
     };
 
     module.side_table.map_statement(location, &statement);

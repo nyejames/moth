@@ -21,6 +21,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOriginId, StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::diagnostics::{
     resource_output_path_collision_messages, resource_output_path_reserved_messages,
@@ -83,8 +84,20 @@ pub(crate) struct PlannedResourceOutput {
     pub(crate) origin: StableResourceOriginId,
     pub(crate) output_path: PathBuf,
     pub(crate) first_authored_location: SourceLocation,
+    /// Exact span of the first authored owner when the record carries source-owned provenance.
+    pub(crate) first_authored_span: Option<SourceSpan>,
     pub(crate) uses: Vec<PlannedResourceUse>,
     has_executable_use: bool,
+}
+
+/// One authored location paired with its exact source span.
+///
+/// The span travels with its location so collision and reserved diagnostics never pair a
+/// span with a different location. Synthetic fragment and fallback sources carry `None`.
+#[derive(Clone, Debug)]
+pub(crate) struct AuthoredResourceLocation {
+    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Authored locations for one origin, with intern-table fallback last.
@@ -93,9 +106,9 @@ pub(crate) struct PlannedResourceOutput {
 /// page-metadata uses, which are output-live but not HIR-reachable.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OriginAuthoredLocations {
-    pub executable: Vec<SourceLocation>,
-    pub metadata: Vec<SourceLocation>,
-    pub fallback: Option<SourceLocation>,
+    pub executable: Vec<AuthoredResourceLocation>,
+    pub metadata: Vec<AuthoredResourceLocation>,
+    pub fallback: Option<AuthoredResourceLocation>,
 }
 
 /// One page-observed URL use claimed while planning an origin.
@@ -175,6 +188,7 @@ impl HtmlResourceOutputPlan {
                 &display_origin(&record.origin),
                 artefact_kind,
                 &record.first_authored_location,
+                record.first_authored_span,
                 string_table,
             ));
         }
@@ -192,6 +206,7 @@ impl HtmlResourceOutputPlan {
         &mut self,
         origin: StableResourceOriginId,
         first_authored_location: SourceLocation,
+        first_authored_span: Option<SourceSpan>,
         context: ResourceUrlContext,
         string_table: &mut StringTable,
         use_kind: ResourceUseKind,
@@ -207,6 +222,7 @@ impl HtmlResourceOutputPlan {
             origin,
             output_path,
             first_authored_location,
+            first_authored_span,
             Some(observed_use),
             string_table,
         )
@@ -222,6 +238,7 @@ impl HtmlResourceOutputPlan {
             self.plan_origin(
                 resource_use.origin.clone(),
                 resource_use.authored_location.clone(),
+                resource_use.authored_span,
                 context.clone(),
                 string_table,
                 ResourceUseKind::Metadata,
@@ -239,6 +256,7 @@ impl HtmlResourceOutputPlan {
         &mut self,
         origin: StableResourceOriginId,
         first_authored_location: SourceLocation,
+        first_authored_span: Option<SourceSpan>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let output_path = self
@@ -249,6 +267,7 @@ impl HtmlResourceOutputPlan {
             origin,
             output_path,
             first_authored_location,
+            first_authored_span,
             None,
             string_table,
         )
@@ -288,11 +307,12 @@ impl HtmlResourceOutputPlan {
                 .output_path_for_origin(origin)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-            for authored_location in &authored_locations.executable {
+            for authored_use in &authored_locations.executable {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    authored_location.clone(),
+                    authored_use.location.clone(),
+                    authored_use.span,
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Executable,
@@ -301,11 +321,12 @@ impl HtmlResourceOutputPlan {
                 )?;
             }
 
-            for authored_location in &authored_locations.metadata {
+            for authored_use in &authored_locations.metadata {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    authored_location.clone(),
+                    authored_use.location.clone(),
+                    authored_use.span,
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Metadata,
@@ -319,7 +340,8 @@ impl HtmlResourceOutputPlan {
                     self.plan_one_origin(
                         origin.clone(),
                         output_path,
-                        fallback.clone(),
+                        fallback.location.clone(),
+                        fallback.span,
                         None,
                         string_table,
                     )?;
@@ -340,6 +362,7 @@ impl HtmlResourceOutputPlan {
         origin: StableResourceOriginId,
         output_path: PathBuf,
         first_authored_location: SourceLocation,
+        first_authored_span: Option<SourceSpan>,
         observed_use: Option<ObservedResourceUse>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -352,8 +375,10 @@ impl HtmlResourceOutputPlan {
                     &output_path,
                     &display_origin(&record.origin),
                     &record.first_authored_location,
+                    record.first_authored_span,
                     &display_origin(&origin),
                     &first_authored_location,
+                    first_authored_span,
                     string_table,
                 ));
             }
@@ -363,12 +388,14 @@ impl HtmlResourceOutputPlan {
                     ResourceUseKind::Executable => {
                         if !record.has_executable_use {
                             record.first_authored_location = first_authored_location.clone();
+                            record.first_authored_span = first_authored_span;
                             record.has_executable_use = true;
                         }
                     }
                     ResourceUseKind::Metadata => {
                         if !record.has_executable_use && record.uses.is_empty() {
                             record.first_authored_location = first_authored_location.clone();
+                            record.first_authored_span = first_authored_span;
                         }
                     }
                 }
@@ -391,6 +418,7 @@ impl HtmlResourceOutputPlan {
                 &display_origin(&origin),
                 &artefact_kind,
                 &first_authored_location,
+                first_authored_span,
                 string_table,
             ));
         }
@@ -412,6 +440,7 @@ impl HtmlResourceOutputPlan {
             origin,
             output_path,
             first_authored_location,
+            first_authored_span,
             uses,
             has_executable_use,
         });
@@ -478,7 +507,10 @@ fn first_authored_locations(
                 .or_insert_with(|| OriginAuthoredLocations {
                     executable: Vec::new(),
                     metadata: Vec::new(),
-                    fallback: Some(resource.first_authored_location.clone()),
+                    fallback: Some(AuthoredResourceLocation {
+                        location: resource.first_authored_location.clone(),
+                        span: None,
+                    }),
                 });
         }
     }
@@ -500,7 +532,10 @@ fn record_reachable_resource_locations(
             .entry(resource.origin.clone())
             .or_default()
             .executable
-            .push(resource_use.location.clone());
+            .push(AuthoredResourceLocation {
+                location: resource_use.location.clone(),
+                span: resource_use.span,
+            });
     }
 
     Ok(())
@@ -517,11 +552,12 @@ fn record_const_fragment_resource_locations(
 
         for piece in pieces {
             if let OwnedFoldedStringPiece::Resource(origin) = piece {
-                locations
-                    .entry(origin.clone())
-                    .or_default()
-                    .metadata
-                    .push(fragment.location.clone());
+                locations.entry(origin.clone()).or_default().metadata.push(
+                    AuthoredResourceLocation {
+                        location: fragment.location.clone(),
+                        span: None,
+                    },
+                );
             }
         }
     }

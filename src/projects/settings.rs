@@ -13,6 +13,7 @@ use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -95,7 +96,7 @@ impl HtmlSectionConfig {
 
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///
-/// WHAT: the field's folded value plus the canonical type and initializer location needed
+/// WHAT: the field's folded value plus the canonical type and initializer provenance needed
 ///       later by `@project`. Nested record values keep field types on `PublicFoldedField`;
 ///       exact nested field-name spans stay deferred.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,6 +105,7 @@ pub(crate) struct ProjectMetadataField {
     pub type_identity: CanonicalTypeIdentity,
     pub value: PublicFoldedValue,
     pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// WHAT: project configuration loaded from config.moth that controls build behavior.
@@ -120,8 +122,13 @@ pub struct Config {
     pub author: Option<String>,
     pub license: Option<String>,
 
-    /// Source locations for each config key, used for precise error reporting
+    /// Source locations for each config key, used for precise error reporting.
     pub setting_locations: HashMap<String, SourceLocation>,
+    /// Exact authored source spans for config keys when the key came from retained source.
+    ///
+    /// Path-only and synthetic settings deliberately have no entry here rather than acquiring
+    /// a fabricated span from their display location.
+    pub setting_spans: HashMap<String, SourceSpan>,
 
     /// Validated results of the grouped `html` builder section when one was authored.
     pub html_section: HtmlSectionConfig,
@@ -147,6 +154,7 @@ impl Config {
             author: None,
             license: None,
             setting_locations: HashMap::new(),
+            setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
@@ -180,6 +188,11 @@ impl Config {
             .unwrap_or_else(|| SourceLocation::from_path(&self.config_file_path(), string_table))
     }
 
+    /// Return the exact authored span for a config key, if the setting came from retained source.
+    pub fn setting_span(&self, key: &str) -> Option<SourceSpan> {
+        self.setting_spans.get(key).copied()
+    }
+
     /// Build a typed project-config diagnostic with the standard setting location.
     ///
     /// WHAT: centralizes config-setting diagnostics on `Config`.
@@ -192,11 +205,18 @@ impl Config {
         string_table: &mut StringTable,
     ) -> CompilerDiagnostic {
         let key_id = string_table.intern(key);
-        CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
             Some(key_id),
             reason,
             self.setting_location_or_config_file(key, string_table),
-        )
+        );
+        diagnostic.primary_span = self.setting_span(key);
+        if let Some(span) = diagnostic.primary_span {
+            if let Some(label) = diagnostic.labels.first_mut() {
+                label.span = Some(span);
+            }
+        }
+        diagnostic
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -261,6 +281,7 @@ impl Default for Config {
             license: None,
 
             setting_locations: HashMap::new(),
+            setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,

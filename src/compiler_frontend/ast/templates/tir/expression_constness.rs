@@ -338,7 +338,9 @@ fn tir_tree_is_const_evaluable_standalone_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 let Some(bindings) = selector_is_const(
                     &branch.selector,
@@ -487,7 +489,9 @@ fn tir_tree_is_const_evaluable_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 let Some(bindings) = selector_is_const(
                     &branch.selector,

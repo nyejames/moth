@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -21,6 +22,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(in crate::compiler_frontend::ast::statements::value_production) fn then_value_node(
     expressions: Vec<Expression>,
     location: SourceLocation,
+    span: Option<SourceSpan>,
     scope: InternedPath,
 ) -> AstNode {
     AstNode {
@@ -29,6 +31,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn then_valu
             location: location.clone(),
         }),
         location,
+        span,
         scope,
     }
 }
@@ -40,6 +43,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn then_valu
 /// multi-slot receivers. Mixed multi-bind must not call this until slots are final.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn build_value_if_expression(
     value_if: ValueIfBlock,
+    span: Option<SourceSpan>,
     result_type_id: TypeId,
     type_environment: &TypeEnvironment,
 ) -> Expression {
@@ -50,6 +54,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn build_val
             block: Box::new(ValueBlock::If(value_if)),
         },
         location,
+        span,
         result_type_id,
         diagnostic_type_spelling(result_type_id, type_environment),
         ValueMode::ImmutableOwned,
@@ -59,6 +64,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn build_val
 /// Builds a `ValueBlock::Match` expression from a completed `ValueMatchBlock`.
 pub(in crate::compiler_frontend::ast::statements::value_production) fn build_value_match_expression(
     value_match: ValueMatchBlock,
+    span: Option<SourceSpan>,
     result_type_id: TypeId,
     type_environment: &TypeEnvironment,
 ) -> Expression {
@@ -69,6 +75,7 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn build_val
             block: Box::new(ValueBlock::Match(value_match)),
         },
         location,
+        span,
         result_type_id,
         diagnostic_type_spelling(result_type_id, type_environment),
         ValueMode::ImmutableOwned,

@@ -7,9 +7,9 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 #[derive(Debug, Clone)]
 pub struct HirBlock {
     pub id: BlockId,
@@ -29,6 +29,8 @@ pub struct HirLocal {
     pub mutable: bool,
     pub region: RegionId,
     pub source_info: Option<SourceLocation>,
+    /// Exact authored declaration/binding span; compiler-generated locals are span-free.
+    pub span: Option<SourceSpan>,
 }
 
 impl HirBlock {

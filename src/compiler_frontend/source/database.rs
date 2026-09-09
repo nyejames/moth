@@ -54,6 +54,24 @@ pub struct SourceDatabase {
     canonical_to_id: FxHashMap<PathBuf, SourceId>,
     path_interner: PathInternerBuilder,
 }
+
+/// Lookup-only source identity storage published after the mutable build boundary.
+///
+/// The freeze operation moves every source slot, retained snapshot, load failure, canonical-path
+/// index and path-trie allocation out of [`SourceDatabase`]. In particular, source text,
+/// line-start tables and extended-span entries are never copied. The mutable reverse lookup map
+/// owned by [`PathInternerBuilder`] is dropped while its append-only [`PathTable`] is moved here.
+///
+/// A frozen owner has no registration or loading operations. All identities and snapshots it
+/// exposes are the exact ones finalized by [`SourceDatabaseBuilder::finish`].
+#[derive(Debug)]
+pub struct FrozenSourceDatabase {
+    slots: Vec<SourceSlot>,
+    loaded: Vec<SourceRecord>,
+    load_failures: Vec<CompilerError>,
+    canonical_to_id: FxHashMap<PathBuf, SourceId>,
+    paths: PathTable,
+}
 impl Default for SourceDatabase {
     fn default() -> Self {
         Self {
@@ -69,6 +87,30 @@ impl Default for SourceDatabase {
 impl SourceDatabase {
     pub fn empty() -> Self {
         Self::default()
+    }
+    /// Consume the finalized mutable database into lookup-only source storage.
+    ///
+    /// This is the terminal source lifecycle operation. It moves the registration slots, loaded
+    /// source snapshots, line-start tables, installed extended-span tables, load failures,
+    /// canonical index and path nodes without copying any of those allocations. Callers must
+    /// invoke this only after [`SourceDatabaseBuilder::finish`] has installed every live span
+    /// builder; a frozen owner has no mutation path for completing that work.
+    pub(crate) fn freeze(self) -> FrozenSourceDatabase {
+        let SourceDatabase {
+            slots,
+            loaded,
+            load_failures,
+            canonical_to_id,
+            path_interner,
+        } = self;
+
+        FrozenSourceDatabase {
+            slots,
+            loaded,
+            load_failures,
+            canonical_to_id,
+            paths: path_interner.freeze(),
+        }
     }
 
     /// Build deterministic source identities from canonical paths alone, for tests.
@@ -596,6 +638,127 @@ impl SourceDatabase {
             return None;
         }
         Some(slot)
+    }
+}
+impl FrozenSourceDatabase {
+    /// Iterate over physical source slots in deterministic source-identity order.
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
+        debug_assert_eq!(
+            self.slots.first().map(|slot| slot.provenance),
+            Some(SourceProvenance::CompilationRoot)
+        );
+        self.slots[1..].iter()
+    }
+
+    /// Resolve one physical source slot by its compact identity.
+    ///
+    /// The compilation-root identity is intentionally excluded: it owns no physical source
+    /// record, path or snapshot.
+    pub(crate) fn get(&self, id: SourceId) -> Option<&SourceSlot> {
+        let slot = self.slots.get(id.index())?;
+        (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
+    }
+
+    /// Resolve the unique physical slot for an exact frozen logical-path identity.
+    ///
+    /// A path ID identifies a spelling in this owner's path table, but multiple source slots may
+    /// intentionally share that spelling. Returning no slot on ambiguity prevents a renderer
+    /// from choosing another source's snapshot.
+    pub(crate) fn unique_record_for_logical_path(
+        &self,
+        logical_path: PathId,
+    ) -> Option<&SourceSlot> {
+        let mut matches = self.iter().filter(|slot| slot.logical_path == logical_path);
+        let slot = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(slot)
+    }
+
+    /// Resolve a physical source slot by its canonical filesystem path.
+    pub(crate) fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
+        let id = self.canonical_to_id.get(canonical_path)?;
+        self.get(*id)
+    }
+
+    /// Borrow the immutable logical-path trie moved across the source freeze boundary.
+    #[inline]
+    pub(crate) fn paths(&self) -> &PathTable {
+        &self.paths
+    }
+
+    /// Return the compact logical path identity assigned to one physical source.
+    pub(crate) fn source_logical_path(&self, id: SourceId) -> Option<PathId> {
+        self.get(id).map(|slot| slot.logical_path)
+    }
+
+    /// Borrow the exact retained snapshot for one loaded physical source.
+    pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
+        self.loaded_record(id).map(|record| record.text.as_ref())
+    }
+
+    /// Construct a line index over one retained frozen snapshot.
+    pub(crate) fn line_index(&self, id: SourceId) -> Option<LineIndex<'_>> {
+        let record = self.loaded_record(id)?;
+        Some(LineIndex::new(&record.text, &record.line_starts))
+    }
+
+    /// Return the structured load failure retained for one source, when its load failed.
+    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
+        match &self.get(id)?.load {
+            SourceLoadStatus::Failed(index) => self.load_failures.get(index.index()),
+            SourceLoadStatus::Pending | SourceLoadStatus::Loaded(_) => None,
+        }
+    }
+
+    /// Resolve the loaded source record addressed by a physical source identity.
+    ///
+    /// Missing, pending, failed and compilation-root identities are compiler invariant failures
+    /// at this boundary, just as they are for the mutable database's frozen-span lookup.
+    pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
+        let slot = self.slots.get(id.index()).unwrap_or_else(|| {
+            panic!(
+                "source identity {} is absent from the frozen source database; this is a compiler bug",
+                id.index()
+            )
+        });
+
+        if slot.provenance == SourceProvenance::CompilationRoot {
+            panic!(
+                "source identity {} is the compilation root and has no loaded source record; \
+                 this is a compiler bug",
+                id.index()
+            );
+        }
+
+        let loaded_index = match slot.load {
+            SourceLoadStatus::Loaded(index) => index,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => {
+                panic!(
+                    "source identity {} has no loaded source record in the frozen source \
+                     database; this is a compiler bug",
+                    id.index()
+                )
+            }
+        };
+
+        self.loaded.get(loaded_index.index()).unwrap_or_else(|| {
+            panic!(
+                "source identity {} points outside the frozen source records; this is a \
+                 compiler bug",
+                id.index()
+            )
+        })
+    }
+
+    fn loaded_record(&self, id: SourceId) -> Option<&SourceRecord> {
+        let slot = self.get(id)?;
+        let loaded_index = match slot.load {
+            SourceLoadStatus::Loaded(index) => index,
+            SourceLoadStatus::Pending | SourceLoadStatus::Failed(_) => return None,
+        };
+        self.loaded.get(loaded_index.index())
     }
 }
 

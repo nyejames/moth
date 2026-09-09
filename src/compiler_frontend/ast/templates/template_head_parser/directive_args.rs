@@ -401,10 +401,11 @@ fn with_current_token_span(
     token_stream: &FileTokens,
     mut diagnostic: CompilerDiagnostic,
 ) -> CompilerDiagnostic {
-    if diagnostic.primary_span.is_none()
-        && let Some(source) = token_stream.file_id
-    {
-        diagnostic.primary_span = Some(SourceSpan::new(source, token_stream.current_token().span));
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
     }
     diagnostic
 }

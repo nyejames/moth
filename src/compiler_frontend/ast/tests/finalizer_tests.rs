@@ -22,6 +22,7 @@ fn typed_call_constructor_sets_expression_and_result_type_ids() {
         vec![int_type_id],
         &mut type_environment,
         location,
+        None,
     );
 
     assert_eq!(expression.type_id, int_type_id);
