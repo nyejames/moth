@@ -20,8 +20,10 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::{
@@ -44,7 +46,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 
 use super::project_structure_diagnostics::{
-    non_utf8_filesystem_name_error, path_id, project_structure_messages,
+    non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
 };
 
 const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[
@@ -457,7 +459,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let SourceTreeProjectContext {
             project_root,
             validated_output_settings,
@@ -499,7 +501,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let boundary = SourceTreeBoundary {
             entry_root: canonical_root,
             package_identity,
@@ -526,7 +528,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,
@@ -576,8 +578,7 @@ impl SourceTreeIndex {
                         ),
                         string_table,
                     )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                })?;
             entries.sort_by_key(|entry| entry.path());
 
             let mut subdirectories = Vec::new();
@@ -630,10 +631,14 @@ impl SourceTreeIndex {
                         == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
                         || file_name_claims_project_globals_root(file_name))
                 {
-                    return Err(project_structure_messages(
+                    let diagnostic = project_structure_diagnostic(
                         &path,
                         InvalidConfigReason::ProjectGlobalsNameReserved,
                         string_table,
+                    );
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
 
@@ -645,13 +650,14 @@ impl SourceTreeIndex {
                 // Reject them with a structured diagnostic before any other classification so
                 // they are never treated as ordinary source files or silently ignored.
                 if file_name_is_legacy_hash_root_file(file_name) {
-                    return Err(project_structure_messages(
-                        &path,
-                        InvalidConfigReason::LegacyModuleRootFileName {
-                            file_name: string_table.intern(file_name),
-                            directory: path_id(&directory, string_table),
-                        },
-                        string_table,
+                    let reason = InvalidConfigReason::LegacyModuleRootFileName {
+                        file_name: string_table.intern(file_name),
+                        directory: path_id(&directory, string_table),
+                    };
+                    let diagnostic = project_structure_diagnostic(&path, reason, string_table);
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
 
@@ -674,15 +680,13 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                let canonical_path = fs::canonicalize(&path)
-                    .map_err(|error| {
-                        CompilerError::file_error(
-                            &path,
-                            format!("Failed to canonicalize source path: {error}"),
-                            string_table,
-                        )
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let canonical_path = fs::canonicalize(&path).map_err(|error| {
+                    CompilerError::file_error(
+                        &path,
+                        format!("Failed to canonicalize source path: {error}"),
+                        string_table,
+                    )
+                })?;
 
                 if let Some(kind) = source_kind
                     // When the project root equals the entry root, the facade root file is
@@ -696,7 +700,7 @@ impl SourceTreeIndex {
                     }
                 {
                     let logical_candidate_path =
-                        entry_root_relative_logical_path(&path, &entry_root, string_table)?;
+                        entry_root_relative_logical_path(&path, &entry_root)?;
                     recognized_candidates.push(DiscoveredSourceCandidate {
                         canonical_path: canonical_path.clone(),
                         classification: SourceClassification::CompilerSemantic(kind),
@@ -709,7 +713,7 @@ impl SourceTreeIndex {
                     // classified under their nearest enclosing module root, exactly like
                     // compiler semantic candidates.
                     let logical_candidate_path =
-                        entry_root_relative_logical_path(&path, &entry_root, string_table)?;
+                        entry_root_relative_logical_path(&path, &entry_root)?;
                     recognized_candidates.push(DiscoveredSourceCandidate {
                         canonical_path: canonical_path.clone(),
                         classification: SourceClassification::ProviderOwned(extension),
@@ -755,14 +759,15 @@ impl SourceTreeIndex {
                     .iter()
                     .find(|folder_name| folder_name.eq_ignore_ascii_case(stem))
                 {
-                    return Err(project_structure_messages(
-                        &directory,
-                        InvalidConfigReason::SourceFileFolderCollision {
-                            file_name: string_table.intern(file_name),
-                            folder_name: string_table.intern(folder_name),
-                            directory: path_id(&directory, string_table),
-                        },
-                        string_table,
+                    let reason = InvalidConfigReason::SourceFileFolderCollision {
+                        file_name: string_table.intern(file_name),
+                        folder_name: string_table.intern(folder_name),
+                        directory: path_id(&directory, string_table),
+                    };
+                    let diagnostic = project_structure_diagnostic(&directory, reason, string_table);
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
             }
@@ -771,10 +776,14 @@ impl SourceTreeIndex {
                 && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
             {
                 let colliding_folder = directory.join(PROJECT_GLOBALS_DEPENDENCY_NAME);
-                return Err(project_structure_messages(
+                let diagnostic = project_structure_diagnostic(
                     &colliding_folder,
                     InvalidConfigReason::ProjectGlobalsNameReserved,
                     string_table,
+                );
+                let table = std::mem::take(string_table);
+                return Err(PremergeFailure::Diagnosed(
+                    PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                 ));
             }
 
@@ -789,13 +798,15 @@ impl SourceTreeIndex {
                 for folder_name in &dependency_folder_names {
                     if source_packages.has_prefix(folder_name) {
                         let colliding_folder = directory.join(folder_name);
-                        return Err(project_structure_messages(
-                            &colliding_folder,
-                            InvalidConfigReason::EntryRootPackagePrefixCollision {
-                                prefix: string_table.intern(folder_name),
-                                entry_folder: path_id(&colliding_folder, string_table),
-                            },
-                            string_table,
+                        let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+                            prefix: string_table.intern(folder_name),
+                            entry_folder: path_id(&colliding_folder, string_table),
+                        };
+                        let diagnostic =
+                            project_structure_diagnostic(&colliding_folder, reason, string_table);
+                        let table = std::mem::take(string_table);
+                        return Err(PremergeFailure::Diagnosed(
+                            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                         ));
                     }
                 }
@@ -819,30 +830,25 @@ impl SourceTreeIndex {
                 }
             };
             if let Some(root) = directory_root {
-                let canonical_root_directory = fs::canonicalize(&directory)
-                    .map_err(|error| {
-                        CompilerError::file_error(
-                            &directory,
-                            format!("Failed to canonicalize module root directory: {error}"),
-                            string_table,
-                        )
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let canonical_root_directory = fs::canonicalize(&directory).map_err(|error| {
+                    CompilerError::file_error(
+                        &directory,
+                        format!("Failed to canonicalize module root directory: {error}"),
+                        string_table,
+                    )
+                })?;
 
                 let logical_module_path =
-                    logical_module_path_from(&canonical_root_directory, &entry_root, string_table)?;
+                    logical_module_path_from(&canonical_root_directory, &entry_root)?;
 
                 stats.module_roots_found += 1;
-                records.push(
-                    ModuleIdentityRecord::new(
-                        canonical_root_directory,
-                        root.root_file,
-                        root.role,
-                        logical_module_path,
-                        &boundary_package,
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                );
+                records.push(ModuleIdentityRecord::new(
+                    canonical_root_directory,
+                    root.root_file,
+                    root.role,
+                    logical_module_path,
+                    &boundary_package,
+                )?);
             }
 
             subdirectories.sort();
@@ -853,26 +859,21 @@ impl SourceTreeIndex {
             let SourceTreeBoundaryKind::Project { project_root, .. } = kind else {
                 unreachable!("only project boundaries discover a project package facade");
             };
-            let facade_directory = fs::canonicalize(project_root)
-                .map_err(|error| {
-                    CompilerError::file_error(
-                        project_root,
-                        format!("Failed to canonicalize project root directory: {error}"),
-                        string_table,
-                    )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-            records.push(
-                ModuleIdentityRecord::new(
-                    facade_directory.clone(),
-                    facade_file,
-                    ModuleRootRole::ProjectPackageFacade,
-                    logical_module_path_from(&facade_directory, &facade_directory, string_table)?,
-                    &boundary_package,
+            let facade_directory = fs::canonicalize(project_root).map_err(|error| {
+                CompilerError::file_error(
+                    project_root,
+                    format!("Failed to canonicalize project root directory: {error}"),
+                    string_table,
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-            );
+            })?;
+
+            records.push(ModuleIdentityRecord::new(
+                facade_directory.clone(),
+                facade_file,
+                ModuleRootRole::ProjectPackageFacade,
+                logical_module_path_from(&facade_directory, &facade_directory)?,
+                &boundary_package,
+            )?);
         }
 
         record_discovery_metrics(&stats);
@@ -885,18 +886,15 @@ impl SourceTreeIndex {
             &module_identities,
             recognized_candidates,
             facade_file_for_inventory,
-            string_table,
         )?;
-        validate_unique_source_logical_identities(&classified)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        validate_unique_source_logical_identities(&classified)?;
 
         let SourceInventory {
             sources,
             owned_source_indices,
             unrooted_source_indices,
             canonical_path_to_source_index,
-        } = build_source_inventory(classified, module_count)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        } = build_source_inventory(classified, module_count)?;
 
         Ok(Self {
             entry_root,
@@ -922,7 +920,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<ModuleRootTable, CompilerMessages> {
+    ) -> Result<ModuleRootTable, PremergeFailure> {
         let file_name = entry_file
             .file_name()
             .and_then(|name| name.to_str())
@@ -936,15 +934,13 @@ impl SourceTreeIndex {
         let Some(root_directory) = entry_file.parent() else {
             return Ok(ModuleRootTable::empty());
         };
-        let canonical_root = fs::canonicalize(root_directory)
-            .map_err(|error| {
-                CompilerError::file_error(
-                    root_directory,
-                    format!("Failed to canonicalize single-file source root: {error}"),
-                    string_table,
-                )
-            })
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let canonical_root = fs::canonicalize(root_directory).map_err(|error| {
+            CompilerError::file_error(
+                root_directory,
+                format!("Failed to canonicalize single-file source root: {error}"),
+                string_table,
+            )
+        })?;
 
         Self::discover(
             canonical_root.clone(),
@@ -1063,13 +1059,10 @@ impl SourceTreeIndex {
         directory: &Path,
         error: std::io::Error,
         string_table: &mut StringTable,
-    ) -> CompilerMessages {
-        CompilerMessages::from_error_ref(
-            CompilerError::file_error(
-                directory,
-                format!("Failed to read directory while indexing source tree: {error}"),
-                string_table,
-            ),
+    ) -> CompilerError {
+        CompilerError::file_error(
+            directory,
+            format!("Failed to read directory while indexing source tree: {error}"),
             string_table,
         )
     }
@@ -1085,17 +1078,14 @@ fn discover_project_package_facade(
     project_root: &Path,
     stats: &mut SourceTreeDiscoveryStats,
     string_table: &mut StringTable,
-) -> Result<Option<PathBuf>, CompilerMessages> {
+) -> Result<Option<PathBuf>, PremergeFailure> {
     // A project-root read failure is an infrastructure error, not the absence of a facade.
     // Preserve it through the file-error lane with the project-root path so the build boundary
     // can render it instead of silently treating the facade as missing.
     let entries = fs::read_dir(project_root).map_err(|error| {
-        CompilerMessages::from_error_ref(
-            CompilerError::file_error(
-                project_root,
-                format!("Failed to read project root while discovering package facade: {error}"),
-                string_table,
-            ),
+        CompilerError::file_error(
+            project_root,
+            format!("Failed to read project root while discovering package facade: {error}"),
             string_table,
         )
     })?;
@@ -1111,8 +1101,7 @@ fn discover_project_package_facade(
                     ),
                     string_table,
                 )
-            })
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+            })?
             .path();
 
         if !path.is_file() {
@@ -1131,23 +1120,25 @@ fn discover_project_package_facade(
             })?;
 
         if file_name_claims_project_globals_facade(file_name) {
-            return Err(project_structure_messages(
+            let diagnostic = project_structure_diagnostic(
                 &path,
                 InvalidConfigReason::ProjectGlobalsNameReserved,
                 string_table,
+            );
+            let table = std::mem::take(string_table);
+            return Err(PremergeFailure::Diagnosed(
+                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
             ));
         }
 
         if file_name_is_support_root_file(file_name) {
-            let canonical = fs::canonicalize(&path)
-                .map_err(|error| {
-                    CompilerError::file_error(
-                        &path,
-                        format!("Failed to canonicalize project package facade path: {error}"),
-                        string_table,
-                    )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let canonical = fs::canonicalize(&path).map_err(|error| {
+                CompilerError::file_error(
+                    &path,
+                    format!("Failed to canonicalize project package facade path: {error}"),
+                    string_table,
+                )
+            })?;
             support_roots.push(canonical);
         }
     }
@@ -1159,13 +1150,17 @@ fn discover_project_package_facade(
             .iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        return Err(project_structure_messages(
+        let diagnostic = project_structure_diagnostic(
             project_root,
             InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(project_root, string_table),
                 candidates,
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1182,7 +1177,7 @@ fn classify_directory_root(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
     if directory_roots.is_empty() {
         return Ok(None);
     }
@@ -1193,13 +1188,17 @@ fn classify_directory_root(
             .iter()
             .map(|root| path_id(&root.root_file, string_table))
             .collect();
-        return Err(project_structure_messages(
+        let diagnostic = project_structure_diagnostic(
             directory,
             InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(directory, string_table),
                 candidates,
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1223,20 +1222,24 @@ fn classify_package_root_directory(
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
     let normal_roots = directory_roots
         .iter()
         .filter(|root| root.role == ModuleRootRole::Normal)
         .collect::<Vec<_>>();
 
     if normal_roots.is_empty() {
-        return Err(project_structure_messages(
+        let diagnostic = project_structure_diagnostic(
             directory,
             InvalidConfigReason::SourcePackageMissingRoot {
                 prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1250,7 +1253,7 @@ fn classify_package_root_directory(
             .into_iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        return Err(project_structure_messages(
+        let diagnostic = project_structure_diagnostic(
             directory,
             InvalidConfigReason::SourcePackageMultipleRoots {
                 prefix: string_table.intern(package_prefix),
@@ -1258,6 +1261,10 @@ fn classify_package_root_directory(
                 candidates,
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1275,22 +1282,15 @@ fn classify_package_root_directory(
 /// indexing or the directory escaped the entry-root tree. Rather than silently falling back to an
 /// absolute machine-local path (which would make `ModuleId` non-deterministic across machines),
 /// surface it as an internal compiler error so the failure is never hidden.
-fn logical_module_path_from(
-    root_directory: &Path,
-    base: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+fn logical_module_path_from(root_directory: &Path, base: &Path) -> Result<PathBuf, CompilerError> {
     root_directory
         .strip_prefix(base)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Module root directory {root_directory:?} is not under the canonical base \
+            CompilerError::compiler_error(format!(
+                "Module root directory {root_directory:?} is not under the canonical base \
                  {base:?}; logical module path cannot fall back to an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })
 }
 
@@ -1368,20 +1368,16 @@ fn provider_owned_extension_for_file(
 fn relative_source_path_from(
     file_path: &Path,
     module_root_directory: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, CompilerError> {
     file_path
         .strip_prefix(module_root_directory)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Owned source {file_path:?} is not under its nearest module root \
+            CompilerError::compiler_error(format!(
+                "Owned source {file_path:?} is not under its nearest module root \
                      {module_root_directory:?}; module-relative source path cannot fall back to \
                      an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })
 }
 
@@ -1394,22 +1390,17 @@ fn relative_source_path_from(
 fn entry_root_relative_logical_path(
     traversal_path: &Path,
     entry_root: &Path,
-    string_table: &mut StringTable,
-) -> Result<String, CompilerMessages> {
+) -> Result<String, CompilerError> {
     let relative_path = traversal_path
         .strip_prefix(entry_root)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Discovered source candidate {traversal_path:?} is not under the entry root \
+            CompilerError::compiler_error(format!(
+                "Discovered source candidate {traversal_path:?} is not under the entry root \
                      {entry_root:?}; logical candidate path cannot fall back to an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })?;
     portable_relative_logical_path_from(&relative_path)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
 /// Classify every recognized candidate discovered during traversal and assign its portable logical
@@ -1429,8 +1420,7 @@ fn classify_owned_sources(
     module_identities: &ModuleIdentityTable,
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
     facade_file_for_inventory: Option<PathBuf>,
-    string_table: &mut StringTable,
-) -> Result<Vec<ClassifiedSource>, CompilerMessages> {
+) -> Result<Vec<ClassifiedSource>, CompilerError> {
     let mut classified = Vec::new();
 
     for candidate in recognized_candidates {
@@ -1446,16 +1436,12 @@ fn classify_owned_sources(
         };
 
         let record = module_identities.record(module_id);
-        let relative_path = relative_source_path_from(
-            &candidate.canonical_path,
-            record.root_directory(),
-            string_table,
-        )?;
+        let relative_path =
+            relative_source_path_from(&candidate.canonical_path, record.root_directory())?;
         let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
             record.stable_origin().clone(),
             &relative_path,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        )?;
 
         classified.push(ClassifiedSource {
             canonical_path: candidate.canonical_path,
@@ -1477,22 +1463,17 @@ fn classify_owned_sources(
         });
 
         let facade_module_id = facade_module_id.ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "A project package facade file {facade_file:?} was discovered but no matching \
+            CompilerError::compiler_error(format!(
+                "A project package facade file {facade_file:?} was discovered but no matching \
                      facade module record exists; the facade source must not be silently skipped"
-                )),
-                string_table,
-            )
+            ))
         })?;
         let record = module_identities.record(facade_module_id);
-        let relative_path =
-            relative_source_path_from(&facade_file, record.root_directory(), string_table)?;
+        let relative_path = relative_source_path_from(&facade_file, record.root_directory())?;
         let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
             record.stable_origin().clone(),
             &relative_path,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        )?;
 
         classified.push(ClassifiedSource {
             canonical_path: facade_file,

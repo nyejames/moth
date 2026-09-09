@@ -54,7 +54,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -67,6 +67,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 file name should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -90,7 +91,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -103,6 +104,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 folder name should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -128,7 +130,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -141,6 +143,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -164,7 +167,7 @@ mod non_utf8_filesystem_identity {
         );
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::build_source_package_boundary_indexes(
+        let failure = super::source_package_discovery::build_source_package_boundary_indexes(
             &source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
             &crate::builder_surface::external_import_providers::registry::
@@ -172,6 +175,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -358,8 +362,10 @@ mod source_package_boundary_indexes_tests {
     fn build_indexes(
         source_packages: &SourcePackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
-    {
+    ) -> Result<
+        super::source_package_discovery::SourcePackageBoundaryIndexes,
+        crate::compiler_frontend::compiler_messages::PremergeFailure,
+    > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -406,8 +412,9 @@ mod source_package_boundary_indexes_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("project source-package prefix must remain reserved");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::ProjectGlobalsNameReserved)
@@ -477,8 +484,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &nonexistent);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("nonexistent root should fail canonicalization");
+        let messages = failure.into_messages(&string_table);
 
         let (error_type, message, _location) = messages
             .first_infrastructure_error_for_tests()
@@ -501,8 +509,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("package root without a normal module root should fail boundary indexing");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
@@ -521,8 +530,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("a support root cannot replace the package normal module root");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
@@ -542,8 +552,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("one directory cannot contain hash and support roots");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
@@ -565,9 +576,10 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table).expect_err(
+        let failure = build_indexes(&source_packages, &mut string_table).expect_err(
             "package root with multiple normal module roots should fail boundary indexing",
         );
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(
@@ -597,8 +609,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("unreadable package root should fail boundary indexing");
+        let messages = failure.into_messages(&string_table);
 
         let (error_type, _message, _location) = messages
             .first_infrastructure_error_for_tests()
@@ -750,8 +763,10 @@ mod non_utf8_package_boundary_candidate_tests {
     fn build_indexes(
         source_packages: &SourcePackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
-    {
+    ) -> Result<
+        super::source_package_discovery::SourcePackageBoundaryIndexes,
+        crate::compiler_frontend::compiler_messages::PremergeFailure,
+    > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -786,8 +801,9 @@ mod non_utf8_package_boundary_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("non-UTF-8 candidate should fail boundary indexing");
+        let messages = failure.into_messages(&string_table);
 
         assert_non_utf8_file_error(&messages);
         drop(root);
@@ -807,8 +823,9 @@ mod non_utf8_package_boundary_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("valid root plus invalid candidate should still fail");
+        let messages = failure.into_messages(&string_table);
 
         assert_non_utf8_file_error(&messages);
         drop(root);
@@ -1188,7 +1205,7 @@ mod module_identity_tests {
         let missing_project_root = root.join("does_not_exist");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &missing_project_root,
@@ -1201,6 +1218,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("missing project root should surface a file error, not a missing facade");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
     }
@@ -1228,7 +1246,7 @@ mod module_identity_tests {
             .expect("should drop read permission");
 
         let mut string_table = StringTable::new();
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1241,6 +1259,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("unreadable project root should surface a file error, not a missing facade");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
 
@@ -1311,7 +1330,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1324,6 +1343,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple normal module roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
@@ -1345,7 +1365,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1358,6 +1378,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("mixed normal and support roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
@@ -1379,7 +1400,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1392,6 +1413,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple support roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }

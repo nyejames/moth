@@ -10,11 +10,11 @@
 //!      as a typed `CompilerError` instead of storing it as a normal diagnosed result.
 
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, RenderSourceContext, RenderTypeContext,
+    CompilerError, CompilerMessages, RenderFrozenContext, RenderSourceContext, RenderTypeContext,
 };
-use super::{CompilerDiagnostic, DiagnosticPayload, DiagnosticSeverity};
+use super::{CompilerDiagnostic, DiagnosticPayload, DiagnosticSeverity, PremergeDiagnosticBatch};
 use crate::compiler_frontend::source::SourceDatabase;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
 /// One diagnosed module's user-facing diagnostic set at the retained-module semantic boundary.
@@ -30,6 +30,7 @@ use std::sync::Arc;
 pub(crate) struct ModuleDiagnostics {
     diagnostics: Vec<CompilerDiagnostic>,
     string_table: StringTable,
+    render_frozen_contexts: Vec<RenderFrozenContext>,
     render_source_contexts: Vec<RenderSourceContext>,
     render_type_contexts: Vec<RenderTypeContext>,
 }
@@ -60,9 +61,9 @@ impl ModuleDiagnostics {
     /// error's `SourceLocation` carries interned path IDs issued by that module-local table, so
     /// the attached context lets `CompilerMessages::from_error` merge and remap the location
     /// exactly once instead of resolving it against a mismatched or empty table.
-    pub(crate) fn from_messages(messages: CompilerMessages) -> Result<Self, CompilerError> {
         let diagnostics = messages.diagnostics;
         let string_table = messages.string_table;
+        let render_frozen_contexts = messages.render_frozen_contexts;
         let render_source_contexts = messages.render_source_contexts;
         let render_type_contexts = messages.render_type_contexts;
 
@@ -104,6 +105,7 @@ impl ModuleDiagnostics {
                 Ok(ModuleDiagnostics {
                     diagnostics,
                     string_table,
+                    render_frozen_contexts,
                     render_source_contexts,
                     render_type_contexts,
                 })
@@ -192,8 +194,104 @@ impl ModuleDiagnostics {
         CompilerMessages {
             diagnostics: self.diagnostics,
             string_table: self.string_table,
+            render_frozen_contexts: self.render_frozen_contexts,
             render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,
+        }
+    }
+    /// Classify a premerge batch into a diagnosed module or a typed invariant failure.
+    ///
+    /// WHAT: moves the batch's diagnostics, string table and type contexts into the diagnosed
+    /// owner after verifying the batch carries at least one user-facing `Error` and no
+    /// infrastructure payload. Batches arriving through the premerge lane never carry source
+    /// contexts, so the result starts with none; the final boundary attaches them later.
+    /// WHY: canonical aggregation merges premerge batches exactly once and only then needs the
+    /// diagnosed owner the render boundary consumes. Classifying here keeps the single
+    /// user-error/infrastructure separation beside the existing `from_messages` owner instead
+    /// of reintroducing a mixed message vessel for the merge.
+    pub(crate) fn from_batch(batch: PremergeDiagnosticBatch) -> Result<Self, CompilerError> {
+        let (bag, string_table, render_type_contexts) = batch.into_parts();
+        let diagnostics = bag.into_diagnostics();
+        let mut has_user_error = false;
+        for diagnostic in &diagnostics {
+            if is_infrastructure_payload(diagnostic) {
+                return Err(CompilerError::compiler_error(
+                    "module semantic stage returned a premerge batch carrying an infrastructure payload",
+                ));
+            }
+            if diagnostic.severity == DiagnosticSeverity::Error {
+                has_user_error = true;
+            }
+        }
+        if !has_user_error {
+            if diagnostics.is_empty() {
+                return Err(CompilerError::compiler_error(
+                    "module semantic stage returned a premerge batch with no diagnostics",
+                ));
+            }
+            return Err(CompilerError::compiler_error(
+                "module semantic stage returned a premerge batch with no user-facing error diagnostic",
+            ));
+        }
+        Ok(Self {
+            diagnostics,
+            string_table,
+            render_frozen_contexts: Vec::new(),
+            render_source_contexts: Vec::new(),
+            render_type_contexts,
+        })
+    }
+
+    /// Move this diagnosed module back into the premerge batch lane for canonical merging.
+    ///
+    /// WHAT: moves diagnostics, string table and type contexts into a batch, rejecting a
+    /// module that already carries source contexts with a typed invariant failure.
+    /// WHY: canonical wave merging remaps each module-local delta exactly once through the
+    /// batch owner, then classifies back via `from_batch` without round-tripping through the
+    /// final `CompilerMessages` vessel. Batches intentionally carry no source contexts — the
+    /// final boundary attaches them after merging — so an attached association here is a
+    /// caller error. Rejecting it in all builds keeps a release build from silently
+    /// misassociating diagnostics with a missing snapshot; premerge batches stay
+    /// source-context-free by construction.
+    pub(crate) fn into_batch(self) -> Result<PremergeDiagnosticBatch, CompilerError> {
+        if !self.render_source_contexts.is_empty() {
+            return Err(CompilerError::compiler_error(format!(
+                "diagnosed module reached canonical merging with {} attached source contexts \
+                 beside {} diagnostics; source attachment must happen after merging",
+                self.render_source_contexts.len(),
+                self.diagnostics.len(),
+            )));
+        }
+        if !self.render_frozen_contexts.is_empty() {
+            return Err(CompilerError::compiler_error(format!(
+                "diagnosed module reached canonical merging with {} attached frozen identity \
+                 contexts beside {} diagnostics; frozen attachment must happen after merging",
+                self.render_frozen_contexts.len(),
+                self.diagnostics.len(),
+            )));
+        }
+        let Self {
+            diagnostics,
+            string_table,
+            render_type_contexts,
+            ..
+        } = self;
+        Ok(PremergeDiagnosticBatch::from_parts(
+            diagnostics,
+            string_table,
+            render_type_contexts,
+        ))
+    }
+
+    /// Remap every interned string owned by this diagnosed module into the merged table.
+    ///
+    /// Frozen identity rows are intentionally left untouched: frozen IDs are already final.
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        for diagnostic in self.diagnostics.iter_mut() {
+            diagnostic.remap_string_ids(remap);
+        }
+        for type_context in &mut self.render_type_contexts {
+            type_context.type_environment.remap_string_ids(remap);
         }
     }
 

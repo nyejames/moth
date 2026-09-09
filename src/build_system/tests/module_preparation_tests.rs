@@ -1782,43 +1782,30 @@ fn assert_malformed_chunks_rejected(
     module_file_count: usize,
     expected_fragment: &str,
 ) {
+    use crate::compiler_frontend::compiler_messages::PremergeFailure;
+
     let mut string_table = StringTable::new();
     let mut source_owner = SourceDatabaseBuilder::new(SourceDatabase::empty());
 
-    let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
+    let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         chunks,
         &mut source_owner.split().1,
         module_file_count,
         0,
     ) {
-        Err(messages) => messages,
+        Err(PremergeFailure::Infrastructure(error)) => error,
+        Err(PremergeFailure::Diagnosed(_)) => {
+            panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
+        }
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
     };
 
     assert!(
-        error_messages.has_errors(),
-        "malformed chunks should produce at least one error diagnostic"
+        error.msg.contains(expected_fragment),
+        "error message `{}` should contain `{expected_fragment}`",
+        error.msg,
     );
-
-    let infrastructure_error = error_messages.diagnostics.iter().find(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InfrastructureError { .. }
-        )
-    });
-    let infrastructure_error = infrastructure_error
-        .expect("malformed chunks should produce an infrastructure CompilerError");
-
-    match &infrastructure_error.payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => {
-            assert!(
-                msg.contains(expected_fragment),
-                "error message `{msg}` should contain `{expected_fragment}`"
-            );
-        }
-        _ => unreachable!("already matched InfrastructureError"),
-    }
 }
 
 #[test]
@@ -2055,33 +2042,17 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
         &string_table,
     );
 
-    let error_messages = match result {
-        Err(messages) => messages,
+    let error = match result {
+        Err(error) => error,
         Ok(_) => panic!("a mismatched expected active origin must be rejected"),
     };
     assert!(
-        error_messages.has_errors(),
-        "an origin mismatch must produce at least one error diagnostic"
+        error
+            .msg
+            .contains("does not match the expected active origin"),
+        "error message `{}` should state the origin mismatch",
+        error.msg,
     );
-    let mismatch_error = error_messages
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InfrastructureError { .. }
-            )
-        })
-        .expect("an origin mismatch must produce an infrastructure error");
-    match &mismatch_error.payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => {
-            assert!(
-                msg.contains("does not match the expected active origin"),
-                "error message `{msg}` should state the origin mismatch"
-            );
-        }
-        _ => unreachable!("already matched InfrastructureError"),
-    }
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

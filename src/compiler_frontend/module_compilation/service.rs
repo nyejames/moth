@@ -13,10 +13,10 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, merge_stage_messages,
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ModuleDiagnostics};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::owned_folded_string_from_const_string;
@@ -65,8 +65,6 @@ use crate::compiler_frontend::public_interface::{
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use crate::{borrow_log, timed_stage_attributed};
@@ -168,11 +166,11 @@ pub(crate) fn compile_module(
         timing_context,
     );
 
-    // Normalize the deeper stages' mixed `CompilerMessages` once at this semantic boundary.
-    // A successful compilation becomes `Success`. A failing stage becomes either
-    // `Diagnosed` (user-facing diagnostics the renderer surfaces) or `Err(CompilerError)`
-    // (an infrastructure failure recovered losslessly from its structured payload). This is
-    // the single lossless ownership transfer; graph and render consumers never re-classify.
+    // Normalize the deeper stages' classified premerge lane once at this semantic boundary.
+    // A successful compilation becomes `Success`. A diagnosed batch becomes `Diagnosed`
+    // (user-facing diagnostics the renderer surfaces) or `Err(CompilerError)` when the batch
+    // fails diagnosed validation. An infrastructure failure propagates unchanged. This is the
+    // single lossless ownership transfer; graph and render consumers never re-classify.
     match compile_result {
         Ok(SemanticStageOutput::Complete(output)) => {
             let CompleteSemanticStage {
@@ -196,10 +194,11 @@ pub(crate) fn compile_module(
         Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
         )),
-        Err(messages) => match ModuleDiagnostics::from_messages(messages) {
+        Err(PremergeFailure::Diagnosed(batch)) => match ModuleDiagnostics::from_batch(batch) {
             Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
             Err(error) => Err(error),
         },
+        Err(PremergeFailure::Infrastructure(error)) => Err(error),
     }
 }
 
@@ -214,10 +213,12 @@ pub(crate) fn compile_module_for_boracle(
     prepared: PreparedModuleInput,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BoracleModuleInput, CompilerMessages> {
+) -> Result<BoracleModuleInput, PremergeFailure> {
+    // Intermediate failures stay in the premerge lane; the final build boundary owns the
+    // single vessel conversion. Infrastructure errors propagate typed without building a
+    // second vessel or cloning the local table.
     let entry_file_path = prepared
-        .entry_file_path(context.source_files)
-        .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?
+        .entry_file_path(context.source_files)?
         .to_path_buf();
     let entry_file_path = entry_file_path.as_path();
     let PreparedModuleInput {
@@ -231,23 +232,16 @@ pub(crate) fn compile_module_for_boracle(
         source_file_count,
         source_byte_count,
     } = prepared;
-    resolved_file_references
-        .validate()
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    resolved_file_references.validate()?;
     let active_module_origin = source_module_origins
-        .origin_for(active_root_file_id)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?
+        .origin_for(active_root_file_id)?
         .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "semantic Boracle compilation: active root file id {} has no module origin",
-                    active_root_file_id.index()
-                )),
-                &string_table,
-            )
+            CompilerError::compiler_error(format!(
+                "semantic Boracle compilation: active root file id {} has no module origin",
+                active_root_file_id.index()
+            ))
         })?
         .clone();
-
     let mut compiler = CompilerFrontend::new(
         context.options.clone(),
         string_table,
@@ -256,7 +250,6 @@ pub(crate) fn compile_module_for_boracle(
         context.project_path_resolver,
         context.source_files,
     );
-
     match run_semantic_stages(
         &mut compiler,
         context,
@@ -278,13 +271,12 @@ pub(crate) fn compile_module_for_boracle(
         timing_context,
     ) {
         Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
-        Ok(SemanticStageOutput::Complete(_)) => Err(CompilerMessages::from_error_ref(
+        Ok(SemanticStageOutput::Complete(_)) => Err(PremergeFailure::Infrastructure(
             CompilerError::compiler_error(
                 "Boracle compiler service unexpectedly completed the normal semantic pipeline",
             ),
-            &compiler.string_table,
         )),
-        Err(messages) => Err(messages),
+        Err(failure) => Err(failure),
     }
 }
 
@@ -337,9 +329,10 @@ struct CompleteSemanticStage {
 /// WHAT: binding -> ordering -> AST -> public-interface projection -> HIR -> borrow validation ->
 ///       generated completion, returning the complete module, public interface, generated delta
 ///       and resource-source associations a success is made of.
-/// WHY: every stage in here fails with `CompilerMessages`, which mixes user diagnostics and
-///      infrastructure failures. Collecting those failures at one `?` boundary lets
-///      [`compile_module`] classify them exactly once. Keeping the sequence in its own function
+/// WHY: every stage in here fails with a classified [`PremergeFailure`]: binding/order stages
+///      move the local table into a diagnosed batch, while deeper AST/HIR vessels classify
+///      through the single premerge conversion at each `?` boundary. Infrastructure failures
+///      propagate directly without building a second vessel. Keeping the sequence in its own
 ///      means `compile_module` reads as three steps rather than wrapping four hundred lines.
 fn run_semantic_stages(
     compiler: &mut CompilerFrontend<'_>,
@@ -349,7 +342,7 @@ fn run_semantic_stages(
     inputs: SemanticStageInputs<'_>,
     request: SemanticStageRequest,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<SemanticStageOutput, CompilerMessages> {
+) -> Result<SemanticStageOutput, PremergeFailure> {
     #[cfg(not(feature = "boracle"))]
     let _ = request;
     let SemanticStageInputs {
@@ -384,16 +377,13 @@ fn run_semantic_stages(
                         )
                     })
                     .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "semantic module compilation: candidate source ID {} is not in the boundary source file table",
-                                source_id.index()
-                            )),
-                            &compiler.string_table,
-                        )
+                        PremergeFailure::from(CompilerError::compiler_error(format!(
+                            "semantic module compilation: candidate source ID {} is not in the boundary source file table",
+                            source_id.index()
+                        )))
                     })
             })
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, PremergeFailure>>()?
     } else {
         Vec::new()
     };
@@ -459,8 +449,7 @@ fn run_semantic_stages(
         context.source_provider_dependencies,
         compiler.external_package_registry.as_ref(),
         &compiler.string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
 
     // Build the transient expanded public source-nominal origin index before `sorted`
     // moves into AST construction. Each origin is derived from the header's retained
@@ -478,8 +467,7 @@ fn run_semantic_stages(
         &sorted.headers,
         &sorted.module_symbols,
         &compiler.string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
 
     // Build the transient expanded public source-trait origin index before `sorted`
     // moves into AST construction. Analogous to the nominal origin index, this maps
@@ -493,8 +481,7 @@ fn run_semantic_stages(
         &sorted.headers,
         &sorted.module_symbols,
         &compiler.string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
 
     // 3. Build the Abstract Syntax Tree (AST).
     // The build result carries the executable `Ast` plus the two closed side results
@@ -528,11 +515,8 @@ fn run_semantic_stages(
     } = module_ast_build;
 
     let module_resources = module_resources.ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "module AST finalization did not retain its module resource table",
-            ),
-            &compiler.string_table,
+        CompilerError::compiler_error(
+            "module AST finalization did not retain its module resource table",
         )
     })?;
     // 4. Build the one aggregate public-interface draft before HIR consumes the AST. The
@@ -573,8 +557,7 @@ fn run_semantic_stages(
             module_resources: Some(&module_resource_table),
         })
         .build(),
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
     let public_interface_draft = public_interface_build.draft;
 
     // Release the shared-table borrow before HIR: lowering re-interns handoff origins with
@@ -591,8 +574,7 @@ fn run_semantic_stages(
             &public_origins_by_path,
             &public_source_nominal_type_origins,
             &module_resources.borrow(),
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        )?
         .into_iter()
         .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
         .collect::<Vec<_>>();
@@ -605,8 +587,7 @@ fn run_semantic_stages(
             .generic_function_templates(),
         compiler.external_package_registry.as_ref(),
         &mut module_ast,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
     let generated_request_ids =
         generated_transaction.register_requests(generated_requests.iter().map(|request| {
             GeneratedRequestFacts {
@@ -632,17 +613,13 @@ fn run_semantic_stages(
         &public_interface_draft,
         &public_interface_build.callable_seeds,
         materialisation_context_builder.generic_function_templates_mut(),
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-    materialisation_context_builder
-        .finalize_generic_template_identity_index()
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
+    materialisation_context_builder.finalize_generic_template_identity_index()?;
 
     let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
         public_interface_build.function_origin_seeds,
         private_function_origin_seeds,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
 
     // 5. Convert const fragment structural strings to owned values before AST is consumed by HIR.
     let const_top_level_fragments = {
@@ -662,8 +639,7 @@ fn run_semantic_stages(
                     value,
                 })
             })
-            .collect::<Result<Vec<_>, CompilerError>>()
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+            .collect::<Result<Vec<_>, CompilerError>>()?
     };
 
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
@@ -687,18 +663,14 @@ fn run_semantic_stages(
     // 7. Validate extracted non-HIR compiler metadata before a successful module is
     // returned. Invalid compiler metadata is an internal CompilerError.
     if let Err(error) = lowering_metadata.validate() {
-        return Err(CompilerMessages::from_error_ref(
-            error,
-            &compiler.string_table,
-        ));
+        return Err(error.into());
     }
 
     // Link facts are the validated-HIR owner for direct call targets. The convergence
     // observation model consumes these facts after HIR validation rather than scanning
     // source or introducing a second HIR call graph.
     let function_link_facts =
-        collect_module_function_link_facts_with_string_table(&hir_module, &compiler.string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+        collect_module_function_link_facts_with_string_table(&hir_module, &compiler.string_table)?;
 
     #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {
@@ -720,8 +692,7 @@ fn run_semantic_stages(
         &mut materialisation_context_builder,
         &hir_module,
         &bootstrap_borrow_analysis,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
     timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,
         timing_context,
@@ -752,11 +723,8 @@ fn run_semantic_stages(
         &mut materialisation_context_builder,
         &hir_module,
         &borrow_analysis,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
-    let generated_delta = generated_transaction
-        .finish()
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    )?;
+    let generated_delta = generated_transaction.finish()?;
     record_borrow_counters(&borrow_analysis);
 
     // Concrete call-summary finalization runs exactly once after HIR and borrow
@@ -772,29 +740,23 @@ fn run_semantic_stages(
         timing_context,
         {
             let local_public_interface = public_interface_draft
-                .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+                .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)?;
             PublicSemanticInterface::close_from_local(
                 local_public_interface,
                 context.source_provider_dependencies,
                 compiler.external_package_registry.as_ref(),
             )
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
         }
     )?;
     let materialisation_context = materialisation_context_builder
-        .freeze(&public_interface, &module_resources.borrow())
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        .freeze(&public_interface, &module_resources.borrow())?
         .map(Arc::new);
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "ordinary module resource table still has a live shared handle after HIR lowering",
-                ),
-                &compiler.string_table,
-            )
+            PremergeFailure::from(CompilerError::compiler_error(
+                "ordinary module resource table still has a live shared handle after HIR lowering",
+            ))
         })?;
     let resource_source_associations = resource_table.resource_source_associations().to_vec();
 
@@ -868,7 +830,7 @@ fn bind_retained_headers(
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<BoundModuleHeaders, CompilerMessages> {
+) -> Result<BoundModuleHeaders, PremergeFailure> {
     let headers = bind_module_headers(
         prepared_header_syntax,
         compiler.external_package_registry.as_ref(),
@@ -879,12 +841,12 @@ fn bind_retained_headers(
         &mut compiler.string_table,
     )
     .map_err(|bag| {
-        let mut messages = CompilerMessages::from_diagnostics(
-            bag.into_diagnostics(),
-            compiler.string_table.clone(),
-        );
-        messages.prepend_diagnostics_preserving_context(std::mem::take(warnings));
-        messages
+        // Move the compiler table into the batch; binding failed, so the compiler owner
+        // hands its table to the diagnosed lane instead of cloning it for a vessel.
+        let table = std::mem::take(&mut compiler.string_table);
+        let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+        batch.prepend_diagnostics(std::mem::take(warnings));
+        PremergeFailure::Diagnosed(batch)
     })?;
 
     record_header_counters(&headers);
@@ -896,16 +858,16 @@ fn sort_headers(
     module_headers: BoundModuleHeaders,
     resolved_file_references: &ResolvedFileReferenceTable,
     warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<SortedHeaders, CompilerMessages> {
+) -> Result<SortedHeaders, PremergeFailure> {
     compiler
         .sort_headers(module_headers, resolved_file_references)
         .map_err(|bag| {
-            let mut messages = CompilerMessages::from_diagnostics(
-                bag.into_diagnostics(),
-                compiler.string_table.clone(),
-            );
-            messages.prepend_diagnostics_preserving_context(std::mem::take(warnings));
-            messages
+            // Move the compiler table into the batch; ordering failed, so no clone is
+            // needed to carry the diagnostics.
+            let table = std::mem::take(&mut compiler.string_table);
+            let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+            batch.prepend_diagnostics(std::mem::take(warnings));
+            PremergeFailure::Diagnosed(batch)
         })
 }
 
@@ -923,7 +885,7 @@ fn build_ast_with_registered_types(
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<AstBuildResult, CompilerMessages> {
+) -> Result<AstBuildResult, PremergeFailure> {
     match compiler.headers_to_ast(
         AstBuildRequest {
             sorted,
@@ -942,12 +904,16 @@ fn build_ast_with_registered_types(
             warnings.extend(build_result.ast.warnings.clone());
             Ok(build_result)
         }
-
-        Err(messages) => Err(merge_stage_messages(
-            messages,
-            warnings,
-            &compiler.string_table,
-        )),
+        Err(messages) => {
+            // Classify the mixed vessel once into the premerge lane, then prepend prior
+            // warnings to the diagnosed batch. Infrastructure failures propagate typed and
+            // drop their warning companions, matching the `ModuleDiagnostics` contract.
+            let mut failure = PremergeFailure::from(messages);
+            if let PremergeFailure::Diagnosed(batch) = &mut failure {
+                batch.prepend_diagnostics(std::mem::take(warnings));
+            }
+            Err(failure)
+        }
     }
 }
 

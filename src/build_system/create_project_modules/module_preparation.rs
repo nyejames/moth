@@ -10,8 +10,9 @@
 //! This module stops at prepared syntax. Interface binding, declaration ordering, AST, HIR, borrow
 //! validation and generated completion belong to `compiler_frontend::module_compilation`.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
     HeaderParseOptions, HeaderPreparationFailure, PreparedHeaderSyntax, SourcePreparationDelta,
@@ -306,7 +307,8 @@ impl ModulePreparationContext<'_> {
     /// The source database and origin table have already been built by the enclosing project or
     /// package boundary. Discovery borrows the immutable source table and shares the immutable
     /// origin-table handle, so no module or worker can allocate or copy boundary identities while
-    /// preparation is in flight.
+    /// preparation is in flight. Failures travel in the premerge lane; the final boundary owns
+    /// the single vessel conversion.
     pub(super) fn begin_syntax_discovery<'a>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
@@ -315,7 +317,7 @@ impl ModulePreparationContext<'_> {
         entry_file_role: Option<FileRole>,
         string_table: StringTable,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
+    ) -> Result<ModuleSyntaxDiscovery<'a>, PremergeFailure> {
         let candidate_source_ids = registered_sources.candidate_source_ids;
         let mut prepared_outputs = Vec::new();
         prepared_outputs.resize_with(candidate_source_ids.len(), || None);
@@ -369,7 +371,7 @@ impl ModulePreparationContext<'_> {
         mut string_table: StringTable,
         source_byte_count: usize,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<PreparedModule, CompilerMessages> {
+    ) -> Result<PreparedModule, PremergeFailure> {
         let mut warnings = Vec::new();
 
         // Discovery owns the final source identity domain and supplies this database in
@@ -462,42 +464,30 @@ impl ModulePreparationContext<'_> {
         source_module_origins: &SourceModuleOriginTable,
         expected_active_origin: &StableModuleOriginIdentity,
         entry_file_path: &Path,
-        string_table: &StringTable,
-    ) -> Result<SourceId, CompilerMessages> {
-        let active_root_file_id =
-            source_id_for_canonical_path(source_files, entry_file_path).ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "module preparation: the entry file path {:?} is not in the source file table",
-                        entry_file_path
-                    )),
-                    string_table,
-                )
+        _string_table: &StringTable,
+    ) -> Result<SourceId, CompilerError> {
+        let active_root_file_id = source_id_for_canonical_path(source_files, entry_file_path)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "module preparation: the entry file path {:?} is not in the source file table",
+                    entry_file_path
+                ))
             })?;
 
         let table_origin = source_module_origins
-            .origin_for(active_root_file_id)
-            .map_err(|error| {
-                CompilerMessages::from_error_ref(error, string_table)
-            })?
+            .origin_for(active_root_file_id)?
             .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "module preparation: the active root (file id {}) has no owning module origin in the source module origin table",
-                        active_root_file_id.index()
-                    )),
-                    string_table,
-                )
+                CompilerError::compiler_error(format!(
+                    "module preparation: the active root (file id {}) has no owning module origin in the source module origin table",
+                    active_root_file_id.index()
+                ))
             })?;
 
         if table_origin != expected_active_origin {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "module preparation: the active root's table-resolved origin ({:?}) does not match the expected active origin ({:?})",
-                    table_origin, expected_active_origin
-                )),
-                string_table,
-            ));
+            return Err(CompilerError::compiler_error(format!(
+                "module preparation: the active root's table-resolved origin ({:?}) does not match the expected active origin ({:?})",
+                table_origin, expected_active_origin
+            )));
         }
 
         Ok(active_root_file_id)
@@ -518,7 +508,7 @@ impl ModulePreparationContext<'_> {
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
+    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
         let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
         let options = HeaderParseOptions {
@@ -599,13 +589,12 @@ impl ModulePreparationContext<'_> {
         source_spans: &mut SourceSpanBuilders<'_>,
         module_file_count: usize,
         base_len: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
+    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
         // Completion order is a scheduler detail. Merge order is the module input order encoded
         // by deterministic chunk indexes; prepared outputs are then placed by `file_index`, so
         // header order never depends on which worker finished first.
         preparation_chunks.sort_by_key(|chunk| chunk.chunk_index);
-        validate_distinct_chunk_indexes(&preparation_chunks)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        validate_distinct_chunk_indexes(&preparation_chunks)?;
 
         let mut prepared_outputs = Vec::with_capacity(module_file_count);
         prepared_outputs.resize_with(module_file_count, || None);
@@ -628,26 +617,21 @@ impl ModulePreparationContext<'_> {
                 match prepared_file.result {
                     Ok(mut output) => {
                         if prepared_file.file_index >= module_file_count {
-                            return Err(CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(format!(
-                                    "file preparation record carries file index {} but the module \
-                                     has only {module_file_count} files",
-                                    prepared_file.file_index,
-                                )),
-                                string_table,
-                            ));
+                            return Err(CompilerError::compiler_error(format!(
+                                "file preparation record carries file index {} but the module \
+                                 has only {module_file_count} files",
+                                prepared_file.file_index,
+                            ))
+                            .into());
                         }
 
                         if prepared_outputs[prepared_file.file_index].is_some() {
-                            return Err(CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(format!(
-                                    "file preparation record occupies file index {} more than once",
-                                    prepared_file.file_index,
-                                )),
-                                string_table,
-                            ));
+                            return Err(CompilerError::compiler_error(format!(
+                                "file preparation record occupies file index {} more than once",
+                                prepared_file.file_index,
+                            ))
+                            .into());
                         }
-
                         if output.const_template_count > 0 {
                             const_fragment_source_count += 1;
                         }
@@ -666,13 +650,9 @@ impl ModulePreparationContext<'_> {
                                         FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
                                         1,
                                     );
-                                    output.remap_string_ids(&remap).map_err(|error| {
-                                        CompilerMessages::from_error_ref(error, string_table)
-                                    })?;
+                                    output.remap_string_ids(&remap)?;
                                 }
-                                output.freeze_path_syntax(string_table).map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, string_table)
-                                })?;
+                                output.freeze_path_syntax(string_table)?;
                             }
                             PreparedFileStringDomain::AlreadyGlobal => {
                                 if !remap_is_identity {
@@ -681,9 +661,7 @@ impl ModulePreparationContext<'_> {
                                         1,
                                     );
                                 }
-                                output.require_frozen_path_syntax().map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, string_table)
-                                })?;
+                                output.require_frozen_path_syntax()?;
                             }
                         }
                         warnings.append(&mut output.warnings);
@@ -710,7 +688,7 @@ impl ModulePreparationContext<'_> {
                         diagnostics.push(*diagnostic);
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                        return Err(CompilerMessages::from_error_ref(error, string_table));
+                        return Err(PremergeFailure::Infrastructure(error));
                     }
                 }
             }
@@ -726,30 +704,29 @@ impl ModulePreparationContext<'_> {
         );
 
         if !diagnostics.is_empty() {
-            let mut messages =
-                CompilerMessages::from_diagnostics(diagnostics, string_table.clone());
-            messages.prepend_diagnostics_preserving_context(warnings);
-            return Err(messages);
+            // Move the module table into the batch; the caller discards its table on this
+            // diagnosed path, so no clone is needed to carry the diagnostics.
+            let table = std::mem::take(string_table);
+            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
+            batch.prepend_diagnostics(warnings);
+            return Err(PremergeFailure::Diagnosed(batch));
         }
-
         let mut filled_outputs = Vec::with_capacity(module_file_count);
         for (file_index, slot) in prepared_outputs.into_iter().enumerate() {
             match slot {
                 Some(output) => filled_outputs.push(output),
                 None => {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "file preparation left file index {file_index} unfilled; every \
-                             selected source must be prepared exactly once"
-                        )),
-                        string_table,
-                    ));
+                    return Err(CompilerError::compiler_error(format!(
+                        "file preparation left file index {file_index} unfilled; every \
+                         selected source must be prepared exactly once"
+                    ))
+                    .into());
                 }
             }
         }
 
         record_successful_prepared_outputs(&filled_outputs);
-        let prepared = prepare_header_syntax(
+        let prepared = match prepare_header_syntax(
             &mut filled_outputs,
             string_table,
             &mut |source, diagnostic| {
@@ -758,19 +735,25 @@ impl ModulePreparationContext<'_> {
                 source_spans.retain_span_builder(source, builder);
                 result
             },
-        )
-        .map_err(|bag| {
-            let mut messages = match bag {
-                HeaderPreparationFailure::Diagnosed(bag) => {
-                    CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-                }
-                HeaderPreparationFailure::Infrastructure(error) => {
-                    CompilerMessages::from_error_ref(error, string_table)
-                }
-            };
-            messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-            messages
-        })?;
+        ) {
+            Ok(prepared) => prepared,
+            Err(bag) => {
+                return Err(match bag {
+                    HeaderPreparationFailure::Diagnosed(bag) => {
+                        // Move the module table and owned warnings into the batch; header
+                        // aggregation failed, so the caller discards both and the batch
+                        // becomes the sole owner with no diagnostic clone.
+                        let table = std::mem::take(string_table);
+                        let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+                        batch.prepend_diagnostics(warnings);
+                        PremergeFailure::Diagnosed(batch)
+                    }
+                    HeaderPreparationFailure::Infrastructure(error) => {
+                        PremergeFailure::Infrastructure(error)
+                    }
+                });
+            }
+        };
 
         Ok((prepared, warnings))
     }
@@ -963,27 +946,20 @@ impl ModuleSyntaxDiscovery<'_> {
         &mut self,
         source: PreparedSourceInput,
         source_spans: &mut SourceSpanBuilders<'_>,
-    ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+    ) -> Result<FileFrontendPrepareOutput, PremergeFailure> {
         if matches!(
             &source.source,
             PreparedSourceKind::MothPrepared { .. }
                 | PreparedSourceKind::MothTemplatePrepared { .. }
         ) {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "indexed module syntax discovery received an already-prepared synthetic source",
-                ),
-                &self.string_table,
-            ));
+            return Err(CompilerError::compiler_error(
+                "indexed module syntax discovery received an already-prepared synthetic source",
+            )
+            .into());
         }
 
         let source_id = source.source_id();
-        let source_byte_len = match source_byte_len(self.context.source_files, source_id) {
-            Ok(source_byte_len) => source_byte_len,
-            Err(error) => {
-                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-            }
-        };
+        let source_byte_len = source_byte_len(self.context.source_files, source_id)?;
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id =
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
@@ -999,8 +975,7 @@ impl ModuleSyntaxDiscovery<'_> {
             entry_file_path: &self.entry_file_path,
             options: &options,
         };
-        let frontend_source = frontend_source(source.source, source_id, self.context.source_files)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+        let frontend_source = frontend_source(source.source, source_id, self.context.source_files)?;
         let input = FrontendFilePrepareInput {
             source: frontend_source,
             source_id,
@@ -1026,20 +1001,14 @@ impl ModuleSyntaxDiscovery<'_> {
         let output = match result {
             Ok(output) => output,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                let FileFrontendPrepareError {
-                    warnings,
-                    diagnostic,
-                    ..
-                } = error;
-                let mut messages = CompilerMessages::from_diagnostics(
-                    vec![*diagnostic],
-                    self.string_table.clone(),
-                );
-                messages.prepend_diagnostics_preserving_context(warnings);
-                return Err(messages);
+                // Move the discovery table into the batch; this source failed, so the
+                // discovery owner hands its table to the diagnosed lane instead of cloning.
+                let table = std::mem::take(&mut self.string_table);
+                let batch = error.into_premerge_batch(table);
+                return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                return Err(PremergeFailure::Infrastructure(error));
             }
         };
 
@@ -1082,16 +1051,14 @@ impl ModuleSyntaxDiscovery<'_> {
     pub(super) fn finish(
         mut self,
         source_spans: &mut SourceSpanBuilders<'_>,
-    ) -> Result<PreparedModule, CompilerMessages> {
+    ) -> Result<PreparedModule, PremergeFailure> {
         let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
         for output in &mut prepared_outputs {
-            output
-                .freeze_path_syntax(&self.string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+            output.freeze_path_syntax(&self.string_table)?;
         }
         let source_file_count = prepared_outputs.len();
         record_successful_prepared_outputs(&prepared_outputs);
@@ -1111,17 +1078,19 @@ impl ModuleSyntaxDiscovery<'_> {
         ) {
             Ok(prepared_header_syntax) => prepared_header_syntax,
             Err(bag) => {
-                let mut messages = match bag {
-                    HeaderPreparationFailure::Diagnosed(bag) => CompilerMessages::from_diagnostics(
-                        bag.into_diagnostics(),
-                        self.string_table.clone(),
-                    ),
-                    HeaderPreparationFailure::Infrastructure(error) => {
-                        CompilerMessages::from_error_ref(error, &self.string_table)
+                return Err(match bag {
+                    HeaderPreparationFailure::Diagnosed(bag) => {
+                        // `finish` owns `self`, so move its table and warnings into the batch
+                        // instead of cloning the local table to carry the diagnostics.
+                        let batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
+                        let mut batch = batch;
+                        batch.prepend_diagnostics(self.warnings);
+                        PremergeFailure::Diagnosed(batch)
                     }
-                };
-                messages.prepend_diagnostics_preserving_context(self.warnings);
-                return Err(messages);
+                    HeaderPreparationFailure::Infrastructure(error) => {
+                        PremergeFailure::Infrastructure(error)
+                    }
+                });
             }
         };
         let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(

@@ -12,8 +12,12 @@
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -24,7 +28,7 @@ use std::path::PathBuf;
 
 use super::module_namespace::ModuleNamespaceSet;
 use super::project_module_graph::ProjectModuleGraph;
-use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
+use super::project_structure_diagnostics::{config_diagnostic, path_id};
 use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
@@ -70,6 +74,7 @@ pub(super) fn build_project_path_resolver(
         string_table,
     )
     .map(|setup| setup.resolver)
+    .map_err(|failure| failure.into_messages(string_table))
 }
 
 /// Build the canonical path resolver for a directory project.
@@ -84,7 +89,7 @@ pub(super) fn build_project_path_resolver_with_index(
     external_import_providers: &ExternalImportProviderRegistry,
     binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
-) -> Result<ProjectPathResolverSetup, CompilerMessages> {
+) -> Result<ProjectPathResolverSetup, PremergeFailure> {
     let roots = resolve_project_roots(config, string_table)?;
 
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
@@ -118,8 +123,7 @@ pub(super) fn build_project_path_resolver_with_index(
         source_tree_index
             .module_identities()
             .derive_compilation_root_table(),
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    )?;
 
     // Build the canonical project module graph directly from the single source-tree traversal.
     // The graph consumes the index's identity table rather than recomputing it and reads owned
@@ -158,42 +162,42 @@ pub(crate) fn resolve_project_entry_root(config: &Config) -> PathBuf {
 fn resolve_project_roots(
     config: &Config,
     string_table: &mut StringTable,
-) -> Result<ProjectRootResolution, CompilerMessages> {
+) -> Result<ProjectRootResolution, PremergeFailure> {
     let project_root = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
-            let file_error = CompilerError::file_error(
+            return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
                 &config.entry_dir,
                 format!("Failed to canonicalize project root: {error}"),
                 string_table,
-            );
-
-            return Err(CompilerMessages::from_error_ref(file_error, string_table));
+            )));
         }
     };
 
     let entry_root_path = resolve_project_entry_root(config);
     if !entry_root_path.exists() {
-        return Err(config_diagnostic_messages(
+        let diagnostic = config_diagnostic(
             config,
             "entry_root",
             InvalidConfigReason::ConfiguredEntryRootMissing {
                 entry_root: path_id(&entry_root_path, string_table),
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
     let entry_root = match fs::canonicalize(&entry_root_path) {
         Ok(path) => path,
         Err(error) => {
-            let file_error = CompilerError::file_error(
+            return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
                 &entry_root_path,
                 format!("Failed to canonicalize configured entry root: {error}"),
                 string_table,
-            );
-
-            return Err(CompilerMessages::from_error_ref(file_error, string_table));
+            )));
         }
     };
 

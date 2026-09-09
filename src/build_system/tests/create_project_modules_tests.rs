@@ -362,7 +362,8 @@ fn discover_modules_for_test_with_resource_inputs(
         resolver.source_file_kinds(),
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let (source_files, mut source_spans) = source_owner.split();
@@ -381,7 +382,8 @@ fn discover_modules_for_test_with_resource_inputs(
         resolver.source_file_kinds(),
         &external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -410,12 +412,11 @@ fn discover_modules_for_test_with_resource_inputs(
         crate::timing::NO_TIMING_BOUNDARY,
     ) {
         Ok(schedule) => schedule,
-        Err(mut messages) => {
+        Err(failure) => {
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            messages.set_source_database(Arc::new(source_files));
-            return Err(messages);
+            return Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)));
         }
     };
     let source_files = source_owner
@@ -454,7 +455,8 @@ fn discover_modules_for_test_with_providers(
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let (source_files, mut source_spans) = source_owner.split();
@@ -471,7 +473,8 @@ fn discover_modules_for_test_with_providers(
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -501,12 +504,11 @@ fn discover_modules_for_test_with_providers(
         crate::timing::NO_TIMING_BOUNDARY,
     ) {
         Ok(schedule) => Ok(schedule),
-        Err(mut messages) => {
+        Err(failure) => {
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-            messages.set_source_database(Arc::new(source_files));
-            Err(messages)
+            Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)))
         }
     }
 }
@@ -1219,7 +1221,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    let messages = match super::source_discovery::collect_reachable_input_files(
+    let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
         &resolver,
         &style_directives,
@@ -1229,8 +1231,11 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &mut string_table,
     ) {
         Ok(_) => panic!("malformed synthetic preparation should diagnose"),
-        Err(messages) => messages,
+        Err(error) => error.into_parts(),
     };
+    let source_files =
+        source_database.expect("diagnosed discovery must publish its finalized source context");
+    let messages = failure.into_messages_with_source(&string_table, Arc::new(source_files));
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
@@ -1795,7 +1800,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
 
-    let messages = super::source_tree_index::SourceTreeIndex::discover(
+    let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &canonical_root,
@@ -1808,6 +1813,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         &mut string_table,
     )
     .expect_err("non-skipped bst/folder collision should be rejected");
+    let messages = failure.into_messages(&string_table);
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
@@ -1869,7 +1875,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
     let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
     let mut string_table = StringTable::new();
 
-    let messages = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
+    let failure = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
         &entry_file,
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1878,6 +1884,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
         &mut string_table,
     )
     .expect_err("single-file normal module roots should reject real dependency-name collisions");
+    let messages = failure.into_messages(&string_table);
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
@@ -1899,7 +1906,7 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
-    let messages = super::source_tree_index::SourceTreeIndex::discover(
+    let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &canonical_root,
@@ -1912,6 +1919,7 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         &mut string_table,
     )
     .expect_err("a module directory may contain only one normal module root");
+    let messages = failure.into_messages(&string_table);
 
     let reason = first_invalid_config_reason(&messages);
     let InvalidConfigReason::MultipleModuleRootFiles {
@@ -1922,8 +1930,8 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         panic!("expected duplicate module root diagnostic, got {reason:?}");
     };
     assert_eq!(
-        *directory,
-        string_table.intern(&fs::canonicalize(&entry_root).unwrap().display().to_string())
+        messages.string_table.resolve(*directory),
+        fs::canonicalize(&entry_root).unwrap().display().to_string()
     );
     assert_eq!(candidates.len(), 2);
 }
@@ -5044,7 +5052,8 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
             ) else {
                 panic!("source-package @project dependency must be rejected");
             };
-            let messages = error.into_messages(string_table);
+            let failure = error.into_failure(string_table);
+            let messages = failure.into_messages(string_table);
             let diagnostic = first_error_diagnostic(&messages);
             assert!(matches!(
                 diagnostic.payload,

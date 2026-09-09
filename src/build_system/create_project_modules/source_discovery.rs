@@ -4,8 +4,10 @@
 //! build the complete set of source files for one single-file module. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
-// Stage 0 deliberately returns full diagnostic/infrastructure payloads in `SourceDiscoveryError`
-// so dependency discovery does not erase source locations or downgrade filesystem failures.
+//! Stage 0 returns move-only typed failures in `SourceDiscoveryError` (a boxed user diagnostic
+//! or a typed infrastructure error) plus a finalized form pairing a `PremergeFailure` with its
+//! finished `SourceDatabase`. Production discovery never constructs `CompilerMessages`; the
+//! parent single-file/test tail owns that single conversion.
 
 use crate::builder_surface::external_import_providers::cache::ExternalImportCacheKey;
 use crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache;
@@ -15,10 +17,13 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+#[cfg(test)]
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DependencyClauseKind, InvalidDependencyClauseReason,
+    PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -54,10 +59,10 @@ use crate::counter_observation;
 
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
-
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::sync::Arc;
 
 use super::file_reference_resolution::{
@@ -187,6 +192,25 @@ pub(super) struct CollectedReachableInputs {
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
 }
+/// Stage 0 boundary error preserving the finished source owner for the final tail.
+///
+/// WHAT: carries the typed premerge failure plus the finished source database when
+///       discovery finalization already finalized its owner before failing. Plain
+///       pre-finalization failures carry `None` because no finished owner exists yet.
+/// WHY: the single-file final boundary converts the inner failure once and attaches the
+///      finished database as the render source context, instead of dropping snapshots on
+///      a diagnosed discovery failure.
+#[derive(Debug)]
+pub(super) struct CollectReachableInputsError {
+    failure: PremergeFailure,
+    source_database: Option<SourceDatabase>,
+}
+impl CollectReachableInputsError {
+    /// Consume into the typed failure and its optional finished source owner.
+    pub(super) fn into_parts(self) -> (PremergeFailure, Option<SourceDatabase>) {
+        (self.failure, self.source_database)
+    }
+}
 /// One resolved dependency edge ready for direct insertion into the project module graph.
 ///
 /// WHAT: records that an authored structural provider reference resolved through the
@@ -251,6 +275,9 @@ fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
 // -------------------------
 
 /// Collect all reachable source files for a given entry point and load their content.
+///
+/// Failures travel as [`CollectReachableInputsError`]; the final boundary converts the inner
+/// [`PremergeFailure`] once and attaches the finished source database when present.
 pub(super) fn collect_reachable_input_files(
     entry_path: &Path,
     project_path_resolver: &ProjectPathResolver,
@@ -259,7 +286,7 @@ pub(super) fn collect_reachable_input_files(
     source_file_kinds: &SourceFileKindRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<CollectedReachableInputs, CompilerMessages> {
+) -> Result<CollectedReachableInputs, CollectReachableInputsError> {
     let discovery = match discover_reachable_source_files(
         entry_path,
         project_path_resolver,
@@ -270,8 +297,18 @@ pub(super) fn collect_reachable_input_files(
         string_table,
     ) {
         Ok(discovery) => discovery,
-        Err(error) => {
-            return Err(error.into_messages(string_table));
+        Err(SourceDiscoveryError::Finalized(boxed)) => {
+            let (failure, source_database) = boxed.into_parts();
+            return Err(CollectReachableInputsError {
+                failure,
+                source_database: Some(source_database),
+            });
+        }
+        Err(other) => {
+            return Err(CollectReachableInputsError {
+                failure: other.into_failure(string_table),
+                source_database: None,
+            });
         }
     };
 
@@ -504,7 +541,7 @@ pub(super) fn merge_prepared_owned_source(
             remap_prepared_source_input(&mut input, &remap)?;
             Ok(input)
         }
-        Err(error) => Err(remap_source_discovery_error(error, &remap, string_table)),
+        Err(error) => Err(remap_source_discovery_error(error, &remap)),
     }
 }
 
@@ -522,17 +559,25 @@ fn remap_prepared_source_input(
 fn remap_source_discovery_error(
     error: SourceDiscoveryError,
     remap: &StringIdRemap,
-    string_table: &StringTable,
 ) -> SourceDiscoveryError {
     match error {
         SourceDiscoveryError::Diagnostic(mut diagnostic) => {
             diagnostic.remap_string_ids(remap);
             SourceDiscoveryError::Diagnostic(diagnostic)
         }
-        SourceDiscoveryError::Messages(mut messages) => {
-            messages.remap_string_ids(remap);
-            messages.string_table = string_table.clone();
-            SourceDiscoveryError::Messages(messages)
+        SourceDiscoveryError::Premerge(mut failure) => {
+            match &mut failure {
+                PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
+                PremergeFailure::Infrastructure(error) => error.remap_string_ids(remap),
+            }
+            SourceDiscoveryError::Premerge(failure)
+        }
+        SourceDiscoveryError::Finalized(mut boxed) => {
+            match &mut boxed.failure {
+                PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
+                PremergeFailure::Infrastructure(error) => error.remap_string_ids(remap),
+            }
+            SourceDiscoveryError::Finalized(boxed)
         }
         SourceDiscoveryError::Infrastructure(mut error) => {
             error.remap_string_ids(remap);
@@ -546,13 +591,20 @@ fn remap_source_discovery_error(
 /// The final source owner already contains every known snapshot and original span builder. This
 /// boundary only normalizes retained preparation facts and then finishes that owner so any
 /// terminal rebinding failure still carries the finalized source context.
+///
+/// WHAT: rebinds retained warnings and the terminal diagnostic to final identities, moves the
+///       live local table into a diagnosed batch via `mem::take`, and finishes the source
+///       owner before the finalized failure escapes.
+/// WHY: no intermediate vessel may carry diagnostics; the parent final boundary owns the
+///      single conversion and attaches the finished database. Infrastructure terminals stay
+///      typed and drop companion warnings, matching the premerge lane contract.
 fn finalize_failed_discovery(
     mut files: Vec<ReachableSourceFile>,
     mut source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     source_builder: SourceDatabaseBuilder,
     failure: Option<TraversalFailure>,
-    string_table: &StringTable,
-) -> CompilerMessages {
+    string_table: &mut StringTable,
+) -> SourceDiscoveryError {
     files.sort_by_key(|file| {
         source_builder
             .sources()
@@ -578,9 +630,10 @@ fn finalize_failed_discovery(
                     "retained discovery source {} has no final registration",
                     file.path.display()
                 ));
-                let messages =
-                    CompilerMessages::from_error_with_warnings(error, warnings, string_table);
-                return finish_discovery_source_owner(messages, source_builder, string_table);
+                return finish_discovery_source_owner(
+                    PremergeFailure::Infrastructure(error),
+                    source_builder,
+                );
             }
         };
         let logical_path = source_builder.sources().legacy_logical_path(source_id);
@@ -610,15 +663,9 @@ fn finalize_failed_discovery(
                             "final source identity {} has no canonical path",
                             source_id.index()
                         ));
-                        let messages = CompilerMessages::from_error_with_warnings(
-                            error,
-                            warnings,
-                            string_table,
-                        );
                         return finish_discovery_source_owner(
-                            messages,
+                            PremergeFailure::Infrastructure(error),
                             source_builder,
-                            string_table,
                         );
                     }
                 };
@@ -636,9 +683,10 @@ fn finalize_failed_discovery(
                         );
                     }
                     warnings.append(&mut output.warnings);
-                    let messages =
-                        CompilerMessages::from_error_with_warnings(error, warnings, string_table);
-                    return finish_discovery_source_owner(messages, source_builder, string_table);
+                    return finish_discovery_source_owner(
+                        PremergeFailure::Infrastructure(error),
+                        source_builder,
+                    );
                 }
                 warnings.append(&mut output.warnings);
             }
@@ -667,61 +715,108 @@ fn finalize_failed_discovery(
         }
     }
 
-    let mut messages = if let Some(failure) = failure {
-        let mut messages = failure.error.into_messages(string_table);
-        if let Some(source_id) = failure
-            .source_path
-            .as_ref()
-            .and_then(|path| source_builder.sources().get_by_canonical_path(path))
-            .map(|source| source.id)
-        {
-            let logical_path = source_builder.sources().legacy_logical_path(source_id);
-            for diagnostic in &mut messages.diagnostics {
-                diagnostic.rebind_source_identity(None, source_id, &logical_path);
+    let terminal_failure = if let Some(failure) = failure {
+        match failure.error {
+            SourceDiscoveryError::Diagnostic(mut diagnostic) => {
+                if let Some(source_id) = failure
+                    .source_path
+                    .as_ref()
+                    .and_then(|path| source_builder.sources().get_by_canonical_path(path))
+                    .map(|source| source.id)
+                {
+                    let logical_path = source_builder.sources().legacy_logical_path(source_id);
+                    diagnostic.rebind_source_identity(None, source_id, &logical_path);
+                }
+                let table = std::mem::take(string_table);
+                let mut diagnostics = warnings;
+                diagnostics.push(*diagnostic);
+                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
+                    diagnostics,
+                    table,
+                ))
+            }
+            SourceDiscoveryError::Premerge(mut failure) => {
+                if let PremergeFailure::Diagnosed(batch) = &mut failure {
+                    batch.prepend_diagnostics(warnings);
+                }
+                failure
+            }
+            SourceDiscoveryError::Infrastructure(mut error) => {
+                if let Some(source_id) = failure
+                    .source_path
+                    .as_ref()
+                    .and_then(|path| source_builder.sources().get_by_canonical_path(path))
+                    .map(|source| source.id)
+                {
+                    let logical_path = source_builder.sources().legacy_logical_path(source_id);
+                    error.location.rebind_source_identity(&logical_path);
+                }
+                PremergeFailure::Infrastructure(error)
+            }
+            SourceDiscoveryError::Finalized(_) => {
+                unreachable!("traversal failure cannot already carry a finalized source owner")
             }
         }
-        messages
     } else {
-        preparation_failure
+        match preparation_failure
             .expect("an aborted discovery owns its terminal preparation failure")
-            .into_messages(string_table)
+        {
+            SourceDiscoveryError::Diagnostic(diagnostic) => {
+                let table = std::mem::take(string_table);
+                let mut diagnostics = warnings;
+                diagnostics.push(*diagnostic);
+                PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostics(
+                    diagnostics,
+                    table,
+                ))
+            }
+            SourceDiscoveryError::Premerge(mut failure) => {
+                if let PremergeFailure::Diagnosed(batch) = &mut failure {
+                    batch.prepend_diagnostics(warnings);
+                }
+                failure
+            }
+            SourceDiscoveryError::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+            SourceDiscoveryError::Finalized(_) => {
+                unreachable!("preparation failure cannot already carry a finalized source owner")
+            }
+        }
     };
-    messages.prepend_diagnostics_preserving_context(warnings);
-    finish_discovery_source_owner(messages, source_builder, string_table)
+    finish_discovery_source_owner(terminal_failure, source_builder)
 }
 
-/// Finish the final source owner before attaching its source context to a terminal message set.
+/// Finish the final source owner beside a typed failure.
 ///
 /// Every known source snapshot and original builder has already moved into `source_builder`.
 /// Finishing here is the only path that can publish those tables after a post-registration error.
+///
+/// WHAT: finishes the builder, then pairs the finished database with the typed failure.
+///       A builder-finish failure supersedes the prior failure as typed infrastructure,
+///       matching the package-boundary `?` precedent; there is no finished database to
+///       preserve in that case.
+/// WHY: the finalized failure must never drop the finished owner, and no intermediate
+///      vessel may be constructed before the parent final boundary.
 fn finish_discovery_source_owner(
-    mut messages: CompilerMessages,
+    failure: PremergeFailure,
     source_builder: SourceDatabaseBuilder,
-    string_table: &StringTable,
-) -> CompilerMessages {
+) -> SourceDiscoveryError {
     match source_builder.finish() {
-        Ok(source_files) => {
-            messages.set_source_database(Arc::new(source_files));
-            messages
-        }
-        Err(error) => CompilerMessages::from_error_with_warnings(
-            error,
-            messages.into_diagnostics(),
-            string_table,
-        ),
+        Ok(source_database) => SourceDiscoveryError::finalized(failure, source_database),
+        Err(error) => SourceDiscoveryError::Infrastructure(error),
     }
 }
 
+/// Finish the final source owner beside an infrastructure error.
+///
+/// WHAT: pairs a typed infrastructure error with its finished database; a builder-finish
+///       failure supersedes as typed infrastructure with no database to preserve.
+/// WHY: retention and identity-rebinding errors occur after registration, so their source
+///      snapshots must still reach the final boundary.
 fn discovery_finalization_error(
     error: CompilerError,
     source_builder: SourceDatabaseBuilder,
-    string_table: &StringTable,
 ) -> SourceDiscoveryError {
-    SourceDiscoveryError::Messages(finish_discovery_source_owner(
-        CompilerMessages::from_error_ref(error, string_table),
-        source_builder,
-        string_table,
-    ))
+    finish_discovery_source_owner(PremergeFailure::Infrastructure(error), source_builder)
 }
 
 /// Move every known synthetic snapshot and its original span builder into final source ownership.
@@ -779,12 +874,17 @@ fn retain_known_discovery_sources(
 /// Read failures remain infrastructure diagnostics, but their source slots still become terminal
 /// failures. Successful siblings are retained before the first error is published, so finalizing
 /// a diagnosed discovery cannot leave a pending slot or discard a usable snapshot.
+///
+/// WHAT: retains every successful sibling snapshot before publishing the first typed
+///       infrastructure error; no intermediate vessel is constructed.
+/// WHY: the caller pairs this typed error with the aborted-walk finalization that finishes
+///      the source owner, so snapshots stay owned until the finalized failure escapes.
 fn finalize_missing_source_loads(
     files: &[ReachableSourceFile],
     load_results: Vec<MissingSourceLoadResult>,
     source_builder: &mut SourceDatabaseBuilder,
     string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), CompilerError> {
     let mut first_error = None;
 
     for result in load_results {
@@ -846,7 +946,7 @@ fn finalize_missing_source_loads(
     }
 
     match first_error {
-        Some(error) => Err(CompilerMessages::from_error_ref(error, string_table)),
+        Some(error) => Err(error),
         None => Ok(()),
     }
 }
@@ -883,11 +983,7 @@ fn finalize_reachable_files(
 
     if let Err(error) = retain_known_discovery_sources(&files, &mut source_cache, &mut source_files)
     {
-        return Err(discovery_finalization_error(
-            error,
-            source_files,
-            string_table,
-        ));
+        return Err(discovery_finalization_error(error, source_files));
     }
 
     if failure.is_some()
@@ -895,9 +991,13 @@ fn finalize_reachable_files(
             .values()
             .any(|source| source.prepared_output.result.is_err())
     {
-        let messages =
-            finalize_failed_discovery(files, source_cache, source_files, failure, string_table);
-        return Err(SourceDiscoveryError::Messages(messages));
+        return Err(finalize_failed_discovery(
+            files,
+            source_cache,
+            source_files,
+            failure,
+            string_table,
+        ));
     }
 
     let missing_sources = files
@@ -916,11 +1016,7 @@ fn finalize_reachable_files(
                 "reachable Moth source {} has no prepared traversal output",
                 source_file.source_file.path.display()
             ));
-            return Err(discovery_finalization_error(
-                error,
-                source_files,
-                string_table,
-            ));
+            return Err(discovery_finalization_error(error, source_files));
         }
     }
     for source_file in &files {
@@ -929,21 +1025,20 @@ fn finalize_reachable_files(
         }
     }
     let load_results = load_missing_sources(missing_sources);
-    match finalize_missing_source_loads(&files, load_results, &mut source_files, string_table) {
-        Ok(()) => {}
-        Err(messages) => {
-            let failure = TraversalFailure {
-                error: SourceDiscoveryError::Messages(messages),
-                source_path: None,
-            };
-            return Err(SourceDiscoveryError::Messages(finalize_failed_discovery(
-                files,
-                source_cache,
-                source_files,
-                Some(failure),
-                string_table,
-            )));
-        }
+    if let Err(error) =
+        finalize_missing_source_loads(&files, load_results, &mut source_files, string_table)
+    {
+        let failure = TraversalFailure {
+            error: SourceDiscoveryError::Infrastructure(error),
+            source_path: None,
+        };
+        return Err(finalize_failed_discovery(
+            files,
+            source_cache,
+            source_files,
+            Some(failure),
+            string_table,
+        ));
     };
 
     // All original tables are owned before this fallible identity transformation. The closure
@@ -1046,11 +1141,7 @@ fn finalize_reachable_files(
 
     match normalized {
         Ok(input_files) => Ok((source_files, input_files)),
-        Err(error) => Err(discovery_finalization_error(
-            error,
-            source_files,
-            string_table,
-        )),
+        Err(error) => Err(discovery_finalization_error(error, source_files)),
     }
 }
 
@@ -1892,7 +1983,7 @@ pub(super) fn load_missing_source_path_for_test(
         Some(MissingSourceLoadResult::Loaded(_)) => Ok(()),
         Some(MissingSourceLoadResult::Failed(failure)) => {
             let error = source_read_error(&failure.path, failure.error, string_table);
-            Err(SourceDiscoveryError::from(error).into_messages(string_table))
+            Err(CompilerMessages::from_error_ref(error, string_table))
         }
         None => Err(CompilerMessages::from_error_ref(
             CompilerError::compiler_error("test source loading produced no result"),
@@ -1983,7 +2074,8 @@ pub(super) fn load_missing_source_paths_with_registered_paths_for_test(
         string_table,
     ) {
         Ok(()) => {}
-        Err(mut messages) => {
+        Err(error) => {
+            let mut messages = CompilerMessages::from_error_ref(error, string_table);
             let source_files = source_owner
                 .finish()
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;

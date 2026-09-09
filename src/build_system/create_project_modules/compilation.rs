@@ -18,6 +18,7 @@ use crate::compiler_frontend::build_config::{
     ResolvedBuildConfigMap,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
@@ -265,7 +266,145 @@ struct SourcePackageCheckOnlyInventory {
     /// Canonical source contracts used to resolve each deferred job independently.
     canonical_source_facts: Vec<BuildConfigContractFact>,
     build_config_values: ResolvedBuildConfigMap,
-    messages: Vec<CompilerMessages>,
+    /// Canonical batches retained until the package source finalizes and converts each
+    /// batch exactly once with its snapshot.
+    batches: Vec<PremergeDiagnosticBatch>,
+}
+
+/// Typed directory-orchestration failure retaining its source owner.
+///
+/// WHAT: pairs the premerge lane with the finished package database when the failure is
+///       package-scoped, so the single public tail can attach the correct snapshot once.
+/// WHY: package failures must render against their own snapshot while project failures render
+///      against the project database finalized by the outer tail; carrying the owner here keeps
+///      every intermediate site typed until that deliberate final conversion.
+struct DirectoryPremergeFailure {
+    failure: PremergeFailure,
+    package_source: Option<SourceDatabase>,
+}
+
+impl DirectoryPremergeFailure {
+    fn project(failure: PremergeFailure) -> Self {
+        Self {
+            failure,
+            package_source: None,
+        }
+    }
+
+    fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
+        Self {
+            failure,
+            package_source: Some(source),
+        }
+    }
+}
+
+impl From<PremergeFailure> for DirectoryPremergeFailure {
+    fn from(failure: PremergeFailure) -> Self {
+        Self::project(failure)
+    }
+}
+
+impl From<CompilerError> for DirectoryPremergeFailure {
+    fn from(error: CompilerError) -> Self {
+        Self::project(PremergeFailure::Infrastructure(error))
+    }
+}
+
+// NOTE: no `From<CompilerMessages>` here by design. Stage 0 stays in the typed premerge lane;
+// the public tail owns the single final vessel conversion.
+
+/// Finish a package source owner beside a typed failure.
+///
+/// WHAT: moves the builder's finished database onto a package-scoped failure. When
+///       finalization itself fails there is no snapshot to attach, so the original failure
+///       stays authoritative and the finish failure is surfaced deterministically beside it:
+///       a diagnosed batch keeps its diagnostics and table by move and gains the finish
+///       failure as a trailing infrastructure diagnostic, while an infrastructure error keeps
+///       its location, type and metadata and chains the finish message.
+/// WHY: the builder is consumed by the failed finish, yet the original failure still owns
+///      diagnostics and tables no later stage can rebuild. Dropping either side would lose
+///      the user's failure or the freeze failure silently; both stay observable in the one
+///      project-scoped failure without cloning any diagnostic batch or string table.
+fn finalize_package_failure(
+    failure: PremergeFailure,
+    builder: SourceDatabaseBuilder,
+) -> DirectoryPremergeFailure {
+    match builder.finish() {
+        Ok(source) => DirectoryPremergeFailure::package(failure, source),
+        Err(finish_error) => DirectoryPremergeFailure::project(match failure {
+            PremergeFailure::Diagnosed(mut batch) => {
+                // Every freeze failure is a bare `CompilerError::compiler_error` value with a
+                // default location, so its diagnostic form carries no interned ids from a
+                // foreign table domain the batch could misresolve.
+                batch.push(
+                    crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic(
+                        &finish_error,
+                    ),
+                );
+                PremergeFailure::Diagnosed(batch)
+            }
+            PremergeFailure::Infrastructure(mut original) => {
+                // Both sides stay observable: the original render identity wins, and the
+                // finish message chains deterministically behind the original message.
+                if original.location == SourceLocation::default() {
+                    original.location = finish_error.location;
+                }
+                original.msg = format!(
+                    "{original_msg}; package source finalization also failed: {finish_msg}",
+                    original_msg = original.msg,
+                    finish_msg = finish_error.msg,
+                );
+                for (key, value) in finish_error.metadata {
+                    original.metadata.entry(key).or_insert(value);
+                }
+                PremergeFailure::Infrastructure(original)
+            }
+        }),
+    }
+}
+/// Chain a failed source finalization beside an existing typed failure.
+///
+/// WHAT: keeps the semantic failure authoritative without cloning any diagnostic batch
+///       or string table: a diagnosed batch gains the finish failure as a trailing
+///       infrastructure diagnostic, while an infrastructure error keeps its location,
+///       type and metadata and chains the finish message behind its own.
+/// WHY: the builder is consumed by the failed finish, yet the original failure still
+///      owns diagnostics and tables no later stage can rebuild. Every Stage 0 tail
+///      shares this so a finish failure never replaces the failure it raced with.
+pub(super) fn append_finish_failure(
+    failure: PremergeFailure,
+    finish_error: CompilerError,
+) -> PremergeFailure {
+    match failure {
+        PremergeFailure::Diagnosed(mut batch) => {
+            // Every freeze failure is a bare `CompilerError::compiler_error` value with a
+            // default location, so its diagnostic form carries no interned ids from a
+            // foreign table domain the batch could misresolve.
+            batch.push(
+                crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic(
+                    &finish_error,
+                ),
+            );
+            PremergeFailure::Diagnosed(batch)
+        }
+        PremergeFailure::Infrastructure(mut original) => {
+            // Both sides stay observable: the original render identity wins, and the
+            // finish message chains deterministically behind the original message.
+            if original.location == SourceLocation::default() {
+                original.location = finish_error.location;
+            }
+            original.msg = format!(
+                "{original_msg}; package source finalization also failed: {finish_msg}",
+                original_msg = original.msg,
+                finish_msg = finish_error.msg,
+            );
+            for (key, value) in finish_error.metadata {
+                original.metadata.entry(key).or_insert(value);
+            }
+            PremergeFailure::Infrastructure(original)
+        }
+    }
 }
 
 /// Index every resolved provider edge once by consumer module and retained dependency shell.
@@ -361,8 +500,7 @@ pub(crate) fn build_module_package_dependency_index(
 
 fn order_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
-    string_table: &StringTable,
-) -> Result<Vec<SourcePackageModuleInventory>, CompilerMessages> {
+) -> Result<Vec<SourcePackageModuleInventory>, CompilerError> {
     let package_prefixes = inventories
         .iter()
         .map(|inventory| inventory.dependency_prefix.clone())
@@ -385,8 +523,7 @@ fn order_source_package_inventories(
         })
         .collect::<Vec<_>>();
 
-    let order = order_packages_by_dependency(&package_prefixes, &dependency_prefixes)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let order = order_packages_by_dependency(&package_prefixes, &dependency_prefixes)?;
     let mut remaining = inventories.into_iter().map(Some).collect::<Vec<_>>();
     let ordered = order
         .into_iter()
@@ -396,7 +533,6 @@ fn order_source_package_inventories(
                 .expect("each package index is selected exactly once")
         })
         .collect();
-
     Ok(ordered)
 }
 
@@ -492,6 +628,10 @@ pub(crate) fn order_packages_by_dependency(
 }
 
 /// Discover all entry modules in a directory project and compile each one.
+///
+/// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
+/// WHY: every intermediate directory site stays typed until here, so source attachment and
+///      string-table finalization happen exactly once at this outer tail.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
@@ -504,6 +644,54 @@ pub(crate) fn compile_directory_frontend(
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    match compile_directory_frontend_in_premerge_lane(
+        config,
+        build_profile,
+        validated_output_settings,
+        style_directives,
+        builder_surface,
+        string_table,
+        project_source_files,
+        build_config_inputs,
+        mode,
+    ) {
+        Ok(compilation) => Ok(compilation),
+        Err(directory_failure) => {
+            if let Some(package_source) = directory_failure.package_source {
+                return Err(directory_failure
+                    .failure
+                    .into_messages_with_source(string_table, Arc::new(package_source)));
+            }
+            let mut messages = directory_failure.failure.into_messages(string_table);
+            if messages.source_database_for_diagnostic(0).is_none()
+                && let Some(project_source) = project_source_files.as_ref()
+            {
+                messages.set_source_database(Arc::clone(project_source));
+            }
+            Err(messages)
+        }
+    }
+}
+
+/// Directory orchestration in the premerge lane.
+///
+/// WHAT: runs package/project discovery, source loading, deferred check-only preparation,
+///       provider publication and graph validation with typed failures, retaining a finished
+///       package snapshot beside package-scoped failures.
+/// WHY: the public wrapper above owns the single final vessel conversion; this lane never
+///      constructs it early and never clones a diagnostic table solely to transport a failure.
+#[allow(clippy::too_many_arguments)]
+fn compile_directory_frontend_in_premerge_lane(
+    config: &Config,
+    build_profile: FrontendBuildProfile,
+    validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &mut BuilderSurface,
+    string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
+    build_config_inputs: &BuildConfigInputSet,
+    mode: FrontendCompilationMode,
+) -> Result<ProjectFrontendCompilation, DirectoryPremergeFailure> {
     // Directory inventory owns graph construction, source-package discovery,
     // and deterministic package ordering before any module semantics run.
     timing_scope!(
@@ -512,6 +700,8 @@ pub(crate) fn compile_directory_frontend(
     );
 
     // 1. Setup path resolution based on config settings.
+    // `build_project_path_resolver_with_index` returns the typed premerge lane; retain it
+    // beside the finished source owner and convert once at the outer tail.
     let mut project_setup = match project_roots::build_project_path_resolver_with_index(
         config,
         validated_output_settings,
@@ -522,8 +712,8 @@ pub(crate) fn compile_directory_frontend(
         string_table,
     ) {
         Ok(resolver) => resolver,
-        Err(error) => {
-            return Err(error);
+        Err(failure) => {
+            return Err(DirectoryPremergeFailure::project(failure));
         }
     };
     let project_path_resolver = project_setup.resolver;
@@ -538,7 +728,7 @@ pub(crate) fn compile_directory_frontend(
             })
             .unwrap_or_else(SourceDatabase::empty),
     );
-    let result = (|| {
+    let result = (|| -> Result<ProjectFrontendCompilation, DirectoryPremergeFailure> {
         project_sources
             .sources_mut()
             .append_ordered_registration_index(
@@ -546,14 +736,12 @@ pub(crate) fn compile_directory_frontend(
                 project_path_resolver.entry_root(),
                 Some(&project_path_resolver),
                 string_table,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            )?;
         load_registered_source_texts(
             project_sources.sources_mut(),
             &project_registration_index,
             string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        )?;
         let (project_source_files, mut project_source_spans) = project_sources.split();
         let config_globals = builder_surface.config_globals().clone();
 
@@ -598,21 +786,17 @@ pub(crate) fn compile_directory_frontend(
                 package_path_resolver.entry_root(),
                 Some(&package_path_resolver),
                 string_table,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            )?;
             let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
             if let Err(error) = load_registered_source_texts(
                 package_sources.sources_mut(),
                 &package_registration_index,
                 string_table,
             ) {
-                let mut messages = CompilerMessages::from_error_ref(error, string_table);
-                messages.set_source_database(Arc::new(
-                    package_sources
-                        .finish()
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                return Err(finalize_package_failure(
+                    PremergeFailure::Infrastructure(error),
+                    package_sources,
                 ));
-                return Err(messages);
             }
             let (package_source_files, mut package_source_spans) = package_sources.split();
             timing_scope_attributed!(
@@ -637,11 +821,8 @@ pub(crate) fn compile_directory_frontend(
                     timing_boundary,
                 ) {
                     Ok(module_waves) => module_waves,
-                    Err(mut messages) => {
-                        messages.set_source_database(Arc::new(package_sources.finish().map_err(
-                            |error| CompilerMessages::from_error_ref(error, string_table),
-                        )?));
-                        return Err(messages);
+                    Err(failure) => {
+                        return Err(finalize_package_failure(failure, package_sources));
                     }
                 };
             // Merge canonical contract locations before any transient package job forks its string
@@ -654,18 +835,12 @@ pub(crate) fn compile_directory_frontend(
                 .module_identities()
                 .module_id_for_directory(package_index.entry_root())
             else {
-                let mut messages = CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
+                return Err(finalize_package_failure(
+                    PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
                         "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
-                    )),
-                    string_table,
-                );
-                messages.set_source_database(Arc::new(
-                    package_sources
-                        .finish()
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
+                    ))),
+                    package_sources,
                 ));
-                return Err(messages);
             };
             source_package_inventories.push(SourcePackageModuleInventory {
                 dependency_prefix: dependency_prefix.to_owned(),
@@ -717,8 +892,8 @@ pub(crate) fn compile_directory_frontend(
                 project_timing_boundary,
             ) {
                 Ok(schedule) => schedule,
-                Err(messages) => {
-                    return Err(messages);
+                Err(failure) => {
+                    return Err(failure.into());
                 }
             };
         // Merge all canonical project contract locations before transient jobs fork their local
@@ -729,8 +904,7 @@ pub(crate) fn compile_directory_frontend(
             string_table,
         );
         let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts =
@@ -747,13 +921,11 @@ pub(crate) fn compile_directory_frontend(
                     .source_package_boundaries()
                     .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
                 else {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "Source package @{} disappeared before deferred check-only preparation",
-                            inventory.dependency_prefix
-                        )),
-                        string_table,
-                    ));
+                    return Err(CompilerError::compiler_error(format!(
+                        "Source package @{} disappeared before deferred check-only preparation",
+                        inventory.dependency_prefix
+                    ))
+                    .into());
                 };
                 let package_resolution = DirectoryDependencyResolution::package(
                     &project_setup.module_namespace_set,
@@ -761,7 +933,7 @@ pub(crate) fn compile_directory_frontend(
                     package_index,
                 );
                 let (_, mut source_spans) = inventory.source_files.split();
-                if let Err(mut messages) = inventory.schedule.prepare_check_only_jobs(
+                if let Err(failure) = inventory.schedule.prepare_check_only_jobs(
                     style_directives,
                     &mut source_spans,
                     &inventory.path_resolver,
@@ -770,12 +942,7 @@ pub(crate) fn compile_directory_frontend(
                     string_table,
                 ) {
                     let inventory = source_package_inventories.swap_remove(index);
-                    messages.set_source_database(Arc::new(
-                        inventory.source_files.finish().map_err(|error| {
-                            CompilerMessages::from_error_ref(error, string_table)
-                        })?,
-                    ));
-                    return Err(messages);
+                    return Err(finalize_package_failure(failure, inventory.source_files));
                 }
             }
         }
@@ -821,28 +988,29 @@ pub(crate) fn compile_directory_frontend(
             &config_globals,
             project_fallback.clone(),
             string_table,
-        )?;
+        )
+        .map_err(DirectoryPremergeFailure::project)?;
         if let Some(input) = config_boundary::first_unknown_build_config_input(
             build_config_inputs,
             &all_project_source_facts,
             &direct_project_facts,
         ) {
-            return Err(config_boundary::build_config_resolution_messages(
+            // Diagnosed config failures move the boundary table into the batch; this
+            // path terminates, so no clone is needed to carry the diagnostic.
+            let failure = config_boundary::build_config_resolution_failure(
                 BuildConfigResolutionError::UnknownExplicitInput { input },
                 project_fallback,
                 string_table,
-            ));
+            );
+            return Err(DirectoryPremergeFailure::project(failure));
         }
         let project_globals = config_boundary::build_project_globals_interface(
             config,
             &effective_project_fields,
             string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        #[cfg(feature = "timers")]
-        timing_guard_build_boundary_inventory_3.finish();
+        )?;
         let source_package_inventories =
-            order_source_package_inventories(source_package_inventories, string_table)?;
+            order_source_package_inventories(source_package_inventories)?;
         #[cfg(feature = "timers")]
         timing_guard_stage0_directory_inventory.finish();
 
@@ -875,7 +1043,7 @@ pub(crate) fn compile_directory_frontend(
             } = inventory;
             let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
                 schedule.into_parts();
-            let result: Result<_, CompilerMessages> = (|| {
+            let result: Result<_, PremergeFailure> = (|| {
                 let package_inputs = BuildConfigInputSet::new();
                 let package_fallback =
                     SourceLocation::from_path(path_resolver.entry_root(), string_table);
@@ -894,35 +1062,36 @@ pub(crate) fn compile_directory_frontend(
                     crate::timing::TimingMetric::BoundaryCompile,
                     Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
                 );
-                // Canonical package compilation is deliberately independent of the transient lane. In
-                // particular, no check-only job may publish an artefact or make a package ready for
-                // dependency scheduling.
-                let (boundary, package_transient_messages) = canonical::compile_module_waves(
-                    canonical::BoundaryCompilationContext::new(
-                        config,
-                        build_profile,
-                        &path_resolver,
-                        Arc::clone(source_files.sources()),
-                        style_directives,
-                        &external_packages,
-                        builder_surface,
-                        &completed_source_packages,
-                        build_config_values,
-                        source_facts.clone(),
-                        BuildConfigInputSet::new(),
-                        config_globals.clone(),
+                // Canonical package compilation is deliberately independent of the transient lane.
+                // The typed lane returns batches; conversion happens once at the package
+                // source-owner tail below.
+                let (boundary, package_transient_batches) =
+                    canonical::compile_module_waves_in_premerge_lane(
+                        canonical::BoundaryCompilationContext::new(
+                            config,
+                            build_profile,
+                            &path_resolver,
+                            Arc::clone(source_files.sources()),
+                            style_directives,
+                            &external_packages,
+                            builder_surface,
+                            &completed_source_packages,
+                            build_config_values,
+                            source_facts.clone(),
+                            BuildConfigInputSet::new(),
+                            config_globals.clone(),
+                            Vec::new(),
+                            Vec::new(),
+                            None,
+                        ),
+                        graph,
+                        module_waves,
                         Vec::new(),
-                        Vec::new(),
-                        None,
-                    ),
-                    graph,
-                    module_waves,
-                    Vec::new(),
-                    &provider_bindings,
-                    &source_package_dependencies,
-                    &mut resource_inputs,
-                    string_table,
-                )?;
+                        &provider_bindings,
+                        &source_package_dependencies,
+                        &mut resource_inputs,
+                        string_table,
+                    )?;
                 let mut dependency_prefixes = Vec::new();
                 let mut seen_dependency_prefixes = FxHashSet::default();
                 for dependency in &source_package_dependencies {
@@ -937,23 +1106,16 @@ pub(crate) fn compile_directory_frontend(
                     root_module_id,
                     boundary,
                 };
-                let publication = completed_source_packages
-                    .preflight(&package, &dependency_prefixes)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let publication =
+                    completed_source_packages.preflight(&package, &dependency_prefixes)?;
                 completed_source_packages.reserve_commit(&publication);
                 completed_source_packages.commit(publication, package);
-                Ok((deferred_build_config_values, package_transient_messages))
+                Ok((deferred_build_config_values, package_transient_batches))
             })();
-            let (build_config_values, messages) =
-                match result {
-                    Ok(value) => value,
-                    Err(mut messages) => {
-                        messages.set_source_database(Arc::new(source_files.finish().map_err(
-                            |error| CompilerMessages::from_error_ref(error, string_table),
-                        )?));
-                        return Err(messages);
-                    }
-                };
+            let (build_config_values, batches) = match result {
+                Ok(value) => value,
+                Err(failure) => return Err(finalize_package_failure(failure, source_files)),
+            };
             source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
                 dependency_prefix,
                 path_resolver,
@@ -963,13 +1125,10 @@ pub(crate) fn compile_directory_frontend(
                 source_package_dependencies,
                 canonical_source_facts: source_facts,
                 build_config_values,
-                messages,
+                batches,
             });
         }
-
-        completed_source_packages
-            .validate_dependency_edges()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        completed_source_packages.validate_dependency_edges()?;
         // Every canonical package facade is now published. Run the deferred transient package jobs
         // against those immutable boundaries so their package providers can never affect Kahn
         // ordering or surface as a readiness infrastructure failure.
@@ -983,24 +1142,19 @@ pub(crate) fn compile_directory_frontend(
                 source_package_dependencies,
                 canonical_source_facts,
                 build_config_values,
-                mut messages,
+                mut batches,
             } = inventory;
-            let result: Result<_, CompilerMessages> = (|| {
+            let result: Result<_, PremergeFailure> = (|| {
                 let package_id = completed_source_packages
                     .by_prefix(dependency_prefix.as_str())
                     .ok_or_else(|| {
-                        CompilerMessages::from_error_ref(
-                            CompilerError::compiler_error(format!(
-                                "deferred check-only source package @{} was not published",
-                                dependency_prefix
-                            )),
-                            string_table,
-                        )
+                        CompilerError::compiler_error(format!(
+                            "deferred check-only source package @{} was not published",
+                            dependency_prefix
+                        ))
                     })?;
-                let package = completed_source_packages
-                    .package(package_id)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                let package_transient_messages =
+                let package = completed_source_packages.package(package_id)?;
+                let check_only_batches =
                     deferred_check_only::compile_check_only_jobs_after_canonical(
                         canonical::BoundaryCompilationContext::new(
                             config,
@@ -1026,25 +1180,46 @@ pub(crate) fn compile_directory_frontend(
                         &source_package_dependencies,
                         string_table,
                     )?;
-                Ok((package_id, package_transient_messages))
+                Ok((package_id, check_only_batches))
             })();
-            let finalized = Arc::new(
-                source_files
-                    .finish()
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-            );
-            let (package_id, mut check_only_messages) = result.map_err(|mut messages| {
-                messages.set_source_database(Arc::clone(&finalized));
-                messages
-            })?;
-            completed_source_packages
-                .set_source_database(package_id, Arc::clone(&finalized))
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            messages.append(&mut check_only_messages);
-            for messages in &mut messages {
-                messages.set_source_database(Arc::clone(&finalized));
-            }
-            transient_messages.extend(messages);
+            // Finish the package source owner beside the deferred result so success batches
+            // and failures convert/attach exactly once with this snapshot. A finished
+            // source keeps a failure package-scoped; a failed finish keeps the deferred
+            // failure authoritative and chains the finish failure beside it.
+            let finish_outcome = source_files.finish();
+            let (result, finalized_source) = match (result, finish_outcome) {
+                (result, Ok(finished)) => (result, finished),
+                (Ok(_), Err(finish_error)) => {
+                    return Err(DirectoryPremergeFailure::project(
+                        PremergeFailure::Infrastructure(finish_error),
+                    ));
+                }
+                (Err(failure), Err(finish_error)) => {
+                    return Err(DirectoryPremergeFailure::project(append_finish_failure(
+                        failure,
+                        finish_error,
+                    )));
+                }
+            };
+            let finalized = Arc::new(finalized_source);
+            let (package_id, check_only_batches) = match result {
+                Ok(value) => value,
+                Err(failure) => {
+                    return Err(DirectoryPremergeFailure::package(
+                        failure,
+                        Arc::try_unwrap(finalized)
+                            .expect("package snapshot shared before failure attach"),
+                    ));
+                }
+            };
+            completed_source_packages.set_source_database(package_id, Arc::clone(&finalized))?;
+            batches.extend(check_only_batches);
+            // Each batch converts exactly once with its package snapshot.
+            let mut package_messages = batches
+                .into_iter()
+                .map(|batch| batch.into_messages_with_source(Arc::clone(&finalized)))
+                .collect::<Vec<_>>();
+            transient_messages.append(&mut package_messages);
         }
 
         timing_scope_attributed!(
@@ -1054,7 +1229,9 @@ pub(crate) fn compile_directory_frontend(
                 project_timing_boundary
             )),
         );
-        let (project_boundary, mut project_transient_messages) = canonical::compile_module_waves(
+        // The typed lane returns batches; convert each exactly once without a source here.
+        // The outer tail attaches the finalized project snapshot below.
+        let (project_boundary, project_batches) = canonical::compile_module_waves_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
                 build_profile,
@@ -1080,24 +1257,43 @@ pub(crate) fn compile_directory_frontend(
             &mut resource_inputs,
             string_table,
         )?;
+        let mut project_transient_messages = project_batches
+            .into_iter()
+            .map(PremergeDiagnosticBatch::into_messages)
+            .collect::<Vec<_>>();
         transient_messages.append(&mut project_transient_messages);
         #[cfg(feature = "timers")]
         timing_guard_build_boundary_compile_2.finish();
         #[cfg(feature = "timers")]
         timing_guard_stage0_directory_compile.finish();
-        ProjectFrontendCompilation::new_with_transient_messages(
+        Ok(ProjectFrontendCompilation::new_with_transient_messages(
             project_boundary,
             completed_source_packages,
             resource_inputs,
             transient_messages,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+        )?)
     })();
-    let finalized = Arc::new(
-        project_sources
-            .finish()
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-    );
+    // Final project source owner beside the semantic result. A finished source keeps
+    // current attachment behavior; a failed finish has no snapshot, so the semantic
+    // failure stays authoritative and the finish failure chains beside it for the
+    // public tail to render. A successful result with a failed finish surfaces only
+    // the finish infrastructure error.
+    let finish_outcome = project_sources.finish();
+    let (result, finalized) = match (result, finish_outcome) {
+        (result, Ok(finished)) => (result, Arc::new(finished)),
+        (Ok(_), Err(finish_error)) => {
+            return Err(DirectoryPremergeFailure::project(
+                PremergeFailure::Infrastructure(finish_error),
+            ));
+        }
+        (Err(directory_failure), Err(finish_error)) => {
+            let combined = append_finish_failure(directory_failure.failure, finish_error);
+            return Err(DirectoryPremergeFailure {
+                failure: combined,
+                package_source: directory_failure.package_source,
+            });
+        }
+    };
     *project_source_files = Some(Arc::clone(&finalized));
     match result {
         Ok(mut compilation) => {
@@ -1113,11 +1309,6 @@ pub(crate) fn compile_directory_frontend(
             }
             Ok(compilation)
         }
-        Err(mut messages) => {
-            if messages.source_database_for_diagnostic(0).is_none() {
-                messages.set_source_database(finalized);
-            }
-            Err(messages)
-        }
+        Err(directory_failure) => Err(directory_failure),
     }
 }

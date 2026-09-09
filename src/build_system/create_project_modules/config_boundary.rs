@@ -14,9 +14,10 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
+    PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::build_input_type_name;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -756,23 +757,28 @@ fn describe_build_config_contract(fact: &BuildConfigContractFact) -> String {
     )
 }
 
-/// Map one compiler-owned barrier failure onto the existing structured config diagnostic lane.
-pub(super) fn build_config_resolution_messages(
+/// Map one compiler-owned barrier failure onto the typed premerge config diagnostic lane.
+///
+/// WHAT: converts a [`BuildConfigResolutionError`] into a [`PremergeFailure`] without
+///       constructing the final `CompilerMessages` vessel. User-facing failures move the
+///       boundary string table into a [`PremergeDiagnosticBatch`]; the direct-project
+///       invariant violation stays a typed infrastructure error.
+/// WHY: configuration resolution is a Stage 0 boundary operation whose failures must travel
+///      typed until the final merge boundary owns the single vessel conversion. Moving the
+///      table keeps every interned diagnostic id valid without cloning.
+pub(super) fn build_config_resolution_failure(
     error: BuildConfigResolutionError,
     fallback_location: SourceLocation,
     string_table: &mut StringTable,
-) -> CompilerMessages {
+) -> PremergeFailure {
     if matches!(
         &error,
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
-        return CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(format!(
-                "direct project build-config value for '{}' was not retained by config folding",
-                error.name().as_str()
-            )),
-            string_table,
-        );
+        return PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "direct project build-config value for '{}' was not retained by config folding",
+            error.name().as_str()
+        )));
     }
     let key = string_table.intern(error.name().as_str());
     let provided_argument_index = match error.value_location() {
@@ -871,7 +877,12 @@ pub(super) fn build_config_resolution_messages(
         )
     };
 
-    CompilerMessages::from_diagnostic(diagnostic, string_table.clone())
+    // Move the boundary table into the batch; every failure path here terminates the
+    // resolution, so no clone is needed to carry the diagnostic ids.
+    PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
+        diagnostic,
+        std::mem::take(string_table),
+    ))
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_boundary_build_config(
@@ -882,7 +893,7 @@ pub(super) fn resolve_boundary_build_config(
     builder_globals: &BuilderConfigGlobalSet,
     fallback_location: SourceLocation,
     string_table: &mut StringTable,
-) -> Result<ResolvedBuildConfigMap, CompilerMessages> {
+) -> Result<ResolvedBuildConfigMap, PremergeFailure> {
     resolve_build_config_values(
         source_facts,
         fixed_project_facts,
@@ -890,5 +901,5 @@ pub(super) fn resolve_boundary_build_config(
         explicit_inputs,
         builder_globals,
     )
-    .map_err(|error| build_config_resolution_messages(error, fallback_location, string_table))
+    .map_err(|error| build_config_resolution_failure(error, fallback_location, string_table))
 }

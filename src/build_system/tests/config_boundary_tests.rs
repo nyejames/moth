@@ -5,7 +5,7 @@
 //! WHY: these failures cross a StringTable boundary before they reach renderers, so tests must
 //!      inspect structured payloads, identities, labels and source locations rather than prose.
 
-use super::config_boundary::build_config_resolution_messages;
+use super::config_boundary::build_config_resolution_failure;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigContractFact, BuildConfigInputEntry, BuildConfigInputSet,
     BuildConfigResolutionError, BuildConfigValueLocation, BuildInputName, BuildInputType,
@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, InvalidConfigReason,
+    PremergeFailure,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -139,7 +140,11 @@ fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
         BuildConfigResolutionError::SourceContractConflict { .. }
     ));
 
-    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
+    let failure = build_config_resolution_failure(error, fallback_location, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
     let diagnostic = messages
         .first_error()
         .expect("mapped conflict should contain one error");
@@ -219,8 +224,12 @@ fn mapped_unknown_build_config_input_preserves_fallback_location_and_argument_in
         BuildConfigResolutionError::UnknownExplicitInput { .. }
     ));
 
-    let messages =
-        build_config_resolution_messages(error, fallback_location.clone(), &mut boundary_table);
+    let failure =
+        build_config_resolution_failure(error, fallback_location.clone(), &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
     let diagnostic = assert_config_identity_and_location(
         &messages,
         &fallback_location,
@@ -292,7 +301,11 @@ fn mapped_config_input_type_mismatch_preserves_contract_location_and_argument_in
         BuildConfigResolutionError::ValueTypeMismatch { .. }
     ));
 
-    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
+    let failure = build_config_resolution_failure(error, fallback_location, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
     let diagnostic = assert_config_identity_and_location(
         &messages,
         &contract_location,
@@ -360,7 +373,11 @@ fn mapped_missing_source_contract_publishes_exact_primary_span() {
         BuildConfigResolutionError::MissingRequiredValue { .. }
     ));
 
-    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
+    let failure = build_config_resolution_failure(error, fallback_location, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
     let diagnostic = messages
         .first_error()
         .expect("mapped missing config input should contain one error");

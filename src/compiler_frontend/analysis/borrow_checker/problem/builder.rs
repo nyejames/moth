@@ -722,7 +722,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirExpressionKind::Copy(place) => {
                 let source_place = self.lower_place(place, &source, event_ids)?;
                 self.emit_read(source_place, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_copy_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -747,7 +747,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 if expression.value_kind == ValueKind::Const {
                     return Ok(ValueRef { place: None });
                 }
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -800,7 +800,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirExpressionKind::TupleConstruct { .. }
             | HirExpressionKind::VariantConstruct { .. }
             | HirExpressionKind::MapLiteral(_) => {
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 self.lower_aggregate_into(destination, expression, &source, event_ids)?;
                 Ok(ValueRef {
                     place: Some(destination),
@@ -808,7 +808,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
             _ => {
                 let _ = self.lower_expression_children(expression, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -1486,11 +1486,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.intern_place(base_place.root, projections)
     }
 
-    fn synthetic_place(
-        &mut self,
-        value_id: u32,
-        source: &EventSource,
-    ) -> Result<PlaceId, CompilerError> {
+    fn synthetic_place(&mut self, value_id: u32) -> Result<PlaceId, CompilerError> {
         let binding = if let Some(binding) = self.synthetic_binding_by_value.get(&value_id) {
             *binding
         } else {
@@ -1540,7 +1536,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         if let Some(place) = value.place {
             return Ok(place);
         }
-        let place = self.synthetic_place(expression.id.0, source)?;
+        let place = self.synthetic_place(expression.id.0)?;
         let origin = self.new_fresh_origin();
         self.emit_write(place, source, event_ids)?;
         self.emit_event(

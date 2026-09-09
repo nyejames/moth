@@ -347,7 +347,7 @@ impl SourceSpan {
     /// operation. The reserved compilation root owns no record, so its spans resolve without a
     /// lookup and only through its exact empty range; every other identity resolves through its
     /// own loaded record, and an unresolvable extended row names that source as a compiler bug.
-    pub fn byte_range<S: SourceSpanDatabase>(self, sources: &S) -> ResolvedByteRange {
+    pub(crate) fn byte_range<S: SourceSpanDatabase>(self, sources: &S) -> ResolvedByteRange {
         if self.source == SourceId::COMPILATION_ROOT {
             return self.resolve_compilation_root_range();
         }
@@ -385,17 +385,17 @@ impl SourceSpan {
     }
 
     #[allow(dead_code)]
-    pub fn start<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
+    pub(crate) fn start<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
         self.byte_range(sources).start()
     }
 
     #[allow(dead_code)]
-    pub fn end<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
+    pub(crate) fn end<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
         self.byte_range(sources).end()
     }
 
     #[allow(dead_code)]
-    pub fn overlaps<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
+    pub(crate) fn overlaps<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
         if self.source != other.source {
             return false;
         }
@@ -406,7 +406,7 @@ impl SourceSpan {
     }
 
     #[allow(dead_code)]
-    pub fn contains<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
+    pub(crate) fn contains<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
         if self.source != other.source {
             return false;
         }

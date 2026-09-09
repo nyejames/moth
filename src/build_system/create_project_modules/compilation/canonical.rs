@@ -12,9 +12,10 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionIndex,
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics,
+    CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
+    PremergeFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -588,11 +589,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     ) -> DirectoryModuleTaskResult {
         match facade_project_globals_dependency(&prepared) {
             Ok(Some(diagnostic)) => {
-                let messages = CompilerMessages::from_diagnostic(
-                    diagnostic,
-                    prepared.semantic.string_table.clone(),
-                );
-                let outcome = match ModuleDiagnostics::from_messages(messages) {
+                // Move the prepared table into the batch; the facade diagnostic aborts this
+                // module, so the prepared payload is discarded and no clone is needed.
+                let PreparedModule { mut semantic, .. } = prepared;
+                let table = std::mem::take(&mut semantic.string_table);
+                let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
+                let outcome = match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
                     Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
                 };
@@ -755,14 +757,20 @@ fn compile_check_only_job(
                 .contract_location()
                 .cloned()
                 .unwrap_or_else(SourceLocation::default);
-            let messages = config_boundary::build_config_resolution_messages(
+            // The typed config failure already carries the moved local table; classify
+            // the batch into the module outcome without a vessel round-trip.
+            let outcome = match config_boundary::build_config_resolution_failure(
                 error,
                 fallback_location,
                 &mut prepared.semantic.string_table,
-            );
-            let outcome = match ModuleDiagnostics::from_messages(messages) {
-                Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+            ) {
+                PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
+                    Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                },
+                PremergeFailure::Infrastructure(error) => {
+                    DirectoryModuleTaskOutcome::Infrastructure(error)
+                }
             };
             return DirectoryModuleTaskResult {
                 module_id,
@@ -804,7 +812,7 @@ fn compile_check_only_job(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compile_check_only_jobs(
+pub(super) fn compile_check_only_batches(
     context: &BoundaryCompilationContext<'_>,
     provider_store: &ModuleArtifactStore,
     generated_store: &BoundaryGeneratedFunctionStore,
@@ -816,15 +824,16 @@ pub(super) fn compile_check_only_jobs(
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
     string_table: &mut StringTable,
-) -> Result<Vec<CompilerMessages>, CompilerMessages> {
+) -> Result<Vec<PremergeDiagnosticBatch>, PremergeFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
-    // Only their diagnostics/warnings cross the frontend result boundary.
+    // Only their diagnostics/warnings cross the frontend result boundary. Failures stay in the
+    // premerge lane; the outer wrapper owns the single vessel conversion.
     add_frontend_counter(
         FrontendCounter::ModuleCompilationSerialCount,
         check_only_jobs.len(),
     );
-    let mut transient_messages = Vec::new();
+    let mut transient_batches = Vec::new();
     for check_only_job in check_only_jobs {
         let outcome = {
             let compile_context = DirectoryModuleCompileContext::new(
@@ -859,39 +868,34 @@ pub(super) fn compile_check_only_jobs(
                         .flat_map(|record| record.sidecar.module.metadata.warnings.iter().cloned()),
                 );
                 if !warnings.is_empty() {
-                    let mut messages =
-                        CompilerMessages::from_diagnostics(warnings, module_string_table);
-                    let remap = string_table
-                        .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
-                    if !remap.is_identity() {
-                        messages.remap_string_ids(&remap);
-                    }
-                    transient_messages.push(messages);
+                    // Merge the module-local delta exactly once through the batch owner;
+                    // conversion happens once at the outer final tail.
+                    let mut batch =
+                        PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
+                    batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
+                    transient_batches.push(batch);
                 }
             }
             DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                let mut messages = diagnostics.into_messages();
-                let remap = string_table
-                    .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
-                if !remap.is_identity() {
-                    messages.remap_string_ids(&remap);
-                }
-                transient_messages.push(messages);
+                // Remap through the batch owner without round-tripping through the final
+                // vessel; conversion happens once at the outer final tail.
+                let mut batch = diagnostics.into_batch()?;
+                batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
+                transient_batches.push(batch);
             }
             DirectoryModuleTaskOutcome::Blocked => {
                 // The failed canonical provider's own diagnostics remain authoritative; a
                 // dependent check-only unit contributes no cascade diagnostics.
             }
             DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                return Err(CompilerMessages::from_error_ref(error, string_table));
+                return Err(PremergeFailure::Infrastructure(error));
             }
         }
     }
-
-    Ok(transient_messages)
+    Ok(transient_batches)
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compile_module_waves(
+pub(super) fn compile_module_waves_in_premerge_lane(
     context: BoundaryCompilationContext<'_>,
     graph: ProjectModuleGraph,
     module_waves: Vec<Vec<module_inventory::ModuleCompilationJob>>,
@@ -900,36 +904,31 @@ pub(super) fn compile_module_waves(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
-) -> Result<(CompiledGraphBoundary, Vec<CompilerMessages>), CompilerMessages> {
+) -> Result<(CompiledGraphBoundary, Vec<PremergeDiagnosticBatch>), PremergeFailure> {
     let mut provider_store = ModuleArtifactStore::new(graph.nodes().len());
     let mut generated_store = BoundaryGeneratedFunctionStore::default();
     // The compiler resolves declaring generic templates through this registry, so it never reads a
     // live build store while semantic analysis runs. Completed packages seed it; each successful
     // module in this boundary extends it as it publishes.
     let mut provider_materialisations =
-        seed_completed_package_materialisations(context.completed_packages)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
+        seed_completed_package_materialisations(context.completed_packages())?;
     // One direct lookup index per boundary so module binding never scans every provider edge,
     // source-package dependency or completed package for each retained dependency shell.
-    let provider_binding_index = build_provider_binding_index(provider_bindings)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-    let source_package_dependency_index =
-        build_source_package_dependency_index(&provider_binding_index, source_package_dependencies)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let provider_binding_index = build_provider_binding_index(provider_bindings)?;
+    let source_package_dependency_index = build_source_package_dependency_index(
+        &provider_binding_index,
+        source_package_dependencies,
+    )?;
     // Canonical fact ownership is indexed once per boundary. Transient units borrow this index
     // instead of cloning and concatenating the canonical fact vector for every unit.
     let build_config_index = context.build_config_resolution_index();
-
     // Index each consumer module's direct package dependencies once per boundary so readiness
     // walks only the packages that module actually depends on and never filters the full dependency
     // vector for every job.
     let module_package_dependencies = build_module_package_dependency_index(
         source_package_dependencies,
-        context.completed_packages,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
+        context.completed_packages(),
+    )?;
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
     for wave in module_waves {
@@ -937,26 +936,20 @@ pub(super) fn compile_module_waves(
         let mut ready = Vec::new();
         for job in wave {
             let mut blocked_provider = None;
-            for provider_id in graph
-                .dependency_providers(job.module_id)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
-            {
-                match provider_store
-                    .slot(*provider_id)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
-                {
+            for provider_id in graph.dependency_providers(job.module_id)? {
+                match provider_store.slot(*provider_id)? {
                     ProviderSlot::Successful(_) => {}
                     ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
                         blocked_provider = Some(BlockedProvider::Module(*provider_id));
                         break;
                     }
                     ProviderSlot::Unavailable => {
-                        let error = CompilerError::compiler_error(format!(
+                        return Err(CompilerError::compiler_error(format!(
                             "ModuleId {} became ready before provider ModuleId {} completed",
                             job.module_id.index(),
                             provider_id.index()
-                        ));
-                        return Err(CompilerMessages::from_error_ref(error, string_table));
+                        ))
+                        .into());
                     }
                 }
             }
@@ -965,15 +958,9 @@ pub(super) fn compile_module_waves(
                 && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
             {
                 for package_id in package_ids {
-                    let package = context
-                        .completed_packages
-                        .package(*package_id)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    let package = context.completed_packages().package(*package_id)?;
 
-                    match package
-                        .root_slot()
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
-                    {
+                    match package.root_slot()? {
                         ProviderSlot::Successful(_) => {}
                         ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
                             blocked_provider = Some(BlockedProvider::SourcePackage(
@@ -982,21 +969,20 @@ pub(super) fn compile_module_waves(
                             break;
                         }
                         ProviderSlot::Unavailable => {
-                            let error = CompilerError::compiler_error(format!(
-                                "ModuleId {} became ready before source package @{} completed its facade",
-                                job.module_id.index(),
-                                package.package_prefix()
-                            ));
-                            return Err(CompilerMessages::from_error_ref(error, string_table));
+                            return Err(
+                                CompilerError::compiler_error(format!(
+                                    "ModuleId {} became ready before source package @{} completed its facade",
+                                    job.module_id.index(),
+                                    package.package_prefix()
+                                ))
+                                .into(),
+                            );
                         }
                     }
                 }
             }
-
             if let Some(required_provider) = blocked_provider {
-                provider_store
-                    .mark_blocked(job.module_id)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                provider_store.mark_blocked(job.module_id)?;
                 blocked.push(BlockedModule {
                     module_id: job.module_id,
                     required_provider,
@@ -1055,43 +1041,34 @@ pub(super) fn compile_module_waves(
                         artifact,
                         generated_delta,
                         resource_source_associations,
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    })?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                    provider_store
-                        .mark_diagnosed(outcome.module_id)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    let mut messages = diagnostics.into_messages();
-                    let remap = string_table
-                        .merge_delta_from(&messages.string_table, outcome.string_table_base_len);
-                    if !remap.is_identity() {
-                        messages.remap_string_ids(&remap);
-                    }
-                    let diagnostics = ModuleDiagnostics::from_messages(messages)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    provider_store.mark_diagnosed(outcome.module_id)?;
+                    // then classify back without round-tripping through the final vessel.
+                    let mut batch = diagnostics.into_batch()?;
+                    batch.merge_delta_into_global(string_table, outcome.string_table_base_len);
+                    let diagnostics = ModuleDiagnostics::from_batch(batch)?;
                     diagnosed.push(DiagnosedModule {
                         module_id: outcome.module_id,
                         diagnostics,
                     });
                 }
                 DirectoryModuleTaskOutcome::Blocked => {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "canonical ModuleId {} unexpectedly became transient-blocked",
-                            outcome.module_id.index()
-                        )),
-                        string_table,
-                    ));
+                    return Err(CompilerError::compiler_error(format!(
+                        "canonical ModuleId {} unexpectedly became transient-blocked",
+                        outcome.module_id.index()
+                    ))
+                    .into());
                 }
                 DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                    return Err(CompilerMessages::from_error_ref(error, string_table));
+                    return Err(error.into());
                 }
             }
         }
     }
 
-    let transient_messages = compile_check_only_jobs(
+    let transient_batches = compile_check_only_batches(
         &context,
         &provider_store,
         &generated_store,
@@ -1107,17 +1084,15 @@ pub(super) fn compile_module_waves(
 
     let diagnosed_provider_exists = !diagnosed.is_empty()
         || context
-            .completed_packages
+            .completed_packages()
             .iter()
             .any(|package| !package.boundary.diagnosed.is_empty());
     if !blocked.is_empty() && !diagnosed_provider_exists {
-        return Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(format!(
-                "Graph retained {} blocked modules without a diagnosed provider",
-                blocked.len()
-            )),
-            string_table,
-        ));
+        return Err(CompilerError::compiler_error(format!(
+            "Graph retained {} blocked modules without a diagnosed provider",
+            blocked.len()
+        ))
+        .into());
     }
 
     let boundary = CompiledGraphBoundary {
@@ -1127,8 +1102,6 @@ pub(super) fn compile_module_waves(
         diagnosed,
         blocked,
     };
-    boundary
-        .finish()
-        .map(|boundary| (boundary, transient_messages))
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
+    let boundary = boundary.finish()?;
+    Ok((boundary, transient_batches))
 }

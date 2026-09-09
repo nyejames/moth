@@ -834,7 +834,7 @@ fn collect_expression_roots(
     expression: &HirExpression,
     out: &mut RootSet,
     location: SourceLocation,
-    span: Option<SourceSpan>,
+    _span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
