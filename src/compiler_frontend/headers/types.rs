@@ -7,7 +7,9 @@
 
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DependencyClauseKind};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DependencyClauseKind, DiagnosticBag, PremergeDiagnosticBatch,
+};
 use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
@@ -1206,6 +1208,23 @@ pub(crate) struct SourcePreparationDelta {
     pub(crate) span_builder: ExtendedSpanBuilder,
     pub(crate) result: Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
 }
+impl SourcePreparationDelta {
+    /// Consume the delta into its owned file identity, span builder and preparation result.
+    ///
+    /// WHAT: moves all three lanes out at once so the caller can return the builder to the
+    /// source owner before propagating the result.
+    /// WHY: the same builder survives successful syntax, source diagnosis and infrastructure
+    /// failure; file/chunk consumers must hand it back however the result settled.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        SourceId,
+        ExtendedSpanBuilder,
+        Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure>,
+    ) {
+        (self.file_id, self.span_builder, self.result)
+    }
+}
 
 /// A diagnosed file preparation result and warnings emitted before rejection.
 ///
@@ -1215,6 +1234,29 @@ pub struct FileFrontendPrepareError {
     pub(crate) file_id: SourceId,
     pub warnings: Vec<CompilerDiagnostic>,
     pub diagnostic: Box<CompilerDiagnostic>,
+}
+impl FileFrontendPrepareError {
+    /// Number of diagnostics carried: pre-rejection warnings plus the terminal diagnostic.
+    pub(crate) fn len(&self) -> usize {
+        self.warnings.len() + 1
+    }
+
+    /// Consume the error into one move-only bag with warnings first, terminal diagnostic last.
+    ///
+    /// WHAT: moves the pre-rejection warnings and the terminal diagnostic into a single
+    /// `DiagnosticBag` in exact production order.
+    /// WHY: diagnosed file preparation crosses into premerge aggregation as one owner
+    /// without constructing the final `CompilerMessages` vessel at this file boundary.
+    pub(crate) fn into_diagnostic_bag(self) -> DiagnosticBag {
+        let mut bag = DiagnosticBag::from_diagnostics(self.warnings);
+        bag.push(*self.diagnostic);
+        bag
+    }
+
+    /// Consume the error into one move-only premerge batch against its local table.
+    pub(crate) fn into_premerge_batch(self, string_table: StringTable) -> PremergeDiagnosticBatch {
+        PremergeDiagnosticBatch::from_bag(self.into_diagnostic_bag(), string_table)
+    }
 }
 
 /// Per-file preparation outcome that preserves the diagnostic and infrastructure lanes.
@@ -1239,6 +1281,41 @@ impl FileFrontendPrepareFailure {
                 diagnostic,
             }),
             TokenizeFailure::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+}
+impl FileFrontendPrepareFailure {
+    /// Whether this failure carries authored-source diagnostics rather than infrastructure failure.
+    pub(crate) fn is_diagnosed(&self) -> bool {
+        matches!(self, Self::Diagnosed(_))
+    }
+
+    /// Consume the failure into its move-only diagnostic bag, preserving warning order.
+    ///
+    /// WHAT: warnings stay before the terminal diagnostic; infrastructure stays a typed
+    /// `CompilerError` on the `Err` lane and never enters the bag.
+    /// WHY: file preparation must cross into premerge aggregation without constructing the
+    /// final `CompilerMessages` vessel.
+    pub(crate) fn into_diagnostic_bag(self) -> Result<DiagnosticBag, CompilerError> {
+        match self {
+            Self::Diagnosed(error) => Ok(error.into_diagnostic_bag()),
+            Self::Infrastructure(error) => Err(error),
+        }
+    }
+
+    /// Consume the failure into one move-only premerge batch against its local table.
+    ///
+    /// WHAT: the diagnosed lane moves warnings plus the terminal diagnostic into the batch
+    /// in production order; the infrastructure lane stays a separate `CompilerError`.
+    /// WHY: later module aggregation merges premerge batches exactly once at the final
+    /// build/package boundary instead of rendering per-file message sets.
+    pub(crate) fn into_premerge_batch(
+        self,
+        string_table: StringTable,
+    ) -> Result<PremergeDiagnosticBatch, CompilerError> {
+        match self {
+            Self::Diagnosed(error) => Ok(error.into_premerge_batch(string_table)),
+            Self::Infrastructure(error) => Err(error),
         }
     }
 }
