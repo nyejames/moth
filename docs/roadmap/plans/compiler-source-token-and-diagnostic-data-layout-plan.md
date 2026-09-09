@@ -82,15 +82,15 @@ CURRENT_SLICE:
   storage redesign and token-store migration. The private location bridge ends at 1H.
 
 LAST_GOOD_COMMIT:
-Arrived at `c4eeaf1c9`, accepting R2: global `SourceSpan` operations accept only resolvers
-  qualified for the span's own source and reject foreign or unqualified pairings as compiler
-  invariants, while bare resolvers remain for source-local `LocalSpan` work. R1b stays
-  accepted in `dc9f36532`. R3 is the next active gate.
+Arrived at `fa5a2e75d`, accepting R3: preparation label ownership follows span identity —
+  capture stamps unspanned labels with the producer source and rebinding inspects each
+  label's existing span `SourceId`, so distinct sources sharing one display path rebind
+  independently. R1b/R2 stay accepted in `dc9f36532`/`c4eeaf1c9`. R4 is the next active gate.
 
 CURRENT_WORKTREE_STATE:
 - Branch: `token-and-diagnostic-data-layout-changes`, explicitly selected by the user.
-- Worktree: clean at the R2 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R3 is next; no other implementation slice is active while the review-derived gates are worked.
-- Continuation order: complete the remaining review-derived Phase 1 correction steps (R3-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
+- Worktree: clean at the R3 record checkpoint; the in-progress borrow-payload worker was interrupted before it changed files. R4 is next; no other implementation slice is active while the review-derived gates are worked.
+- Continuation order: complete the remaining review-derived Phase 1 correction steps (R4-R9, then R10 prerequisites as owned), then resume the remaining 1E/1F/1G/1H slices, Phase 1 closeout and final review. Phase 2 stays pending until external review authorizes continuation.
 - 1D3 (`b1d5a4005`), 1D5a (`0f92205c6`) and 1D5b (`86d4bf508`) are committed and accepted.
 - 1D5c1 is accepted in `835253c32`; 1D5c2 is accepted in `c79763fec`. The worktree was clean
   after checkpoint verification. 1D5c3 is implemented, validated and independently reviewed in
@@ -1214,11 +1214,11 @@ findings below are explicit Phase 1 gates rather than an invitation to create pa
   live-builder operations accept only a source-qualified resolver view and validate
   `span.source()` against the resolver source, rejecting a wrong-source extended row as a
   compiler invariant; bare resolvers remain for source-local `LocalSpan` work.
-- [ ] **R3 — explicit source ownership during capture/rebinding:** remove legacy logical-path
-  equality from preparation label ownership decisions. A source-local capture may inherit its
-  producer `SourceId`; after aggregation, an unspanned related authored site from another source
-  is an invariant failure. Rebinding must inspect an existing label span's `SourceId`, with a
-  regression for distinct source IDs that share one logical display path.
+- [x] **R3 — explicit source ownership during capture/rebinding:** accepted in `fa5a2e75d`.
+  Legacy logical-path equality is removed from preparation label ownership decisions.
+  Source-local capture inherits the producer `SourceId`; rebinding inspects each existing
+  label span's `SourceId`, with a regression for distinct source IDs sharing one logical
+  display path.
 - [ ] **R4 — compilation-root span contract:** make database-backed resolution of the reserved
   compilation-root `SourceSpan` accept only the exact empty range `[0, 0)`. Reject non-empty root
   ranges as compiler invariants, while renderers continue omitting a physical source frame.
