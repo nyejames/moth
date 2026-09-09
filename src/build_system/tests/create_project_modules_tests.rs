@@ -242,7 +242,12 @@ fn module_source_paths(
         .filter_map(|source_file| {
             module_symbols
                 .source_record(source_file, source_files)
-                .and_then(|record| record.canonical_os_path.clone())
+                .and_then(|record| {
+                    record
+                        .canonical_os_path
+                        .clone()
+                        .map(|canonical| canonical.into_path_buf())
+                })
         })
         .collect()
 }
@@ -3362,7 +3367,12 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
                 .source_files
                 .sources()
                 .get(input.source_id())
-                .and_then(|identity| identity.canonical_os_path.clone())
+                .and_then(|identity| {
+                    identity
+                        .canonical_os_path
+                        .clone()
+                        .map(|canonical| canonical.into_path_buf())
+                })
                 .expect("discovered source should have a canonical path")
         })
         .collect();
@@ -7386,7 +7396,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
             source_files
                 .get(*source_id)
                 .and_then(|record| record.canonical_os_path.as_ref())
-                .filter(|canonical_path| *canonical_path == &entry_path)
+                .filter(|canonical_path| canonical_path.to_path_buf() == entry_path)
                 .map(|_| logical_path)
         })
         .expect("entry should retain a source identity");

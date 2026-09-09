@@ -554,7 +554,7 @@ impl SourceDatabase {
         self.canonical_to_id.insert(canonical_path.clone(), id);
         self.slots.push(SourceSlot {
             id,
-            canonical_os_path: Some(canonical_path),
+            canonical_os_path: Some(canonical_path.into()),
             logical_path,
             kind: Some(kind),
             provenance: SourceProvenance::AuthoredPhysical,

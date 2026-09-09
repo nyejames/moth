@@ -1297,7 +1297,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         self.module_symbols
             .source_record(source_file, self.source_files)
             .and_then(|record| record.canonical_os_path.as_ref())
-            .is_some_and(|canonical_path| origin.to_path_buf(self.string_table) == *canonical_path)
+            .is_some_and(|canonical_path| {
+                origin.to_path_buf(self.string_table).into_boxed_path() == *canonical_path
+            })
     }
 
     fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {

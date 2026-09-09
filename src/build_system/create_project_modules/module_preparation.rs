@@ -196,12 +196,16 @@ fn source_path_for_id(
             source_id.index()
         ))
     })?;
-    record.canonical_os_path.clone().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "source identity {} has no canonical filesystem path",
-            source_id.index()
-        ))
-    })
+    record
+        .canonical_os_path
+        .clone()
+        .map(|canonical| canonical.into_path_buf())
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} has no canonical filesystem path",
+                source_id.index()
+            ))
+        })
 }
 
 /// Resolve the identity the boundary already assigned to a canonical path.

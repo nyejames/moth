@@ -59,7 +59,7 @@ impl SourceModuleOriginTable {
                 identity
                     .canonical_os_path
                     .as_ref()
-                    .and_then(|canonical_path| origin_by_canonical_path.get(canonical_path))
+                    .and_then(|canonical_path| origin_by_canonical_path.get(&**canonical_path))
                     .cloned()
             })
             .collect();

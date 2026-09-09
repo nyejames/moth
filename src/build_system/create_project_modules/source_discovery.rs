@@ -627,7 +627,7 @@ fn finalize_failed_discovery(
                 if let Err(error) = output.rebind_source_identity(
                     source_id,
                     logical_path.clone(),
-                    canonical_os_path,
+                    canonical_os_path.into_path_buf(),
                 ) {
                     for warning in &mut output.warnings {
                         warning.rebind_source_identity(
@@ -1264,7 +1264,12 @@ fn traverse_reachable_source_files(
             source_path: inventory
                 .active_source
                 .and_then(|id| inventory.traversal_source_files.get(id))
-                .and_then(|source| source.canonical_os_path.clone()),
+                .and_then(|source| {
+                    source
+                        .canonical_os_path
+                        .clone()
+                        .map(|canonical| canonical.into_path_buf())
+                }),
         }),
     };
     let ReachableSourceInventory {

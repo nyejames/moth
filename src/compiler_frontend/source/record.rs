@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Describes how a source record entered the compiler's identity context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,7 +100,7 @@ pub(super) enum SourceLoadStatus {
 #[derive(Debug)]
 pub struct SourceSlot {
     pub id: super::SourceId,
-    pub canonical_os_path: Option<PathBuf>,
+    pub canonical_os_path: Option<Box<Path>>,
     /// Complete logical path in the owning source database's path table.
     pub logical_path: PathId,
     pub kind: Option<SourceKind>,

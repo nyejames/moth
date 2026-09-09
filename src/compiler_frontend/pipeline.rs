@@ -237,7 +237,10 @@ fn source_identity_facts(
     Ok((
         source_files.legacy_logical_path(record.id),
         record.id,
-        record.canonical_os_path.clone(),
+        record
+            .canonical_os_path
+            .clone()
+            .map(|canonical| canonical.into_path_buf()),
     ))
 }
 

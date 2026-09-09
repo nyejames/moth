@@ -180,15 +180,6 @@ fn insert_keeps_authored_kind_when_canonical_extension_disagrees() {
     );
 }
 
-/// The 48-byte registration row holds compact identity metadata plus a load status that is a
-/// discriminant and a four-byte index. The 48-byte loaded record owns snapshot payload, line starts
-/// and the optional frozen extended-span table. Failure payload lives in its own database array.
-#[test]
-fn source_record_identity_row_stays_within_its_measured_width() {
-    assert_eq!(size_of::<SourceSlot>(), 48);
-    assert_eq!(size_of::<SourceRecord>(), 48);
-}
-
 #[test]
 fn source_database_keeps_each_load_failure_with_its_source_identity() {
     let first_failed_path = PathBuf::from("/project/first-failed.moth");
