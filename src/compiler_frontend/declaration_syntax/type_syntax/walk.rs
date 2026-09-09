@@ -74,13 +74,18 @@ pub(crate) fn collect_capacity_references_in_parsed_ref(
             fixed_capacity,
             ..
         } => {
-            if let Some(ParsedCollectionCapacity::BareConstant { name, location, .. }) =
-                fixed_capacity
+            if let Some(ParsedCollectionCapacity::BareConstant {
+                name,
+                location,
+                span,
+                ..
+            }) = fixed_capacity
             {
                 references.push(InitializerReference {
                     name: *name,
                     dot_member: None,
                     location: location.clone(),
+                    span: *span,
                     followed_by_call: false,
                     followed_by_choice_namespace: false,
                 });

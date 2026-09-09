@@ -20,6 +20,7 @@ use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -156,7 +157,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 // Constants create ordering edges. Same-file edges are still constrained by source order.
                 ConstantReferenceResolution::SourceConstant { path } => {
                     if path == current_path {
-                        diagnostic_bag.push(self_reference_error(reference));
+                        diagnostic_bag.push(self_reference_error(reference, header.tokens.file_id));
                         continue;
                     }
 
@@ -177,6 +178,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                                 &current_path,
                                 &path,
                                 reference,
+                                header.tokens.file_id,
                             ));
                             continue;
                         }
@@ -201,7 +203,10 @@ pub(crate) fn add_constant_initializer_dependencies(
                 // External non-constants are deferred to AST because header stage cannot
                 // determine whether an external call is foldable or valid in all contexts.
                 ConstantReferenceResolution::SourceNonConstant { .. } => {
-                    diagnostic_bag.push(non_constant_reference_error(reference));
+                    diagnostic_bag.push(non_constant_reference_error(
+                        reference,
+                        header.tokens.file_id,
+                    ));
                 }
 
                 // External references are deferred to AST folding validation.
@@ -210,7 +215,8 @@ pub(crate) fn add_constant_initializer_dependencies(
                 // A constant with this name exists in the module but is not visible to this file.
                 ConstantReferenceResolution::NotVisible { name } => {
                     if constants_by_name.contains_key(&name) {
-                        diagnostic_bag.push(not_visible_constant_error(reference));
+                        diagnostic_bag
+                            .push(not_visible_constant_error(reference, header.tokens.file_id));
                     }
                     // If no constant with this name exists anywhere, treat as Unknown so AST
                     // can produce a more precise diagnostic during expression parsing.
@@ -444,27 +450,61 @@ fn is_nominal_constructor(
 // Diagnostic helpers
 // ---------------------------------------------------------------------------
 
-fn self_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::ConstantSelfReference,
-        Some(reference.name),
-        reference.location.clone(),
+fn attach_reference_span(
+    mut diagnostic: CompilerDiagnostic,
+    reference: &InitializerReference,
+    file_id: Option<SourceId>,
+) -> CompilerDiagnostic {
+    // The byte range stays authoritative in the location for current render; the span lets the
+    // 1F boundary resolve the same range without rereading source text.
+    if let Some(source) = file_id {
+        diagnostic.primary_span = Some(SourceSpan::new(source, reference.span));
+    }
+    diagnostic
+}
+
+fn self_reference_error(
+    reference: &InitializerReference,
+    file_id: Option<SourceId>,
+) -> CompilerDiagnostic {
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::ConstantSelfReference,
+            Some(reference.name),
+            reference.location.clone(),
+        ),
+        reference,
+        file_id,
     )
 }
 
-fn not_visible_constant_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::ConstantNotVisible,
-        Some(reference.name),
-        reference.location.clone(),
+fn not_visible_constant_error(
+    reference: &InitializerReference,
+    file_id: Option<SourceId>,
+) -> CompilerDiagnostic {
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::ConstantNotVisible,
+            Some(reference.name),
+            reference.location.clone(),
+        ),
+        reference,
+        file_id,
     )
 }
 
-fn non_constant_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-        Some(reference.name),
-        reference.location.clone(),
+fn non_constant_reference_error(
+    reference: &InitializerReference,
+    file_id: Option<SourceId>,
+) -> CompilerDiagnostic {
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+            Some(reference.name),
+            reference.location.clone(),
+        ),
+        reference,
+        file_id,
     )
 }
 
@@ -472,12 +512,17 @@ fn same_file_forward_reference_error(
     constant_path: &InternedPath,
     target_path: &InternedPath,
     reference: &InitializerReference,
+    file_id: Option<SourceId>,
 ) -> CompilerDiagnostic {
     let target_name = target_path.name().or_else(|| constant_path.name());
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
-        target_name,
-        reference.location.clone(),
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
+            target_name,
+            reference.location.clone(),
+        ),
+        reference,
+        file_id,
     )
 }
 

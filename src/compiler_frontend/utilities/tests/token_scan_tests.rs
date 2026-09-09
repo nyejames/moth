@@ -1,12 +1,14 @@
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
-    OpenConstruct, collect_declaration_initializer_tokens, consume_balanced_template_region,
-    find_expression_end_index, has_top_level_comma_before_statement_end, innermost_open_construct,
+    OpenConstruct, collect_declaration_initializer_tokens, collect_symbol_references,
+    consume_balanced_template_region, find_expression_end_index,
+    has_top_level_comma_before_statement_end, innermost_open_construct,
 };
 
 fn token(kind: TokenKind) -> Token {
@@ -630,4 +632,41 @@ fn declaration_initializer_tokens_keep_a_malformed_multiline_pipe_list_together(
         "the closing pipe must end the initializer before the next statement"
     );
     assert_eq!(stream.current_token_kind(), &TokenKind::Newline);
+}
+
+#[test]
+fn initializer_references_carry_the_scanned_token_span() {
+    let mut string_table = StringTable::new();
+    let mut builder = ExtendedSpanBuilder::new();
+    let name = string_table.intern("other_const");
+    let scope = InternedPath::from_single_str("token_scan_tests", &mut string_table);
+    let span = LocalSpan::exact(4, 11, &mut builder).expect("reference bounds should encode");
+    let tokens = vec![
+        Token::with_span(
+            TokenKind::Symbol(name),
+            SourceLocation::with_byte_range(
+                scope,
+                CharPosition::default(),
+                CharPosition::default(),
+                4,
+                15,
+            ),
+            span,
+        ),
+        Token::new(TokenKind::Newline, SourceLocation::default()),
+        Token::new(TokenKind::Eof, SourceLocation::default()),
+    ];
+
+    let references = collect_symbol_references(&tokens);
+
+    assert_eq!(
+        references.len(),
+        1,
+        "one bare symbol should produce one reference"
+    );
+    assert_eq!(references[0].name, name);
+    assert_eq!(
+        references[0].span, span,
+        "the reference must keep the token's exact span"
+    );
 }

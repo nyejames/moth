@@ -98,6 +98,7 @@ fn initializer_reference_remaps_name_and_location() {
         name: ref_name,
         dot_member: Some(member_name),
         location: make_location(&mut local),
+        span: LocalSpan::source_start(),
         followed_by_call: false,
         followed_by_choice_namespace: false,
     };
@@ -136,6 +137,7 @@ fn declaration_syntax_remaps_all_fields() {
             name: ref_name,
             dot_member: None,
             location: make_location(&mut local),
+            span: LocalSpan::source_start(),
             followed_by_call: true,
             followed_by_choice_namespace: false,
         }],

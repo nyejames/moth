@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::source::LocalSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
@@ -25,6 +26,10 @@ pub struct InitializerReference {
     pub name: StringId,
     pub dot_member: Option<StringId>,
     pub location: SourceLocation,
+    /// Exact authored bounds of the referenced name; renderers resolve it through the owning
+    /// file's span table once the 1F boundary owns resolution. Location stays for current
+    /// render until 1H.
+    pub span: LocalSpan,
     pub followed_by_call: bool,
     pub followed_by_choice_namespace: bool,
 }
@@ -43,6 +48,8 @@ impl InitializerReference {
 
     pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
         self.location.rebind_source_identity(logical_path);
+        // The span names source-local byte bounds only; identity pairing happens when a
+        // `SourceSpan` is built, so rebinding the logical path leaves it untouched.
     }
 }
 
@@ -117,6 +124,7 @@ pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerRefe
             name: *name,
             dot_member,
             location: token.location.clone(),
+            span: token.span,
             followed_by_call: matches!(next, Some(TokenKind::OpenParenthesis)),
             followed_by_choice_namespace: matches!(next, Some(TokenKind::DoubleColon)),
         });

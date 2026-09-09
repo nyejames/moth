@@ -1152,7 +1152,7 @@ Each checked batch below is an independent accepted agent slice. Split a batch b
 before coding when it cannot reach focused green validation in one context. Do not accept a commit with
 a public boundary supporting both location models.
 
-- [ ] **1E1 — headers and ordering:** header/dependency/declaration-shell records, module symbols, dependency edges and sorted headers. Owns the header-side location-only state found in reconciliation: `PublicExportCollector.seen_names` (duplicate-export diagnostics).
+- [x] **1E1 — headers and ordering:** accepted in `<1E1-COMMIT>`. Header/dependency/declaration-shell record span coverage audited with zero gaps (the only span-less preparation records were the semantic `ChoiceVariant` and `BuildConfigQualifierSyntax`, owned by 1E2); ordering hints are path-spelling-based with no location ordering; the module-symbol span map exists and header diagnostics are span-captured by the file-output batch pass. Delivered `InitializerReference.span` end to end (token-scan and capacity producers, `primary_span` on the four constant-dependency diagnostics, one span-plumbing regression test). Header parse-time location stores stay until 1F: their duplicate/bind diagnostics need first-locations with no resolver in scope.
 - [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests. Owns the semantic location-only state found in reconciliation: semantic `ChoiceVariant`/`ChoiceVariantPayload` locations and `BuildConfigQualifierSyntax.qualifier_location` (consumed via declaration shells into AST nodes).
 - [ ] **1E3 — templates:** template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata
 - [ ] **1E4 — backend-facing frontend:** HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation
@@ -1170,6 +1170,7 @@ a public boundary supporting both location models.
 - [ ] define synthetic/compilation-root display and provenance explicitly
 - [ ] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
 - [ ] add rendering tests for changed-on-disk files, Unicode, CRLF, long lines, config/bootstrap sources and synthetic sources
+- [ ] convert header parse-time location stores (`PublicExportCollector.seen_names`, `HeaderFileParseState.encountered_symbols`/`seen_export_block`) once renderers resolve spans; their duplicate diagnostics need first-locations with no resolver in scope until then
 
 ### Slice group 1G — Remove immediate diagnostic bloat and recover green CI
 
