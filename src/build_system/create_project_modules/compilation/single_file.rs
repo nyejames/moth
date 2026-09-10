@@ -14,7 +14,7 @@ use crate::compiler_frontend::module_compilation::{
     ModuleSemanticResult, ProviderMaterialisationRegistry, compile_module,
 };
 
-use crate::builder_surface::{BuilderSurface, SourceFileKind};
+use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -195,36 +195,26 @@ fn compile_single_file_frontend_with_target(
     };
 
     if extension_text != LANGUAGE_SOURCE_EXTENSION {
-        if SourceFileKind::from_extension(extension_text).is_some() {
-            let interned_path =
-                match InternedPath::try_from_filesystem_path(&config.entry_dir, string_table) {
-                    Ok(path) => path,
-                    Err(non_utf8) => {
-                        return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
-                            &non_utf8.path,
-                            "single-file entry path",
-                        )));
-                    }
-                };
-            let extension = string_table.intern(extension_text);
-            let diagnostic =
-                CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
+        let interned_path =
+            match InternedPath::try_from_filesystem_path(&config.entry_dir, string_table) {
+                Ok(path) => path,
+                Err(non_utf8) => {
+                    return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
+                        &non_utf8.path,
+                        "single-file entry path",
+                    )));
+                }
+            };
+        let extension = string_table.intern(extension_text);
+        let diagnostic =
+            CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
 
-            // Move the local table into the batch; this diagnosed path aborts discovery,
-            // so no clone is needed to carry the diagnostic.
-            let table = std::mem::take(string_table);
-            return Err(PremergeFailure::Diagnosed(
-                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
-            ));
-        }
-
-        return Err(CompilerError::file_error(
-            &config.entry_dir,
-            format!(
-                "Unsupported file extension for compilation. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
-            ),
-        )
-        .into());
+        // Move the local table into the batch; this diagnosed path aborts discovery,
+        // so no clone is needed to carry the diagnostic.
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
+        ));
     }
 
     timing_scope!(

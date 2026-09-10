@@ -301,6 +301,35 @@ pub(crate) fn find_config_qualifier_marker(
 
     None
 }
+/// Find a `#Config` marker whose tokens are separated by trivia.
+///
+/// The direct project-config AST path parses anonymous record fields without the retained
+/// preparation span builder. It therefore preflights the token stream here, while the normal
+/// declaration-shell path continues to validate adjacency at its parser cursor.
+pub(crate) fn find_invalid_config_qualifier_spacing(
+    tokens: &[Token],
+    string_table: &StringTable,
+    source_id: SourceId,
+    span_builder: &ExtendedSpanBuilder,
+) -> Option<SourceSpan> {
+    let resolver = span_builder.resolver();
+    tokens.windows(2).find_map(|pair| {
+        if pair[0].kind != TokenKind::Hash {
+            return None;
+        }
+        let TokenKind::Symbol(name) = pair[1].kind else {
+            return None;
+        };
+        if string_table.resolve(name) != "Config" {
+            return None;
+        }
+
+        let marker_range = pair[0].span.resolve_with(resolver);
+        let config_range = pair[1].span.resolve_with(resolver);
+        (marker_range.end() != config_range.start())
+            .then(|| SourceSpan::new(source_id, pair[0].span))
+    })
+}
 
 /// Returns whether the cursor begins the compiler-owned `#Config` qualifier spelling.
 ///

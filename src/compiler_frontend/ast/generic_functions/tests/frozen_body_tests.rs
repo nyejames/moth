@@ -127,7 +127,7 @@ fn resolved_token_text(
     path_syntax: &PathSyntaxTable,
     string_table: &StringTable,
 ) -> String {
-    let kind_text = match &token.kind {
+    match &token.kind {
         TokenKind::Symbol(id) => format!("Symbol({})", string_table.resolve(*id)),
         TokenKind::StyleDirective(id) => {
             format!("StyleDirective({})", string_table.resolve(*id))
@@ -159,8 +159,7 @@ fn resolved_token_text(
                 .to_portable_string(string_table)
         ),
         other => format!("{other:?}"),
-    };
-    kind_text
+    }
 }
 
 fn capture_test_body(

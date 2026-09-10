@@ -123,9 +123,7 @@ impl VisibleNameRegistry {
                 diagnostic.primary_span = span;
                 return Err(diagnostic);
             }
-            let mut diagnostic =
-                diagnostics::dependency_name_collision(local_name, span, entry.span);
-            diagnostic.primary_span = span;
+            let diagnostic = diagnostics::dependency_name_collision(local_name, span, entry.span);
             return Err(diagnostic);
         }
         self.names

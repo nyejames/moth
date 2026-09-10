@@ -132,7 +132,7 @@ fn prepare_test_source_file(
         context.source_id,
         span_builder,
     )
-    .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure))?;
+    .map_err(FileFrontendPrepareFailure::from_tokenization)?;
 
     prepare_file_from_tokens(
         file_tokens,

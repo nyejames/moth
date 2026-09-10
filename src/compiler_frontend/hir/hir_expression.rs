@@ -237,7 +237,7 @@ impl<'a> HirBuilder<'a> {
                 receiver,
                 args,
                 result_type_ids,
-                &span,
+                span,
             ),
 
             ExpressionKind::CollectionBuiltinCall {
@@ -251,7 +251,7 @@ impl<'a> HirBuilder<'a> {
                 receiver,
                 args,
                 result_type_ids,
-                &span,
+                span,
             ),
 
             ExpressionKind::MapBuiltinCall {
@@ -267,7 +267,7 @@ impl<'a> HirBuilder<'a> {
                 *receiver_requires_mutable,
                 args,
                 result_type_ids,
-                &span,
+                span,
             ),
 
             ExpressionKind::FunctionCall {
@@ -635,8 +635,12 @@ impl<'a> HirBuilder<'a> {
         }?;
 
         // The root HIR value represents this authored AST expression. Child values retain
-        // their own spans; constructors used for compiler scaffolding remain span-free.
+        // their own spans; constructors used for compiler scaffolding remain span-free. Some
+        // lowering paths return a generated root value, so restoring its authored span must also
+        // install the corresponding side-table mappings.
         lowered.value.span = expr.span;
+        self.side_table
+            .map_value(expr.span, lowered.value.id, lowered.value.span);
         self.bind_reactive_metadata_for_expression(expr, &lowered.value)?;
         self.log_expression_output(expr, &lowered.value);
         Ok(lowered)
@@ -1634,7 +1638,7 @@ impl<'a> HirBuilder<'a> {
     ) {
         hir_log!(format!(
             "[HIR] Emitted call binding @ {:?}: result={:?}, value={}",
-            span,
+            _span,
             _local,
             _value.display_with_context(
                 &crate::compiler_frontend::hir::hir_display::HirDisplayContext::new(

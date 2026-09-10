@@ -540,7 +540,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
             ConstStringPiece::SiteRoot,
             ConstStringPiece::Text(after),
         ],
-        location.clone(),
+        location,
     );
 
     let node =

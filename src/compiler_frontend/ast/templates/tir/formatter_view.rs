@@ -946,6 +946,7 @@ fn process_formatter_run(
         formatter_store,
         output,
         &anchor_side_table,
+        representative_span,
         run_reactive_subscription,
         string_table,
     )?;
@@ -961,18 +962,21 @@ fn process_formatter_run(
     Ok((replacement_nodes, formatter_warnings, run_changed))
 }
 
-/// Maps formatter output pieces back to TIR node IDs.
+/// Maps formatter output pieces back to TIR nodes.
 ///
-/// WHAT: text output becomes a new body `Text` node; ordinary opaque anchors
-///      look up the local side-table and reuse the original TIR node; a
-///      formatter-generated site-root anchor becomes a structural expression node.
-/// WHY: preserving original nodes for source anchors keeps child-template opacity
-///      and dynamic-expression metadata intact, while `$md` site-root links use
-///      the same structural string path as ordinary file values.
+/// WHAT: text output becomes a new body `Text` node with the formatter run's
+/// representative authored span; ordinary opaque anchors look up the local
+/// side-table and reuse the original TIR node; a formatter-generated site-root
+/// anchor becomes a structural expression node.
+/// WHY: preserving the representative span on transformed text keeps formatter
+/// output diagnosable without fabricating a new source range. Child-template
+/// opacity and dynamic-expression metadata remain attached to their original
+/// nodes.
 fn output_to_tir_nodes(
     formatter_store: &mut FormatterStore<'_>,
     output: crate::compiler_frontend::ast::templates::formatter_contract::FormatterOutput,
     anchor_side_table: &[TemplateIrNodeId],
+    representative_span: Option<SourceSpan>,
     run_reactive_subscription: Option<ReactiveSubscription>,
     string_table: &mut StringTable,
 ) -> Result<(Vec<TemplateIrNodeId>, bool), CompilerMessages> {
@@ -993,7 +997,7 @@ fn output_to_tir_nodes(
                             byte_len,
                             origin: TemplateSegmentOrigin::Body,
                         },
-                        None,
+                        representative_span,
                     ),
                     run_reactive_subscription.clone(),
                 )?);

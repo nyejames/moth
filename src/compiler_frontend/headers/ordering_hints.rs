@@ -279,7 +279,8 @@ fn content_source_targets(
             LocalDeclarationOrderingHint::content_source(
                 content_constant_path(authored_path, string_table),
                 reference.path_syntax,
-            ),
+            )
+            .with_occurrence_span(reference.span),
         );
     }
 

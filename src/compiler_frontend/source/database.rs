@@ -231,7 +231,7 @@ impl SourceDatabase {
                 let path_id = self
                     .path_interner
                     .try_intern_filesystem_path(&logical.path, string_table)
-                    .map_err(|error| map_path_intern_error(error))?;
+                    .map_err(map_path_intern_error)?;
                 Ok((canonical, kind, path_id))
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -537,7 +537,7 @@ impl SourceDatabase {
         let path_id = self
             .path_interner
             .try_intern_filesystem_path(&logical.path, string_table)
-            .map_err(|error| map_path_intern_error(error))?;
+            .map_err(map_path_intern_error)?;
 
         if let Some(slot) = self.get_by_canonical_path(&canonical_path) {
             if slot.logical_path != path_id {
@@ -823,7 +823,7 @@ fn compilation_root_slot() -> SourceSlot {
 
 /// The reserved compilation-root slot keeps no snapshot and never loads. Its database-backed
 /// span resolution accepts only the exact empty range `[0, 0)` and is owned by the span module.
-
+///
 /// Exclusive source ownership until all preparation and semantic producers have finished.
 ///
 /// Span states use the database's private dense loaded-record index. Registration-only slots

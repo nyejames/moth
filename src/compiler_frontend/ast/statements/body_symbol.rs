@@ -376,6 +376,9 @@ pub(crate) fn parse_symbol_statement(
         }
 
         let call_span = Some(token_stream.current_span());
+        // Shared host-call parsing starts at `(` while this statement dispatcher still points at
+        // the external function name.
+        token_stream.advance();
         let external_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
                 token_stream,

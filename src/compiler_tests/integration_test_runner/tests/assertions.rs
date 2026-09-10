@@ -112,6 +112,23 @@ fn failure_message_contains_uses_structured_render_output() {
 #[test]
 fn failure_message_contains_includes_rendered_label_text() {
     let mut string_table = StringTable::new();
+    let temp_dir = tempfile::tempdir().expect("should create label source directory");
+    let source_path = temp_dir.path().join("main.moth");
+    fs::write(&source_path, "value\n").expect("should write label source");
+    let mut source_database = SourceDatabase::build(
+        std::iter::once(source_path.as_path()),
+        &source_path,
+        None,
+        &mut string_table,
+    )
+    .expect("label source identity should build");
+    let source_id = source_database
+        .get_by_canonical_path(&source_path)
+        .expect("label source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, "value\n".to_owned())
+        .expect("label source text should be retained");
     let label_text = string_table.intern("secondary context lives here");
     let diagnostic = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,
@@ -123,10 +140,11 @@ fn failure_message_contains_includes_rendered_label_text() {
         None,
     )
     .with_labels(vec![DiagnosticLabel::secondary(
-        None,
+        Some(test_span(source_id, 0, 1)),
         Some(DiagnosticLabelMessage::RenderedText(label_text)),
     )]);
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    messages.set_source_database(Arc::new(source_database));
     let expectation = FailureExpectation {
         warnings: WarningExpectation::Ignore,
         diagnostic_codes: vec!["MOTH-RULE-0044".to_string()],

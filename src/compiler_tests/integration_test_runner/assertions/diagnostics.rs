@@ -71,6 +71,14 @@ pub(super) fn validate_diagnostics(
                 .join("\n")
             })
             .collect();
+        rendered_messages.extend(error_diagnostics.iter().flat_map(
+            |(diagnostic_index, diagnostic)| {
+                terminal::format_label_messages_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(*diagnostic_index),
+                )
+            },
+        ));
 
         rendered_messages.extend(
             error_diagnostics
@@ -380,11 +388,17 @@ fn diagnostic_path(
 /// Convert a resolved render-context path into the fixture-relative spelling used by assertions.
 ///
 /// Source spans are resolved only through the retained source database or frozen identity context.
-/// This helper performs presentation normalization after that lookup; it never probes the
+/// The compiler's project identity is entry-root-relative, while canonical fixtures store sources
+/// below `input/`; this helper adds that fixture-only prefix after lookup. It never probes the
 /// filesystem or reconstructs a source location from a path.
 fn display_path(path: &Path, fixture_root: &Path) -> String {
     let relative = path.strip_prefix(fixture_root).unwrap_or(path);
-    portable_path_text(relative)
+    let normalized = portable_path_text(relative);
+    if normalized == "input" || normalized.starts_with("input/") {
+        normalized
+    } else {
+        format!("input/{normalized}")
+    }
 }
 
 fn compare_diagnostic_code_multisets(

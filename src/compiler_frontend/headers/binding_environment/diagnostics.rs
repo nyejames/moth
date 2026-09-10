@@ -13,12 +13,17 @@ use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 /// Diagnostic when two visible bindings in the same file target different symbols.
+///
+/// If only one binding has authored provenance, that span becomes the primary owner rather than
+/// emitting a duplicate secondary label for the same location.
 pub(super) fn dependency_name_collision(
     local_name: StringId,
     span: Option<SourceSpan>,
     previous_span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::import_name_collision(local_name, previous_span, span)
+    let primary_span = span.or(previous_span);
+    let previous_span = span.and(previous_span);
+    CompilerDiagnostic::import_name_collision(local_name, previous_span, primary_span)
 }
 
 /// Diagnostic when a dependency through a public surface resolves to a symbol that the surface does

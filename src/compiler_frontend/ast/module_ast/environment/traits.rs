@@ -95,6 +95,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<TraitEnvironment, CompilerMessages> {
         self.project_imported_trait_declarations(&mut trait_environment, string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
+        let mut source_order_by_trait_id = FxHashMap::default();
 
         for &declaration_id in &declaration_lanes.traits {
             let header = declaration_lanes
@@ -115,6 +116,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &trait_environment,
                 string_table,
             )?;
+            let definition_id = definition.id;
 
             if let Some(existing_id) = trait_environment.insert(definition) {
                 let Some(existing_definition) = trait_environment.get(existing_id) else {
@@ -130,6 +132,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                 ));
             }
+
+            source_order_by_trait_id.insert(definition_id, declaration.source_order);
         }
 
         self.validate_trait_conformance_references(
@@ -138,7 +142,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )?;
 
-        self.resolve_trait_incompatibilities(sorted_headers, &mut trait_environment, string_table)?;
+        self.resolve_trait_incompatibilities(
+            sorted_headers,
+            &source_order_by_trait_id,
+            &mut trait_environment,
+            string_table,
+        )?;
 
         Ok(trait_environment)
     }
@@ -606,6 +615,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn resolve_trait_incompatibilities(
         &self,
         sorted_headers: &[Header],
+        source_order_by_trait_id: &FxHashMap<TraitId, usize>,
         trait_environment: &mut TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -626,6 +636,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 trait_environment,
                 string_table,
             )?;
+            if trait_reference_is_forward(
+                header,
+                subject_id,
+                incompatibility.source_order,
+                source_order_by_trait_id,
+                trait_environment,
+            ) {
+                return Err(self.diagnostic_messages(
+                    CompilerDiagnostic::invalid_trait_incompatibility(
+                        incompatibility.subject.name,
+                        Some(incompatibility.subject.name),
+                        InvalidTraitIncompatibilityReason::UnknownTrait,
+                        source_span(header, incompatibility.subject.span),
+                    ),
+                    string_table,
+                ));
+            }
 
             for incompatible_trait in &incompatibility.incompatible_traits {
                 let incompatible_id = self.resolve_trait_incompatibility_reference(
@@ -636,6 +663,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     trait_environment,
                     string_table,
                 )?;
+                if trait_reference_is_forward(
+                    header,
+                    incompatible_id,
+                    incompatibility.source_order,
+                    source_order_by_trait_id,
+                    trait_environment,
+                ) {
+                    return Err(self.diagnostic_messages(
+                        CompilerDiagnostic::invalid_trait_incompatibility(
+                            incompatibility.subject.name,
+                            Some(incompatible_trait.name),
+                            InvalidTraitIncompatibilityReason::UnknownTrait,
+                            source_span(header, incompatible_trait.span),
+                        ),
+                        string_table,
+                    ));
+                }
 
                 if subject_id == incompatible_id {
                     return Err(self.diagnostic_messages(
@@ -798,6 +842,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         ))
     }
+}
+fn trait_reference_is_forward(
+    header: &Header,
+    trait_id: TraitId,
+    relation_source_order: usize,
+    source_order_by_trait_id: &FxHashMap<TraitId, usize>,
+    trait_environment: &TraitEnvironment,
+) -> bool {
+    let Some(definition) = trait_environment.get(trait_id) else {
+        return false;
+    };
+
+    definition.source_file == header.source_file
+        && source_order_by_trait_id
+            .get(&trait_id)
+            .is_some_and(|order| *order > relation_source_order)
 }
 fn source_span(_header: &Header, span: SourceSpan) -> Option<SourceSpan> {
     Some(span)

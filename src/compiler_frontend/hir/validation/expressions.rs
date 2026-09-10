@@ -167,34 +167,36 @@ impl<'a> HirValidator<'a> {
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
         let value_location = HirLocation::Value(expression.id);
-        if self
-            .module
-            .side_table
-            .ast_span_for_hir(value_location)
-            .is_none()
-        {
-            return Err(self.error_with_hir(
-                format!(
-                    "Value {} is missing AST->HIR side-table mapping",
-                    expression.id
-                ),
-                anchor,
-            ));
-        }
+        if expression.span.is_some() {
+            if self
+                .module
+                .side_table
+                .ast_span_for_hir(value_location)
+                .is_none()
+            {
+                return Err(self.error_with_hir(
+                    format!(
+                        "Value {} is missing AST->HIR side-table mapping",
+                        expression.id
+                    ),
+                    anchor,
+                ));
+            }
 
-        if self
-            .module
-            .side_table
-            .hir_source_span_for_hir(value_location)
-            .is_none()
-        {
-            return Err(self.error_with_hir(
-                format!(
-                    "Value {} is missing HIR source side-table mapping",
-                    expression.id
-                ),
-                anchor,
-            ));
+            if self
+                .module
+                .side_table
+                .hir_source_span_for_hir(value_location)
+                .is_none()
+            {
+                return Err(self.error_with_hir(
+                    format!(
+                        "Value {} is missing HIR source side-table mapping",
+                        expression.id
+                    ),
+                    anchor,
+                ));
+            }
         }
 
         self.require_type_id(expression.ty, anchor)?;

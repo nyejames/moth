@@ -9,5 +9,5 @@ code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.assertion_message_cannot_escape"
 path = "input/@page.moth"
 line = 8
-column = 32
+column = 18
 count = 1

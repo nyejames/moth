@@ -230,7 +230,7 @@ fn parse_target_list(
             TokenKind::Comma => {
                 saw_comma = true;
                 let comma_location = Some(token_stream.current_span());
-                continuation_comma = Some(comma_location.clone());
+                continuation_comma = Some(comma_location);
                 token_stream.advance();
 
                 while token_stream.current_token_kind() == &TokenKind::Newline {

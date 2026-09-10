@@ -18,7 +18,7 @@
 //!   rendering only.
 //! - `ModuleDocFragment` replaces the former `HirDocFragment`. Resolved documentation metadata is
 //!   not HIR and uses a non-HIR name and owner.
-//! Documentation metadata carries only optional exact spans; generated fragments remain spanless.
+//!   Documentation metadata carries only optional exact spans; generated fragments remain spanless.
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;

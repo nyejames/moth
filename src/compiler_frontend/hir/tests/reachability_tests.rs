@@ -58,7 +58,7 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
                 vec![call_statement_at(
                     0,
                     CallTarget::External(reachable_external_function),
-                    reachable_location.clone(),
+                    reachable_location,
                 )],
                 HirTerminator::Return(unit_expression(0)),
             ),
@@ -105,12 +105,8 @@ fn reachable_collection_push_ids_remain_distinct() {
         vec![block(
             BlockId(0),
             vec![
-                call_statement_at(
-                    0,
-                    CallTarget::External(growable_push),
-                    growable_location.clone(),
-                ),
-                call_statement_at(1, CallTarget::External(fixed_push), fixed_location.clone()),
+                call_statement_at(0, CallTarget::External(growable_push), growable_location),
+                call_statement_at(1, CallTarget::External(fixed_push), fixed_location),
             ],
             HirTerminator::Return(unit_expression(0)),
         )],
@@ -437,9 +433,9 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
                     call_statement_at(
                         2,
                         CallTarget::External(external_from_second_callee),
-                        second_callee_location.clone(),
+                        second_callee_location,
                     ),
-                    map_statement_at(4, HirMapOp::Contains, second_callee_location.clone()),
+                    map_statement_at(4, HirMapOp::Contains, second_callee_location),
                 ],
                 HirTerminator::Return(unit_expression(2)),
             ),
@@ -449,9 +445,9 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
                     call_statement_at(
                         3,
                         CallTarget::External(external_from_first_callee),
-                        first_callee_successor_location.clone(),
+                        first_callee_successor_location,
                     ),
-                    map_statement_at(5, HirMapOp::Clear, first_callee_successor_location.clone()),
+                    map_statement_at(5, HirMapOp::Clear, first_callee_successor_location),
                 ],
                 HirTerminator::Return(unit_expression(3)),
             ),
@@ -472,12 +468,12 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
             (
                 external_from_second_callee,
                 HirNodeId(2),
-                second_callee_location.clone(),
+                second_callee_location,
             ),
             (
                 external_from_first_callee,
                 HirNodeId(3),
-                first_callee_successor_location.clone(),
+                first_callee_successor_location,
             ),
         ],
     );
@@ -716,7 +712,7 @@ fn reachability_records_reachable_map_uses_only() {
                         kind: HirStatementKind::Expr(map_literal_expression(10)),
                         span: None,
                     },
-                    map_statement_at(11, HirMapOp::Contains, operation_location.clone()),
+                    map_statement_at(11, HirMapOp::Contains, operation_location),
                 ],
                 HirTerminator::Return(unit_expression(0)),
             ),
@@ -784,12 +780,12 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                             ConstStringPiece::Resource(resource_id),
                             ConstStringPiece::SiteRoot,
                         ],
-                        first_location.clone(),
+                        first_location,
                     ),
                     structural_string_statement(
                         11,
                         vec![ConstStringPiece::Resource(resource_id)],
-                        second_location.clone(),
+                        second_location,
                     ),
                 ],
                 HirTerminator::Return(unit_expression(0)),
@@ -873,7 +869,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                         ConstStringPiece::SiteRoot,
                         ConstStringPiece::Resource(resource_id),
                     ],
-                    outer_location.clone(),
+                    outer_location,
                 )],
                 HirTerminator::If {
                     condition: bool_expression(0),
@@ -889,7 +885,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                         ConstStringPiece::Resource(resource_id),
                         ConstStringPiece::SiteRoot,
                     ],
-                    sibling_branch_location.clone(),
+                    sibling_branch_location,
                 )],
                 HirTerminator::Jump {
                     target: BlockId(4),
@@ -905,7 +901,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                         ConstStringPiece::SiteRoot,
                         ConstStringPiece::Resource(resource_id),
                     ],
-                    nested_branch_location.clone(),
+                    nested_branch_location,
                 )],
                 HirTerminator::Jump {
                     target: BlockId(4),
@@ -921,7 +917,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                         ConstStringPiece::SiteRoot,
                         ConstStringPiece::Resource(resource_id),
                     ],
-                    after_branch_location.clone(),
+                    after_branch_location,
                 )],
                 HirTerminator::Return(unit_expression(4)),
             ),
@@ -1276,7 +1272,7 @@ fn reachability_records_reachable_float_statements_only() {
                 vec![float_statement(
                     10,
                     ReachableFloatStatementKind::FormatFloat,
-                    reachable_location.clone(),
+                    reachable_location,
                 )],
                 HirTerminator::Return(unit_expression(0)),
             ),
@@ -1285,7 +1281,7 @@ fn reachability_records_reachable_float_statements_only() {
                 vec![float_statement(
                     11,
                     ReachableFloatStatementKind::ValidateFloat,
-                    unreachable_location.clone(),
+                    unreachable_location,
                 )],
                 HirTerminator::Return(unit_expression(1)),
             ),

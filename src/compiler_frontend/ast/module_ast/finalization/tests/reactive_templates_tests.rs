@@ -273,19 +273,18 @@ fn annotates_linear_tir_root_metadata_through_overlay() {
         &mut store,
         reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
     );
-    let (root, site_id) =
-        single_expression_body_root(&mut store, source_expression, location.clone());
+    let (root, site_id) = single_expression_body_root(&mut store, source_expression, location);
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(
-            template_with_reference(composed_reference(template_id), location.clone()),
+            template_with_reference(composed_reference(template_id), location),
             ValueMode::ImmutableOwned,
         )),
         location,
@@ -574,17 +573,13 @@ fn annotates_branch_body_tir_root_metadata() {
         reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
     );
     let (body_root, body_site_id) =
-        single_expression_body_root(&mut store, body_expression, location.clone());
+        single_expression_body_root(&mut store, body_expression, location);
 
     let selector_site_id = store.next_expression_site_id();
     let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(
-            true,
-            location.clone(),
-            ValueMode::ImmutableOwned,
-        )),
+        TemplateBranchSelector::Bool(Expression::bool(true, location, ValueMode::ImmutableOwned)),
         body_root,
-        location.clone(),
+        location,
         selector_site_id,
     );
 
@@ -594,19 +589,19 @@ fn annotates_branch_body_tir_root_metadata() {
             fallback: None,
             else_marker: None,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(
-            template_with_reference(composed_reference(template_id), location.clone()),
+            template_with_reference(composed_reference(template_id), location),
             ValueMode::ImmutableOwned,
         )),
         location,
@@ -635,7 +630,7 @@ fn annotates_fallback_body_tir_root_metadata() {
             byte_len: 6,
             origin: TemplateSegmentOrigin::Body,
         },
-        location.clone(),
+        location,
     ));
 
     let fallback_expression = template_with_subscription(
@@ -643,17 +638,13 @@ fn annotates_fallback_body_tir_root_metadata() {
         reactive_source(fallback_path.clone(), ReactiveSourceKind::Declaration),
     );
     let (fallback_body_root, fallback_site_id) =
-        single_expression_body_root(&mut store, fallback_expression, location.clone());
+        single_expression_body_root(&mut store, fallback_expression, location);
 
     let selector_site_id = store.next_expression_site_id();
     let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(
-            true,
-            location.clone(),
-            ValueMode::ImmutableOwned,
-        )),
+        TemplateBranchSelector::Bool(Expression::bool(true, location, ValueMode::ImmutableOwned)),
         branch_body_node,
-        location.clone(),
+        location,
         selector_site_id,
     );
 
@@ -663,19 +654,19 @@ fn annotates_fallback_body_tir_root_metadata() {
             fallback: Some(fallback_body_root),
             else_marker: None,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(
-            template_with_reference(composed_reference(template_id), location.clone()),
+            template_with_reference(composed_reference(template_id), location),
             ValueMode::ImmutableOwned,
         )),
         location,
@@ -703,17 +694,13 @@ fn annotates_loop_body_tir_root_metadata() {
         reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
     );
     let (body_root, body_site_id) =
-        single_expression_body_root(&mut store, body_expression, location.clone());
+        single_expression_body_root(&mut store, body_expression, location);
 
     let condition_site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Loop {
             header: TemplateLoopHeader::Conditional {
-                condition: Box::new(Expression::bool(
-                    true,
-                    location.clone(),
-                    ValueMode::ImmutableOwned,
-                )),
+                condition: Box::new(Expression::bool(true, location, ValueMode::ImmutableOwned)),
             },
             header_sites: TemplateLoopHeaderExpressionSites::Conditional {
                 condition: condition_site_id,
@@ -721,19 +708,19 @@ fn annotates_loop_body_tir_root_metadata() {
             body: body_root,
             aggregate_wrapper: None,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(
-            template_with_reference(composed_reference(template_id), location.clone()),
+            template_with_reference(composed_reference(template_id), location),
             ValueMode::ImmutableOwned,
         )),
         location,
@@ -773,7 +760,7 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
         reactive_source(count_path.clone(), ReactiveSourceKind::Declaration),
     );
     let (body_root, body_site_id) =
-        single_expression_body_root(&mut store, body_expression, location.clone());
+        single_expression_body_root(&mut store, body_expression, location);
 
     let selector_expression = reference_expression(
         show_path.clone(),
@@ -784,7 +771,7 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(selector_expression),
         body_root,
-        location.clone(),
+        location,
         selector_site_id,
     );
 
@@ -794,21 +781,21 @@ fn annotates_branch_selector_and_body_through_one_root_overlay() {
             fallback: None,
             else_marker: None,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![
         node(NodeKind::VariableDeclaration(show_declaration), None),
         node(
             NodeKind::ExpressionStatement(Expression::template(
-                template_with_reference(composed_reference(template_id), location.clone()),
+                template_with_reference(composed_reference(template_id), location),
                 ValueMode::ImmutableOwned,
             )),
             location,
@@ -873,7 +860,7 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
             reactive_subscription: None,
             site_id: body_site_id,
         },
-        location.clone(),
+        location,
     ));
 
     let selector_site_id = store.next_expression_site_id();
@@ -891,28 +878,28 @@ fn option_capture_body_uses_scrutinee_reactive_metadata() {
             binding_span: None,
         }),
     };
-    let branch = TemplateIrBranch::new(selector, body_root, location.clone(), selector_site_id);
+    let branch = TemplateIrBranch::new(selector, body_root, location, selector_site_id);
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
             branches: vec![branch],
             fallback: None,
             else_marker: None,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let mut ast = vec![
         node(NodeKind::VariableDeclaration(optional_declaration), None),
         node(
             NodeKind::ExpressionStatement(Expression::template(
-                template_with_reference(composed_reference(template_id), location.clone()),
+                template_with_reference(composed_reference(template_id), location),
                 ValueMode::ImmutableOwned,
             )),
             location,
@@ -961,23 +948,19 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
     let site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(Expression::bool(
-                false,
-                location.clone(),
-                ValueMode::ImmutableOwned,
-            )),
+            expression: Box::new(Expression::bool(false, location, ValueMode::ImmutableOwned)),
             origin: TemplateSegmentOrigin::Body,
             reactive_subscription: None,
             site_id,
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let expression_overlay_id = store
@@ -1004,7 +987,7 @@ fn annotates_existing_effective_expression_override_instead_of_structural_payloa
             phase: TemplateTirPhase::Composed,
             context,
         },
-        location.clone(),
+        location,
     );
 
     let mut ast = vec![
@@ -1056,23 +1039,19 @@ fn annotates_existing_child_expression_override() {
     let child_site_id = store.next_expression_site_id();
     let child_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(Expression::bool(
-                false,
-                location.clone(),
-                ValueMode::ImmutableOwned,
-            )),
+            expression: Box::new(Expression::bool(false, location, ValueMode::ImmutableOwned)),
             origin: TemplateSegmentOrigin::Body,
             reactive_subscription: None,
             site_id: child_site_id,
         },
-        location.clone(),
+        location,
     ));
     let child_template_id = store.push_template(TemplateIr::new(
         child_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let child_expression_overlay_id = store
@@ -1105,14 +1084,14 @@ fn annotates_existing_child_expression_override() {
             reference: child_reference,
             occurrence_id: child_occurrence_id,
         },
-        location.clone(),
+        location,
     ));
     let parent_template_id = store.push_template(TemplateIr::new(
         parent_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
 
     let template = template_with_reference(
@@ -1121,7 +1100,7 @@ fn annotates_existing_child_expression_override() {
             phase: TemplateTirPhase::Composed,
             context: root_context,
         },
-        location.clone(),
+        location,
     );
     let mut ast = vec![
         node(NodeKind::VariableDeclaration(show_declaration), None),
@@ -1295,7 +1274,7 @@ fn reactive_annotation_rejects_missing_root_template() {
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location.clone(),
+        location,
     );
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(template, ValueMode::ImmutableOwned)),
@@ -1316,14 +1295,14 @@ fn reactive_annotation_rejects_missing_root_view_context() {
         TemplateIrNodeKind::Sequence {
             children: Vec::new(),
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
     let template = template_with_reference(
         TemplateTirReference {
@@ -1334,7 +1313,7 @@ fn reactive_annotation_rejects_missing_root_view_context() {
                 ..TemplateViewContext::default()
             },
         },
-        location.clone(),
+        location,
     );
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(template, ValueMode::ImmutableOwned)),
@@ -1355,14 +1334,14 @@ fn reactive_annotation_rejects_missing_expression_overlay() {
         TemplateIrNodeKind::Sequence {
             children: Vec::new(),
         },
-        location.clone(),
+        location,
     ));
     let template_id = store.push_template(TemplateIr::new(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        location.clone(),
+        location,
     ));
     // Allocate a real expression overlay and reference it from the view context,
     // then drop the expression-overlay arena so the retained ID dangles. This
@@ -1384,7 +1363,7 @@ fn reactive_annotation_rejects_missing_expression_overlay() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        location.clone(),
+        location,
     );
     let mut ast = vec![node(
         NodeKind::ExpressionStatement(Expression::template(template, ValueMode::ImmutableOwned)),

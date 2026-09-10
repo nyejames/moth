@@ -257,7 +257,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let problem_block_id = self.problem_block(hir_block_id)?;
         self.current_problem_block = Some(problem_block_id);
         let block_source = self.block_source(hir_block_id);
-        let entry = self.new_point(problem_block_id, block_source.clone());
+        let entry = self.new_point(problem_block_id, block_source);
         let mut event_ids = Vec::new();
 
         if hir_block_id == self.function.entry {
@@ -289,7 +289,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::Terminator { kind },
         );
 
-        let exit = self.new_point(problem_block_id, block_source.clone());
+        let exit = self.new_point(problem_block_id, block_source);
         self.blocks
             .push(CfgBlock::new(problem_block_id, entry, exit, event_ids));
 
@@ -304,8 +304,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let to = if bindings.is_empty() {
                 original_to
             } else {
-                let edge_block =
-                    self.new_edge_block(bindings, original_to, block_source.clone())?;
+                let edge_block = self.new_edge_block(bindings, original_to, block_source)?;
                 self.edges.push(CfgEdge::new(edge_block, original_to));
                 edge_block
             };
@@ -334,7 +333,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let source = self
                 .bindings
                 .get(binding.index())
-                .map(|binding| binding.source.clone())
+                .map(|binding| binding.source)
                 .unwrap_or_else(EventSource::none);
             let place = self.local_place(local, &source)?;
             let origin = self.new_origin(OriginKind::Parameter {
@@ -450,7 +449,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.emit_write(target, source, event_ids)?;
                 self.emit_event(
                     event_ids,
-                    source.clone(),
+                    *source,
                     EventKind::Copy {
                         source: source_place,
                         destination: target,
@@ -532,7 +531,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Fresh {
                 destination: target,
                 origin,
@@ -556,7 +555,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Aggregate {
                 destination: target,
                 origin,
@@ -864,11 +863,7 @@ impl<'a> FunctionProblemBuilder<'a> {
 
         for local in locals {
             let place = self.local_place(LocalId(local), source)?;
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::ReactiveObserve { place },
-            );
+            self.emit_event(event_ids, *source, EventKind::ReactiveObserve { place });
         }
         Ok(())
     }
@@ -888,7 +883,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(destination, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Projection {
                 source: source_place,
                 destination,
@@ -915,7 +910,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Projection {
                 source: source_place,
                 destination: target,
@@ -1069,7 +1064,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             .zip(argument_sources)
             .enumerate()
         {
-            let point = self.new_point(self.current_problem_block()?, argument_source.clone());
+            let point = self.new_point(self.current_problem_block()?, argument_source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -1101,7 +1096,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                         .cloned()
                         .expect("call argument was just appended"),
                 },
-                argument_source.clone(),
+                argument_source,
             ));
             event_ids.push(event_id);
         }
@@ -1116,7 +1111,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallResult { place, origin }
         });
         let event_id = self.next_event_id()?;
-        let point = self.new_point(self.current_problem_block()?, source.clone());
+        let point = self.new_point(self.current_problem_block()?, *source);
         self.events.push(Event::new(
             event_id,
             point,
@@ -1125,11 +1120,11 @@ impl<'a> FunctionProblemBuilder<'a> {
                 arguments: call_arguments.into_boxed_slice(),
                 result: call_result,
             }),
-            source.clone(),
+            *source,
         ));
         event_ids.push(event_id);
         if let Some(result) = result {
-            let point = self.new_point(self.current_problem_block()?, source.clone());
+            let point = self.new_point(self.current_problem_block()?, *source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -1143,7 +1138,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 event_id,
                 point,
                 EventKind::Access { use_id },
-                source.clone(),
+                *source,
             ));
             event_ids.push(event_id);
         }
@@ -1305,7 +1300,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         if !bindings.is_empty() {
             self.emit_event(
                 event_ids,
-                source.clone(),
+                *source,
                 EventKind::ScopeExit {
                     bindings: bindings.into_boxed_slice(),
                 },
@@ -1360,15 +1355,15 @@ impl<'a> FunctionProblemBuilder<'a> {
             .next_problem_block_id
             .checked_add(1)
             .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
-        let entry = self.new_point(id, source.clone());
+        let entry = self.new_point(id, source);
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
             event_id,
             entry,
             EventKind::ScopeExit { bindings },
-            source.clone(),
+            source,
         ));
-        let jump_point = self.new_point(id, source.clone());
+        let jump_point = self.new_point(id, source);
         let jump_event_id = self.next_event_id()?;
         self.events.push(Event::new(
             jump_event_id,
@@ -1376,7 +1371,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump { target },
             },
-            source.clone(),
+            source,
         ));
         let exit = self.new_point(id, source);
         self.blocks.push(CfgBlock::new(
@@ -1539,7 +1534,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(place, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Fresh {
                 destination: place,
                 origin,
@@ -1573,7 +1568,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 destination,
             }
         };
-        self.emit_event(event_ids, source.clone(), event);
+        self.emit_event(event_ids, *source, event);
         Ok(())
     }
 
@@ -1609,7 +1604,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             destination,
             origin,
         };
-        self.emit_event(event_ids, source.clone(), event);
+        self.emit_event(event_ids, *source, event);
         Ok(())
     }
 
@@ -1638,7 +1633,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        let point = self.new_point(self.current_problem_block()?, source.clone());
+        let point = self.new_point(self.current_problem_block()?, *source);
         let use_id = self.next_use_id()?;
         self.uses.push(Use {
             id: use_id,
@@ -1656,7 +1651,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             event_id,
             point,
             EventKind::Access { use_id },
-            source.clone(),
+            *source,
         ));
         event_ids.push(event_id);
         Ok(())
@@ -1671,7 +1666,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let point = self.new_point(
             self.current_problem_block
                 .expect("Boracle event emission requires an active CFG block"),
-            source.clone(),
+            source,
         );
         let event_id = EventId::new(self.events.len() as u32);
         self.events.push(Event::new(event_id, point, kind, source));

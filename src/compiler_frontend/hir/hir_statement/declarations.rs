@@ -103,7 +103,7 @@ impl<'a> HirBuilder<'a> {
                 continue;
             }
 
-            let span = row.metadata.span.clone();
+            let span = row.metadata.span;
             let const_value = self.lower_const_value_for_module_pool(store, row.id)?;
 
             let const_id = self.allocate_const_id();
@@ -506,10 +506,10 @@ impl<'a> HirBuilder<'a> {
                 );
             }
 
-            let field_location = if field.span == None {
-                span.clone()
+            let field_location = if field.span.is_none() {
+                *span
             } else {
-                field.span.clone()
+                field.span
             };
 
             let field_type = self.lower_type_id(field.type_id, &field_location)?;
@@ -672,11 +672,7 @@ impl<'a> HirBuilder<'a> {
             .join_str(IMPLICIT_START_FUNC_NAME, self.string_table);
 
         let Some(start_function) = self.functions_by_name.get(&start_name).copied() else {
-            let error_location = ast
-                .nodes
-                .first()
-                .map(|node| node.span.clone())
-                .unwrap_or_default();
+            let error_location = ast.nodes.first().map(|node| node.span).unwrap_or_default();
 
             return_hir_transformation_error!(
                 format!(
@@ -739,10 +735,10 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
-        let source_location = if variable.value.span == None {
-            span.clone()
+        let source_location = if variable.value.span.is_none() {
+            *span
         } else {
-            variable.value.span.clone()
+            variable.value.span
         };
 
         let local_type = self.lower_type_id(variable.value.type_id, &source_location)?;

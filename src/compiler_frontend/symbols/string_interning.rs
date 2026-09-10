@@ -63,6 +63,17 @@ impl StringTableResolver for StringTable {
         StringTable::try_resolve(self, id)
     }
 }
+impl StringTableResolver for Box<StringTable> {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        self.as_ref().resolve(id)
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        self.as_ref().try_resolve(id)
+    }
+}
 
 impl StringTableResolver for FrozenStringTable {
     #[inline]

@@ -34,6 +34,8 @@ impl<'a> HirBuilder<'a> {
         let mut success_value =
             self.lower_fallible_carrier_to_success_value(result_carrier, &propagation_span)?;
         success_value.span = *value_span;
+        self.side_table
+            .map_value(*value_span, success_value.id, success_value.span);
         Ok(Some(success_value))
     }
 

@@ -91,8 +91,7 @@ pub(crate) fn validate_trait_evidence(
                 InvalidTraitConformanceReason::ImportedModuleRoot,
                 Some(conformance.target.span),
                 Vec::new(),
-            )
-            .into());
+            ));
         }
 
         let visibility = input
@@ -149,7 +148,7 @@ pub(crate) fn validate_trait_evidence(
                     Some(trait_ref.span),
                     previous_declaration_label(previous_span),
                 );
-                return Err(diagnostic.into());
+                return Err(diagnostic);
             }
 
             let key = (target.type_id, trait_id);
@@ -161,7 +160,7 @@ pub(crate) fn validate_trait_evidence(
                     Some(trait_ref.span),
                     previous_declaration_label(previous_span),
                 );
-                return Err(diagnostic.into());
+                return Err(diagnostic);
             }
 
             if let Some(incompatible) = find_incompatible_evidence(
@@ -180,7 +179,7 @@ pub(crate) fn validate_trait_evidence(
                     Some(trait_ref.span),
                     previous_declaration_label(incompatible.declaration_span),
                 );
-                return Err(diagnostic.into());
+                return Err(diagnostic);
             }
             pending_canonical_spans.insert(key, Some(conformance.target.span));
 
@@ -201,7 +200,7 @@ pub(crate) fn validate_trait_evidence(
             let mut diagnostic =
                 CompilerDiagnostic::unknown_trait_name(pending.trait_name, pending.trait_span);
             diagnostic.primary_span = pending.trait_span;
-            return Err(diagnostic.into());
+            return Err(diagnostic);
         };
 
         let mut requirement_context = RequirementValidationContext {

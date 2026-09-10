@@ -39,7 +39,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
@@ -163,7 +163,7 @@ fn inject_collection_expression_statement(
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -314,7 +314,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
             operands: HirNumericOperands::Binary { left, right },
             result: result_local,
         },
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -373,7 +373,7 @@ fn validator_rejects_plain_numeric_binop() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -438,7 +438,7 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
     let statement = HirStatement {
         id: HirNodeId(9013),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -463,7 +463,7 @@ fn validator_rejects_string_append_with_non_string_result() {
     let statement = HirStatement {
         id: HirNodeId(9014),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -492,7 +492,7 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
     let statement = HirStatement {
         id: HirNodeId(9015),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     let entry_block_index = start_entry_block_index(&module);
@@ -540,7 +540,7 @@ fn validator_rejects_plain_numeric_unary_op() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -600,7 +600,7 @@ fn validator_rejects_plain_string_concatenation_binop() {
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
@@ -662,7 +662,7 @@ fn inject_float_statement(
             }
             _ => panic!("inject_float_statement only supports FormatFloat and ValidateFloat"),
         },
-        span: span.clone(),
+        span: *span,
     };
 
     module.side_table.map_statement(*span, &statement);
@@ -970,6 +970,10 @@ fn validator_rejects_missing_side_table_mappings() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let x = super::symbol("x", &mut string_table);
+    let authored_span = Some(SourceSpan::new(
+        SourceId::from_index(1),
+        LocalSpan::source_start(),
+    ));
 
     let start_fn = function_node(
         start_name,
@@ -981,11 +985,11 @@ fn validator_rejects_missing_side_table_mappings() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
+                    Expression::int(1, authored_span, ValueMode::ImmutableOwned),
                 )),
-                None,
+                authored_span,
             ),
-            node(NodeKind::Return(vec![]), None),
+            node(NodeKind::Return(vec![]), authored_span),
         ],
         None,
     );
@@ -1257,7 +1261,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1305,7 +1309,7 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     let statement = HirStatement {
         id: statement_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1514,9 +1518,9 @@ fn lowering_errors_preserve_string_table_context() {
                     missing_function,
                     Vec::new(),
                     Vec::new(),
-                    call_span.clone(),
+                    call_span,
                 )),
-                call_span.clone(),
+                call_span,
             ),
             node(NodeKind::Return(vec![]), None),
         ],
@@ -1592,7 +1596,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1664,7 +1668,7 @@ fn hir_variant_construct_result_invalid_index_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1772,7 +1776,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1881,7 +1885,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     let statement = HirStatement {
         id: stmt_id,
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span,
     };
 
     module.side_table.map_statement(span, &statement);
@@ -1964,7 +1968,7 @@ fn inject_nonfinite_float_expression(
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::Expr(expression),
-        span: span.clone(),
+        span: *span,
     };
 
     module.side_table.map_statement(*span, &statement);

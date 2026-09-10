@@ -818,10 +818,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             span,
         )
     }
-    ///       resolves the inherited wrapper set into module-local wrapper refs before
-    ///       wrapping the child handoff. `IfChildEmits` becomes a neutral
-    ///       `ConditionalWrapper` node so HIR can use its existing emitted-output
-    ///       guard without seeing TIR overlay state.
+    /// Applies inherited wrapper context to an already materialized child handoff.
+    ///
+    /// WHAT: resolves the inherited wrapper set into module-local wrapper refs before wrapping the
+    ///      child handoff. `IfChildEmits` becomes a neutral `ConditionalWrapper` node so HIR can
+    ///      use its existing emitted-output guard without seeing TIR overlay state.
     /// WHY: this is the runtime-handoff analogue of
     ///      `apply_wrapper_context_overlay_to_child_emission` in `fold/wrappers.rs`.
     fn apply_wrapper_context_overlay_to_child_handoff(

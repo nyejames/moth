@@ -110,6 +110,8 @@ impl<'a> HirBuilder<'a> {
             let mut success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
             success_value.span = *value_span;
+            self.side_table
+                .map_value(*value_span, success_value.id, success_value.span);
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -202,6 +204,8 @@ impl<'a> HirBuilder<'a> {
             let mut success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
             success_value.span = *call_span;
+            self.side_table
+                .map_value(*call_span, success_value.id, success_value.span);
             self.log_call_result_binding(call_span, None, &success_value);
 
             return Ok(LoweredExpression {
@@ -241,6 +245,8 @@ impl<'a> HirBuilder<'a> {
             let mut success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
             success_value.span = *call_span;
+            self.side_table
+                .map_value(*call_span, success_value.id, success_value.span);
             self.log_call_result_binding(call_span, None, &success_value);
 
             return Ok(LoweredExpression {

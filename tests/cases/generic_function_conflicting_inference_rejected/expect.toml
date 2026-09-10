@@ -9,11 +9,11 @@ code = "MOTH-RULE-0057"
 reason = "invalid_generic_instantiation.conflicting_inference"
 path = "input/@page.moth"
 line = 5
-column = 19
+column = 18
 count = 1
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
 path = "input/@page.moth"
 line = 5
-column = 16
+column = 15

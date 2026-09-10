@@ -728,12 +728,10 @@ fn collect_free_export_bindings(
         if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
             let public_name = reexport.binding.public_name().to_owned();
             export_bindings.push(reexport.binding);
-            if let Some(span) = reexport.provenance {
-                export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
-                    public_name,
-                    span: Some(span),
-                });
-            }
+            export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+                public_name,
+                span: reexport.provenance,
+            });
         }
     }
 

@@ -40,6 +40,7 @@ pub(super) fn parse_trait_declaration(
     token_stream: &mut FileTokens,
     declaration_token: &Token,
     declaration_name: StringId,
+    source_order: usize,
     context: &mut HeaderBuildContext<'_>,
     span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
@@ -80,6 +81,7 @@ pub(super) fn parse_trait_declaration(
     Ok(TraitDeclarationSyntax {
         name: declaration_name,
         name_span,
+        source_order,
         requirements,
         span: name_span,
     })
@@ -271,6 +273,7 @@ pub(super) fn parse_specialized_conformance_target(
 pub(super) fn parse_trait_incompatibility(
     token_stream: &mut FileTokens,
     subject: TraitReferenceSyntax,
+    source_order: usize,
     context: &mut HeaderBuildContext<'_>,
 ) -> TraitHeaderResult<TraitIncompatibilitySyntax> {
     let mut incompatible_traits = Vec::new();
@@ -349,6 +352,7 @@ pub(super) fn parse_trait_incompatibility(
 
     Ok(TraitIncompatibilitySyntax {
         subject,
+        source_order,
         incompatible_traits,
     })
 }

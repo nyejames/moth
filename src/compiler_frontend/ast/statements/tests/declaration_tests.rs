@@ -484,6 +484,7 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         .with_declaring_file_id(file_id);
         let initializer = super::declaration_initializer_stream(
             &source_path.append(name),
+            declaration.span,
             declaration.initializer_tokens,
             &tokens.path_syntax,
             &context,

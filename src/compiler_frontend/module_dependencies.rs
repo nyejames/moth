@@ -310,7 +310,14 @@ impl<'a> DependencyGraph<'a> {
         // through the Stage 0 resolved-reference table instead of re-deriving the authored
         // spelling, so a module-relative authored occurrence still targets the canonical
         // content constant.
-        let span = header.name_span;
+        // Content-source hints carry the exact authored path span because synthetic `content`
+        // headers intentionally have deferred path tables. Reading a generated header's token
+        // stream here would reopen a detached path-table owner and can panic at the stage boundary.
+        let span = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
+            hint.occurrence_span().or(header.name_span)
+        } else {
+            header.name_span
+        };
         let requested_path = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
             let Some(resolved_path) = self
                 .content_source_targets

@@ -279,22 +279,22 @@ struct SourcePackageCheckOnlyInventory {
 ///      against the project database finalized by the outer tail; carrying the owner here keeps
 ///      every intermediate site typed until that deliberate final conversion.
 struct DirectoryPremergeFailure {
-    failure: PremergeFailure,
-    package_source: Option<SourceDatabase>,
+    failure: Box<PremergeFailure>,
+    package_source: Option<Box<SourceDatabase>>,
 }
 
 impl DirectoryPremergeFailure {
     fn project(failure: PremergeFailure) -> Self {
         Self {
-            failure,
+            failure: Box::new(failure),
             package_source: None,
         }
     }
 
     fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
         Self {
-            failure,
-            package_source: Some(source),
+            failure: Box::new(failure),
+            package_source: Some(Box::new(source)),
         }
     }
 }
@@ -679,11 +679,10 @@ pub(crate) fn compile_directory_frontend(
         Ok(compilation) => Ok(compilation),
         Err(directory_failure) => {
             if let Some(package_source) = directory_failure.package_source {
-                return Err(directory_failure
-                    .failure
-                    .into_messages_with_source(string_table, Arc::new(package_source)));
+                return Err((*directory_failure.failure)
+                    .into_messages_with_source(string_table, Arc::new(*package_source)));
             }
-            let mut messages = directory_failure.failure.into_messages(string_table);
+            let mut messages = (*directory_failure.failure).into_messages(string_table);
             if messages.source_database_for_diagnostic(0).is_none()
                 && let Some(project_source) = project_source_files.as_ref()
             {
@@ -1310,16 +1309,13 @@ fn compile_directory_frontend_in_premerge_lane(
             ));
         }
         (Err(directory_failure), Err(finish_error)) => {
-            let combined = append_finish_failure(directory_failure.failure, finish_error);
+            let combined = append_finish_failure(*directory_failure.failure, finish_error);
             return Err(DirectoryPremergeFailure {
-                failure: combined,
+                failure: Box::new(combined),
                 package_source: directory_failure.package_source,
             });
         }
     };
     *project_source_files = Some(finalized);
-    match result {
-        Ok(compilation) => Ok(compilation),
-        Err(directory_failure) => Err(directory_failure),
-    }
+    result
 }

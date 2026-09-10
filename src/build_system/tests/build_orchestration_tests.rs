@@ -1027,10 +1027,10 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
                 .any(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035"),
             "expected the named-type diagnostic to be preserved"
         );
-        let source_files = messages
-            .source_database_for_diagnostic(0)
-            .expect("frontend diagnostics should retain their source database");
-        let source_id = source_files
+        let identity = messages
+            .frozen_identity_context_for_diagnostic(0)
+            .expect("frontend diagnostics should retain their frozen identity context");
+        let source_id = identity
             .get_by_canonical_path(
                 &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize"),
             )

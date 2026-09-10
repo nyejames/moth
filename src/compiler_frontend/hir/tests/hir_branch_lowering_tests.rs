@@ -170,12 +170,12 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
         },
         vec![node(
             NodeKind::If(
-                Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                Expression::bool(true, location, ValueMode::ImmutableOwned),
                 vec![],
                 None,
                 test_if_branch_metadata(false),
             ),
-            location.clone(),
+            location,
         )],
         None,
     );
@@ -201,30 +201,22 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
         vec![node(
             NodeKind::Return(vec![Expression::bool(
                 true,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let condition = runtime_expr(
         vec![
-            runtime_operand_item(Expression::bool(
-                false,
-                location.clone(),
-                ValueMode::ImmutableOwned,
-            )),
-            runtime_function_call_item(
-                rhs_name.clone(),
-                vec![builtin_type_ids::BOOL],
-                location.clone(),
-            ),
-            runtime_operator_item(Operator::And, location.clone()),
+            runtime_operand_item(Expression::bool(false, location, ValueMode::ImmutableOwned)),
+            runtime_function_call_item(rhs_name.clone(), vec![builtin_type_ids::BOOL], location),
+            runtime_operator_item(Operator::And, location),
         ],
         builtin_type_ids::BOOL,
-        location.clone(),
+        location,
         ValueMode::MutableOwned,
     );
 
@@ -240,17 +232,17 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
                 vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
-                        location.clone(),
+                        location,
                         ValueMode::ImmutableOwned,
                     )),
-                    location.clone(),
+                    location,
                 )],
                 None,
                 test_if_branch_metadata(false),
             ),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -330,30 +322,22 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
         vec![node(
             NodeKind::Return(vec![Expression::bool(
                 false,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let condition = runtime_expr(
         vec![
-            runtime_operand_item(Expression::bool(
-                true,
-                location.clone(),
-                ValueMode::ImmutableOwned,
-            )),
-            runtime_function_call_item(
-                rhs_name.clone(),
-                vec![builtin_type_ids::BOOL],
-                location.clone(),
-            ),
-            runtime_operator_item(Operator::Or, location.clone()),
+            runtime_operand_item(Expression::bool(true, location, ValueMode::ImmutableOwned)),
+            runtime_function_call_item(rhs_name.clone(), vec![builtin_type_ids::BOOL], location),
+            runtime_operator_item(Operator::Or, location),
         ],
         builtin_type_ids::BOOL,
-        location.clone(),
+        location,
         ValueMode::MutableOwned,
     );
 
@@ -369,17 +353,17 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
                 vec![node(
                     NodeKind::ExpressionStatement(Expression::int(
                         1,
-                        location.clone(),
+                        location,
                         ValueMode::ImmutableOwned,
                     )),
-                    location.clone(),
+                    location,
                 )],
                 None,
                 test_if_branch_metadata(false),
             ),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -448,19 +432,19 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
             runtime_operand_item(inferred_type_reference_expr(
                 lhs_name.clone(),
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )),
             runtime_operand_item(inferred_type_reference_expr(
                 rhs_name.clone(),
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )),
-            runtime_operator_item(Operator::And, location.clone()),
+            runtime_operator_item(Operator::And, location),
         ],
         builtin_type_ids::BOOL,
-        location.clone(),
+        location,
         ValueMode::MutableOwned,
     );
 
@@ -474,16 +458,16 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     lhs_name,
-                    Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::bool(false, location, ValueMode::ImmutableOwned),
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     rhs_name,
-                    Expression::bool(true, location.clone(), ValueMode::MutableOwned),
+                    Expression::bool(true, location, ValueMode::MutableOwned),
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::If(
@@ -491,18 +475,18 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
                     vec![node(
                         NodeKind::ExpressionStatement(Expression::int(
                             1,
-                            location.clone(),
+                            location,
                             ValueMode::ImmutableOwned,
                         )),
-                        location.clone(),
+                        location,
                     )],
                     None,
                     test_if_branch_metadata(false),
                 ),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -552,12 +536,12 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             expressions: vec![inferred_type_reference_expr(
                 left_name.clone(),
                 builtin_type_ids::INT,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )],
-            span: location.clone(),
+            span: location,
         }),
-        location.clone(),
+        location,
     )];
 
     let else_body = vec![node(
@@ -565,12 +549,12 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             expressions: vec![inferred_type_reference_expr(
                 right_name.clone(),
                 builtin_type_ids::INT,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )],
-            span: location.clone(),
+            span: location,
         }),
-        location.clone(),
+        location,
     )];
 
     let value_if_expression = Expression::new(
@@ -579,23 +563,23 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
                 condition: runtime_expr(
                     vec![runtime_operand_item(Expression::bool(
                         true,
-                        location.clone(),
+                        location,
                         ValueMode::ImmutableOwned,
                     ))],
                     builtin_type_ids::BOOL,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableOwned,
                 ),
                 then_body,
                 else_body,
                 then_scope: entry_path.clone(),
                 else_scope: entry_path.clone(),
-                span: location.clone(),
+                span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
-        location.clone(),
+        location,
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -611,23 +595,23 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     left_name,
-                    Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(1, location, ValueMode::ImmutableOwned),
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     right_name,
-                    Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                    Expression::int(2, location, ValueMode::ImmutableOwned),
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(result_name, value_if_expression)),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -682,39 +666,39 @@ fn assertion_failure_uses_message_value_block_tail() {
                 condition: inferred_type_reference_expr(
                     condition_name.clone(),
                     builtin_type_ids::BOOL,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 ),
                 then_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
-                            location.clone(),
+                            location,
                             ValueMode::ImmutableOwned,
                         )],
-                        span: location.clone(),
+                        span: location,
                     }),
-                    location.clone(),
+                    location,
                 )],
                 else_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
-                            location.clone(),
+                            location,
                             ValueMode::ImmutableOwned,
                         )],
-                        span: location.clone(),
+                        span: location,
                     }),
-                    location.clone(),
+                    location,
                 )],
                 then_scope: entry_path.clone(),
                 else_scope: entry_path.clone(),
-                span: location.clone(),
+                span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
-        location.clone(),
+        location,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -732,7 +716,7 @@ fn assertion_failure_uses_message_value_block_tail() {
                     condition_name.clone(),
                     builtin_type_ids::BOOL,
                     false,
-                    location.clone(),
+                    location,
                 ),
             ],
             returns: vec![],
@@ -742,14 +726,14 @@ fn assertion_failure_uses_message_value_block_tail() {
                 condition: inferred_type_reference_expr(
                     condition_name,
                     builtin_type_ids::BOOL,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 ),
                 message,
             },
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
@@ -812,21 +796,21 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         vec![node(
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("message"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
     let message = runtime_expr(
         vec![runtime_function_call_item(
             message_name,
             vec![builtin_type_ids::STRING],
-            location.clone(),
+            location,
         )],
         builtin_type_ids::STRING,
-        location.clone(),
+        location,
         ValueMode::MutableOwned,
     );
     let mut option_type_environment =
@@ -841,12 +825,12 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(true, location, ValueMode::ImmutableOwned),
                 message: Expression::coerced(message, option_string),
             },
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -889,39 +873,39 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                 condition: inferred_type_reference_expr(
                     condition_name.clone(),
                     builtin_type_ids::BOOL,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 ),
                 then_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("then"),
-                            location.clone(),
+                            location,
                             ValueMode::ImmutableOwned,
                         )],
-                        span: location.clone(),
+                        span: location,
                     }),
-                    location.clone(),
+                    location,
                 )],
                 else_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
                         expressions: vec![Expression::string_slice(
                             string_table.intern("else"),
-                            location.clone(),
+                            location,
                             ValueMode::ImmutableOwned,
                         )],
-                        span: location.clone(),
+                        span: location,
                     }),
-                    location.clone(),
+                    location,
                 )],
                 then_scope: entry_path.clone(),
                 else_scope: entry_path.clone(),
-                span: location.clone(),
+                span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
             })),
         },
-        location.clone(),
+        location,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -939,19 +923,19 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                     condition_name,
                     builtin_type_ids::BOOL,
                     false,
-                    location.clone(),
+                    location,
                 ),
             ],
             returns: vec![],
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(false, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(false, location, ValueMode::ImmutableOwned),
                 message,
             },
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);

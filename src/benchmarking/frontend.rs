@@ -252,8 +252,10 @@ pub fn run_frontend_benchmark(
         Ok(path) => path,
         Err(error) => {
             let messages = CompilerMessages::from_error(error, StringTable::new());
-            let diagnostic_codes = collect_diagnostic_codes(&messages);
-
+            let mut diagnostic_codes = collect_diagnostic_codes(&messages);
+            if messages.has_infrastructure_error() {
+                diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
+            }
             return Err(FrontendBenchmarkError {
                 kind: FrontendBenchmarkFailureKind::PathValidation,
                 diagnostic_codes,

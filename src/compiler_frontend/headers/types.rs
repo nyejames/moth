@@ -306,6 +306,11 @@ pub struct LocalDeclarationOrderingHint {
     ///       a module-relative authored spelling still orders against the canonical content
     ///       constant of a nested module.
     occurrence: Option<PathSyntaxId>,
+    /// The exact authored span for a content-source occurrence.
+    ///
+    /// Synthetic content headers intentionally have deferred path tables, so Stage 3 must carry
+    /// this source-qualified span on the retained hint rather than reopening a token stream.
+    occurrence_span: Option<SourceSpan>,
 }
 
 impl LocalDeclarationOrderingHint {
@@ -315,6 +320,7 @@ impl LocalDeclarationOrderingHint {
             path,
             origin: LocalDeclarationOrderingHintOrigin::SourceOwned,
             occurrence: None,
+            occurrence_span: None,
         }
     }
 
@@ -324,6 +330,7 @@ impl LocalDeclarationOrderingHint {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ProviderSpelling,
             occurrence: None,
+            occurrence_span: None,
         }
     }
 
@@ -333,6 +340,7 @@ impl LocalDeclarationOrderingHint {
             path,
             origin: LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling,
             occurrence: None,
+            occurrence_span: None,
         }
     }
 
@@ -345,12 +353,24 @@ impl LocalDeclarationOrderingHint {
             path,
             origin: LocalDeclarationOrderingHintOrigin::ContentSource,
             occurrence: Some(occurrence),
+            occurrence_span: None,
         }
+    }
+
+    /// Attach the exact authored span for a content-source occurrence.
+    pub fn with_occurrence_span(mut self, span: SourceSpan) -> Self {
+        self.occurrence_span = Some(span);
+        self
     }
 
     /// The authored occurrence handle for content-source hints; absent for other origins.
     pub fn occurrence(&self) -> Option<PathSyntaxId> {
         self.occurrence
+    }
+
+    /// The exact authored span for a content-source occurrence.
+    pub fn occurrence_span(&self) -> Option<SourceSpan> {
+        self.occurrence_span
     }
 
     /// The conservative referenced path this hint records.
@@ -385,6 +405,7 @@ impl LocalDeclarationOrderingHint {
 
     fn rebind_source_identity(
         self,
+        final_file_id: SourceId,
         provisional_source_file: &InternedPath,
         logical_path: &InternedPath,
     ) -> Result<Self, CompilerError> {
@@ -403,6 +424,9 @@ impl LocalDeclarationOrderingHint {
             path,
             origin: self.origin,
             occurrence: self.occurrence,
+            occurrence_span: self
+                .occurrence_span
+                .map(|span| SourceSpan::new(final_file_id, span.local())),
         })
     }
 }
@@ -922,8 +946,11 @@ impl Header {
 
         let mut rebound_hints = HashSet::with_capacity(self.local_ordering_hints.len());
         for hint in self.local_ordering_hints.drain() {
-            rebound_hints
-                .insert(hint.rebind_source_identity(&provisional_source_file, &logical_path)?);
+            rebound_hints.insert(hint.rebind_source_identity(
+                file_id,
+                &provisional_source_file,
+                &logical_path,
+            )?);
         }
         self.local_ordering_hints = rebound_hints;
 

@@ -277,7 +277,7 @@ impl CompilerFrontend<'static> {
             source_id,
             span_builder,
         )
-        .map_err(|failure| FileFrontendPrepareFailure::from_tokenization(failure))?;
+        .map_err(FileFrontendPrepareFailure::from_tokenization)?;
         tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }

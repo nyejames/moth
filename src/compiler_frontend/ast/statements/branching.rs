@@ -398,15 +398,13 @@ pub(crate) fn parse_match_block(
             TokenKind::End => {
                 let next_token = peek_next_non_newline_token(token_stream);
                 let next_index = peek_next_non_newline_token_index(token_stream);
-                let semicolon_separates_same_level_arms = match (next_token, next_index) {
-                    (Some(next), Some(idx))
-                        if next.kind == TokenKind::Else
-                            || token_index_has_top_level_fat_arrow(token_stream, idx) =>
-                    {
-                        true
-                    }
-                    _ => false,
-                };
+                let semicolon_separates_same_level_arms = !seen_else
+                    && matches!(
+                        (next_token, next_index),
+                        (Some(next), Some(idx))
+                            if next.kind == TokenKind::Else
+                                || token_index_has_top_level_fat_arrow(token_stream, idx)
+                    );
 
                 if semicolon_separates_same_level_arms {
                     return Err(branching_error(CompilerDiagnostic::invalid_match_arm(

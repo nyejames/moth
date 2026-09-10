@@ -22,6 +22,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
+type StoredInsertContributionTemplates = Option<Vec<(TemplateIrId, Option<SourceSpan>)>>;
 
 /// Builds a template infrastructure failure without rendering it into the source-diagnostic lane.
 pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
@@ -114,7 +115,7 @@ pub(super) fn children_of_node(
 pub(crate) fn stored_insert_contribution_templates(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<Option<Vec<(TemplateIrId, Option<SourceSpan>)>>, CompilerError> {
+) -> Result<StoredInsertContributionTemplates, CompilerError> {
     let template = store.get_template(template_id).ok_or_else(|| {
         CompilerError::compiler_error(
             "TIR slot composition: stored insert carrier referenced a missing template.",

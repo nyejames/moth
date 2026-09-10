@@ -70,10 +70,10 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let x_ref = inferred_type_reference_expr(
         x_name.clone(),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
-    let two = int_expr(2, loc.clone());
+    let two = int_expr(2, loc);
 
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -81,17 +81,17 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
         x_name,
         LocalId(10),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
     );
 
     let expr = runtime_expr(
         vec![
             runtime_operand_item(x_ref),
             runtime_operand_item(two),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -121,12 +121,12 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
     let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(5, loc.clone())),
-            runtime_operand_item(int_expr(3, loc.clone())),
-            runtime_operator_item(Operator::Subtract, loc.clone()),
+            runtime_operand_item(int_expr(5, loc)),
+            runtime_operand_item(int_expr(3, loc)),
+            runtime_operator_item(Operator::Subtract, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -145,12 +145,12 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
     let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(5, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Divide, loc.clone()),
+            runtime_operand_item(int_expr(5, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Divide, loc),
         ],
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -198,12 +198,12 @@ fn mixed_int_float_addition_converts_int_operand() {
     let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(float_expr(2.5, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(float_expr(2.5, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -244,7 +244,7 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     let x_ref = inferred_type_reference_expr(
         x_name.clone(),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
 
@@ -254,16 +254,16 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
         x_name,
         LocalId(10),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
     );
 
     let expr = runtime_expr(
         vec![
             runtime_operand_item(x_ref),
-            runtime_operator_item(Operator::Negate, loc.clone()),
+            runtime_operator_item(Operator::Negate, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -284,12 +284,12 @@ fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
     let fn_name = symbol("__test_fn_error", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -341,12 +341,12 @@ fn numeric_failure_mode_is_trap_for_custom_error_function() {
     let fn_name = symbol("__test_fn_string_error", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -374,12 +374,12 @@ fn numeric_failure_mode_is_trap_for_non_fallible_function() {
     let fn_name = symbol("__test_fn_non_fallible", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 

@@ -151,7 +151,7 @@ pub(super) fn is_receiver_method_candidate(
         return false;
     };
 
-    first_parameter.id.name_str(string_table) == Some("This")
+    first_parameter.id.name_str(string_table) == Some("this")
 }
 
 /// Extract the parsed receiver type name from a receiver-method candidate.

@@ -96,7 +96,7 @@ impl ModuleDiagnostics {
 
                 Ok(ModuleDiagnostics {
                     diagnostics,
-                    string_table,
+                    string_table: *string_table,
                     render_frozen_contexts,
                     render_source_contexts,
                     render_type_contexts,
@@ -120,7 +120,7 @@ impl ModuleDiagnostics {
                     )));
                 }
 
-                Err(error)
+                Err(*error)
             }
         }
     }
@@ -135,7 +135,7 @@ impl ModuleDiagnostics {
         CompilerMessages {
             diagnostics: self.diagnostics,
             infrastructure_error: None,
-            string_table: self.string_table,
+            string_table: Box::new(self.string_table),
             render_frozen_contexts: self.render_frozen_contexts,
             render_source_contexts: self.render_source_contexts,
             render_type_contexts: self.render_type_contexts,

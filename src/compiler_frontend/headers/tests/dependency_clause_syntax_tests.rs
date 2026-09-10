@@ -175,20 +175,20 @@ fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
         }
     ));
     let (tokens, strings, _) = tokenize_source(source);
-    let cos_span = tokens
+    let tan_span = tokens
         .tokens
         .iter()
         .find(|token| {
             matches!(
                 &token.kind,
-                TokenKind::Symbol(id) if strings.resolve(*id) == "cos"
+                TokenKind::Symbol(id) if strings.resolve(*id) == "tan"
             )
         })
-        .expect("expected the unexpected cos selection")
+        .expect("expected the unexpected adjacent selection")
         .span;
     assert_eq!(
         error.primary_span,
-        Some(SourceSpan::new(tokens.file_id, cos_span))
+        Some(SourceSpan::new(tokens.file_id, tan_span))
     );
 }
 

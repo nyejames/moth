@@ -43,10 +43,8 @@ pub(crate) fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec
             messages.diagnostic_render_context(diagnostic_index),
         ));
     }
-    if !outer_emitted {
-        if let Some(error) = messages.infrastructure_error() {
-            lines.push(format_terse_compiler_error(error));
-        }
+    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
+        lines.push(format_terse_compiler_error(error));
     }
     lines
 }

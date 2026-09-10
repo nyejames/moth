@@ -87,7 +87,7 @@ fn multi_file_declarations_are_aggregated() {
             &mut span_builder,
         )
         .expect("source should tokenize");
-        let output = prepare_file_from_tokens(
+        prepare_file_from_tokens(
             tokens,
             &entry_path,
             &HeaderParseOptions::default(),
@@ -96,8 +96,7 @@ fn multi_file_declarations_are_aggregated() {
             0,
             &mut span_builder,
         )
-        .expect("source should prepare");
-        output
+        .expect("source should prepare")
     };
     let entry_output = prepare_file("[runtime1]\n", &entry_path, entry_id);
     let helper_output = prepare_file(

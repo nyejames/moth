@@ -827,6 +827,7 @@ fn parse_inferred_curly_literal(
                             coerced_key.span,
                         )?;
                         validate_compile_time_map_key(&coerced_key, context, string_table)?;
+                        record_known_map_key(&mut known_keys, &coerced_key, string_table)?;
 
                         entries.push(MapLiteralEntry {
                             key: coerced_key,

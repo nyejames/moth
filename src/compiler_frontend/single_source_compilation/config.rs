@@ -31,10 +31,12 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticBag, DiagnosticKind, InvalidConfigReason, RuleDiagnosticKind,
+    CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, DiagnosticKind,
+    InvalidConfigReason, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
@@ -598,6 +600,23 @@ fn prepare_config_file(
         }
     };
     file_tokens.canonical_os_path = Some(request.canonical_path.to_path_buf());
+
+    if let Some(marker_span) = find_invalid_config_qualifier_spacing(
+        &file_tokens.tokens,
+        string_table,
+        request.file_id,
+        span_builder,
+    ) {
+        let mut diagnostic = CompilerDiagnostic::common_syntax_mistake(
+            CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
+            Some(marker_span),
+        );
+        diagnostic
+            .capture_preparation_span(request.file_id)
+            .map_err(ConfigPreparationFailure::Infrastructure)?;
+        diagnostics.push(diagnostic);
+        return Err(ConfigPreparationFailure::Diagnosed(diagnostics));
+    }
 
     let output = match prepare_file_from_tokens(
         file_tokens,

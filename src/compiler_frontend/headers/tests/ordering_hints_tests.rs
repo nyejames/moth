@@ -96,9 +96,25 @@ fn header_of_kind<'a>(
 }
 
 fn assert_hints(header: &Header, expected: &HashSet<LocalDeclarationOrderingHint>) {
+    let actual_keys = header
+        .local_ordering_hints
+        .iter()
+        .map(|hint| (hint.path().clone(), hint.origin(), hint.occurrence()))
+        .collect::<HashSet<_>>();
+    let expected_keys = expected
+        .iter()
+        .map(|hint| (hint.path().clone(), hint.origin(), hint.occurrence()))
+        .collect::<HashSet<_>>();
     assert_eq!(
-        &header.local_ordering_hints, expected,
+        actual_keys, expected_keys,
         "unexpected ordering hints on the declaration shell"
+    );
+    assert!(
+        header
+            .local_ordering_hints
+            .iter()
+            .all(|hint| hint.occurrence_span().is_some()),
+        "every retained content occurrence must carry its exact authored span"
     );
 }
 

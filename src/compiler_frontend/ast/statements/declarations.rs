@@ -444,6 +444,7 @@ pub fn resolve_declaration_syntax(
 
         let mut initializer_stream = declaration_initializer_stream(
             &qualified_name,
+            declaration_syntax.span,
             declaration_syntax.initializer_tokens.clone(),
             path_syntax,
             context,
@@ -602,6 +603,7 @@ pub fn resolve_declaration_syntax(
     }
     let mut initializer_stream = declaration_initializer_stream(
         &qualified_name,
+        declaration_syntax.span,
         declaration_syntax.initializer_tokens,
         path_syntax,
         context,
@@ -854,11 +856,15 @@ pub fn resolve_declaration_syntax(
 /// takes that scope's source identity rather than an identity a caller could pass wrongly.
 fn declaration_initializer_stream(
     qualified_name: &InternedPath,
+    declaration_span: Option<SourceSpan>,
     mut initializer_tokens: Vec<Token>,
     path_syntax: &FilePathSyntax,
     context: &ScopeContext,
 ) -> DeclarationResult<FileTokens> {
-    let Some(eof_span) = initializer_tokens.last().map(|token| token.span) else {
+    let Some(eof_span) = declaration_span
+        .map(SourceSpan::local)
+        .or_else(|| initializer_tokens.last().map(|token| token.span))
+    else {
         return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::MissingInitializerExpression,
             qualified_name.name(),

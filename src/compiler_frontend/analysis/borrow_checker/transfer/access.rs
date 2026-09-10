@@ -109,7 +109,7 @@ fn record_shared_reads_in_pattern(
         value: expression, ..
     } = &arm.pattern
     {
-        let location = env.location.clone();
+        let location = env.location;
         record_shared_reads_in_expression(
             env,
             expression,
@@ -119,7 +119,7 @@ fn record_shared_reads_in_pattern(
     }
 
     if let Some(guard) = &arm.guard {
-        let location = env.location.clone();
+        let location = env.location;
         record_shared_reads_in_expression(
             env,
             guard,
@@ -153,7 +153,7 @@ fn transfer_assign_target(
     let block_id = context.block_id;
     let current_order = context.current_order;
     let tracker = &mut *context.tracker;
-    let location = context.location.clone();
+    let location = context.location;
     let span = context.span;
     let stats = &mut *context.stats;
 
@@ -165,7 +165,7 @@ fn transfer_assign_target(
                         "Assignment target local '{}' is not in the active function layout",
                         transfer_context.diagnostics.local_name(*local_id)
                     ),
-                    location.clone(),
+                    location,
                 ));
             };
 
@@ -174,7 +174,7 @@ fn transfer_assign_target(
                 layout,
                 state,
                 value,
-                location.clone(),
+                location,
                 value.span,
                 &transfer_context.diagnostics,
             )?;
@@ -238,7 +238,7 @@ fn transfer_assign_target(
                                 state: &*state,
                                 block_id,
                                 tracker,
-                                location: location.clone(),
+                                location,
                                 span: value.span,
                                 stats,
                                 actor_index_hint: Some(local_index),
@@ -299,7 +299,7 @@ fn transfer_assign_target(
                 state: &*state,
                 block_id,
                 tracker,
-                location: location.clone(),
+                location,
                 span,
                 stats,
                 actor_index_hint: Some(local_index),
@@ -377,7 +377,7 @@ fn transfer_assign_target(
                 layout,
                 state,
                 target,
-                location.clone(),
+                location,
                 span,
                 &transfer_context.diagnostics,
             )?;
@@ -387,7 +387,7 @@ fn transfer_assign_target(
                 state: &*state,
                 block_id,
                 tracker,
-                location: location.clone(),
+                location,
                 span,
                 stats,
                 actor_index_hint: place_root_local_index(layout, target),
@@ -509,7 +509,7 @@ fn direct_value_provenance_from_expression(
     state: &BorrowState,
     expression: &HirExpression,
     location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
+    _span: Option<SourceSpan>,
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<DirectValueProvenance>, BorrowCheckError> {
     // WHAT: a fallible success unwrap carries the success payload's alias roots through the
@@ -524,7 +524,7 @@ fn direct_value_provenance_from_expression(
                 state,
                 result,
                 location,
-                span,
+                _span,
                 diagnostics,
             );
         }
@@ -535,7 +535,7 @@ fn direct_value_provenance_from_expression(
                     layout,
                     state,
                     element,
-                    location.clone(),
+                    location,
                     element.span,
                     diagnostics,
                 )? {
@@ -666,7 +666,7 @@ fn record_shared_reads_in_place_indices(
         }
 
         HirPlace::Index { base, index } => {
-            record_shared_reads_in_place_indices(env, base, location.clone(), roots)?;
+            record_shared_reads_in_place_indices(env, base, location, roots)?;
             record_shared_reads_in_expression(env, index, location, roots)
         }
     }
@@ -688,7 +688,7 @@ fn record_shared_reads_in_expression(
 
         HirExpressionKind::VariantConstruct { fields, .. } => {
             for field in fields {
-                record_shared_reads_in_expression(env, &field.value, location.clone(), roots)?;
+                record_shared_reads_in_expression(env, &field.value, location, roots)?;
             }
         }
 
@@ -764,49 +764,49 @@ fn record_shared_reads_in_expression(
         }
 
         HirExpressionKind::BinOp { left, right, .. } => {
-            record_shared_reads_in_expression(env, left, location.clone(), roots)?;
-            record_shared_reads_in_expression(env, right, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, left, location, roots)?;
+            record_shared_reads_in_expression(env, right, location, roots)?;
         }
 
         HirExpressionKind::UnaryOp { operand, .. } => {
-            record_shared_reads_in_expression(env, operand, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, operand, location, roots)?;
         }
 
         HirExpressionKind::StructConstruct { fields, .. } => {
             for (_, value) in fields {
-                record_shared_reads_in_expression(env, value, location.clone(), roots)?;
+                record_shared_reads_in_expression(env, value, location, roots)?;
             }
         }
 
         HirExpressionKind::Collection(elements)
         | HirExpressionKind::TupleConstruct { elements } => {
             for element in elements {
-                record_shared_reads_in_expression(env, element, location.clone(), roots)?;
+                record_shared_reads_in_expression(env, element, location, roots)?;
             }
         }
         HirExpressionKind::MapLiteral(entries) => {
             for entry in entries {
-                record_shared_reads_in_expression(env, &entry.key, location.clone(), roots)?;
-                record_shared_reads_in_expression(env, &entry.value, location.clone(), roots)?;
+                record_shared_reads_in_expression(env, &entry.key, location, roots)?;
+                record_shared_reads_in_expression(env, &entry.value, location, roots)?;
             }
         }
         HirExpressionKind::TupleGet { tuple, .. } => {
-            record_shared_reads_in_expression(env, tuple, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, tuple, location, roots)?;
         }
 
         HirExpressionKind::Range { start, end } => {
-            record_shared_reads_in_expression(env, start, location.clone(), roots)?;
-            record_shared_reads_in_expression(env, end, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, start, location, roots)?;
+            record_shared_reads_in_expression(env, end, location, roots)?;
         }
 
         HirExpressionKind::FallibleUnwrapSuccess { result }
         | HirExpressionKind::FallibleUnwrapError { result }
         | HirExpressionKind::Cast { source: result, .. } => {
-            record_shared_reads_in_expression(env, result, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, result, location, roots)?;
         }
 
         HirExpressionKind::VariantPayloadGet { source, .. } => {
-            record_shared_reads_in_expression(env, source, location.clone(), roots)?;
+            record_shared_reads_in_expression(env, source, location, roots)?;
         }
     }
 
@@ -832,14 +832,8 @@ fn collect_expression_roots(
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
         HirExpressionKind::Load(place) => {
-            let roots = roots_for_place(
-                layout,
-                state,
-                place,
-                location.clone(),
-                expression.span,
-                diagnostics,
-            )?;
+            let roots =
+                roots_for_place(layout, state, place, location, expression.span, diagnostics)?;
             out.union_with(&roots);
 
             if let HirPlace::Index { index, .. } = place {
@@ -870,15 +864,7 @@ fn collect_expression_roots(
         }
 
         HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_roots(
-                layout,
-                state,
-                left,
-                out,
-                location.clone(),
-                left.span,
-                diagnostics,
-            )?;
+            collect_expression_roots(layout, state, left, out, location, left.span, diagnostics)?;
             collect_expression_roots(layout, state, right, out, location, right.span, diagnostics)?;
         }
 
@@ -901,7 +887,7 @@ fn collect_expression_roots(
                     state,
                     value,
                     out,
-                    location.clone(),
+                    location,
                     value.span,
                     diagnostics,
                 )?;
@@ -916,7 +902,7 @@ fn collect_expression_roots(
                     state,
                     element,
                     out,
-                    location.clone(),
+                    location,
                     element.span,
                     diagnostics,
                 )?;
@@ -929,7 +915,7 @@ fn collect_expression_roots(
                     state,
                     &entry.key,
                     out,
-                    location.clone(),
+                    location,
                     entry.key.span,
                     diagnostics,
                 )?;
@@ -938,34 +924,18 @@ fn collect_expression_roots(
                     state,
                     &entry.value,
                     out,
-                    location.clone(),
+                    location,
                     entry.value.span,
                     diagnostics,
                 )?;
             }
         }
         HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_roots(
-                layout,
-                state,
-                tuple,
-                out,
-                location.clone(),
-                tuple.span,
-                diagnostics,
-            )?;
+            collect_expression_roots(layout, state, tuple, out, location, tuple.span, diagnostics)?;
         }
 
         HirExpressionKind::Range { start, end } => {
-            collect_expression_roots(
-                layout,
-                state,
-                start,
-                out,
-                location.clone(),
-                start.span,
-                diagnostics,
-            )?;
+            collect_expression_roots(layout, state, start, out, location, start.span, diagnostics)?;
             collect_expression_roots(layout, state, end, out, location, end.span, diagnostics)?;
         }
 
@@ -997,7 +967,7 @@ fn collect_expression_roots(
                     state,
                     &field.value,
                     out,
-                    location.clone(),
+                    location,
                     field.value.span,
                     diagnostics,
                 )?;
@@ -1052,7 +1022,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     &entry.key,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
                 transfer_aggregate_child(
@@ -1061,7 +1031,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     &entry.value,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
             }
@@ -1075,7 +1045,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     element,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
             }
@@ -1088,7 +1058,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 left,
                 block_id,
                 current_order,
-                location.clone(),
+                location,
                 aggregate_context,
             )?;
             transfer_aggregate_expression_ownership(
@@ -1133,7 +1103,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                 start,
                 block_id,
                 current_order,
-                location.clone(),
+                location,
                 aggregate_context,
             )?;
             transfer_aggregate_expression_ownership(
@@ -1181,7 +1151,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     value,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
             }
@@ -1195,7 +1165,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     element,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
             }
@@ -1209,7 +1179,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     &field.value,
                     block_id,
                     current_order,
-                    location.clone(),
+                    location,
                     aggregate_context,
                 )?;
             }
@@ -1251,19 +1221,12 @@ fn transfer_aggregate_child(
         expression,
         block_id,
         current_order,
-        location.clone(),
+        location,
         aggregate_context,
     )?;
 
     if let HirExpressionKind::Load(place) = &expression.kind {
-        let roots = roots_for_place(
-            layout,
-            state,
-            place,
-            location.clone(),
-            expression.span,
-            diagnostics,
-        )?;
+        let roots = roots_for_place(layout, state, place, location, expression.span, diagnostics)?;
         if roots.is_empty() {
             return Ok(());
         }

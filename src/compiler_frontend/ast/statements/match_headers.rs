@@ -147,7 +147,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         name: capture_name,
         binding_path,
         inner_type_id,
-        span: pattern_span.clone(),
+        span: pattern_span,
         binding_span,
     };
 

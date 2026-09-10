@@ -100,10 +100,14 @@ impl IfHeaderClassification {
             return false;
         }
 
-        token_stream
-            .tokens
-            .get(delimiter_index + 1..=token_index)
-            .is_some_and(|tokens| !tokens.iter().any(|token| token.kind == TokenKind::Newline))
+        let (start, end) = if token_index <= delimiter_index {
+            (token_index, delimiter_index)
+        } else {
+            (delimiter_index, token_index)
+        };
+        token_stream.tokens[start..=end]
+            .iter()
+            .all(|token| token.kind != TokenKind::Newline)
     }
 
     /// Returns true when `|` is the raw next token after `is`.

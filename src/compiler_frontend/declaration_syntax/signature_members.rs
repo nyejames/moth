@@ -295,7 +295,7 @@ pub fn parse_signature_members_syntax(
             TokenKind::This if member_context == SignatureMemberContext::FunctionParameter => {
                 ensure_member_slot(expecting_member, token_stream)?;
 
-                let this_id = string_table.intern("This");
+                let this_id = string_table.intern("this");
                 let member = parse_signature_member_syntax(
                     token_stream,
                     owner_path.append(this_id),
@@ -474,13 +474,13 @@ fn parse_signature_member_syntax(
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_span = current_source_span(token_stream);
     if !allow_reserved_this && let Some(name_id) = full_name.name() {
-        ensure_not_keyword_shadow_identifier(name_id, member_span.clone(), string_table)?;
+        ensure_not_keyword_shadow_identifier(name_id, member_span, string_table)?;
     }
 
     if let Some(name_id) = full_name.name()
         && let Some(warning) = naming_warning_for_identifier(
             name_id,
-            member_span.clone(),
+            member_span,
             IdentifierNamingKind::ValueLike,
             string_table,
         )
@@ -822,13 +822,12 @@ fn missing_return_type_after_arrow(
     reason: InvalidFunctionSignatureReason,
 ) -> Option<CompilerDiagnostic> {
     match token_stream.current_token_kind() {
-        TokenKind::Colon | TokenKind::Newline | TokenKind::End | TokenKind::Eof => Some(
-            CompilerDiagnostic::invalid_function_signature(
+        TokenKind::Colon | TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
+            Some(CompilerDiagnostic::invalid_function_signature(
                 reason,
                 current_source_span(token_stream),
-            )
-            .into(),
-        ),
+            ))
+        }
         _ => None,
     }
 }

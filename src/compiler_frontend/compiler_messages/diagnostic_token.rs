@@ -346,10 +346,7 @@ impl DiagnosticToken {
     pub(crate) fn char_value(self) -> char {
         // A DiagnosticToken created from TokenKind always carries a valid scalar value. The
         // replacement fallback keeps a corrupt retained record renderable without panicking.
-        match char::from_u32(self.data) {
-            Some(value) => value,
-            None => '\u{FFFD}',
-        }
+        char::from_u32(self.data).unwrap_or('\u{FFFD}')
     }
 
     pub(crate) fn bool_value(self) -> bool {

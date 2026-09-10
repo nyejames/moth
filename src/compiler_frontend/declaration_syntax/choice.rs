@@ -230,7 +230,7 @@ pub(crate) fn parse_choice_shell(
                                 None,
                                 None,
                                 vec![],
-                                current_span.clone(),
+                                current_span,
                             )
                             .into());
                         }

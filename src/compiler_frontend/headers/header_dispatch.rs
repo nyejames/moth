@@ -86,6 +86,7 @@ pub(super) fn create_header(
     span_builder: &mut ExtendedSpanBuilder,
 ) -> HeaderDispatchResult<Header> {
     let name_span = SourceSpan::new(token_stream.file_id, declaration_token.span);
+    let declaration_order = token_stream.index;
     let Some(declaration_name) = full_name.name() else {
         return Err(internal_header_dispatch_error(
             "Header declaration path is missing its declaration name.",
@@ -167,7 +168,8 @@ pub(super) fn create_header(
                 name: declaration_name,
                 span: name_span,
             };
-            let incompatibility = parse_trait_incompatibility(token_stream, subject, context)?;
+            let incompatibility =
+                parse_trait_incompatibility(token_stream, subject, declaration_order, context)?;
             kind = HeaderKind::TraitIncompatibility { incompatibility };
         } else if peek == Some(TokenKind::Colon) {
             ensure_trait_name_is_all_caps(declaration_name, Some(name_span), context.string_table)?;
@@ -180,6 +182,7 @@ pub(super) fn create_header(
                 token_stream,
                 declaration_token,
                 declaration_name,
+                declaration_order,
                 context,
                 span_builder,
             )?;

@@ -470,9 +470,13 @@ fn parse_ordinary_quoted_literal(
         ));
     };
 
+    let resolver = span_builder.resolver();
+    let literal_range = literal.span.resolve_with(resolver);
+    let eof_range = eof.span.resolve_with(resolver);
     if !matches!(module_start.kind, TokenKind::ModuleStart)
         || !matches!(eof.kind, TokenKind::Eof)
-        || literal.span == eof.span
+        || literal_range.start() != 0
+        || literal_range.end() != eof_range.end()
     {
         return Err(malformed_quoted_literal_error(
             value,
@@ -923,43 +927,43 @@ pub(crate) enum BuildConfigContractConflictReason {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BuildConfigResolutionError {
     SourceContractConflict {
-        first: BuildConfigContractFact,
-        conflicting: BuildConfigContractFact,
+        first: Box<BuildConfigContractFact>,
+        conflicting: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     DuplicateProjectContract {
-        first: BuildConfigContractFact,
-        conflicting: BuildConfigContractFact,
+        first: Box<BuildConfigContractFact>,
+        conflicting: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     ProjectSourceContractConflict {
-        project: BuildConfigContractFact,
-        source: BuildConfigContractFact,
+        project: Box<BuildConfigContractFact>,
+        source: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     FixedProjectSourceTypeMismatch {
-        fixed: BuildConfigContractFact,
-        source: BuildConfigContractFact,
+        fixed: Box<BuildConfigContractFact>,
+        source: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     DefaultTypeMismatch {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
         provided: PrimitiveBuildInputType,
     },
     ValueTypeMismatch {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
         provided: PrimitiveBuildInputType,
         value_location: Option<BuildConfigValueLocation>,
     },
     MissingRequiredValue {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
     },
     /// A direct project contract reached the barrier without its folded provider payload.
     ///
     /// This is an internal handoff invariant: direct project config selection belongs exclusively
     /// to the config-folding service and must never fall back to boundary resolution.
     DirectProjectProviderMissing {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
     },
     UnknownExplicitInput {
         input: BuildConfigInputEntry,
@@ -1038,7 +1042,7 @@ impl BuildConfigResolutionError {
             }
             | Self::DuplicateProjectContract {
                 first, conflicting, ..
-            } => Some((first, conflicting)),
+            } => Some((first.as_ref(), conflicting.as_ref())),
             Self::ProjectSourceContractConflict {
                 project, source, ..
             }
@@ -1046,7 +1050,7 @@ impl BuildConfigResolutionError {
                 fixed: project,
                 source,
                 ..
-            } => Some((project, source)),
+            } => Some((project.as_ref(), source.as_ref())),
             Self::DefaultTypeMismatch { .. }
             | Self::ValueTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
@@ -1071,7 +1075,7 @@ impl BuildConfigResolutionError {
             }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
-            } => Some(source),
+            } => Some(source.as_ref()),
             Self::SourceContractConflict { .. }
             | Self::DuplicateProjectContract { .. }
             | Self::UnknownExplicitInput { .. } => None,
@@ -1250,8 +1254,8 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                     && let Some(reason) = contract_conflict_reason(fixed, fact, false)
                 {
                     return Err(BuildConfigResolutionError::FixedProjectSourceTypeMismatch {
-                        fixed: (**fixed).clone(),
-                        source: fact.clone(),
+                        fixed: Box::new((**fixed).clone()),
+                        source: Box::new(fact.clone()),
                         reason,
                     });
                 }
@@ -1259,8 +1263,8 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                     && let Some(reason) = contract_conflict_reason(project, fact, true)
                 {
                     return Err(BuildConfigResolutionError::ProjectSourceContractConflict {
-                        project: (**project).clone(),
-                        source: fact.clone(),
+                        project: Box::new((**project).clone()),
+                        source: Box::new(fact.clone()),
                         reason,
                     });
                 }
@@ -1319,8 +1323,8 @@ fn collect_transient_source_facts<'a>(
             && let Some(reason) = contract_conflict_reason(first, fact, true)
         {
             return Err(BuildConfigResolutionError::SourceContractConflict {
-                first: first.clone(),
-                conflicting: fact.clone(),
+                first: Box::new(first.clone()),
+                conflicting: Box::new(fact.clone()),
                 reason,
             });
         }
@@ -1404,8 +1408,8 @@ fn collect_source_facts(
             let reason = contract_conflict_reason(first, fact, true);
             if let Some(reason) = reason {
                 return Err(BuildConfigResolutionError::SourceContractConflict {
-                    first: first.clone(),
-                    conflicting: fact.clone(),
+                    first: Box::new(first.clone()),
+                    conflicting: Box::new(fact.clone()),
                     reason,
                 });
             }
@@ -1429,8 +1433,8 @@ fn collect_project_facts(
                 },
             );
             return Err(BuildConfigResolutionError::DuplicateProjectContract {
-                first: first.clone(),
-                conflicting: fact.clone(),
+                first: Box::new(first.clone()),
+                conflicting: Box::new(fact.clone()),
                 reason,
             });
         }
@@ -1449,7 +1453,7 @@ fn validate_fact_defaults<'a>(
                 .accepts_primitive(default.primitive_type())
         {
             return Err(BuildConfigResolutionError::DefaultTypeMismatch {
-                contract: fact.clone(),
+                contract: Box::new(fact.clone()),
                 provided: default.primitive_type(),
             });
         }
@@ -1478,8 +1482,8 @@ fn validate_project_source_compatibility(
             && let Some(reason) = contract_conflict_reason(fixed, source, false)
         {
             return Err(BuildConfigResolutionError::FixedProjectSourceTypeMismatch {
-                fixed: fixed.clone(),
-                source: source.clone(),
+                fixed: Box::new(fixed.clone()),
+                source: Box::new(source.clone()),
                 reason,
             });
         }
@@ -1488,8 +1492,8 @@ fn validate_project_source_compatibility(
             && let Some(reason) = contract_conflict_reason(project, source, true)
         {
             return Err(BuildConfigResolutionError::ProjectSourceContractConflict {
-                project: project.clone(),
-                source: source.clone(),
+                project: Box::new(project.clone()),
+                source: Box::new(source.clone()),
                 reason,
             });
         }
@@ -1548,7 +1552,7 @@ fn resolve_one_build_config_value(
     if let Some(direct_project) = direct_project {
         let provider = direct_project.resolved_provider().ok_or_else(|| {
             BuildConfigResolutionError::DirectProjectProviderMissing {
-                contract: direct_project.clone(),
+                contract: Box::new(direct_project.clone()),
             }
         })?;
         return Ok(resolved_value_from_provider(direct_project, provider));
@@ -1559,13 +1563,13 @@ fn resolve_one_build_config_value(
         // not user input; preserving a typed error is preferable to panicking if map assembly
         // changes that invariant.
         BuildConfigResolutionError::MissingRequiredValue {
-            contract: BuildConfigContractFact::new(
+            contract: Box::new(BuildConfigContractFact::new(
                 name.clone(),
                 BuildInputType::Primitive(PrimitiveBuildInputType::String),
                 true,
                 None,
                 None,
-            ),
+            )),
         }
     })?;
 
@@ -1573,7 +1577,7 @@ fn resolve_one_build_config_value(
         let value_type = input.value().primitive_type();
         if !contract.value_type().accepts_primitive(value_type) {
             return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: contract.clone(),
+                contract: Box::new(contract.clone()),
                 provided: value_type,
                 value_location: Some(input.location().clone()),
             });
@@ -1587,7 +1591,7 @@ fn resolve_one_build_config_value(
         let value_type = value.primitive_type();
         if !contract.value_type().accepts_primitive(value_type) {
             return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: contract.clone(),
+                contract: Box::new(contract.clone()),
                 provided: value_type,
                 value_location: None,
             });
@@ -1605,7 +1609,7 @@ fn resolve_one_build_config_value(
         )
     } else if contract.required() {
         return Err(BuildConfigResolutionError::MissingRequiredValue {
-            contract: contract.clone(),
+            contract: Box::new(contract.clone()),
         });
     } else {
         (None, BuildConfigValueOrigin::DeclarationDefault, None)

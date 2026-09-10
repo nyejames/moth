@@ -128,10 +128,8 @@ impl<'a> HirBuilder<'a> {
         )?;
         self.emit_result_carrier_error_return(
             branch.error_block,
-            result_carrier.result_local,
-            result_carrier.carrier_type,
+            &result_carrier,
             current_error_type,
-            result_carrier.err_type,
             span,
             *span,
         )?;
@@ -196,23 +194,25 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn emit_result_carrier_error_return(
         &mut self,
         error_block: BlockId,
-        result_local: LocalId,
-        carrier_type: TypeId,
+        result_carrier: &EmittedFallibleCarrier,
         expected_error_type: TypeId,
-        err_type: TypeId,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         self.set_current_block(error_block, span)?;
         let error_region = self.current_region_or_error(span)?;
-        let error_result =
-            self.make_local_load_expression(result_local, carrier_type, &None, error_region);
+        let error_result = self.make_local_load_expression(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            &None,
+            error_region,
+        );
         let error_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapError {
                 result: Box::new(error_result),
             },
-            err_type,
+            result_carrier.err_type,
             ValueKind::RValue,
             error_region,
         );

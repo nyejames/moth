@@ -197,13 +197,16 @@ pub(super) struct CollectedReachableInputs {
 ///      a diagnosed discovery failure.
 #[derive(Debug)]
 pub(super) struct CollectReachableInputsError {
-    failure: PremergeFailure,
-    source_database: Option<SourceDatabase>,
+    failure: Box<PremergeFailure>,
+    source_database: Option<Box<SourceDatabase>>,
 }
 impl CollectReachableInputsError {
-    /// Consume into the typed failure and its optional finished source owner.
     pub(super) fn into_parts(self) -> (PremergeFailure, Option<SourceDatabase>) {
-        (self.failure, self.source_database)
+        let Self {
+            failure,
+            source_database,
+        } = self;
+        (*failure, source_database.map(|database| *database))
     }
 }
 /// One resolved dependency edge ready for direct insertion into the project module graph.
@@ -295,13 +298,13 @@ pub(super) fn collect_reachable_input_files(
         Err(SourceDiscoveryError::Finalized(boxed)) => {
             let (failure, source_database) = boxed.into_parts();
             return Err(CollectReachableInputsError {
-                failure,
-                source_database: Some(source_database),
+                failure: Box::new(failure),
+                source_database: Some(Box::new(source_database)),
             });
         }
         Err(other) => {
             return Err(CollectReachableInputsError {
-                failure: other.into_failure(string_table),
+                failure: Box::new(other.into_failure(string_table)),
                 source_database: None,
             });
         }

@@ -266,17 +266,12 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
             before,
             "before".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let after_node = builder.push_text_node(
-            after,
-            "after".len(),
-            TemplateSegmentOrigin::Body,
-            location.clone(),
-        );
-        let root =
-            builder.push_sequence_node(vec![before_node, slot_node, after_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let after_node =
+            builder.push_text_node(after, "after".len(), TemplateSegmentOrigin::Body, location);
+        let root = builder.push_sequence_node(vec![before_node, slot_node, after_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -332,23 +327,18 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
             before,
             "before".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let after_node = builder.push_text_node(
-            after,
-            "after".len(),
-            TemplateSegmentOrigin::Body,
-            location.clone(),
-        );
-        let root =
-            builder.push_sequence_node(vec![before_node, slot_node, after_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let after_node =
+            builder.push_text_node(after, "after".len(), TemplateSegmentOrigin::Body, location);
+        let root = builder.push_sequence_node(vec![before_node, slot_node, after_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
         let occurrence = match &store.get_node(slot_node).expect("child slot exists").kind {
             TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
@@ -365,9 +355,9 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
                 TemplateTirPhase::Composed,
                 TemplateViewContext::default(),
             ),
-            location.clone(),
+            location,
         );
-        let root = builder.push_sequence_node(vec![child_node], location.clone());
+        let root = builder.push_sequence_node(vec![child_node], location);
         builder.finish_template(
             root,
             Style::default(),
@@ -398,26 +388,22 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
 
     let build_branch_template = |store: &mut TemplateIrStore, selected: bool| {
         let mut builder = TemplateIrBuilder::new(store);
-        let selected_slot = builder.push_slot_node(SlotKey::Default, location.clone());
-        let fallback_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let selected_slot = builder.push_slot_node(SlotKey::Default, location);
+        let fallback_slot = builder.push_slot_node(SlotKey::Default, location);
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(selected)),
             selected_slot,
             None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(
-            vec![branch],
-            Some(fallback_slot),
-            None,
-            location.clone(),
-        );
+        let root =
+            builder.push_branch_chain_node(vec![branch], Some(fallback_slot), None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::SlotInsert(SlotKey::Default),
             TemplateIrSummary::empty(),
-            location.clone(),
+            location,
         );
         let selected_occurrence = match &store
             .get_node(selected_slot)
@@ -463,7 +449,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
     let location = None;
     let (template_id, occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let body = builder.push_slot_node(SlotKey::Default, location.clone());
+        let body = builder.push_slot_node(SlotKey::Default, location);
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: None,
@@ -476,7 +462,7 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
                 end_kind: RangeEndKind::Exclusive,
             }),
         };
-        let root = builder.push_loop_node(header, body, None, location.clone());
+        let root = builder.push_loop_node(header, body, None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -511,14 +497,14 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
 
     let (parent_template_id, wrapper_occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let wrapper_slot = builder.push_slot_node(named_key, location.clone());
-        let wrapper_root = builder.push_sequence_node(vec![wrapper_slot], location.clone());
+        let wrapper_slot = builder.push_slot_node(named_key, location);
+        let wrapper_root = builder.push_sequence_node(vec![wrapper_slot], location);
         let wrapper_template_id = builder.finish_template(
             wrapper_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            location.clone(),
+            location,
         );
         let wrapper_occurrence = match &builder
             .store
@@ -534,9 +520,9 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
             child_text,
             "child".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let child_root = builder.push_sequence_node(vec![child_node], location.clone());
+        let child_root = builder.push_sequence_node(vec![child_node], location);
         let parent_template_id = builder.finish_template(
             child_root,
             Style::default(),
@@ -576,7 +562,7 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
     let location = None;
     let (template_id, body_occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let body_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let body_slot = builder.push_slot_node(SlotKey::Default, location);
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: None,
@@ -597,18 +583,17 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
             string_table.intern("<"),
             1,
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let close = builder.push_text_node(
             string_table.intern(">"),
             1,
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let aggregate_wrapper =
-            builder.push_sequence_node(vec![open, aggregate_output, close], location.clone());
-        let root =
-            builder.push_loop_node(header, body_slot, Some(aggregate_wrapper), location.clone());
+            builder.push_sequence_node(vec![open, aggregate_output, close], location);
+        let root = builder.push_loop_node(header, body_slot, Some(aggregate_wrapper), location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -649,20 +634,20 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 
     let false_branch_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let hidden_slot = builder.push_slot_node(SlotKey::Default, location.clone());
+        let hidden_slot = builder.push_slot_node(SlotKey::Default, location);
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             hidden_slot,
             None,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, location.clone());
+        let root = builder.push_branch_chain_node(vec![branch], None, None, location);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::SlotInsert(SlotKey::Default),
             TemplateIrSummary::empty(),
-            location.clone(),
+            location,
         )
     };
     assert!(
@@ -671,7 +656,7 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 
     let zero_iteration_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let body = builder.push_slot_node(SlotKey::Default, location.clone());
+        let body = builder.push_slot_node(SlotKey::Default, location);
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: None,
@@ -684,7 +669,7 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
                 end_kind: RangeEndKind::Exclusive,
             }),
         };
-        let root = builder.push_loop_node(header, body, None, location.clone());
+        let root = builder.push_loop_node(header, body, None, location);
         builder.finish_template(
             root,
             Style::default(),

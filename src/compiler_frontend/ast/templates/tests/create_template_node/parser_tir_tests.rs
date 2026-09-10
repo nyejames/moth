@@ -1192,7 +1192,7 @@ fn build_template_with_direct_tir_root(
         let mut store = store.borrow_mut();
         let (root, summary) = build_root(&mut store, string_table);
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.finish_template(root, style.clone(), kind.clone(), summary, span.clone())
+        builder.finish_template(root, style.clone(), kind.clone(), summary, span)
     };
     let context = TemplateViewContext::default();
     Template {
@@ -1227,16 +1227,16 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         &context,
         TemplateType::String,
         style.clone(),
-        span.clone(),
+        span,
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
-                Expression::int(42, span.clone(), ValueMode::ImmutableOwned),
+                Expression::int(42, span, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                span.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], span.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1295,7 +1295,7 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         source_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        span.clone(),
+        span,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
@@ -1309,16 +1309,16 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         &context,
         TemplateType::String,
         style.clone(),
-        span.clone(),
+        span,
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
                 expression,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                span.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], span.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1407,7 +1407,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         &context,
         TemplateType::String,
         style.clone(),
-        span.clone(),
+        span,
         move |store, string_table| {
             let text = string_table.intern("reactive body");
             let byte_len = "reactive body".len();
@@ -1417,9 +1417,9 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
                 byte_len,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                span.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], span.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 estimated_output_bytes: byte_len,
                 text_node_count: 1,

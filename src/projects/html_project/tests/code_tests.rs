@@ -125,6 +125,7 @@ fn code_formatter_wraps_opaque_pieces_inside_the_code_block() {
                 text: text_id,
                 span: None,
             }),
+            FormatterInputPiece::Opaque(opaque),
         ],
     };
 

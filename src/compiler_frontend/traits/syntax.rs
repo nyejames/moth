@@ -18,11 +18,14 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRema
 pub struct TraitDeclarationSyntax {
     pub name: StringId,
     pub name_span: SourceSpan,
+    /// Token-stream order of the declaration name inside its owning source file.
+    ///
+    /// This preserves the source-order rule for same-file incompatibility references without
+    /// retaining line/column coordinates in the semantic trait record.
+    pub source_order: usize,
     pub requirements: Vec<TraitRequirementSyntax>,
-    #[allow(dead_code)] // Retained for deferred trait declaration diagnostics.
     pub span: SourceSpan,
 }
-
 /// One method requirement inside a trait block.
 #[derive(Clone, Debug)]
 pub struct TraitRequirementSyntax {
@@ -65,12 +68,14 @@ pub struct TraitConformanceSyntax {
 ///
 /// WHAT: records a source-authored mutual exclusion between the subject trait and one or more
 ///      other traits. No concrete type may explicitly conform to both sides of the relation.
-/// WHY: incompatibility declarations are bodyless top-level metadata discovered at the header
-///      stage; semantic resolution and conflict recording happen during AST environment
-///      construction after all trait definitions are registered.
+/// WHY: incompatibility declarations are top-level metadata discovered at the header stage; semantic
+///      resolution and conflict recording happen during AST environment construction after all trait
+///      definitions are registered.
 #[derive(Clone, Debug)]
 pub struct TraitIncompatibilitySyntax {
     pub subject: TraitReferenceSyntax,
+    /// Token-stream order of the relation's subject inside its owning source file.
+    pub source_order: usize,
     pub incompatible_traits: Vec<TraitReferenceSyntax>,
 }
 

@@ -1879,10 +1879,10 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
             text_id,
             "text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let root = builder.push_sequence_node(vec![text_node, slot_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let root = builder.push_sequence_node(vec![text_node, slot_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -1938,10 +1938,10 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
             text_id,
             "formatted text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let root = builder.push_sequence_node(vec![text_node, slot_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let root = builder.push_sequence_node(vec![text_node, slot_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -2021,33 +2021,29 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
             branch_text,
             "branch body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let fallback_body = builder.push_text_node(
             fallback_text,
             "fallback body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::reference_with_type_id(
                 InternedPath::from_single_str("show_branch", &mut string_table),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
             branch_body,
-            location.clone(),
+            location,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(
-            vec![branch],
-            Some(fallback_body),
-            None,
-            location.clone(),
-        );
+        let root =
+            builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, location);
         builder.finish_template(
             root,
             Style::default(),
@@ -2106,32 +2102,30 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         let mut store = template_ir_store.borrow_mut();
         let aggregate_output = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
-            location.clone(),
+            location,
         ));
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
             loop_text,
             "loop body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let open =
-            builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location.clone());
-        let close =
-            builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location.clone());
+        let open = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location);
+        let close = builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location);
         let aggregate_wrapper =
-            builder.push_sequence_node(vec![open, aggregate_output, close], location.clone());
+            builder.push_sequence_node(vec![open, aggregate_output, close], location);
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(Expression::reference_with_type_id(
                 InternedPath::from_single_str("keep_looping", &mut string_table),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
         };
-        let root = builder.push_loop_node(header, body, Some(aggregate_wrapper), location.clone());
+        let root = builder.push_loop_node(header, body, Some(aggregate_wrapper), location);
         builder.finish_template(
             root,
             Style::default(),
@@ -2353,32 +2347,32 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let unselected_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(unselected_text, location.clone(), ValueMode::ImmutableOwned)
+            Expression::string_slice(unselected_text, location, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                     unselected_member,
                 )),
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
         let selected_node = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 selected_structural_text,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )),
             unselected_node,
-            location.clone(),
+            location,
             builder.store.next_expression_site_id(),
         );
         let root =
@@ -2920,15 +2914,15 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
                 expression,
                 TemplateSegmentOrigin::Body,
                 subscription,
-                location.clone(),
+                location,
             );
-            let root = builder.push_sequence_node(vec![dynamic], location.clone());
+            let root = builder.push_sequence_node(vec![dynamic], location);
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                location.clone(),
+                location,
             );
             Expression::template(
                 template_with_reference(
@@ -3733,23 +3727,23 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
         let mut store = store_handle.borrow_mut();
 
         let mut fill_builder = TemplateIrBuilder::new(&mut store);
-        let fill_root = fill_builder.push_sequence_node(Vec::new(), location.clone());
+        let fill_root = fill_builder.push_sequence_node(Vec::new(), location);
         let fill_template_id = fill_builder.finish_template(
             fill_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
 
         let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
-        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location.clone());
+        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location);
         let template_id = wrapper_builder.finish_template(
             slot_node,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
 
         (template_id, fill_template_id)
@@ -3833,7 +3827,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
         PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
             .expect("test resource path should be portable"),
     );
-    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location.clone());
+    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location);
     let before = producer_strings.intern("before");
     let after = producer_strings.intern("after");
     let structural_expression = Expression::new(
@@ -3845,7 +3839,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
                 ConstStringPiece::Text(after),
             ],
         },
-        location.clone(),
+        location,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -3858,15 +3852,15 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
             structural_expression,
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
-        let root = builder.push_sequence_node(vec![dynamic_node], location.clone());
+        let root = builder.push_sequence_node(vec![dynamic_node], location);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         )
     };
     let template = template_with_reference(
@@ -3875,7 +3869,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location.clone(),
+        location,
     );
 
     let projected = project_const_template_value(

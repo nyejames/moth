@@ -296,7 +296,7 @@ impl PremergeDiagnosticBatch {
         CompilerMessages {
             diagnostics: bag.into_diagnostics(),
             infrastructure_error: None,
-            string_table,
+            string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts,

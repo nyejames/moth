@@ -156,8 +156,7 @@ fn validate_requirement_signature(
             },
             context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
-        )
-        .into());
+        ));
     }
 
     validate_parameters(requirement, trait_this_type, method, context)?;
@@ -189,8 +188,7 @@ fn validate_parameters(
             },
             context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
-        )
-        .into());
+        ));
     }
 
     for (index, (required, actual)) in requirement
@@ -209,8 +207,7 @@ fn validate_parameters(
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
-            )
-            .into());
+            ));
         }
 
         let expected_type =
@@ -227,8 +224,7 @@ fn validate_parameters(
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
-            )
-            .into());
+            ));
         }
     }
 
@@ -253,8 +249,7 @@ fn validate_returns(
             },
             context.conformance_span,
             requirement_and_method_labels(requirement, method.entry, context.string_table),
-        )
-        .into());
+        ));
     }
 
     for (index, (required, actual)) in requirement.returns.iter().zip(method_returns).enumerate() {
@@ -268,8 +263,7 @@ fn validate_returns(
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
-            )
-            .into());
+            ));
         }
 
         let Some(actual_type) = return_type_id(actual) else {
@@ -288,8 +282,7 @@ fn validate_returns(
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
-            )
-            .into());
+            ));
         };
 
         let expected_type =
@@ -306,8 +299,7 @@ fn validate_returns(
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),
-            )
-            .into());
+            ));
         }
     }
 

@@ -233,6 +233,7 @@ impl ProjectCompilation {
             source_packages,
             resource_inputs,
             transient_batches: _,
+            project_source_database: _,
         } = frontend;
         Self::from_successful_boundaries(project, source_packages, resource_inputs)
     }
@@ -1695,7 +1696,7 @@ pub fn build_project(
     let project = match project_result {
         Ok(project) => project,
         Err(mut compiler_messages) => {
-            compiler_messages.string_table = string_table;
+            compiler_messages.string_table = Box::new(string_table);
             attach_source_database(&mut compiler_messages, project_source_files.as_ref());
             return Err(compiler_messages);
         }

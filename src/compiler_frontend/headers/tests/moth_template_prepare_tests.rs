@@ -1251,13 +1251,18 @@ fn same_directory_root_constants_collide_with_html_constants() {
             crate::compiler_frontend::compiler_messages::ImportDiagnosticKind::ImportNameCollision
         )
     ));
-    assert_eq!(diagnostic.labels.len(), 2);
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "collision primary span should remain separate from secondary labels"
+    );
+    assert_eq!(diagnostic.labels.len(), 1);
     assert!(
         diagnostic
             .labels
             .iter()
             .any(|label| label.style == DiagnosticLabelStyle::Secondary)
     );
+
     assert!(
         diagnostic.labels.iter().all(|label| label.span.is_some()),
         "collision labels should retain exact source spans"
@@ -1645,15 +1650,23 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
         ])
         .expect("module AST should build");
 
-    let bd_function_nodes: Vec<_> = ast
+    // The active module root may legitimately contribute its implicit start node; only a function
+    // scoped under the imported template would violate the template's no-runtime contract.
+    let template_function_nodes: Vec<_> = ast
         .nodes
         .iter()
-        .filter(|node| matches!(node.kind, NodeKind::Function(..)))
+        .filter(|node| {
+            matches!(&node.kind, NodeKind::Function(..))
+                && node
+                    .scope
+                    .to_portable_string(&ast_string_table)
+                    .starts_with("src/intro.mtf")
+        })
         .collect();
 
     assert!(
-        bd_function_nodes.is_empty(),
-        ".mtf file should not produce any AST function nodes"
+        template_function_nodes.is_empty(),
+        "imported .mtf file should not produce any AST function nodes"
     );
 
     fixture.assert_ast_contains_moth_template_content(&ast, &ast_string_table, "src/intro.mtf");

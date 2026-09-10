@@ -50,12 +50,12 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
         vec![node(
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -70,11 +70,11 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
                 vec![],
                 vec![],
                 FallibleExpressionHandling::Propagate,
-                location.clone(),
+                location,
             )),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -134,12 +134,12 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         vec![node(
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -149,7 +149,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         vec![builtin_type_ids::STRING],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        location.clone(),
+        location,
     );
 
     let forward_function = function_node(
@@ -161,11 +161,8 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![propagated_call]),
-            location.clone(),
-        )],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![propagated_call]), location)],
+        location,
     );
 
     let start_function = function_node(
@@ -174,8 +171,8 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -262,7 +259,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 source_input.clone(),
                 builtin_type_ids::STRING,
                 false,
-                location.clone(),
+                location,
             )],
             returns: vec![
                 success_return_slot(builtin_type_ids::STRING),
@@ -273,12 +270,12 @@ fn direct_return_result_propagation_allows_alias_success_return() {
             NodeKind::Return(vec![inferred_type_reference_expr(
                 source_input,
                 builtin_type_ids::STRING,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -288,16 +285,16 @@ fn direct_return_result_propagation_allows_alias_success_return() {
             inferred_type_reference_expr(
                 forward_input.clone(),
                 builtin_type_ids::STRING,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             ),
             CallAccessMode::Shared,
-            location.clone(),
+            location,
         )],
         vec![builtin_type_ids::STRING],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        location.clone(),
+        location,
     );
 
     let forward_function = function_node(
@@ -307,18 +304,15 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 forward_input,
                 builtin_type_ids::STRING,
                 false,
-                location.clone(),
+                location,
             )],
             returns: vec![
                 success_return_slot(builtin_type_ids::STRING),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![propagated_call]),
-            location.clone(),
-        )],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![propagated_call]), location)],
+        location,
     );
 
     let start_function = function_node(
@@ -327,8 +321,8 @@ fn direct_return_result_propagation_allows_alias_success_return() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -398,12 +392,12 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         vec![node(
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -413,7 +407,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         vec![builtin_type_ids::STRING],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        location.clone(),
+        location,
     );
 
     let forward_function = function_node(
@@ -431,19 +425,19 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
                     value_name.clone(),
                     propagated_call,
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::STRING,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 )]),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -452,8 +446,8 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -544,14 +538,14 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             NodeKind::Return(vec![
                 Expression::string_slice(
                     string_table.intern("ok"),
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableOwned,
                 ),
-                Expression::int(2, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(2, location, ValueMode::ImmutableOwned),
             ]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -561,7 +555,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         vec![builtin_type_ids::STRING, builtin_type_ids::INT],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        location.clone(),
+        location,
     );
 
     let forward_function = function_node(
@@ -583,39 +577,39 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                             builtin_type_ids::STRING,
                             ValueMode::ImmutableOwned,
                             MultiBindTargetKind::Declaration,
-                            location.clone(),
+                            location,
                         ),
                         multi_bind_target(
                             count_id.clone(),
                             builtin_type_ids::INT,
                             ValueMode::ImmutableOwned,
                             MultiBindTargetKind::Declaration,
-                            location.clone(),
+                            location,
                         ),
                     ],
                     value: propagated_call,
                 },
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::Return(vec![
                     inferred_type_reference_expr(
                         first_id,
                         builtin_type_ids::STRING,
-                        location.clone(),
+                        location,
                         ValueMode::ImmutableReference,
                     ),
                     inferred_type_reference_expr(
                         count_id,
                         builtin_type_ids::INT,
-                        location.clone(),
+                        location,
                         ValueMode::ImmutableReference,
                     ),
                 ]),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -624,8 +618,8 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -721,12 +715,12 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         vec![node(
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let consume_function = function_node(
@@ -736,7 +730,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 consume_input.clone(),
                 builtin_type_ids::STRING,
                 false,
-                location.clone(),
+                location,
             )],
             returns: vec![success_return_slot(builtin_type_ids::STRING)],
         },
@@ -744,12 +738,12 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             NodeKind::Return(vec![inferred_type_reference_expr(
                 consume_input,
                 builtin_type_ids::STRING,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let mut expression_types = TypeEnvironment::new();
@@ -759,18 +753,18 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         vec![builtin_type_ids::STRING],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
-        location.clone(),
+        location,
     );
     let outer_call = Expression::function_call_with_typed_arguments(
         consume_name.clone(),
         vec![CallArgument::positional(
             propagated_call,
             CallAccessMode::Shared,
-            location.clone(),
+            location,
         )],
         vec![builtin_type_ids::STRING],
         &mut expression_types,
-        location.clone(),
+        location,
     );
 
     let forward_function = function_node(
@@ -785,19 +779,19 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         vec![
             node(
                 NodeKind::VariableDeclaration(make_test_variable(value_name.clone(), outer_call)),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::STRING,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 )]),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -806,8 +800,8 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -904,12 +898,12 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         vec![node(
             NodeKind::Return(vec![Expression::int(
                 41,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let runtime_value = runtime_expr(
@@ -918,17 +912,13 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 can_fail_name,
                 vec![builtin_type_ids::INT],
                 FallibleHandling::Propagate,
-                location.clone(),
+                location,
             ),
-            runtime_operand_item(Expression::int(
-                1,
-                location.clone(),
-                ValueMode::ImmutableOwned,
-            )),
-            runtime_operator_item(Operator::Add, location.clone()),
+            runtime_operand_item(Expression::int(1, location, ValueMode::ImmutableOwned)),
+            runtime_operator_item(Operator::Add, location),
         ],
         builtin_type_ids::INT,
-        location.clone(),
+        location,
         ValueMode::MutableOwned,
     );
 
@@ -947,19 +937,19 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                     value_name.clone(),
                     runtime_value,
                 )),
-                location.clone(),
+                location,
             ),
             node(
                 NodeKind::Return(vec![inferred_type_reference_expr(
                     value_name,
                     builtin_type_ids::INT,
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableReference,
                 )]),
-                location.clone(),
+                location,
             ),
         ],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -968,8 +958,8 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -1041,12 +1031,12 @@ fn return_bang_lowers_to_explicit_error_terminator() {
         vec![node(
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -1055,8 +1045,8 @@ fn return_bang_lowers_to_explicit_error_terminator() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -1101,12 +1091,12 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
         vec![node(
             NodeKind::Return(vec![Expression::string_slice(
                 string_table.intern("ok"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -1115,8 +1105,8 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), location)],
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -1165,12 +1155,12 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
         vec![node(
             NodeKind::ReturnError(Expression::string_slice(
                 string_table.intern("boom"),
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let start_function = function_node(
@@ -1186,7 +1176,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
                     vec![],
                     vec![builtin_type_ids::STRING],
                     FallibleExpressionHandling::Recover,
-                    location.clone(),
+                    location,
                 ),
                 FallibleHandling::Handler {
                     error: Some(CatchErrorBinding { error_binding }),
@@ -1194,9 +1184,9 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
                 },
                 vec![],
             )),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -1249,16 +1239,16 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(1, location, ValueMode::ImmutableOwned),
                 Expression::string_slice(
                     string_table.intern("value"),
-                    location.clone(),
+                    location,
                     ValueMode::ImmutableOwned,
                 ),
             ]),
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let left_id = start_name.join_str("left", &mut string_table);
@@ -1278,26 +1268,26 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                         builtin_type_ids::INT,
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
-                        location.clone(),
+                        location,
                     ),
                     multi_bind_target(
                         right_id,
                         builtin_type_ids::STRING,
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
-                        location.clone(),
+                        location,
                     ),
                 ],
                 value: Expression::function_call(
                     pair_name,
                     vec![],
                     vec![builtin_type_ids::INT, builtin_type_ids::STRING],
-                    location.clone(),
+                    location,
                 ),
             },
-            location.clone(),
+            location,
         )],
-        location.clone(),
+        location,
     );
 
     let (module, _type_environment) = lower_ast(

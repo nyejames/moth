@@ -32,4 +32,4 @@ code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.runtime_assertion_messages"
 path = "input/@page.moth"
 line = 10
-column = 31
+column = 30

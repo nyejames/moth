@@ -32,7 +32,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -40,7 +40,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 condition,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -52,7 +52,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -60,7 +60,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 result,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -73,7 +73,7 @@ pub(crate) fn transfer_terminator(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -81,7 +81,7 @@ pub(crate) fn transfer_terminator(
                 record_shared_reads_in_expression(
                     &mut read_env,
                     scrutinee,
-                    location.clone(),
+                    location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
             }
@@ -93,7 +93,7 @@ pub(crate) fn transfer_terminator(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -111,7 +111,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -119,7 +119,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 value,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -131,7 +131,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -139,7 +139,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 message,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }

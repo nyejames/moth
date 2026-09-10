@@ -930,6 +930,12 @@ pub(crate) struct ProjectFrontendCompilation {
     /// WHAT: move-only premerge batches tagged by domain; local tables merge exactly once
     ///       at the final render tail.
     pub(crate) transient_batches: Vec<TransientPremergeBatch>,
+    /// Project source identity retained for the legacy test-facing render wrapper.
+    ///
+    /// Production build/check/benchmark callers pass their owned source database directly to the
+    /// frozen render tail; the no-input frontend seam keeps this owner so diagnostics rendered
+    /// through the transitional source fallback still resolve their authored spans.
+    pub(crate) project_source_database: Option<Arc<SourceDatabase>>,
 }
 
 impl ProjectFrontendCompilation {
@@ -979,6 +985,7 @@ impl ProjectFrontendCompilation {
             source_packages,
             resource_inputs,
             transient_batches,
+            project_source_database: None,
         })
     }
 
@@ -1027,6 +1034,7 @@ impl ProjectFrontendCompilation {
             project,
             source_packages,
             transient_batches,
+            project_source_database,
             ..
         } = self;
         let project_warnings = project
@@ -1071,12 +1079,15 @@ impl ProjectFrontendCompilation {
         }
         for transient in transient_batches {
             let mut transient_messages = transient.batch.into_messages();
-            if let Some(package_id) = transient.package_id {
-                if let Some(Some(source_database)) = source_databases.get(package_id.index()) {
-                    transient_messages.set_source_database(Arc::clone(source_database));
-                }
+            if let Some(package_id) = transient.package_id
+                && let Some(Some(source_database)) = source_databases.get(package_id.index())
+            {
+                transient_messages.set_source_database(Arc::clone(source_database));
             }
             messages.append_messages_preserving_context(transient_messages);
+        }
+        if let Some(source_database) = project_source_database {
+            messages.set_source_database(source_database);
         }
         messages
     }
@@ -1101,6 +1112,7 @@ impl ProjectFrontendCompilation {
             mut project,
             source_packages,
             transient_batches,
+            project_source_database,
             ..
         } = self;
         let project_warnings = project
@@ -1186,6 +1198,7 @@ impl ProjectFrontendCompilation {
                 frozen_spans.push((start..messages.diagnostic_slice().len(), None));
             }
         }
+        let project_source = project_source.or(project_source_database);
         // Consume owners without cloning. An unexpectedly shared Arc is a caller bug.
         let project_database = match project_source {
             Some(source) => Arc::try_unwrap(source).map_err(|_| {
@@ -1210,7 +1223,7 @@ impl ProjectFrontendCompilation {
         }
         // Freeze only after every local table has been appended/remapped above.
         let frozen_root = Arc::new(FrozenIdentityContext::from_parts(
-            std::mem::take(&mut messages.string_table),
+            *std::mem::take(&mut messages.string_table),
             project_database,
         ));
         let mut package_identities: Vec<Option<Arc<FrozenIdentityContext>>> =

@@ -3486,16 +3486,15 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
         );
 
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let recursive_child = builder
-            .push_child_template_node_with_reference(recursive_child_reference, location.clone());
-        let root =
-            builder.push_sequence_node(vec![valid_branch_root, recursive_child], location.clone());
+        let recursive_child =
+            builder.push_child_template_node_with_reference(recursive_child_reference, location);
+        let root = builder.push_sequence_node(vec![valid_branch_root, recursive_child], location);
         let built_template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
         assert_eq!(
             built_template_id, recursive_template_id,
@@ -3617,15 +3616,14 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
         let store_handle = context.template_ir_store();
         let mut store = store_handle.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let child_node =
-            builder.push_child_template_node_with_reference(child_reference, location.clone());
-        let root = builder.push_sequence_node(vec![child_node], location.clone());
+        let child_node = builder.push_child_template_node_with_reference(child_reference, location);
+        let root = builder.push_sequence_node(vec![child_node], location);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         )
     };
     let parent_context = TemplateViewContext::default();

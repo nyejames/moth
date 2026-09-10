@@ -29,18 +29,16 @@ impl<'a> HirBuilder<'a> {
     ) -> HirExpression {
         // Assigning a place expression directly into the branch-merge temp can preserve aliasing
         // edges to user locals. Materialize as a copied value so branch-local temps stay detached.
-        // The copy preserves the incoming expression span; generated values stay spanless.
+        // The copy keeps the incoming authored span and its side-table mapping.
         let span = value.span;
         if let HirExpressionKind::Load(place) = value.kind {
-            let mut copied = self.make_expression(
-                &None,
+            return self.make_expression(
+                &span,
                 HirExpressionKind::Copy(place),
                 value.ty,
                 ValueKind::RValue,
                 value.region,
             );
-            copied.span = span;
-            return copied;
         }
 
         value

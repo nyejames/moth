@@ -109,10 +109,8 @@ impl<'a> HirBuilder<'a> {
 
         self.emit_result_carrier_error_return(
             branch.error_block,
-            result_carrier.result_local,
-            result_carrier.carrier_type,
+            &result_carrier,
             current_error_type,
-            result_carrier.err_type,
             span,
             authored_span,
         )?;

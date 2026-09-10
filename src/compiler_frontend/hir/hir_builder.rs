@@ -581,7 +581,7 @@ impl<'a> HirBuilder<'a> {
         else {
             return_hir_transformation_error!(
                 format!("Local {:?} is not registered in HIR blocks", local_id),
-                location.clone()
+                *location
             );
         };
 
@@ -597,7 +597,7 @@ impl<'a> HirBuilder<'a> {
         else {
             return_hir_transformation_error!(
                 format!("Field {:?} is not registered in HIR structs", field_id),
-                location.clone()
+                *location
             );
         };
 
@@ -612,7 +612,7 @@ impl<'a> HirBuilder<'a> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
             return_hir_transformation_error!(
                 format!("Block {:?} is not registered in HIR module", block_id),
-                location.clone()
+                *location
             );
         };
 
@@ -627,7 +627,7 @@ impl<'a> HirBuilder<'a> {
         let Some(index) = self.function_index_by_id.get(&function_id).copied() else {
             return_hir_transformation_error!(
                 format!("Function {:?} is not registered in HIR module", function_id),
-                location.clone()
+                *location
             );
         };
 
@@ -735,7 +735,7 @@ impl<'a> HirBuilder<'a> {
         location: &Option<SourceSpan>,
     ) -> Result<BlockId, CompilerError> {
         let Some(block_id) = self.current_block else {
-            return_hir_transformation_error!("No current HIR block is active", location.clone());
+            return_hir_transformation_error!("No current HIR block is active", *location);
         };
 
         Ok(block_id)
@@ -784,7 +784,7 @@ impl<'a> HirBuilder<'a> {
             if !Self::is_placeholder_terminator(&block.terminator) {
                 return_hir_transformation_error!(
                     format!("Block {} already has an explicit terminator", block_id),
-                    source_location.clone()
+                    *source_location
                 );
             }
 

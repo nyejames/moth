@@ -107,12 +107,16 @@ pub struct CompilerMessages {
     /// WHAT: holds the single typed `CompilerError` for internal/tooling/filesystem failures
     ///       without converting it into a user-facing diagnostic payload.
     /// WHY: an infrastructure failure aborts the owning compilation yet must stay observable at
-    ///      existing command/render/test boundaries. Storing it here keeps the typed message,
-    ///      source span or host path, error type and metadata intact without making this
-    ///      diagnostic stream own the failure's render context.
-    pub(crate) infrastructure_error: Option<CompilerError>,
+    ///      existing command/render/test boundaries. Storing the rare, large failure behind a
+    ///      pointer keeps this transitional boundary compact without boxing common diagnostics.
+    pub(crate) infrastructure_error: Option<Box<CompilerError>>,
 
-    pub string_table: StringTable,
+    /// Interned diagnostic strings owned by this boundary.
+    ///
+    /// The table is separately allocated because the message vessel crosses many `Result`
+    /// boundaries and must remain below the large-error threshold without boxing individual
+    /// `CompilerDiagnostic` values.
+    pub string_table: Box<StringTable>,
 
     /// Per-diagnostic frozen identity snapshots used by diagnostic renderers.
     ///
@@ -141,6 +145,8 @@ pub struct CompilerMessages {
     /// `TypeEnvironment`. Successful builds carry the module type table in `Module`, not here.
     pub(crate) render_type_contexts: Vec<RenderTypeContext>,
 }
+
+const _: () = assert!(std::mem::size_of::<CompilerMessages>() <= 128);
 #[derive(Debug, Clone)]
 pub(crate) struct RenderTypeContext {
     pub(crate) diagnostic_range: Range<usize>,
@@ -162,7 +168,7 @@ impl CompilerMessages {
         Self {
             diagnostics: Vec::new(),
             infrastructure_error: None,
-            string_table,
+            string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -176,7 +182,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             infrastructure_error: None,
-            string_table,
+            string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -194,7 +200,7 @@ impl CompilerMessages {
     /// WHY: renderers, tests and status summaries inspect the outer failure's message,
     ///      source span or host path, type and metadata directly.
     pub(crate) fn infrastructure_error(&self) -> Option<&CompilerError> {
-        self.infrastructure_error.as_ref()
+        self.infrastructure_error.as_deref()
     }
 
     /// Store the outer infrastructure failure without converting it into a user diagnostic.
@@ -223,7 +229,7 @@ impl CompilerMessages {
                 }
             }
             None => {
-                self.infrastructure_error = Some(error);
+                self.infrastructure_error = Some(Box::new(error));
             }
         }
     }
@@ -341,7 +347,7 @@ impl CompilerMessages {
         Self {
             diagnostics: vec![diagnostic],
             infrastructure_error: None,
-            string_table,
+            string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -364,8 +370,8 @@ impl CompilerMessages {
     pub fn from_error(error: CompilerError, string_table: StringTable) -> Self {
         Self {
             diagnostics: Vec::new(),
-            infrastructure_error: Some(error),
-            string_table,
+            infrastructure_error: Some(Box::new(error)),
+            string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -396,8 +402,8 @@ impl CompilerMessages {
     ) -> Self {
         Self {
             diagnostics: warning_diagnostics,
-            infrastructure_error: Some(error),
-            string_table: string_table.clone(),
+            infrastructure_error: Some(Box::new(error)),
+            string_table: Box::new(string_table.clone()),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -420,7 +426,7 @@ impl CompilerMessages {
         Self {
             diagnostics,
             infrastructure_error: None,
-            string_table: string_table.clone(),
+            string_table: Box::new(string_table.clone()),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
             render_type_contexts: Vec::new(),
@@ -437,10 +443,21 @@ impl CompilerMessages {
     ///
     /// The range is deliberately captured at the time of attachment: a single message set may
     /// later aggregate diagnostics from several independent project/package databases.
+    ///
+    /// Infrastructure-only failures have no diagnostic row, but their source owner is still useful
+    /// to boundary callers inspecting retained source slots. Reserve index zero as a source-context
+    /// sentinel for that shape; ordinary diagnostic ranges continue to cover exactly the current
+    /// stream.
     pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
-        if !self.diagnostics.is_empty() {
+        let diagnostic_end = self.diagnostics.len();
+        if diagnostic_end != 0 {
             self.render_source_contexts.push(RenderSourceContext {
-                diagnostic_range: 0..self.diagnostics.len(),
+                diagnostic_range: 0..diagnostic_end,
+                source_database,
+            });
+        } else if self.infrastructure_error.is_some() {
+            self.render_source_contexts.push(RenderSourceContext {
+                diagnostic_range: 0..1,
                 source_database,
             });
         }
@@ -551,7 +568,7 @@ impl CompilerMessages {
             mut render_source_contexts,
             mut render_type_contexts,
         } = messages;
-        let remap = self.string_table.merge_from(&string_table);
+        let remap = self.string_table.merge_from(string_table.as_ref());
         if !remap.is_identity() {
             for diagnostic in &mut diagnostics {
                 diagnostic.remap_string_ids(&remap);
@@ -583,7 +600,7 @@ impl CompilerMessages {
         }
 
         if let Some(error) = infrastructure_error {
-            self.set_infrastructure_error(error);
+            self.set_infrastructure_error(*error);
         }
     }
 
@@ -634,7 +651,7 @@ impl CompilerMessages {
     ) -> crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext<'_> {
         let frozen_identity = self.frozen_identity_context_for_diagnostic(diagnostic_index);
         crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext::new(
-            &self.string_table,
+            self.string_table.as_ref(),
         )
         .with_optional_type_environment(self.type_environment_for_diagnostic(diagnostic_index))
         .with_optional_source_database(self.source_database_for_diagnostic(diagnostic_index))
@@ -704,7 +721,7 @@ pub(crate) fn merge_stage_messages(
 ) -> CompilerMessages {
     let mut messages = messages;
     messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-    messages.string_table = string_table.clone();
+    messages.string_table = Box::new(string_table.clone());
     messages
 }
 

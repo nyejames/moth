@@ -33,10 +33,8 @@ pub fn print_compiler_messages(messages: CompilerMessages) {
             render_context,
         );
     }
-    if !outer_emitted {
-        if let Some(error) = messages.infrastructure_error() {
-            print_formatted_error(error.clone(), &messages.string_table);
-        }
+    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
+        print_formatted_error(error.clone(), &messages.string_table);
     }
 }
 

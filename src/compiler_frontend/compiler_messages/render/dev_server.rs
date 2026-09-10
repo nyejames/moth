@@ -112,10 +112,8 @@ pub(crate) fn render_compiler_messages_html(
             messages.diagnostic_render_context(diagnostic_index),
         ));
     }
-    if !outer_emitted {
-        if let Some(error) = messages.infrastructure_error() {
-            cards.push(render_compiler_error_card(error));
-        }
+    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
+        cards.push(render_compiler_error_card(error));
     }
     if cards.is_empty() {
         return String::from("<p>No compiler diagnostics available.</p>");

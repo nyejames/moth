@@ -359,6 +359,9 @@ pub(super) fn parse_identifier_or_call(
             .into());
         }
         let call_span = Some(token_stream.current_span());
+        // Host-call argument parsing starts at the opening parenthesis; lookup leaves the cursor
+        // on the identifier itself.
+        token_stream.advance();
 
         let function_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {

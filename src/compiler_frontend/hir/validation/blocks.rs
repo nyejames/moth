@@ -86,6 +86,13 @@ impl<'a> HirValidator<'a> {
         &self,
         statement: &HirStatement,
     ) -> Result<(), CompilerError> {
+        // Compiler-generated statements intentionally have no authored span and therefore no
+        // side-table source mapping. Authored statements must carry both reversible provenance
+        // and the exact diagnostic span.
+        if statement.span.is_none() {
+            return Ok(());
+        }
+
         let statement_location = HirLocation::Statement(statement.id);
         if self
             .module
@@ -124,6 +131,12 @@ impl<'a> HirValidator<'a> {
         &self,
         block_id: BlockId,
     ) -> Result<(), CompilerError> {
+        // Only authored terminators have an exact syntax marker. Generated CFG terminators are
+        // deliberately span-free and do not need synthetic provenance.
+        if self.module.side_table.terminator_span(block_id).is_none() {
+            return Ok(());
+        }
+
         let terminator_location = HirLocation::Terminator(block_id);
         if self
             .module

@@ -58,12 +58,11 @@ pub(super) fn parse_children_style_directive(
                 ..
             }
         ) {
-            let replacement = CompilerDiagnostic::invalid_template_directive(
+            CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
                 diagnostic.primary_span,
-            );
-            replacement
+            )
         } else {
             diagnostic
         }

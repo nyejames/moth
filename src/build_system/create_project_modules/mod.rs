@@ -133,7 +133,7 @@ pub fn compile_project_frontend(
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
     let mut project_source_files = None;
-    compile_project_frontend_with_inputs(
+    let result = compile_project_frontend_with_inputs(
         config,
         build_profile,
         validated_output_settings,
@@ -143,7 +143,13 @@ pub fn compile_project_frontend(
         &mut project_source_files,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
-    )
+    );
+    result.map(|mut frontend| {
+        // This no-input seam renders through the transitional source fallback in focused
+        // frontend tests, so retain the finalized project owner with the typed outcome.
+        frontend.project_source_database = project_source_files;
+        frontend
+    })
 }
 
 /// Compile all project modules with one command-owned typed input set and frontend mode.

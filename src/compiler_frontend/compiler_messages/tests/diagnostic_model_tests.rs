@@ -389,12 +389,9 @@ fn reason_key_dispatch_covers_distinct_typed_reason_families() {
         CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
             InvalidTypeAnnotationReason::NoneNotAllowed,
-            span.clone(),
+            span,
         ),
-        CompilerDiagnostic::invalid_map_type(
-            InvalidMapTypeReason::FixedCapacityNotAllowed,
-            span.clone(),
-        ),
+        CompilerDiagnostic::invalid_map_type(InvalidMapTypeReason::FixedCapacityNotAllowed, span),
         CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::CapacityOverflow,
             span,
@@ -648,19 +645,19 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
     let source = SourceId::from_index(1);
     let mut span_builder = ExtendedSpanBuilder::new();
     let primary_span = Some(exact_span(source, 4, 3, &mut span_builder));
-    let first_span = Some(exact_span(source, 10, 2, &mut span_builder));
+    let first_span = exact_span(source, 10, 2, &mut span_builder);
 
     let mut path_syntax = PathSyntaxTable::new();
-    let path_id = path_syntax.push(import_path.clone(), first_span.unwrap());
+    let path_id = path_syntax.push(import_path.clone(), first_span);
     let expected_token = CompilerDiagnostic::expected_token(
         TokenKind::Symbol(name),
         Some(TokenKind::Path(path_id)),
         primary_span,
     );
-    let duplicate = CompilerDiagnostic::duplicate_declaration(name, first_span, primary_span);
-    let import = CompilerDiagnostic::import_name_collision(alias, first_span, primary_span)
+    let duplicate = CompilerDiagnostic::duplicate_declaration(name, Some(first_span), primary_span);
+    let import = CompilerDiagnostic::import_name_collision(alias, Some(first_span), primary_span)
         .with_labels(vec![DiagnosticLabel::secondary(
-            first_span,
+            Some(first_span),
             Some(DiagnosticLabelMessage::RenderedText(label_text)),
         )]);
     let borrow = borrow_conflict_diagnostic(
@@ -708,7 +705,7 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
         .iter()
         .find(|label| label.message == Some(DiagnosticLabelMessage::PreviousDeclaration))
         .expect("duplicate declaration should carry a previous declaration label");
-    assert_eq!(previous_label.span, first_span);
+    assert_eq!(previous_label.span, Some(first_span));
 
     match &diagnostics[2].payload {
         DiagnosticPayload::ImportNameCollision { name } => {
@@ -716,7 +713,7 @@ fn remap_string_ids_updates_payloads_labels_and_tokens() {
         }
         payload => panic!("unexpected import payload: {payload:?}"),
     }
-    assert_eq!(diagnostics[2].labels[0].span, first_span);
+    assert_eq!(diagnostics[2].labels[0].span, Some(first_span));
     match &diagnostics[2].labels[0].message {
         Some(DiagnosticLabelMessage::RenderedText(message)) => {
             assert_eq!(merged_table.resolve(*message), "temporary label");
@@ -2621,7 +2618,7 @@ fn token_diagnostics_render_source_spelling_not_token_debug_names() {
     let expected = CompilerDiagnostic::expected_token(
         TokenKind::OpenParenthesis,
         Some(TokenKind::Symbol(name)),
-        span.clone(),
+        span,
     );
     let unexpected = CompilerDiagnostic::unexpected_token(TokenKind::OpenCurly, span);
 

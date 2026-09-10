@@ -95,6 +95,9 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         let mut terminated_anchor: Option<BlockId> = None;
+        // The match has terminated the parent block; capture binding and present-body output
+        // belong to the present arm rather than being appended after that terminator.
+        self.set_current_block(present_block, span_ref)?;
         let capture_local = self.register_template_option_capture_local(
             binding_path,
             *inner_type_id,
@@ -197,9 +200,10 @@ impl<'a> HirBuilder<'a> {
         let field_ty = self.lower_type_id(inner_type_id, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
         let source = self.make_local_load_expression(option_local, option_type, span_ref, region);
-        // Authored option capture materialization carries the binding span.
-        let mut payload_get = self.make_expression(
-            span_ref,
+        // Authored option capture materialization carries the binding span. Constructing the
+        // value with that span keeps its side-table mapping aligned with the node itself.
+        let payload_get = self.make_expression(
+            &binding_span,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Option,
                 source: Box::new(source),
@@ -210,7 +214,6 @@ impl<'a> HirBuilder<'a> {
             ValueKind::RValue,
             region,
         );
-        payload_get.span = binding_span;
 
         self.emit_statement_kind_with_span(
             HirStatementKind::Assign {

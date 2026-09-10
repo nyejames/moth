@@ -38,6 +38,7 @@ fn trait_header(
             declaration: TraitDeclarationSyntax {
                 name: string_table.intern(name),
                 name_span: root_span(),
+                source_order: 0,
                 requirements: Vec::new(),
                 span: root_span(),
             },

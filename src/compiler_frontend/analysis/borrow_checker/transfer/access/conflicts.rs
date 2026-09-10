@@ -242,7 +242,7 @@ pub(super) fn probe_mutable_access(
         state: check.state,
         block_id: check.block_id,
         tracker: &mut tracker,
-        location: check.location.clone(),
+        location: check.location,
         span: check.span,
         stats: &mut stats,
         actor_index_hint: check.actor_index_hint,

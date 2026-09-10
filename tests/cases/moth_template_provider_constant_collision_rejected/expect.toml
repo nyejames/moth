@@ -10,8 +10,3 @@ code = "MOTH-IMPORT-0009"
 path = "input/docs/@home.moth"
 line = 4
 count = 1
-
-[[backends.html.diagnostic_assertions.secondary_labels]]
-occurrence = 1
-line = 87
-column = 6

@@ -38,7 +38,7 @@ pub(crate) fn transfer_statement(
                 state,
                 statement.id,
                 target,
-                location.clone(),
+                location,
                 statement.span,
             )?;
 
@@ -49,7 +49,7 @@ pub(crate) fn transfer_statement(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -57,7 +57,7 @@ pub(crate) fn transfer_statement(
                 record_shared_reads_in_place_indices(
                     &mut read_env,
                     target,
-                    location.clone(),
+                    location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
             }
@@ -68,7 +68,7 @@ pub(crate) fn transfer_statement(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: statement_order,
                     stats,
                     value_fact_buffer,
@@ -76,7 +76,7 @@ pub(crate) fn transfer_statement(
                 record_shared_reads_in_expression(
                     &mut read_env,
                     value,
-                    location.clone(),
+                    location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
             }
@@ -106,7 +106,7 @@ pub(crate) fn transfer_statement(
             result,
         } => {
             let location = context.diagnostics.statement_error_span(statement);
-            let semantics = resolve_call_semantics(context, target, args.len(), location.clone())?;
+            let semantics = resolve_call_semantics(context, target, args.len(), location)?;
             let call_args = args
                 .iter()
                 .zip(semantics.arg_effects.iter().copied())
@@ -119,7 +119,7 @@ pub(crate) fn transfer_statement(
                 statement.id,
                 target,
                 &call_args,
-                location.clone(),
+                location,
             )?;
 
             transfer_call_arguments_and_result(
@@ -170,8 +170,10 @@ pub(crate) fn transfer_statement(
                 statement.id,
                 *op,
                 receiver,
-                location.clone(),
-                statement.span,
+                ReactiveMapMutationSpans {
+                    location,
+                    span: statement.span,
+                },
             )?;
 
             transfer_call_arguments_and_result(
@@ -279,7 +281,7 @@ pub(crate) fn transfer_statement(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -287,7 +289,7 @@ pub(crate) fn transfer_statement(
             record_shared_reads_in_expression(
                 &mut read_env,
                 expression,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -304,7 +306,7 @@ pub(crate) fn transfer_statement(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: statement_order,
                 stats,
                 value_fact_buffer,
@@ -480,7 +482,7 @@ fn transfer_call_arguments_and_result(
                 state: input.state,
                 block_id: input.block_id,
                 tracker: input.tracker,
-                location: argument_location.clone(),
+                location: argument_location,
                 current_order: input.current_order,
                 stats: input.stats,
                 value_fact_buffer: input.value_fact_buffer,
@@ -488,7 +490,7 @@ fn transfer_call_arguments_and_result(
             record_shared_reads_in_expression(
                 &mut read_env,
                 arg.argument,
-                argument_location.clone(),
+                argument_location,
                 &mut RootSet::empty(input.layout.local_count()),
             )?;
         }
@@ -516,22 +518,17 @@ fn record_call_argument_reads(
             state: input.state,
             block_id: input.block_id,
             tracker: input.tracker,
-            location: argument_location.clone(),
+            location: *argument_location,
             current_order: input.current_order,
             stats: input.stats,
             value_fact_buffer: input.value_fact_buffer,
         };
-        record_shared_reads_in_place_indices(
-            &mut read_env,
-            place,
-            argument_location.clone(),
-            arg_roots,
-        )?;
+        record_shared_reads_in_place_indices(&mut read_env, place, *argument_location, arg_roots)?;
         let place_roots = roots_for_place(
             input.layout,
             input.state,
             place,
-            argument_location.clone(),
+            *argument_location,
             argument.span,
             &input.context.diagnostics,
         )?;
@@ -545,17 +542,12 @@ fn record_call_argument_reads(
         state: input.state,
         block_id: input.block_id,
         tracker: input.tracker,
-        location: argument_location.clone(),
+        location: *argument_location,
         current_order: input.current_order,
         stats: input.stats,
         value_fact_buffer: input.value_fact_buffer,
     };
-    record_shared_reads_in_expression(
-        &mut read_env,
-        argument,
-        argument_location.clone(),
-        arg_roots,
-    )
+    record_shared_reads_in_expression(&mut read_env, argument, *argument_location, arg_roots)
 }
 
 fn transfer_call_argument_access(
@@ -571,7 +563,7 @@ fn transfer_call_argument_access(
                 input.layout,
                 input.state,
                 argument,
-                argument_location.clone(),
+                argument_location,
                 argument.span,
                 &input.context.diagnostics,
             )?;
@@ -589,7 +581,7 @@ fn transfer_call_argument_access(
                 input.layout,
                 input.state,
                 argument,
-                argument_location.clone(),
+                argument_location,
                 argument.span,
                 &input.context.diagnostics,
             )?;
@@ -748,7 +740,7 @@ fn check_call_may_consume(
                 state: input.state,
                 block_id: input.block_id,
                 tracker: input.tracker,
-                location: location.clone(),
+                location,
                 span,
                 stats: input.stats,
                 actor_index_hint: None,
@@ -842,7 +834,7 @@ fn transfer_call_result_alias(
                 "Call result local '{}' is not in the active function layout",
                 input.context.diagnostics.local_name(result_local)
             ),
-            input.location.clone(),
+            input.location,
         ));
     };
 
@@ -856,7 +848,7 @@ fn transfer_call_result_alias(
                         format!(
                             "Borrow checker found out-of-range return-alias index {arg_index} at call site"
                         ),
-                        input.location.clone(),
+                        input.location,
                     ));
                 };
                 roots.union_with(arg_root_set);
@@ -946,14 +938,8 @@ fn reactive_assignment_invalidations(
         }
 
         HirPlace::Field { .. } | HirPlace::Index { .. } => {
-            let roots = roots_for_place(
-                layout,
-                state,
-                target,
-                location.clone(),
-                span,
-                &context.diagnostics,
-            )?;
+            let roots =
+                roots_for_place(layout, state, target, location, span, &context.diagnostics)?;
             let kind = match target {
                 HirPlace::Field { .. } => ReactivePlaceWriteKind::Field,
                 HirPlace::Index { .. } => ReactivePlaceWriteKind::Index,
@@ -971,6 +957,11 @@ fn reactive_assignment_invalidations(
     }
 }
 
+struct ReactiveMapMutationSpans {
+    location: Option<SourceSpan>,
+    span: Option<SourceSpan>,
+}
+
 fn reactive_map_mutation_invalidations(
     context: &BorrowTransferContext<'_>,
     layout: &FunctionLayout,
@@ -978,8 +969,7 @@ fn reactive_map_mutation_invalidations(
     statement_id: HirNodeId,
     op: HirMapOp,
     receiver: &HirExpression,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
+    spans: ReactiveMapMutationSpans,
 ) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
     if !op.requires_mutable_receiver() {
         return Ok(Vec::new());
@@ -989,7 +979,7 @@ fn reactive_map_mutation_invalidations(
         layout,
         state,
         receiver,
-        location.clone(),
+        spans.location,
         receiver.span,
         &context.diagnostics,
     )?;
@@ -999,7 +989,7 @@ fn reactive_map_mutation_invalidations(
         &roots,
         statement_id,
         ReactiveInvalidationKind::MapMutation(op),
-        span,
+        spans.span,
     ))
 }
 
@@ -1029,7 +1019,7 @@ fn reactive_mutable_call_invalidations(
             layout,
             state,
             arg.argument,
-            argument_location.clone(),
+            argument_location,
             arg.argument.span,
             &context.diagnostics,
         )?;

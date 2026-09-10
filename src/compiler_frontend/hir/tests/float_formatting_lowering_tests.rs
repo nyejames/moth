@@ -156,10 +156,10 @@ fn make_float_to_string_cast(
 fn cast_float_to_string_lowers_to_format_float_statement() {
     let mut string_table = StringTable::new();
     let loc = None;
-    let source = float_expr(1.5, loc.clone());
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -194,9 +194,9 @@ fn cast_float_to_string_flushes_source_prelude_before_formatting() {
         vec![],
         vec![builtin_type_ids::FLOAT],
         &mut builder.type_environment,
-        loc.clone(),
+        loc,
     );
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -235,7 +235,7 @@ fn cast_float_to_string_return_error_in_builtin_error_function() {
     let mut string_table = StringTable::new();
     let loc = None;
     let fn_name = symbol("__test_fn_error", &mut string_table);
-    let source = float_expr(1.5, loc.clone());
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
     let error_type_id = builder.test_register_builtin_error_type();
@@ -245,7 +245,7 @@ fn cast_float_to_string_return_error_in_builtin_error_function() {
     builder.test_register_function_with_return_type(fn_name, FunctionId(1), return_type);
     builder.test_set_current_function(FunctionId(1));
 
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
     let lowered = builder
         .lower_expression(&expr)
         .expect("Float -> String cast lowering in Error! function should succeed");
@@ -289,11 +289,11 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
     let value_ref = inferred_type_reference_expr(
         value_name.clone(),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
 
-    let expr = runtime_template_expression(loc.clone(), vec![value_ref], &string_table);
+    let expr = runtime_template_expression(loc, vec![value_ref], &string_table);
 
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -301,7 +301,7 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
         value_name,
         LocalId(10),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
     );
 
     let _lowered = builder
@@ -321,9 +321,9 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
 fn runtime_string_template_chunk_does_not_emit_format_float() {
     let mut string_table = StringTable::new();
     let loc = None;
-    let text = string_expr("hello", &mut string_table, loc.clone());
+    let text = string_expr("hello", &mut string_table, loc);
 
-    let expr = runtime_template_expression(loc.clone(), vec![text], &string_table);
+    let expr = runtime_template_expression(loc, vec![text], &string_table);
 
     let mut builder = setup_builder(&mut string_table);
     let _lowered = builder
@@ -351,7 +351,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
     let value_ref = inferred_type_reference_expr(
         value_path.clone(),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     )
     .with_reactive_source(source.clone());
@@ -378,7 +378,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
         value_path.clone(),
         value_local,
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
     );
     builder.side_table.bind_reactive_source(HirReactiveSource {
         id: ReactiveSourceId(0),
@@ -408,7 +408,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
 fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
     let mut string_table = StringTable::new();
     let loc = None;
-    let source = float_expr(1.5, loc.clone());
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
     let optional_string_type = builder

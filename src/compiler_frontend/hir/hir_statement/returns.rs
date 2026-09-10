@@ -101,15 +101,13 @@ impl<'a> HirBuilder<'a> {
                 let span = lowered_value.span;
                 let ty = lowered_value.ty;
                 let region = lowered_value.region;
-                let mut copied = self.make_expression(
-                    span_ref,
+                self.make_expression(
+                    &span,
                     HirExpressionKind::Copy(place),
                     ty,
                     ValueKind::RValue,
                     region,
-                );
-                copied.span = span;
-                copied
+                )
             }
             _ => lowered_value,
         };

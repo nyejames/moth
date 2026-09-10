@@ -8,5 +8,5 @@ code = "MOTH-IMPORT-0016"
 reason = "invalid_import_path.public_root"
 path = "input/@page.moth"
 line = 1
-column = 2
+column = 1
 count = 1

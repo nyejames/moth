@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -438,6 +438,40 @@ fn diagnostic_identity_sequence<'a>(
         .collect()
 }
 
+/// Collect diagnostic identity rows through the canonical frozen identity context.
+fn diagnostic_identity_sequence_frozen<'a>(
+    diagnostics: impl IntoIterator<Item = &'a CompilerDiagnostic>,
+    string_table: &'a StringTable,
+    frozen_identity: &'a FrozenIdentityContext,
+    project_root: &std::path::Path,
+) -> Vec<DiagnosticIdentityRow> {
+    let canonical_project_root = project_root
+        .canonicalize()
+        .expect("diagnostic fixture root should canonicalize");
+    let render_context =
+        DiagnosticRenderContext::new(string_table).with_frozen_identity(frozen_identity);
+
+    diagnostics
+        .into_iter()
+        .map(|diagnostic| {
+            let identity = diagnostic.identity();
+            let position = render_context
+                .primary_position(diagnostic)
+                .expect("frontend diagnostics should retain a resolvable primary source span");
+            let relative_path = position
+                .path
+                .strip_prefix(&canonical_project_root)
+                .unwrap_or(position.path.as_path());
+            let normalized_path = relative_path
+                .to_str()
+                .expect("diagnostic logical path should be valid UTF-8")
+                .replace('\\', "/");
+            let line = position.start.line.saturating_add(1) as i32;
+            (identity.code, identity.reason_key, normalized_path, line)
+        })
+        .collect()
+}
+
 #[test]
 fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_artifacts() {
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
@@ -497,18 +531,18 @@ if value is:
             && remaining.iter().any(|name| name == "src"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
-    let check_warning_source_database = check_warning_outcome
+    let check_warning_identity_context = check_warning_outcome
         .messages
-        .source_database_for_diagnostic(0)
-        .expect("check warnings should retain their source database");
+        .frozen_identity_context_for_diagnostic(0)
+        .expect("check warnings should retain their frozen identity context");
     let build_warning_source_database = build_warning_result
         .source_database
         .as_deref()
         .expect("build warnings should retain their source database");
-    let check_warning_identity = diagnostic_identity_sequence(
+    let check_warning_identity = diagnostic_identity_sequence_frozen(
         check_warning_outcome.messages.diagnostic_slice().iter(),
         &check_warning_outcome.messages.string_table,
-        check_warning_source_database,
+        check_warning_identity_context,
         &warning_root,
     );
     let build_warning_identity = diagnostic_identity_sequence(
@@ -571,23 +605,23 @@ increment(count)
         panic!("error fixture should fail the build frontend");
     };
 
-    let check_error_source_database = check_error_outcome
+    let check_error_identity_context = check_error_outcome
         .messages
-        .source_database_for_diagnostic(0)
-        .expect("check errors should retain their source database");
-    let build_error_source_database = build_error_messages
-        .source_database_for_diagnostic(0)
-        .expect("build errors should retain their source database");
-    let check_error_identity = diagnostic_identity_sequence(
+        .frozen_identity_context_for_diagnostic(0)
+        .expect("check errors should retain their frozen identity context");
+    let build_error_identity_context = build_error_messages
+        .frozen_identity_context_for_diagnostic(0)
+        .expect("build errors should retain their frozen identity context");
+    let check_error_identity = diagnostic_identity_sequence_frozen(
         check_error_outcome.messages.diagnostic_slice().iter(),
         &check_error_outcome.messages.string_table,
-        check_error_source_database,
+        check_error_identity_context,
         &error_root,
     );
-    let build_error_identity = diagnostic_identity_sequence(
+    let build_error_identity = diagnostic_identity_sequence_frozen(
         build_error_messages.diagnostic_slice().iter(),
         &build_error_messages.string_table,
-        build_error_source_database,
+        build_error_identity_context,
         &error_root,
     );
 

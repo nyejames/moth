@@ -369,7 +369,6 @@ fn parse_inline_catch_handler_body(
         )
         .into());
     }
-    reject_invalid_inline_catch_value_window(token_stream)?;
 
     let mut handler_context =
         context.new_child_control_flow(ContextKind::CatchHandler, string_table);
@@ -415,13 +414,6 @@ fn parse_inline_catch_handler_body(
         )
         .into());
     }
-    if token_stream.current_token_kind() == &TokenKind::Newline {
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::InlineCatchMultiline,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
     let body = vec![AstNode {
         kind: NodeKind::ThenValue(ProducedValues {
             expressions: produced_values,
@@ -435,36 +427,4 @@ fn parse_inline_catch_handler_body(
         error: error.map(|parsed| parsed.binding),
         body,
     })
-}
-
-fn reject_invalid_inline_catch_value_window(
-    token_stream: &FileTokens,
-) -> Result<(), ExpressionParseError> {
-    let mut index = token_stream.index;
-
-    while index < token_stream.length {
-        let token = &token_stream.tokens[index];
-
-        if token.kind == TokenKind::Newline {
-            return Err(CompilerDiagnostic::invalid_fallible_handling(
-                InvalidFallibleHandlingReason::InlineCatchMultiline,
-                Some(SourceSpan::new(token_stream.file_id, token.span)),
-            )
-            .into());
-        }
-
-        match token.kind {
-            TokenKind::Newline | TokenKind::End | TokenKind::Eof => return Ok(()),
-            TokenKind::Catch => {
-                return Err(CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler,
-                    Some(SourceSpan::new(token_stream.file_id, token.span)),
-                )
-                .into());
-            }
-            _ => index += 1,
-        }
-    }
-
-    Ok(())
 }

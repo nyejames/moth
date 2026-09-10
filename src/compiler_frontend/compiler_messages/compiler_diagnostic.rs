@@ -354,7 +354,7 @@ impl CompilerDiagnostic {
     ) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor),
-            span.clone(),
+            span,
             DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
                 first_path,
                 second_path,
@@ -1206,7 +1206,7 @@ impl CompilerDiagnostic {
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicateTraitRequirement),
-            duplicate_span.clone(),
+            duplicate_span,
             DiagnosticPayload::DuplicateTraitRequirement {
                 trait_name,
                 requirement_name,
@@ -1297,7 +1297,7 @@ impl CompilerDiagnostic {
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::DuplicatePublicExport),
-            span.clone(),
+            span,
             DiagnosticPayload::DuplicatePublicExport { name },
         )
         .with_labels(vec![DiagnosticLabel::secondary(first_span, None)])
@@ -1412,7 +1412,7 @@ impl CompilerDiagnostic {
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
-            duplicate_span.clone(),
+            duplicate_span,
             DiagnosticPayload::ShadowedName { name },
         )
         .with_labels(vec![DiagnosticLabel::secondary(

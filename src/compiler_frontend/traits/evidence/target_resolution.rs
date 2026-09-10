@@ -61,8 +61,7 @@ pub(super) fn resolve_conformance_target(
                 feature: target.name,
             },
             None,
-        )
-        .into());
+        ));
     }
 
     if is_builtin_scalar_target(target.name, context.string_table) {
@@ -72,8 +71,7 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::BuiltinTarget,
             None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     if let Some(symbol_id) = context
@@ -88,8 +86,7 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::ExternalOpaqueTarget,
             None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     if context
@@ -103,12 +100,11 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::AliasTarget,
             None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     let Some(target_path) = context.visibility.visible_source_names.get(&target.name) else {
-        return Err(CompilerDiagnostic::unknown_type_name(target.name, None).into());
+        return Err(CompilerDiagnostic::unknown_type_name(target.name, None));
     };
     let Some(type_id) = context.nominal_type_ids_by_path.get(target_path).copied() else {
         return Err(invalid_conformance(
@@ -117,8 +113,7 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::NonCanonicalTarget,
             None,
             Vec::new(),
-        )
-        .into());
+        ));
     };
 
     let Some(definition) = context.type_environment.get(type_id) else {
@@ -128,8 +123,7 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::NonCanonicalTarget,
             None,
             Vec::new(),
-        )
-        .into());
+        ));
     };
 
     match definition {
@@ -145,8 +139,7 @@ pub(super) fn resolve_conformance_target(
                     InvalidTraitConformanceReason::NonlocalSourceTarget,
                     None,
                     Vec::new(),
-                )
-                .into());
+                ));
             }
 
             Ok(ConformanceTarget {
@@ -170,8 +163,7 @@ pub(super) fn resolve_conformance_target(
                     InvalidTraitConformanceReason::NonlocalSourceTarget,
                     None,
                     Vec::new(),
-                )
-                .into());
+                ));
             }
 
             Ok(ConformanceTarget {
@@ -189,8 +181,7 @@ pub(super) fn resolve_conformance_target(
             InvalidTraitConformanceReason::NonCanonicalTarget,
             None,
             Vec::new(),
-        )
-        .into()),
+        )),
     }
 }
 
@@ -217,5 +208,5 @@ pub(super) fn resolve_trait_reference(
         return Ok(id);
     }
 
-    Err(CompilerDiagnostic::unknown_trait_name(trait_ref.name, None).into())
+    Err(CompilerDiagnostic::unknown_trait_name(trait_ref.name, None))
 }

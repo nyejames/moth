@@ -20,6 +20,7 @@ use crate::build_system::create_project_modules::file_reference_resolution::{
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions,
     SourcePreparationDelta,
@@ -35,7 +36,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceRegistrationIndex,
+    SourceRegistrationIndex, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -359,7 +360,7 @@ pub(super) fn prepare_file_value_bundle(
         };
         let path_syntax = resolved.path_syntax;
         let class = resolved.class;
-        let outcome = match resolved_outcome_from_physical(
+        let mut outcome = match resolved_outcome_from_physical(
             resolved,
             source_builder.sources(),
             string_table,
@@ -369,6 +370,9 @@ pub(super) fn prepare_file_value_bundle(
                 return Err(finish_source_owner(messages, source_builder, string_table));
             }
         };
+        if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
+            rebind_diagnostic_source(diagnostic, owner_source_file);
+        }
         if let Err(error) = resolved_file_references.push(ResolvedFileReference {
             source_file: owner_source_file,
             path_syntax,
@@ -537,12 +541,21 @@ fn finalize_known_sources(
         let messages = CompilerMessages::from_error_ref(error, string_table);
         return Err(finish_source_owner(messages, source_builder, string_table));
     }
-
     let rebound: Result<_, CompilerError> = (|| {
         let mut prepared_entry = None;
         let mut prepared_content_sources = Vec::new();
         for (path, mut prepared, _) in prepared {
+            let source_id = source_builder
+                .sources()
+                .get_by_canonical_path(&path)
+                .expect("transferred source must remain registered")
+                .id;
             let is_entry = path == entry_file_path;
+            prepared.rebind_source_identity(
+                source_id,
+                source_builder.sources().legacy_logical_path(source_id),
+                path,
+            )?;
             prepared.freeze_path_syntax(string_table)?;
             if is_entry {
                 prepared_entry = Some(prepared);
@@ -627,11 +640,30 @@ fn finalize_discovery_failure(
     for prepared in &mut prepared_content_sources {
         prior_warnings.append(&mut prepared.warnings);
     }
+
+    let source_id = match source_id_for_path(
+        source_builder.sources(),
+        &failed_path,
+        string_table,
+        "has no finalized identity for its preparation failure",
+    ) {
+        Ok(source_id) => source_id,
+        Err(mut messages) => {
+            messages.prepend_diagnostics_preserving_context(prior_warnings);
+            return finish_source_owner(messages, source_builder, string_table);
+        }
+    };
     match &mut failure {
         FileFrontendPrepareFailure::Diagnosed(error) => {
+            for warning in &mut error.warnings {
+                rebind_diagnostic_source(warning, source_id);
+            }
+            rebind_diagnostic_source(&mut error.diagnostic, source_id);
             prior_warnings.append(&mut error.warnings);
         }
-        FileFrontendPrepareFailure::Infrastructure(_) => {}
+        FileFrontendPrepareFailure::Infrastructure(error) => {
+            rebind_error_source(error, source_id);
+        }
     }
 
     let messages = match failure {
@@ -765,6 +797,25 @@ fn source_id_for_path(
                 string_table,
             )
         })
+}
+
+fn rebind_source_span(span: &mut Option<SourceSpan>, source_id: SourceId) {
+    if let Some(span) = span
+        && span.source() != SourceId::COMPILATION_ROOT
+    {
+        *span = SourceSpan::new(source_id, span.local());
+    }
+}
+
+fn rebind_diagnostic_source(diagnostic: &mut CompilerDiagnostic, source_id: SourceId) {
+    rebind_source_span(&mut diagnostic.primary_span, source_id);
+    for label in &mut diagnostic.labels {
+        rebind_source_span(&mut label.span, source_id);
+    }
+}
+
+fn rebind_error_source(error: &mut CompilerError, source_id: SourceId) {
+    rebind_source_span(&mut error.source_span, source_id);
 }
 
 fn prepare_one_source(
