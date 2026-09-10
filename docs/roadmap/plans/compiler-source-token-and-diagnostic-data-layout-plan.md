@@ -75,8 +75,8 @@ CURRENT_SLICE:
   authored extended-span exhaustion is `MOTH-SYNTAX-0036`; clean outcomes skip the frozen render
   tail.
 - Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
-  The clean final full gate passed on 2026-09-10 at commit `687295a80`: native featured all-target
-  Clippy, 5,096 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
+  The clean final full gate passed on 2026-09-10 at commit `18d8e92cb`: native featured all-target
+  Clippy, 5,097 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
   1,325 files, docs check, 82 benchmark preflights, three scaling series and timer erasure.
   The five-run retained-layout/allocator probe is recorded in
   `benchmarks/frontend-optimization-results.md`.
@@ -1307,7 +1307,7 @@ The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522`, `687295
 Focused suites cover generated ownership, provenance-independent Wasm validation, checked string
 lookup, selected-source loading, terminal/HTML rendering, report aggregation, retention accounting
 and late site-config interned values. The clean `just validate` gate then passed native featured
-all-target Clippy, 5,096 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951,
+all-target Clippy, 5,097 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951,
 source audit (1,325 files), docs, benchmark sanity (82 preflights), all three scaling budgets and
 timer erasure. `cargo fmt --all -- --check` and `git diff --check` also pass; the clean gate left
 no generated changes in the worktree.
