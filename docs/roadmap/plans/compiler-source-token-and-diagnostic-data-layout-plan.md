@@ -83,12 +83,12 @@ CURRENT_SLICE:
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
   stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoints
-  `d8c182e9b`, `d7286e522` and `687295a80`.
+  `d8c182e9b`, `d7286e522`, `687295a80` and `18d8e92cb`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
-`eb6416312`, `d8c182e9b`, `d7286e522` and `687295a80`; the plan and evidence closeout sequence is
-committed through the final correction checkpoint.
+`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80` and `18d8e92cb`; the plan and evidence closeout
+sequence is committed through the final correction checkpoint.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
@@ -1262,14 +1262,14 @@ them without changing the fixed common layouts or starting Phase 2:
 
 | Finding | Phase 1 contract now enforced |
 | --- | --- |
-| Generated ownership stopped at AST | Generated materialisation retains the declaring frozen-identity handle through HIR lowering, borrow checking and backend target validation. Re-anchoring preserves existing primary/label owners, compares duplicate sites with their identity domains, and never falls back from an unresolved donor-domain handle to the requester database. |
+| Generated ownership stopped at AST | Generated materialisation retains the declaring frozen-identity handle through successful warnings, HIR lowering, borrow checking and backend target validation. Re-anchoring preserves existing primary/label owners, compares duplicate sites with their identity domains, and never falls back from an unresolved donor-domain handle to the requester database. |
 | Provenance-independent Wasm validation | Generic runtime validation returns an occurrence with an independent optional span. Reachable spanful and spanless occurrences take the same unsupported-feature path; only reachability controls acceptance. |
 | String lookup safety | Mutable and frozen string resolvers use checked lookup. An in-range ID still requires the correct identity domain; a foreign out-of-range ID is a compiler-invariant failure, never undefined behaviour. |
-| Build/dev report ownership | Early frontend diagnosis, generated post-HIR failure, late backend/output failure, warning success and clean success each have an explicit terminal owner. Warnings and package/generated source contexts move into the final frozen report before late failures; clean consumers release the mutable table and source owner. |
+| Build/dev report ownership | Early frontend diagnosis, generated post-HIR failure, late backend/output failure, warning success and clean success each have an explicit terminal owner. Warnings, package/generated source contexts and authored late-output source contexts move into the final frozen report before late failures; clean consumers release the mutable table and source owner only after output succeeds. |
 | Selected source loading | Registration assigns deterministic slots without reading files. Canonical discovery and explicit check-only preparation load selected semantic sources once; provider-only and unselected sources remain pending. |
 | Rendered output correctness | Terminal source/caret rows share gutter and tab policies; related sites retain their paths/messages; HTML retains secondary labels and escapes dynamic path text. |
 | Retention evidence | Feature-gated accounting distinguishes peak, live-report and after-owner-drop measurements. Retained-context counts are distinct and include donor-only handles; diagnostic-free package databases do not inflate the final report count. |
-| Failure handoffs | Production borrow failures move a premerge batch with its table once. Package finalization uses the existing append/finish helper; the remaining AST/HIR compatibility classifier is test-only and explicitly deferred. |
+| Failure handoffs | Production borrow failures move a premerge batch with its table once. Package finalization uses the existing append/finish helper; the remaining AST/HIR compatibility classifier is a production migration boundary, explicitly deferred until its callers move to direct premerge classification. |
 
 #### Cold ownership contract for the final common layouts
 
@@ -1302,7 +1302,8 @@ adds no second interner, scheduler, observer API or ubiquitous per-node owner.
 
 #### Follow-up validation evidence (2026-09-10)
 
-The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522` and `687295a80`.
+The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522`, `687295a80` and
+`18d8e92cb`.
 Focused suites cover generated ownership, provenance-independent Wasm validation, checked string
 lookup, selected-source loading, terminal/HTML rendering, report aggregation, retention accounting
 and late site-config interned values. The clean `just validate` gate then passed native featured

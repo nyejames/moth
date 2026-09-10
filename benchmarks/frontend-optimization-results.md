@@ -3533,44 +3533,26 @@ is sampled while the owner-preserving benchmark result still holds the final `Co
 and `after_report_drop_bytes_delta` is sampled after both that owner and the public report are
 dropped. All three are process-global allocator proxies, not owner attribution.
 
-The five-run rows below are the earlier evidence captured before the owner-preserving split. Their
-former `live_bytes_delta` values are retained as **after-render-owner-drop proxies** (the diagnostic
-owner had dropped, but the small public report value was still alive); they are not live-report
-measurements and are not relabelled as the new `after_report_drop_bytes_delta` field. The earlier
-source/layout columns also counted frozen package databases before final-report reachability was
-known, so they remain historical layout context until the three workloads are rerun with the
-current probe. Peak measurements remain valid and useful for comparison. The current
-`retained.*` semantics are: source bytes, extended rows and identity slots are counted only for
-frozen identity contexts reachable from the final report; `retained.identity_contexts` counts
-distinct range-row and donor-only-handle contexts; diagnostic-free package databases are excluded.
-The five-run elapsed value is the median with the inclusive five-run range.
+The current five-run rows below were captured after the owner-preserving split with the current
+probe. The elapsed value and each allocator value use the median with the inclusive five-run range.
+The retained layout columns count only frozen identity contexts reachable from the final report;
+`retained.identity_contexts` counts distinct range-row and donor-only-handle contexts, and
+diagnostic-free package databases are excluded.
 
-| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Historical after-render-owner-drop proxy | Median peak allocation bytes delta | Historical snapshot bytes† | Historical extended rows† | Historical source identity slots† | Diagnostic records† | Label slots† | Historical identity contexts† |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `docs` | Success | 0 / 0 | 1882.574334 (1862.175625–1949.929875) | 455,591 | 24,090,042 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `warning-heavy.moth` | Success | 0 / 39 | 39.082500 (21.830833–51.667542) | 18,093 | 2,699,354 | 1,200 | 0 | 2 | 39 | 0 | 1 |
-| `diagnosed/` | Diagnosed | 40 / 0 | 80.131417 (68.767375–103.873583) | 23,339 | 2,108,546 | 5,116 | 0 | 45 | 40 | 0 | 1 |
+| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Median live-report bytes (range) | Median peak allocation bytes (range) | Median after-report-drop bytes (range) | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Identity contexts |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | Success | 0 / 0 | 1936.796209 (1922.272958–1978.143542) | 377,831 (377,831–377,831) | 23,954,631 (23,954,631–23,954,631) | 1,542 (1,542–1,542) | 0 | 0 | 0 | 0 | 0 | 0 |
+| `warning-heavy.moth` | Success | 0 / 39 | 39.917583 (21.979833–48.051208) | 28,276 (28,276–28,276) | 2,699,354 (2,699,354–2,699,354) | 1,479 (1,479–1,479) | 1,200 | 0 | 2 | 39 | 0 | 1 |
+| `diagnosed/` | Diagnosed | 40 / 0 | 88.565833 (66.884583–99.111791) | 255,540 (255,540–255,540) | 2,108,306 (2,108,306–2,108,306) | 1,488 (1,488–1,488) | 903 | 0 | 42 | 40 | 0 | 1 |
 
-The five-run median and inclusive min–max range for the historical allocator proxy and retained
-layout fields are:
+The predecessor comparison remains historical context only:
 
-| Workload | After-render-owner-drop proxy | Peak allocation bytes delta | Historical snapshot bytes† | Historical extended rows† | Historical source identity slots† | Diagnostic records† | Label slots† | Historical identity contexts† |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `docs` | 455,591 (455,591–455,591) | 24,090,042 (24,090,042–24,090,042) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) |
-| `warning-heavy.moth` | 18,093 (18,093–18,093) | 2,699,354 (2,699,354–2,699,354) | 1,200 (1,200–1,200) | 0 (0–0) | 2 (2–2) | 39 (39–39) | 0 (0–0) | 1 (1–1) |
-| `diagnosed/` | 23,339 (23,339–23,339) | 2,108,546 (2,108,546–2,108,546) | 5,116 (5,116–5,116) | 0 (0–0) | 45 (45–45) | 40 (40–40) | 0 (0–0) | 1 (1–1) |
-
-The historical peak and after-render-owner-drop proxies remain directly comparable with the
-recovered predecessor's same-workload owner-final probe:
-
-| Workload | Predecessor peak bytes | Historical current peak bytes | Peak delta | Predecessor after-report bytes | Historical current after-render-owner-drop proxy |
+| Workload | Predecessor peak bytes | Current peak bytes | Peak delta | Predecessor after-report bytes | Current after-report-drop bytes |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `docs` | 29,216,701 | 24,090,042 | -17.55% | 455,591 | 455,591 |
-| `warning-heavy.moth` | 3,306,673 | 2,699,354 | -18.37% | 18,093 | 18,093 |
-| `diagnosed/` | 2,579,817 | 2,108,546 | -18.27% | 23,339 | 23,339 |
+| `docs` | 29,216,701 | 23,954,631 | -18.01% | 455,591 | 1,542 |
+| `warning-heavy.moth` | 3,306,673 | 2,699,354 | -18.37% | 18,093 | 1,479 |
+| `diagnosed/` | 2,579,817 | 2,108,306 | -18.28% | 23,339 | 1,488 |
 
-† Historical layout values are retained for provenance only and do not establish current
-post-reachability source retention. Rerun each workload with the command above to populate
-`live_report_bytes_delta`, `after_report_drop_bytes_delta`, and the corrected
-`retained.identity_contexts` values. The corrected probe still does not partition common versus
-cold allocations or attribute allocator bytes to individual owners.
+The corrected live-report and after-report-drop fields are process-global allocator proxies, not owner
+attribution. The probe still does not partition common versus cold allocations or attribute allocator
+bytes to individual owners.
