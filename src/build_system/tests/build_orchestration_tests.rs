@@ -5,7 +5,8 @@
 use super::*;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder, build_project,
+    BuildResult, DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder,
+    build_project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 #[cfg(unix)]
@@ -14,14 +15,20 @@ use crate::build_system::output::manifest::BUILD_MANIFEST_FILENAME;
 use crate::build_system::output::{
     BuilderKind, OutputDestinationOutcome, OutputOwner, OutputPlan, OutputWriteOutcome,
 };
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
 #[cfg(unix)]
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity,
+    InvalidConfigReason,
+};
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
 };
 use crate::compiler_tests::test_diagnostics::{
     assert_no_infrastructure_errors, assert_output_rejection,
@@ -30,6 +37,7 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
     messages
@@ -140,6 +148,123 @@ fn build_project_preserves_builder_warnings_in_build_result() {
             "build result should include backend warnings"
         );
     }
+}
+
+#[test]
+fn build_result_warning_handoff_expands_generated_donor_source_context() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let package_temp = tempfile::tempdir().expect("should create package temp dir");
+    let project_root = project_temp.path().join("src");
+    let package_root = package_temp.path().join("src");
+    fs::create_dir_all(&project_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package source root");
+
+    let project_path = project_root.join("@mod.moth");
+    let package_path = package_root.join("@mod.moth");
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "package_snapshot = 1\n";
+    fs::write(&project_path, project_text).expect("should write project source");
+    fs::write(&package_path, package_text).expect("should write package source");
+
+    let mut string_table = StringTable::new();
+    let mut project_database = SourceDatabase::build(
+        std::iter::once(project_path.as_path()),
+        &project_root,
+        None,
+        &mut string_table,
+    )
+    .expect("project source identity should build");
+    let project_source_id = project_database
+        .get_by_canonical_path(&project_path)
+        .expect("project source should be registered")
+        .id;
+    project_database
+        .retain_text(project_source_id, project_text.to_owned())
+        .expect("project snapshot should be retained");
+
+    let mut package_database = SourceDatabase::build(
+        std::iter::once(package_path.as_path()),
+        &package_root,
+        None,
+        &mut string_table,
+    )
+    .expect("package source identity should build");
+    let package_source_id = package_database
+        .get_by_canonical_path(&package_path)
+        .expect("package source should be registered")
+        .id;
+    package_database
+        .retain_text(package_source_id, package_text.to_owned())
+        .expect("package snapshot should be retained");
+    assert_eq!(
+        project_source_id, package_source_id,
+        "independent source databases should have colliding SourceId values"
+    );
+
+    let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "pkg");
+    let package_database = Arc::new(package_database);
+    let project_database = Arc::new(project_database);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span =
+        LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
+    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+        package_source_id,
+        local_span,
+    )))
+    .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(
+        package_identity.clone(),
+    ));
+
+    let mut result = BuildResult {
+        project: Project {
+            output_files: Vec::new(),
+            entry_page_rel: None,
+            cleanup_policy: generic_cleanup_policy(),
+            warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
+        },
+        config: Config::new(project_temp.path().to_path_buf()),
+        warnings: vec![warning],
+        string_table,
+        warning_source_contexts: vec![RenderSourceContext {
+            diagnostic_range: 0..0,
+            source_database: Arc::clone(&package_database),
+            domain: Some(package_identity),
+        }],
+        source_database: Some(Arc::clone(&project_database)),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Test,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
+    };
+    drop(package_database);
+    drop(project_database);
+
+    let messages = result
+        .take_warning_messages()
+        .expect("warning report handoff should succeed")
+        .expect("spanful warning should produce a report");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("warning report should retain its diagnostic");
+    let position = messages
+        .diagnostic_render_context(0)
+        .primary_position(diagnostic)
+        .expect("donor warning should resolve through its package identity");
+    assert_eq!(position.host_path, Some(package_path.as_path()));
+    assert!(
+        position.line.contains("package_snapshot"),
+        "donor warning should render the package snapshot: {}",
+        position.line
+    );
+    assert!(
+        !position.line.contains("project_snapshot"),
+        "donor warning must not render the project snapshot: {}",
+        position.line
+    );
 }
 
 #[test]

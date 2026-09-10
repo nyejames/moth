@@ -1592,8 +1592,9 @@ pub struct BuildResult {
     /// Per-warning source snapshot associations, indexed against `warnings`.
     ///
     /// Package ranges are collected before backend warnings are appended, so the final append
-    /// leaves their indexes unchanged. Project-owned warnings intentionally have no association
-    /// and resolve through the project database fallback at each render boundary.
+    /// leaves their indexes unchanged. Ordinary project-owned warnings use the project database
+    /// fallback; donor-owned generated warnings are expanded into their package range at the
+    /// terminal report handoff.
     pub(crate) warning_source_contexts: Vec<RenderSourceContext>,
     /// The retained source snapshots used by this build's diagnostics and warning renderers.
     ///
@@ -1623,7 +1624,8 @@ impl BuildResult {
     /// Move successful-build warnings into a mutable report owner without freezing it yet.
     ///
     /// WHAT: transfers warnings, their aggregate string table and all source contexts as one
-    ///       move-only `CompilerMessages` value.
+    ///       move-only `CompilerMessages` value, expanding package rows for donor-owned generated
+    ///       warnings that were published through the project sidecar lane.
     /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
     ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
     pub(crate) fn take_warning_messages_before_freeze(
@@ -1645,6 +1647,7 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
+        messages.extend_source_contexts_for_owned_handles();
 
         Ok(Some(messages))
     }
