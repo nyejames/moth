@@ -28,3 +28,6 @@ Same-module dependencies see everything. No export block needed.
 ]
 
 Now the parent module can bind `internal_value` through the `@components` public surface. It cannot bypass that surface with `@components/utils`.
+
+`export:` remains the current public marker. A later `$export` migration is accepted
+direction, but block support is undecided and both spellings will not remain permanent.

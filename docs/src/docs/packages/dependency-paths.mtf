@@ -42,6 +42,11 @@ Dependency clauses that cross into another module boundary can only access what 
 
 Moth template and plain Markdown content files are bound with the same extensionless syntax. Their dependency shape is covered by the Moth template and Plain Markdown pages, not here.
 
+`export:` remains the current module-boundary marker. A later `$export` migration
+will replace it rather than create a permanent dual syntax; its block support is
+undecided. This future spelling does not change module-root-relative path resolution.
+
+
 ### Related concepts
 
 - For direct-selection and namespace dependency clauses see @#dependency-clauses (Direct-selection and namespace dependency clauses).

@@ -10,7 +10,7 @@ page_head #= theme_head
 #[section, $md:
     @../ (Memory management) / Checked proof-budget research
 
-    This page records a future design proposal and the compiler constraints current Boracle work should preserve. It is not accepted source syntax or current compiler behaviour.
+    This page records a future design proposal and the compiler constraints current Boracle work should preserve. `$checked:` is the agreed future spelling and compiler-owned direction; proof-tier semantics remain open. It is not implemented source behaviour or current compiler behaviour.
 ]
 
 #[section, reference_content]

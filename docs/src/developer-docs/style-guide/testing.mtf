@@ -655,7 +655,7 @@ opt-in lane with its own named command:
     [td:
         [: `scoped-blocks`]
         [: `checked_blocks`, `async_blocks`]
-        [: the deferred-feature diagnostics for `checked:` and `async:` blocks]
+        [: the deferred-feature diagnostics for `$checked:` and `$async:` blocks]
     ]
 
     [td:

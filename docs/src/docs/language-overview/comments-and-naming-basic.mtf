@@ -29,4 +29,6 @@ Use `PascalCase` for named types:
 Clear names beat short names. `player_score` is easier to understand than
 `ps`, especially when the code grows.
 
-`Config` and its keyword-shadow variants are reserved for build configuration. `Import` is an ordinary type name.
+`Config` and its shadows remain reserved by current `#Config` support. Identifier
+reclamation is pending until the cutover to `$config`; the accepted directive
+spellings do not reserve ordinary `config` or `project` names.

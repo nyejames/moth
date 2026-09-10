@@ -81,6 +81,8 @@ The plan must consume these from the canonical module plan. Each references wher
 - selected builder capability metadata (see `docs/build-system-design.md` "Selected command and capability surface")
 - backend config fingerprints (see `docs/build-system-design.md` "Physical variants")
 - output manifest ownership (see `docs/build-system-design.md` "Output ownership")
+- explicit root-only HTML entry metadata and purpose facts from compiled module metadata (see `docs/build-system-design.md` "Root metadata and purpose directives" and "Entry candidates and selection")
+- validated `$layout` representation contracts when that TODO plan has delivered them; ABI and struct-lowering phases honour offsets, alignment and those contracts without inventing a new nominal type category
 
 ## Mixed-target sequence
 
@@ -239,6 +241,8 @@ Context: define the Wasm ABI type mapping and replace bridge instructions.
 - Remove `Void` as a real ABI type. Represent no result as `results: []`.
 - Define Wasm ABI type mapping for scalars, handles, strings, collections, structs, choices, options and errors.
 - Define Wasm layout for structs: field offsets, alignment, construction, field access, mutation and ownership hooks.
+- Honour compiler-owned `$layout` contracts when present. Consume validated offsets, alignment and representation constraints; do not manufacture a new nominal type category, a universal C ABI or SoA layout here.
+- Document-title capability belongs to JavaScript affinity where the host advertises it. This mixed-backend plan does not implement `io.set_title`, feature selection or `$export` migration.
 - Define Wasm layout for choices: unit variants, payload variants, tag representation, payload storage, equality, matching and generic choices.
 - Design runtime string model: allocation, UTF-8 layout, interpolation helpers, host string extraction and release hooks. Keep backend ownership here; cross-link profiling and string-building experiments from `post-tir-template-parser-optimization-plan.md` without moving output assembly into TIR.
 - Remove helper-export boolean structs. Replace with runtime capability and helper import plans.

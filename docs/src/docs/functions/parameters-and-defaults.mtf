@@ -20,8 +20,11 @@ Every function parameter has a name and an explicit type.
 - Parameter names follow the no-shadowing rule.
 - Each parameter name must be unique in the signature.
 
-Reactive parameters use `$Type` and are documented by
-@../reactivity (Reactivity).
+`$` is not a reactive parameter mode. Any future reactive parameter spelling remains
+owned by its accepted Wiring design rather than this function-parameter contract.
+
+Directive calls share the ordinary argument parser and slot routing. Ordinary `f()`
+remains valid; only directive syntax rejects an authored empty `()`.
 
 ### Defaults
 

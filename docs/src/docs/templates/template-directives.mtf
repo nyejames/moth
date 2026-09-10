@@ -1,9 +1,15 @@
-`$` introduces a compiler-handled template directive.
+`$` is the general directive marker. This page owns template-specific directive
+semantics; general ownership, context, argument and diagnostic rules live in
+@../directives (Directives).
+
+The template directives documented here are current supported semantics. General
+non-template directives such as `$config`, `$project`, `$html_builder` and `$page`
+are accepted queued design and have their own signature owners.
 
 Directive availability comes from one merged registry:
 
 - frontend directives are always available
-- a project builder may add project-specific directives
+- a project builder may add constrained project-specific template directives
 - an unknown directive is a syntax or rule error
 
 ### Frontend directives
@@ -45,7 +51,7 @@ Directive availability comes from one merged registry:
 
 ### HTML builder directives
 
-The HTML project builder adds:
+The selected HTML project builder may add constrained template-formatting directives:
 
 `$html`:
 
@@ -66,6 +72,12 @@ The HTML project builder adds:
 - preserves indentation relative to that baseline
 - escapes HTML-sensitive characters in `text` mode without applying syntax classes
 - suppresses nested child-template interpretation inside the code content
+
+
+Builder template directives remain constrained to formatting and composition contracts;
+they cannot rewrite functions, change nominal identity, mutate HIR or weaken language
+safety. For the shared directive family and no-empty-parentheses rule, see
+@../directives (Directives).
 
 ### Formatter scope
 

@@ -32,3 +32,25 @@ add a second way to do it.
 Authors write against Moth and builder-provided capabilities. The builder decides how those semantics
 become JavaScript, Wasm or another artefact; source does not test which target was selected. Build
 configuration is not target detection.
+
+### Directives stay constrained
+
+Compiler-known directives may carry language or structural meaning. Arbitrary
+macros and builder AST transformations do not. Ordinary `$config` values and
+static `if` cannot remove declarations or dependencies.
+
+Future `$feature` is the separate structural mechanism. It selects source
+structure before graph publication from bootstrap-known data and the selected
+builder identity. Known feature names must be distinguished from enabled
+features so a typo cannot silently disable code; its full predicate, nesting and
+config-declaration grammar is future work.
+
+### Target and representation boundaries
+
+Source cannot query a physical target, OS, architecture or backend. Builder
+identity is not physical target identity. Excluded regions still need a sound
+structural boundary before unknown syntax can be skipped.
+
+Future `$layout` preserves nominal identity, `$export` replaces rather than
+duplicates export syntax, and `$test` remains a deferred root purpose. Custom
+metadata is open design, so `$project` stays strict.

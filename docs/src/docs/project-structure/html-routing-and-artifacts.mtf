@@ -1,4 +1,4 @@
-The HTML builder derives routes from directory position under the configured `entry_root`. The normal module-root filename does not choose the route name.
+**Current support versus accepted design.** The Alpha HTML builder currently emits routes for roots with authored runtime work or fragments and expects an artefact at the entry root. The accepted queued page design selects only roots with an explicit `$page` purpose. It keeps directory routes and replaces activity-based emission and the mandatory homepage with command-specific no-page rules.
 
 ### Directory-based routes
 
@@ -7,56 +7,83 @@ The module root's directory determines the HTML output path:
 [codeblock, $code("text"):
     src/@page.moth              -> index.html
     src/docs/@page.moth         -> docs/index.html
-    src/docs/basics/@page.moth  -> docs/basics/index.html
+    src/docs/basics/@module.moth -> docs/basics/index.html
     src/@home.moth              -> index.html
     src/@api.moth               -> index.html
 ]
 
-The root module maps to the project index. A nested directory maps to a nested index route. The normal module-root filename (`@page.moth`, `@home.moth`, `@api.moth`) has no effect on the route name.
+The root module maps to the project index when it declares a page. A nested
+directory maps to a nested index route. The normal module-root filename
+(`@page.moth`, `@home.moth`, `@api.moth`) has no effect on the route name.
 
-### API-only modules
+An ordinary file cannot declare a page, and `index.moth` has no special meaning.
+The page migration adds no route override, filename-derived route, page alias or
+new redirect. Existing `page_url_style` and `redirect_index_html` policies stay
+unchanged.
 
-A module root with no builder-relevant top-level activity remains API-only. A
-root file alone emits no HTML artefact. Artefact emission requires runtime code,
-const fragments or runtime fragments.
+### Explicit pages
+
+After the accepted cutover, a normal module root becomes an HTML artefact only
+when it declares the root-only `$page` purpose:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+The root at `entry_root` may remain declaration-only while descendant roots
+declare pages. Each page candidate comes from the existing normal-module root
+inventory; the builder does not scan arbitrary `.moth` files. A metadata-only
+page and a page whose metadata uses resources both produce a complete document.
+
+### Command-specific no-page rules
+
+The accepted command policy distinguishes checking from HTML output:
+
+- Directory-project `check` accepts a valid project with zero pages. It still rejects authored runtime or direct output without a purpose.
+- HTML application `build` and `dev` require at least one page anywhere below `entry_root`. They do not require a homepage at `entry_root`.
+- Single-file `check` accepts a declaration-only synthetic root, but authored runtime or output still needs a purpose.
+- Single-file HTML output requires `$page` on the explicitly selected synthetic root.
+
+Do not fabricate `index.html` to satisfy development tooling. Serve descendant
+routes normally. If a tool needs a launch page, choose the real homepage when
+present or the lexicographically first normalised page route. That choice
+doesn't create a redirect or route alias. Requests to an absent site root
+retain ordinary missing-route behaviour.
 
 ### Builder ownership
 
 The HTML builder owns route and artefact policy. The frontend remains
 builder-neutral. The builder decides:
 
-- which modules produce HTML artefacts
+- which `$page` roots produce HTML artefacts
 - how routes are derived
 - how output files are organised
 - whether to reject unsupported reachable features
 
-Source stays target agnostic. The HTML builder may choose JavaScript, Wasm or mixed output, but source
-cannot query or branch on that choice. Builder packages expose stable capabilities rather than target
-identity.
+Source stays target agnostic. The HTML builder may choose JavaScript, Wasm or
+mixed output, but source cannot query or branch on that choice. Builder
+packages expose stable capabilities rather than target identity.
 
 ### Output folders
 
 The builder generates output folders and manages them through manifests.
-Builder sections in `config.moth` own output settings. HTML defaults to `dev`
-for development and `release` for release builds. Treat generated folders as
-build artefacts, not source.
+Builder settings in `config.moth` own output paths. HTML defaults to `dev` for
+development and `release` for release builds. Treat generated folders as build
+artefacts, not source.
 
 ### Release versus development output
 
-The default build writes to the dev folder. The `--release` flag writes to the output folder. The dev server serves from the dev folder.
-
-### Entry root artefact requirement
-
-The HTML builder requires at least one artefact-producing module root at the
-configured entry root. When the entry root contains only API-only roots, the
-compiler rejects the build with `MOTH-CONFIG-0001`.
+The default build writes to the dev folder. The `--release` flag writes to the
+release output folder. The dev server serves from the dev folder.
 
 ### Experimental Wasm mode
 
-In the experimental `--html-wasm` mode, the builder can emit a route folder containing `index.html`, `page.js` and `page.wasm` instead of a single HTML file with embedded JavaScript.
+In the experimental `--html-wasm` mode, the builder can emit a route folder
+containing `index.html`, `page.js` and `page.wasm` instead of a single HTML
+file with embedded JavaScript.
 
 ### Related concepts
 
-- For module root rules see @#module-roots (Module roots).
-- For root activity see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For project layout see @#project-layout (Project layout).
+- For module identity and cosmetic root suffixes see @#module-roots (Module roots).
+- For root purpose, fragments and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For page metadata and `io.set_title` see @#entry-config (Entry metadata and page directives).

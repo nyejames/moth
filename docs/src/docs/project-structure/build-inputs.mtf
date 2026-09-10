@@ -1,30 +1,78 @@
-**Implemented build configuration values.** The compiler supports direct and source `#Config` contracts, typed `--input` values for `build`, `check` and `dev`, ordinary static-`if` integration and immutable explicit `@project`. Semantic fingerprints are constructed transiently during frontend compilation; retaining and comparing them for dependency-aware targeted reuse remains deferred to the existing incremental and persistent artefact work. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current status.
+**Current support versus accepted design.** Direct and source `#Config of T` contracts, typed `--input` values, ordinary static `if` and explicit `@project` are implemented. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
 
-Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent schema-approved project metadata, deployment settings, feature choices and similar stable semantic configuration. They do not represent project identity, source-discovery settings, operating-system, architecture, backend or target identity.
+Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent schema-approved settings and similar stable semantic configuration. They do not represent project identity, source-discovery settings, operating-system, architecture, backend or target identity.
 
-### Direct project `#Config` fields
+### `$config` declarations
 
-Direct project `#Config` is governed by the selected project schema's per-field policy. Only a direct field marked `Configurable` by that policy, with a supported primitive or optional primitive shape, may use `#Config of T`. A primitive shape alone does not make a field configurable.
+`$config` prefixes one explicitly typed top-level `#` binding. The name is the input name, the type is the contract and `=` is the fallback.
 
 [codeblock, $code("moth"):
-    project #= |
-        name = "moth_docs",
-        version #Config of String = "0.1.0",
-        author #Config of String? = none,
-        license #Config of String? = none,
-        entry_root = "src",
-    |
+    $config
+    analytics #Bool = false
+
+    $config
+    max_retries #Int = 3
+
+    $config
+    api_url #String
+
+    $config
+    label #String? = none
 ]
 
-`name` is the required project identity field and `entry_root` controls source discovery; both are fixed-only. Compiler-control fields such as `template_const_loop_iteration_limit` are also fixed-only. The built-in schema marks ordinary metadata fields such as `version`, `author` and `license` as configurable, and open metadata fields not registered by that schema are configurable too. The exact policy comes from the selected schema; a primitive shape alone never makes a registered fixed-only field configurable.
+[table:
+    [th:
+        [: Declaration]
+        [: Missing external input]
+    ]
 
-Direct-field-only placement applies. Nested project fields, builder and tooling sections, entry-local `config:` blocks and runtime declarations cannot use `#Config`. Accepted types are `String`, `Int`, `Float`, `Bool`, `Char` and optional forms of those types.
+    [td:
+        [: Non-optional type, no initializer]
+        [: Required-input diagnostic]
+    ]
 
-The grouped `project` record remains open for ordinary metadata: schema-unknown folded fields are accepted and preserved for `@project`. Openness and qualifier eligibility are separate: the selected schema policy decides whether a direct metadata field may carry `#Config`, while fixed-only identity and source-discovery fields remain non-configurable.
+    [td:
+        [: Non-optional type with initializer]
+        [: Use the validated fallback]
+    ]
 
-### Source `#Config` contracts
+    [td:
+        [: Optional type with no initializer or `= none`]
+        [: Resolve to absence]
+    ]
 
-Any selected source module can declare a module-wide top-level compile-time contract:
+    [td:
+        [: Optional type with a present initializer]
+        [: Use that present fallback]
+    ]
+]
+
+Ordinary constants still require initializers. Only a marked configuration contract may omit one. Reject inferred `#=` configuration contracts, runtime or mutable bindings, multi-bind targets, parameters, fields, function-local declarations and type-position or value-position directives.
+
+Accepted types stay `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives.
+
+### Explicit-only providers
+
+Only `$config` declarations create input contracts.
+
+- `$project(version = "1.0")` is project metadata, not a `version` input provider.
+- An ordinary `version #String = "1.0"` is a helper constant, not an input provider.
+- Passing `release_version` to `$project(version = release_version)` does not rename its input contract.
+- `@project` publishes only predefined project fields.
+
+Matching declarations within one compilation boundary agree on name, primitive type, optionality, required or default state and normalised default value. Each project or package boundary owns its own namespace.
+
+### Bootstrap versus source defaults
+
+In `config.moth`, a fallback may use earlier visible helper values on the allowed single-file compile-time surface. Same-file forward references remain errors.
+
+In source modules, defaults remain self-contained primitive literals or `none`. Names, projections, expressions, templates, calls, casts, collections, records and references to other configuration values remain invalid defaults.
+
+Bootstrap contracts resolve from explicit input, a compatible builder primitive global, the fallback or a required-input diagnostic. Source contracts resolve from a matching bootstrap contract, explicit source-only input, a compatible builder global, the common source fallback or a required-input diagnostic.
+
+### Current `#Config` spelling
+
+Until the cutover, operational source still uses:
 
 [codeblock, $code("moth"):
     api_url #Config of String = "https://api.example.com"
@@ -32,7 +80,7 @@ Any selected source module can declare a module-wide top-level compile-time cont
     analytics #Config of Bool = false
 ]
 
-Source defaults must be self-contained primitive literals or `none` for an optional contract. They cannot use names, templates, expressions, calls, casts, field projections, collections, records or another configuration value. Same-name contracts must agree on primitive type, optionality, required/default state and normalised default value.
+Direct project `#Config` fields remain the current project-input path. They are not the accepted end-state provider model.
 
 ### Command build-input typing
 
@@ -62,30 +110,25 @@ Omitting an input lets optional absence resolve to `none` through the contract o
 
 ### Ordinary static `if`
 
-Ordinary `if` is the only conditional source form. There is no `#Config if`.
+Ordinary `if` is the only conditional source form. There is no `$config if` and no `#Config if`.
 
 [codeblock, $code("moth"):
-    analytics #Config of Bool = false
+    $config
+    analytics #Bool = false
 
     if analytics:
         send_analytics()
     ;
 ]
 
-Both branches remain valid Moth source and complete frontend validation. A known Bool selects the executable branch before HIR, preserving the selected branch's lexical scope; inactive executable work does not reach HIR or later analysis. This does not condition imports, declarations, exports or package topology.
+Both branches remain valid Moth source and complete frontend validation, including unknown directives. A known Bool selects the executable branch before HIR. This does not condition imports, declarations, exports or package topology. Future `$feature` is a separate pre-graph structural-selection contract.
 
 ### Platform boundary
 
-Moth source cannot inspect or branch on operating system, architecture, backend, target or runtime-platform identity. Builders own physical target decisions and map stable source semantics and capabilities to JavaScript, Wasm or other platform-specific artefacts. Source may use a stable capability API exposed by a selected builder or package without learning which physical backend implements it.
-
-### Resolution and isolation
-
-For a schema-configurable direct project field, `#Config` values resolve from explicit command or programmatic input, a compatible builder primitive global, the declaration default or a missing-input diagnostic. Project-wide source contracts resolve from a compatible fixed direct project field, a resolved direct project `#Config`, explicit source-only input, a compatible builder global, the shared source default or a missing-input diagnostic. A fixed project field is authoritative and blocks an override.
-
-Resolved values carry boundary-local provenance and semantic fingerprints based only on their stable name, contract type and effective value-or-absence during frontend compilation. These facts are not retained after the build. Every project or package compilation boundary owns a separate configuration namespace; consumer inputs do not implicitly satisfy dependency contracts. Configuration can specialise executable behaviour, but cannot change source discovery, dependency clauses, declarations, exports, receiver methods, traits, conformances or module/package topology. Retention, dependency-aware targeted invalidation and reuse are deferred to the existing incremental and persistent artefact work.
+Moth source cannot inspect or branch on operating system, architecture, backend, target or runtime-platform identity. Builders own physical target decisions and map stable source semantics and capabilities to JavaScript, Wasm or other platform-specific artefacts.
 
 ### Related concepts
 
-- For the config file see @#project-config (Project config).
-- For entry-local metadata see @#entry-config (Entry config).
-- For the build-system authority see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).
+- For `$project` and `$html_builder` see @#project-config (Project config).
+- For `$page` metadata see @#entry-config (Entry metadata and page directives).
+- For general directive grammar see @../directives (Directives).

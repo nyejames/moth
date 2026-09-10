@@ -1,4 +1,10 @@
-The `export:` block is the only public API marker. It is valid only in a module root file and marks declarations as visible to other modules.
+**Current support versus accepted design.** `export:` is implemented and remains
+the only public API marker in current source. The accepted future `$export`
+migration will replace it later. Directive-block support for that migration is
+undecided, so these forms will not remain permanent alternatives.
+
+The current `export:` block is valid only in a module root file. It marks legal
+declarations as visible to other modules.
 
 ### Syntax
 
@@ -23,7 +29,7 @@ The `export:` block is the only public API marker. It is valid only in a module 
 - The block ends with normal Moth `;`.
 - An empty `export:` block is rejected with `MOTH-RULE-0080`.
 - Items inside the block are ordinary top-level module-root items marked public.
-- Items outside the block remain private to the module root file.
+- Items outside the block remain private to the module.
 
 ### Allowed inside export:
 
@@ -53,7 +59,9 @@ The `export:` block is the only public API marker. It is valid only in a module 
 - nested `export:` blocks
 - all legacy inline `export` forms
 
-Runtime statements inside the block are rejected with `MOTH-RULE-0080`. Legacy inline `export` syntax (without the `:` block delimiter) is rejected with `MOTH-SYNTAX-0001`.
+Runtime statements inside the block are rejected with `MOTH-RULE-0080`.
+Legacy inline `export` syntax without the `:` block delimiter is rejected with
+`MOTH-SYNTAX-0001`.
 
 ### Re-exports
 
@@ -67,11 +75,15 @@ The export block can re-export direct selections from other files:
     ;
 ]
 
-The selected alias becomes the public name. In this example cross-module consumers can depend on `Card`, not `CardData`, unless the export block lists `CardData` separately.
+The selected alias becomes the public name. In this example cross-module
+consumers can depend on `Card`, not `CardData`, unless the export block lists
+`CardData` separately.
 
 ### `#` constants are compile-time, not visibility
 
-The `#` marker on a binding means compile-time constant. It does not control cross-module visibility. Cross-module visibility is controlled exclusively by the `export:` block.
+The `#` marker on a binding means compile-time constant. It does not control
+cross-module visibility. Cross-module visibility is controlled exclusively by
+the `export:` block.
 
 ### Same-module versus cross-module visibility
 
@@ -80,8 +92,17 @@ The `#` marker on a binding means compile-time constant. It does not control cro
 - Private declarations in the module root file are not available to other modules.
 - A module root with no `export:` block exports nothing.
 
+### Future migration
+
+The accepted `$export` direction belongs to the general directive family, but
+its exact block syntax and migration timing remain future work. Recognition or
+documentation of its name does not add semantics. Do not write `$export` in a
+current project, and do not promise that both spellings will be supported
+forever.
+
 ### Related concepts
 
 - For module root rules see @#module-roots (Module roots).
+- For entry purpose and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For re-export syntax see @../packages/#public-reexports (Public re-exports).
 - For visibility rules see @../packages/#module-visibility (Module visibility).

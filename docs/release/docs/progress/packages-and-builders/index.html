@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Packages and Builders Progress Matrix | Moth</title>
+    <meta name="description" content="Current implementation status, coverage and accepted follow-ups for Moth packages and project builders.">
+    <style>
+/*!
+  MOTH CSS CORE (absolute basics CSS reset)
+  This is inspired by Pico.css, but is an even more minimal reset.
+
+  Actual style systems are intended to be built on top of this easily.
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --moth-font-size: 100%;
+
+  --moth-font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --moth-font-family-sans-serif: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, "Helvetica Neue", sans-serif, var(--moth-font-family-emoji);
+  --moth-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace, var(--moth-font-family-emoji);
+  --moth-font-family: var(--moth-font-family-sans-serif);
+
+  --moth-line-height: 1.5;
+  --moth-font-weight: 400;
+  --moth-font-size: 100%;
+  --moth-text-underline-offset: 0.1rem;
+  --moth-border-radius: 0.25rem;
+  --moth-border-width: 0.0625rem;
+  --moth-outline-width: 0.125rem;
+  --moth-transition: 0.2s ease-in-out;
+
+  --moth-spacing: 1rem;
+  --moth-spacing-small: 0.5rem;
+
+  /* Code block colours (language-neutral role palette) */
+  --moth-code-comment: #8e8e8e;
+  --moth-code-keyword: #eeb159;
+  --moth-code-literal: #f78c6c;
+  --moth-code-string: #64d721;
+  --moth-code-number: #c6c2f6;
+  --moth-code-operator: #a6a9fd;
+  --moth-code-nominal: #fca1e7;
+  --moth-code-type: #46ceff;
+  --moth-code-delimiter: #c6b760;
+  --moth-code-function: #82aaff;
+  --moth-code-directive: #bcde8a;
+  --moth-code-contract: #f5646b;
+}
+
+/* where: is used here for less specificity, allowing easier overriding */
+:where(:root) {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-weight: var(--moth-font-weight);
+  font-size: var(--moth-font-size);
+  line-height: var(--moth-line-height);
+  font-family: var(--moth-font-family);
+  text-underline-offset: var(--moth-text-underline-offset);
+  text-rendering: optimizeLegibility;
+  overflow-wrap: break-word;
+  -moz-tab-size: 4;
+  -o-tab-size: 4;
+  tab-size: 4;
+
+}
+
+@media (min-width: 576px) {
+  :root {
+    --moth-font-size: 106.25%;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --moth-font-size: 112.5%;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --moth-font-size: 118.75%;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --moth-font-size: 125%;
+  }
+}
+@media (min-width: 1536px) {
+  :root {
+    --moth-font-size: 131.25%;
+  }
+}
+
+body {
+  width: 100%;
+  margin: 0;
+}
+
+/* Code Style */
+.codeblock {
+  color: hsla(0, 0%, 100%, 0.982);
+  font-family: var(--moth-font-family-monospace);
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+.moth-code-comment {
+  color: var(--moth-code-comment);
+}
+.moth-code-keyword {
+  color: var(--moth-code-keyword);
+}
+.moth-code-literal {
+  color: var(--moth-code-literal);
+}
+.moth-code-string {
+  color: var(--moth-code-string);
+}
+.moth-code-number {
+  color: var(--moth-code-number);
+}
+.moth-code-operator {
+  color: var(--moth-code-operator);
+}
+.moth-code-nominal {
+  color: var(--moth-code-nominal);
+}
+.moth-code-type {
+  color: var(--moth-code-type);
+}
+.moth-code-delimiter {
+  color: var(--moth-code-delimiter);
+}
+.moth-code-function {
+  color: var(--moth-code-function);
+}
+.moth-code-directive {
+  color: var(--moth-code-directive);
+}
+.moth-code-contract {
+  color: var(--moth-code-contract);
+}
+
+/* BASIC CSS RESET STUFF */
+
+/**
+ * Document
+ * Content-box & Responsive typography
+*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  background-repeat: no-repeat;
+}
+
+::before,
+::after {
+  text-decoration: inherit;
+  vertical-align: inherit;
+}
+    </style>
+<style>@font-face {
+    font-family: "Computer Modern Sans";
+    src: url("../../../styles/fonts/cmunss.woff2") format("woff2");
+    font-style: normal;
+    letter-spacing: 10em;
+    font-weight: 400;
+    font-display: swap;
+}body {
+    font-family:
+        "Computer Modern Sans",
+        var(--moth-font-family-sans-serif);
+
+    min-height: 100vh;
+
+    background-color:
+        light-dark(
+            hsl(0, 0%, 98%),
+            #080d0c
+        );
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(48 92 61 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(25 67 46 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #050d1b 0%,
+                #0a0a17 48%,
+                #0d1a31 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body {
+        background-image:
+            radial-gradient(
+                80rem 55rem at 8% -10%,
+                rgb(0 50 80 / 20%),
+                transparent 60%
+            ),
+            radial-gradient(
+                65rem 45rem at 100% 18%,
+                rgb(0 67 100 / 10%),
+                transparent 65%
+            ),
+            linear-gradient(
+                145deg,
+                #c7e3fc 0%,
+                #c4d3f2 12%,
+                #c8d9fb 91%,
+                #adbfff 100%
+            );
+
+        background-repeat: no-repeat;
+    }
+}
+
+a {
+    color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+}
+
+h1 {
+    color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+}
+
+.container {
+    width: 100%;
+    margin-right: auto;
+    margin-left: auto;
+    padding-right: var(--moth-spacing-small);
+    padding-left: var(--moth-spacing-small);
+}
+
+.container code:not(.codeblock) {
+    color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+    font-family: var(--moth-font-family-monospace);
+    margin-left: 0.2em;
+    margin-right: 0.15em;
+    font-weight: 400;
+}
+
+.container pre {
+    max-width: 100%;
+    margin-block: 1.25em;
+    padding: 1em;
+    overflow-x: auto;
+    border-radius: 5px;
+    background-color: #151515e9;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    max-width: 100%;
+}
+
+th,
+td {
+    border: 1px solid;
+    border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+    padding: 0.5em 1em;
+    vertical-align: top;
+    text-align: left;
+}
+
+@media (min-width: 576px) {
+    .container {
+        max-width: 510px;
+        padding-right: var(--moth-spacing);
+        padding-left: var(--moth-spacing);
+        padding-bottom: var(--moth-spacing);
+    }
+}
+
+@media (min-width: 768px) {
+    .container {
+        max-width: 700px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .container {
+        max-width: 950px;
+    }
+
+    table {
+        font-size: 0.8rem;
+    }
+
+    th,
+    td {
+        padding: 0.4em;
+    }
+}
+
+@media (min-width: 1280px) {
+    .container {
+        max-width: 1200px;
+    }
+}
+
+@media (min-width: 1536px) {
+    .container {
+        max-width: 1450px;
+    }
+}
+
+.moth-nav-1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom-color: grey;
+    border-bottom-style: solid;
+    border-bottom-width: 1px;
+    padding: 0rem 2rem 0rem 2rem;
+}</style>
+  </head>
+  <body style="">
+<nav class="moth-nav-1" aria-label="Primary">
+    <a
+        href="/moth/"
+        style="
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.9rem 0;
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04rem;
+        "
+    >
+        <span
+            aria-hidden="true"
+            style="
+                font-family: var(--moth-font-family-emoji);
+                font-size: 1.4rem;
+                line-height: 1;
+                color: light-dark( #234970, #97b7ef );
+            "
+        >ʚĭɞ</span>
+
+    </a>
+
+    <div
+        style="
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        "
+    >
+        <a
+            href="/moth/docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Docs
+        </a>
+
+        <a
+            href="/moth/developer-docs/"
+            style="
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                text-decoration: none;
+                font-weight: 500;
+                padding: 0.35rem 0;
+            "
+        >
+            Developers
+        </a>
+
+        <a
+            href="https://github.com/nyejames/moth"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Moth GitHub repository"
+            style="
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: light-dark(var(--moth-text-lightmode), var(--moth-text-darkmode));
+                padding: 0.35rem 0;
+            "
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                width="22"
+                height="22"
+                fill="currentColor"
+                aria-hidden="true"
+            >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+                0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+                -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07
+                -1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+                2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+                1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2
+                0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+            </svg>
+        </a>
+    </div>
+</nav>
+ <h1 style="font-size: 2em;text-align: center;"> PACKAGES AND BUILDERS PROGRESS</h1>
+<section class="container"><p>This page tracks current implementation status for Moth packages and project builders. It also records the important accepted gaps and next extensions for partial package surfaces so later work does not need to rediscover them from implementation details.</p><p>The <a href="../">compiler progress matrix</a> tracks the core language, compiler, memory work and backend implementation. Backend implementation progress belongs there even when a project builder consumes that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or a project builder.</p><p>Accepted deferred surfaces may appear here. Open design questions and outside-scope mechanisms do not. Package acquisition, resolver and package-manager sequencing remains roadmap work rather than something this matrix designs.</p><h2>How to read and edit this page</h2><ul><li>Keep package rows focused on the implemented v1 surface and the most useful accepted next gaps.</li><li>Update a package row while working on that package so deferred extensions do not need to be rediscovered later.</li><li>Keep project-builder rows separate from backend implementation rows.</li><li>Put user-facing package and builder explanations in <code>docs/src/docs/packages/**</code> and the relevant project documentation.</li><li>Put implementation sequencing and unaccepted proposals in <code>docs/roadmap/roadmap.md</code>.</li><li>Use the status labels from this page&#39;s legend. Put backend-specific or deliberately deferred nuance in the notes column instead of inventing new status labels.</li></ul></section>
+<section class="container"><h2>Status legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Status</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Meaning</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Implemented for the current supported surface and expected to compile, type check and run through its advertised builder/runtime path.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> A useful subset is implemented, but important common operations, package surfaces or builder behaviour remain incomplete.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Experimental</td>
+ <td style="padding: 0.1em 0.5em; "> Present in the repository, but not part of the Alpha stability promise.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted or design-compatible follow-up work that is not currently implemented.</td>
+        </tr>
+            
+
+</table><h2>Coverage legend</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Coverage</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Meaning</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Broad</td>
+ <td style="padding: 0.1em 0.5em; "> Multiple focused cases exist, including success and failure coverage.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Targeted</td>
+ <td style="padding: 0.1em 0.5em; "> Dedicated coverage exists, but not across all important edges.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Thin</td>
+ <td style="padding: 0.1em 0.5em; "> Coverage exists indirectly or through only a small number of cases.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> No clear canonical coverage found.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Package model and infrastructure</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Surface</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Status</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Coverage</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Runtime target</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Prelude policy</td>
+ <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted prelude symbol registration, namespace-alias plumbing and collision rejection coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
+ <td style="padding: 0.1em 0.5em; "> The builtin prelude policy registers <code>io</code> as a namespace alias to <code>@core/io</code> and leaves compiler-owned <code>Error</code> as a bare language symbol. Prelude is visibility policy, not a package origin or backing. There is no <code>@core/prelude</code> package.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Binding-backed platform packages</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Broad package dependency, external constant, external signature, provider-created JS package, runtime asset/glue, Core package, prelude and backend validation coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / JS</td>
+ <td style="padding: 0.1em 0.5em; "> Rust-side and provider-created binding-backed packages expose free functions, opaque types and compile-time scalar constants. Project-local and builder-owned annotated <code>.js</code> files can create JS-backed package surfaces. Binding-backed packages do not expose receiver methods. Unsupported reachable calls for an active backend fail before lowering.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Source-backed package roots</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted AST-backed config loading, known-key and shape enforcement, self-contained config dependency rejection, generic package-root discovery, collision detection and public-surface enforcement coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Source-backed packages and regular modules share module-root and visibility rules. <code>config.moth</code> is compiled as one self-contained source before package discovery and rejects every dependency clause before path resolution.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Builder-provided source-backed packages</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted builder source-backed package root registration and HTML Builder package coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Builders expose source-backed packages through <code>BuilderSurface.source_packages</code>. The HTML builder provides <code>@html</code> as a source-backed package. Builder and project-local prefix collisions are hard config errors.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Project-local packages</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted structural support-package roots, rejected legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> Structural <code>+*.moth</code> support packages and the optional project-root facade define the accepted project-local package model. Legacy config-driven <code>package_folders</code> paths and the historical default <code>lib/</code> are removed. Independently registered Builder/Core source packages retain their own package boundaries.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Builder runtime packages</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted built-in JS-backed package, runtime asset, runtime module, import-map, glue and backend validation coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
+ <td style="padding: 0.1em 0.5em; "> Builder-owned runtime packages such as <code>@web/canvas</code> are binding-backed packages. They share the specialised external package registry and HTML external JS asset/glue pipeline with provider-created imports.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> First-party no-third-party-dependencies guard</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted package-manager, vendored-root, allowed-runtime-import and rejected-module-import coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Validation / packages</td>
+ <td style="padding: 0.1em 0.5em; "> The <code>first-party-deps</code> validation owner inspects first-party implementation roots plus the compiler-owned JavaScript inventory. Physical <code>.js</code> assets, Core helper bodies, inline lowering templates and registered runtime modules are checked. User-owned and future dependency packages, generated glue, documentation, tests and benchmarks remain outside its scan.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Core packages</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Surface</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Status</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Coverage</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Runtime target</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes and accepted next gaps</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core IO package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML-Wasm validation</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/io</code> exposes <code>io.print</code>, <code>io.line</code>, <code>io.debug</code>, <code>io.warn</code>, <code>io.error</code> and <code>io.input.*</code>. The prelude injects <code>io</code> as a compile-time namespace alias, not a runtime value. Its future scope and the surface that should remain permanently preluded require a dedicated design pass before major expansion. Filesystem, network, timers, event queues and targeted input sources remain candidate inputs to that review rather than pre-assigned additions or separate packages. Queued <code>io.set_title</code> is a later browser-capability document-title call, not current IO support; see the deferred row below.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core collections package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Broad literal, fixed/growable mutation, indexing, fallibility, AST/HIR call target, JS helper and diagnostic coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML-Wasm validation</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/collections</code> provides the compiler-owned collection operation identities behind fixed and growable collection members. Common non-sorting gaps still need a focused package audit. The accepted stable-by-default sorting contract is owned by its specialised package plan and remains blocked on final mixed-backend collection support.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core math package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted direct, aliased, namespace, const, arity, type, missing-symbol, unbound access, finite-result boundary and HTML-Wasm unsupported-path coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML-Wasm validation</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/math</code> exposes Float math functions and scalar constants. It requires an explicit dependency clause. HTML-JS routes every single-Float external result through the shared finite-result boundary, rejecting NaN and both infinities before ordinary Moth code observes them. Common mathematical gaps should be filled before expanding into specialised APIs.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core text package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted runtime, JS helper, arity, type-error, edge-case, unsupported-builder and Wasm-unsupported coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/text</code> currently exposes length, emptiness, containment, prefix and suffix checks. <code>text.length</code> counts Unicode scalar values with the same unit as <code>Char</code>. The accepted next v1 slice adds scalar-indexed character access and slicing, first/last search positions, match counting, Unicode-whitespace trimming and literal replacement after native result slots and Core const evaluation land. Collection-valued split/join/lines/character surfaces wait for stable collection-valued binding signatures. Fallible <code>char_at</code> and <code>slice</code> can gain Rust parity immediately but compile-time evaluation waits for an accepted fallible Core evaluator. Unicode casing, case folding, normalization and grapheme operations wait for a pinned Moth-owned Unicode data policy rather than inheriting host Unicode versions. Regex and locale-sensitive text remain separate future design areas.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core random package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted dependency, JS helper, runtime smoke, arity, type-error and Wasm-unsupported coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/random</code> exposes random Float and inclusive random Int helpers. Seeded random and additional common distributions remain deferred. Exact generator algorithm identity is not currently a cross-backend semantic promise, so JS may use a backend-local implementation while portable observable contracts remain stable.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core time package</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted dependency, direct alias, namespace, helper, runtime smoke, fallible parse/catch, arity/type diagnostic, old-name rejection, opaque-field rejection and backend validation coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/time</code> exposes opaque Duration, TimeMark and Timestamp values plus the first JS-backed time helper slice. Calendar, civil-time and time-zone APIs remain future work. Time values, parsing and other deterministic semantics must stay backend-neutral rather than inheriting JavaScript-specific behaviour.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>HTML project builder</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Surface</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Status</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Coverage</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Runtime target</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes and accepted next gaps</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> HTML project builds</td>
+ <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Broad routing, API-only artifact filtering, document shell, metadata, config, output cleanup, external JS glue, page-fragment and resource-output coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
+ <td style="padding: 0.1em 0.5em; "> This is the release-critical project builder. Only roots with HTML artefact activity participate in page, runtime asset, resource-output and homepage planning. Backend implementation and HTML-Wasm progress remain on the compiler progress matrix.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Moth template <code>.mtf</code> content assets</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, module-root re-export, direct API, diagnostics and integration coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
+ <td style="padding: 0.1em 0.5em; "> <code>.mtf</code> files are builder-supported source assets that synthesize one private compile-time <code>content #String</code> constant from an implicit <code>$md</code> template body. Nested templates without an explicit directive also default to Markdown and explicit directives override that default. They bind extensionlessly into <code>.moth</code> and must fully fold.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Plain Markdown <code>.md</code> content assets</td>
+ <td style="padding: 0.1em 0.5em; "> Supported</td>
+ <td style="padding: 0.1em 0.5em; "> Broad extensionless dependency, direct alias, module-root re-export, parser options, raw HTML, literal links/images, collision, direct-extension and module-root rejection coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML builder / frontend</td>
+ <td style="padding: 0.1em 0.5em; "> <code>.md</code> files render to HTML at compile time and synthesize one private <code>content #String</code> constant. They do not parse Moth declarations, interpolation, templates, frontmatter or metadata.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Builder-supported source file kinds</td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Targeted moth template and Markdown source-kind registry, extensionless resolution, unsupported-kind diagnostics, source discovery and tokenizer/preparation coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Stage 0 / frontend</td>
+ <td style="padding: 0.1em 0.5em; "> Builders can declare non-<code>.moth</code> source file kinds that participate in source dependency discovery and frontend preparation. The HTML builder currently implements <code>.mtf</code> and plain Markdown <code>.md</code> content assets.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> HTML Builder package <code>@html</code></td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Source-backed Builder package registration plus docs-site use across templates, style helpers, tables, code blocks and canvas wrappers.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML builder</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@html</code> provides compile-time HTML helpers and source-owned wrappers over lower-level builder bindings such as <code>@web/canvas</code>. It should grow only where helpers are broadly useful to HTML projects rather than becoming a general web framework.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Canvas package <code>@web/canvas</code></td>
+ <td style="padding: 0.1em 0.5em; "> Partial</td>
+ <td style="padding: 0.1em 0.5em; "> Binding-backed package registration, opaque handle types, runtime assets/glue and current drawing API coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> HTML / JS</td>
+ <td style="padding: 0.1em 0.5em; "> The current surface covers canvas element management, 2D context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. Canvas is deliberately allowed a broader expansion target than most packages because visuals and animation make it a useful Moth language and runtime stress-test surface.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Accepted deferred package and builder work</h2><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+    
+    <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+         <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Surface</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Status</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Coverage / diagnostic direction</th> <th style="border: 1px solid; padding: 0.5em; text-align: left;"> Notes</th> 
+</tr>
+
+
+
+                
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core Text collection-valued operations</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Keep final collection signatures unavailable rather than exposing opaque JS handles.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>split</code>, <code>join</code>, <code>lines</code> and an eventual character iteration surface wait for stable collection-valued binding signatures or another final source-backed route.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core Text Unicode transforms</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Exact search and current transforms remain host-version-independent.</td>
+ <td style="padding: 0.1em 0.5em; "> Unicode lowercase/uppercase, case folding and NFC/NFD/NFKC/NFKD normalization wait for one pinned Moth-owned Unicode data policy and generated first-party tables shared across implementations. Host JavaScript or Rust Unicode versions do not define Core semantics.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core Text grapheme operations</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Existing length and positions remain Unicode-scalar based.</td>
+ <td style="padding: 0.1em 0.5em; "> Grapheme-aware length, iteration and slicing wait for an accepted explicit API plus pinned Unicode segmentation data. They do not replace the scalar semantics of <code>length</code>, <code>char_at</code>, search positions or <code>slice</code>.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Core Text fallible constant evaluation</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> Runtime APIs keep normal Error semantics; no temporary optional forms are introduced.</td>
+ <td style="padding: 0.1em 0.5em; "> Rust parity functions for fallible text helpers can exist with the package, but compile-time evaluation of <code>char_at</code> and <code>slice</code> waits for an accepted compiler-owned fallible Core evaluator.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Source-backed package HIR caching</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> No precompiled source-backed package cache.</td>
+ <td style="padding: 0.1em 0.5em; "> Source-backed packages are compiled from source each build. Caching stays deferred until package identities and the package system are stable.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Package manager</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> No package manager, remote registries, lockfiles or dependency resolver.</td>
+ <td style="padding: 0.1em 0.5em; "> Project dependency declarations, resolver/catalog handoff and package-manager foundations are owned by their later roadmap work. This matrix records status only and does not design that system.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Binding-backed JS package expansion</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> JS provider diagnostics reject unsupported public binding forms.</td>
+ <td style="padding: 0.1em 0.5em; "> The HTML builder supports annotated single-file <code>.js</code> imports and builder-owned JS-backed packages. Additional binding forms should be added only when their package contract is clear and they fit existing package ownership.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Generic binding-backed package functions</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> External signature validation rejects unsupported generic binding-backed surfaces.</td>
+ <td style="padding: 0.1em 0.5em; "> Binding-backed packages currently expose concrete functions, opaque types and constants only. Generic binding-backed functions remain deferred and must not be introduced just to flesh out a package.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> <code>$html_builder</code> configuration</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Closed config-only HTML settings directive with required singleton invocation for authored HTML directory projects. Bare <code>$html_builder</code> uses defaults. Current grouped <code>html</code> records remain implemented. Compiler-wide <code>$project</code> / <code>$config</code> status lives in @../ (Progress).</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Root-only <code>$page</code> and explicit purpose</td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted queued HTML entry declaration. One normal-root <code>$page</code> per directory, metadata cutover from reserved <code>page_*</code> names, and command-specific no-page rules. Current HTML entries still come from implemented root activity and reserved page metadata.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> Browser-capability <code>io.set_title</code></td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> None</td>
+ <td style="padding: 0.1em 0.5em; "> Queued Core IO call: one String-content input, no value result, HTML-JS host capability, pre-lowering rejection on unsupported reachable targets. Not a silent no-op. Current IO helpers are unchanged.</td>
+        </tr>
+            
+
+</table></section>
+<section class="container"><h2>Maintenance rule</h2><p>Keep this page concise but useful as a handoff between package iterations.</p><ul><li>Record the important common missing operations while a package is being worked on.</li><li>Move implementation sequencing and unaccepted package ideas to <code>docs/roadmap/roadmap.md</code>.</li><li>Keep backend implementation status on <a href="../">the compiler progress matrix</a>.</li><li>Keep package API explanations and examples in <code>docs/src/docs/packages/**</code>.</li><li>Add a new package row only after that package&#39;s scope and semantic contract have been deliberately considered.</li><li>Do not invent package origins or tiers to classify importance. Use only the package model accepted by the canonical package documentation.</li></ul></section>
+<script>
+function __moth_is_ref(value) {
+return value !== null && typeof value === "object" && value.__moth_ref === true;
+}
+
+function __moth_binding(value) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
+}
+
+function __moth_param_binding(value) {
+if (!__moth_is_ref(value)) {
+return __moth_binding(value);
+}
+if (value.__moth_kind === "binding") {
+return value;
+}
+const binding = __moth_binding(undefined);
+binding.__moth_mode = "alias";
+binding.__moth_target = value;
+return binding;
+}
+
+function __moth_resolve(ref) {
+while (ref.__moth_kind === "binding" && ref.__moth_mode === "alias") {
+ref = ref.__moth_target;
+}
+return ref;
+}
+
+function __moth_read(ref) {
+const resolved = __moth_resolve(ref);
+return resolved.__moth_kind === "binding" ? resolved.__moth_slot.value : resolved.__moth_get();
+}
+
+function __moth_write(ref, value) {
+const resolved = __moth_resolve(ref);
+if (resolved.__moth_kind === "binding") {
+resolved.__moth_slot.value = value;
+} else {
+resolved.__moth_set(value);
+}
+return value;
+}
+
+function __moth_assign_borrow(binding, ref) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, __moth_read(ref));
+}
+binding.__moth_mode = "alias";
+binding.__moth_target = ref;
+return binding;
+}
+
+function __moth_assign_value(binding, value) {
+if (binding.__moth_mode === "alias") {
+return __moth_write(binding, value);
+}
+binding.__moth_mode = "slot";
+binding.__moth_target = null;
+binding.__moth_slot.value = value;
+return binding;
+}
+
+function __moth_field(baseRef, field) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[field];
+},
+__moth_set(value) {
+__moth_read(baseRef)[field] = value;
+}
+};
+}
+
+function __moth_index(baseRef, index) {
+return {
+__moth_ref: true,
+__moth_kind: "computed",
+__moth_get() {
+return __moth_read(baseRef)[index];
+},
+__moth_set(value) {
+__moth_read(baseRef)[index] = value;
+}
+};
+}
+
+function __moth_clone_value(value) {
+if (Array.isArray(value)) {
+return value.map(__moth_clone_value);
+}
+if (value !== null && typeof value === "object") {
+const result = {};
+for (const key of Object.keys(value)) {
+result[key] = __moth_clone_value(value[key]);
+}
+return result;
+}
+return value;
+}
+
+function __moth_error_normalize_file(file) {
+if (typeof file !== "string") {
+return "";
+}
+if (file.startsWith("/")) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+if (/^[A-Za-z]:[\\/]/.test(file)) {
+const parts = file.split(/[\\/]/).filter(Boolean);
+return parts.length > 0 ? parts[parts.length - 1] : file;
+}
+return file;
+}
+
+function __moth_make_error(message, code, location, trace) {
+return {
+f_6d657373616765: message,
+f_636f6465: code,
+__moth_location: location ?? null,
+__moth_trace: trace ?? null
+};
+}
+
+function __moth_error_result(message, code) {
+return { tag: "err", value: __moth_make_error(message, code, null, null) };
+}
+
+function __moth_error_message(error) {
+const message = error && error["f_6d657373616765"] !== undefined ? error["f_6d657373616765"] : error && error.message;
+return typeof message === "string" ? message : String(message ?? "Unknown error");
+}
+
+function __moth_error_code(error) {
+const code = error && error["f_636f6465"] !== undefined ? error["f_636f6465"] : error && error.code;
+return typeof code === "number" ? code : 0;
+}
+
+function __moth_error_with_location(error, location) {
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), location, error.__moth_trace);
+}
+
+function __moth_error_push_trace(error, frame) {
+const nextTrace = error.__moth_trace ? error.__moth_trace.concat([frame]) : [frame];
+return __moth_make_error(__moth_error_message(error), __moth_error_code(error), error.__moth_location, nextTrace);
+}
+
+function __moth_error_bubble(error, file, line, column, functionName) {
+const safeFunction = typeof functionName === "string" && functionName.length > 0 ? functionName : "<unknown>";
+const location = {
+file: __moth_error_normalize_file(file),
+line,
+column,
+function: safeFunction === "<unknown>" ? null : safeFunction
+};
+const frame = { function: safeFunction, location };
+const nextLocation = error.__moth_location ?? location;
+const located = __moth_error_with_location(error, nextLocation);
+return __moth_error_push_trace(located, frame);
+}
+
+function __moth_result_propagate(result) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+throw { __moth_result_propagate: true, value: result.value };
+}
+throw new Error("Expected internal Result carrier during propagation");
+}
+
+function __moth_result_fallback(result, fallback) {
+if (result && result.tag === "ok") {
+return result.value;
+}
+if (result && result.tag === "err") {
+return fallback();
+}
+throw new Error("Expected internal Result carrier during fallback handling");
+}
+
+function __moth_fixed_collection(items, fixedCapacity) {
+return {
+__moth_kind: "fixed_collection",
+items: items,
+fixedCapacity: fixedCapacity,
+};
+}
+
+function __moth_collection_items(collection) {
+if (Array.isArray(collection)) {
+return collection;
+}
+return collection.items;
+}
+
+function __moth_collection_is_valid(collection) {
+if (Array.isArray(collection)) {
+return true;
+}
+if (collection === null || typeof collection !== "object") {
+return false;
+}
+if (collection.__moth_kind !== "fixed_collection") {
+return false;
+}
+if (!Array.isArray(collection.items)) {
+return false;
+}
+return (
+Number.isInteger(collection.fixedCapacity)
+&& collection.fixedCapacity > 0
+&& collection.items.length <= collection.fixedCapacity
+);
+}
+
+function __moth_collection_index_is_valid(collection, index) {
+const items = __moth_collection_items(collection);
+return Number.isInteger(index) && index >= 0 && index < items.length;
+}
+
+function __moth_collection_get(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+return { tag: "ok", value: items[index] };
+}
+
+function __moth_collection_set(collection, index, value) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+items[index] = value;
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_push_growable(collection, value) {
+collection.push(value);
+}
+
+function __moth_collection_push_fixed(collection, value) {
+if (Array.isArray(collection) || !__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+const items = __moth_collection_items(collection);
+if (items.length >= collection.fixedCapacity) {
+return __moth_error_result("Fixed collection capacity exceeded", 102);
+}
+items.push(value);
+return { tag: "ok", value: null };
+}
+
+function __moth_collection_remove(collection, index) {
+if (!__moth_collection_is_valid(collection)) {
+return __moth_error_result("Collection operation expects an ordered collection", 100);
+}
+if (!__moth_collection_index_is_valid(collection, index)) {
+return __moth_error_result("Collection index out of bounds", 101);
+}
+const items = __moth_collection_items(collection);
+const removed = items.splice(index, 1)[0];
+return { tag: "ok", value: removed };
+}
+
+function __moth_collection_length(collection) {
+const items = __moth_collection_items(collection);
+return items.length;
+}
+
+function __moth_string_like(value) {
+if (__moth_is_ref(value)) {
+return __moth_string_like(__moth_read(value));
+}
+return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
+}
+
+function __moth_string_value(value) {
+if (value === undefined || value === null) {
+return "";
+}
+if (__moth_is_ref(value)) {
+return __moth_string_value(__moth_read(value));
+}
+if (value.__moth_template === true && typeof value.snapshot === "function") {
+return value.snapshot();
+}
+return value;
+}
+
+function __moth_string_equal(left, right) {
+return __moth_string_value(left) === __moth_string_value(right);
+}
+
+function __moth_map_key(value) {
+return __moth_string_like(value) ? __moth_string_value(value) : value;
+}
+
+function __moth_value_to_string(value) {
+if (value === undefined || value === null) {
+return "";
+}
+return String(value);
+}
+
+function b_fn0() {
+let b_l0 = __moth_binding(undefined);
+
+__moth_assign_value(b_l0, []);
+return __moth_read(b_l0);
+}
+
+</script>
+<script>
+(function () {
+  if (typeof b_fn0 === "function") b_fn0();
+})();
+</script>
+  </body>
+</html>

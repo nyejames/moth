@@ -699,7 +699,7 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> compiles and tools Moth projects. You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.</p><p>Other tooling continues rapid development.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
+<section class="container"><p><a href="../">Documentation</a> / Getting Started</p><h1>Getting Started with moth</h1><p><code>moth</code> compiles and tools Moth projects. You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.</p><p><strong>Support notice.</strong> The Alpha compiler still accepts grouped <code>project</code> and <code>html</code> records, direct <code>#Config</code> fields and reserved <code>page_*</code> metadata. The accepted <code>$config</code>, <code>$project</code>, <code>$html_builder</code> and root-only <code>$page</code> forms below are queued design. <code>moth new</code> does not emit those forms yet. Keep live projects on the current syntax until the implementation cutover.</p><p>Other tooling continues rapid development.</p><p>If you are running the compiler from the repository instead of an installed <code>moth</code> binary, use <code>cargo run --</code> before the same commands:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
@@ -733,8 +733,8 @@ cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operat
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "><p><code>new html</code></p></td>
- <td style="padding: 0.1em 0.5em; "> Creates a complete HTML project scaffold.</td>
- <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including <code>src/@page.moth</code>, an empty legacy <code>lib/</code> placeholder, output manifests and an optional .gitignore. The <code>lib/</code> folder has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
+ <td style="padding: 0.1em 0.5em; "> Creates the current HTML project scaffold.</td>
+ <td style="padding: 0.1em 0.5em; "><p> Accepts an optional path and <code>--force</code>. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the current-syntax config, a conventional <code>src/@page.moth</code> root, an empty legacy <code>lib/</code> placeholder, output manifests and an optional .gitignore. It does not yet emit the accepted <code>$config</code>/<code>$project</code>/<code>$html_builder</code> starter or a live <code>$page</code> declaration. The <code>lib/</code> folder has no special meaning in the accepted package design. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</p></td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -806,7 +806,28 @@ cargo run <span class='moth-code-operator'>-</span><span class='moth-code-operat
             
 
 </table></section>
-<section class="container"><h2>Create a new HTML project</h2><p>The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><p>Start a new project:</p><pre style="
+<section class="container"><h2>Create a new HTML project</h2><p>The current scaffold creates a project with current-syntax config, a conventional root, generated output folders, build manifests and an optional .gitignore. It does not yet emit the accepted starter below. The HTML project builder itself has more rules than this page needs to cover. See <a href="../project-structure">the project structure guide</a> for page layout, routing, assets, fragments and generated output details.</p><h3>Accepted starter shape (queued)</h3><p>The accepted design keeps the version in an explicit input contract and passes it to the required project field:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'><span class='moth-code-directive'>$config</span>
+version <span class='moth-code-operator'>#</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;0.1.0&quot;</span>
+
+<span class='moth-code-directive'>$project</span><span class='moth-code-delimiter'>(</span>
+    name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;my_site&quot;</span>,
+    version <span class='moth-code-operator'>=</span> version,
+    entry_root <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;src&quot;</span>,
+<span class='moth-code-delimiter'>)</span>
+
+<span class='moth-code-directive'>$html_builder</span></code></pre><p>A normal module root declares an HTML page separately. The accepted page directive is root-only and does not belong in helper files:</p><pre style="
+    padding-left: 1em;
+    border-radius: 5px;
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+"><code class='codeblock'><span class='moth-code-directive'>$page</span></code></pre><p><code>moth new</code> does not emit these accepted forms yet. Keep operational scaffolds on their current grouped config and reserved page metadata.</p><p>Start a new project:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
@@ -871,7 +892,7 @@ Choose 1/2/3:</code></pre><p>If the path contains directories that do not exist,
 │   └── .moth_manifest
 ├── release/
 │   └── .moth_manifest
-└── .gitignore</code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li><code>.moth_manifest</code> files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the conventional module root with a starter page. The filename is cosmetic.</li><li>The current scaffold creates an empty legacy <code>lib/</code> placeholder. It has no special package meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
+└── .gitignore</code></pre><ul><li><code>dev/</code> and <code>release/</code> are output folders.</li><li><code>.moth_manifest</code> files are build-system metadata for safe stale-output cleanup.</li><li><code>src/@page.moth</code> is the current conventional module root. The filename is cosmetic; it does not mean that the accepted root-only <code>$page</code> syntax is implemented.</li><li>The current scaffold creates an empty legacy <code>lib/</code> placeholder. It has no special package meaning. Use structural <code>+*.moth</code> packages under the source tree for project-local packages.</li></ul><h3>Using --force</h3><p>--force allows replacing scaffold-owned files when they already exist:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;

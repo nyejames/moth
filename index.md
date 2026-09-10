@@ -178,6 +178,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/). Production code, not `#[cfg(test)]`.
 - [frontend stage-boundary tests](src/compiler_frontend/tests/frontend_pipeline_tests.rs): one stage at a time, for handoffs a stage-local test cannot see. Not the canonical sequence — that is `compile_module`.
 - [architecture boundary rules](xtask/src/architecture_boundary.rs): the compiler/build dependency direction the source audit enforces.
+- [first-party package dependency audit](xtask/src/first_party_deps.rs): scoped first-party implementation-root validation for manifests, vendored roots and JavaScript module imports, using [first-party JavaScript inventory](src/first_party_js.rs).
 - [integration fixtures](tests/cases/): expect.toml backend matrices.
 - [subsystem unit tests](src/): `*/tests` and module tests throughout src/.
 - [in-process compiler benchmark API](src/benchmarking/): for xtask/dev tooling.
@@ -190,6 +191,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
+- [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
+- [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/src/developer-docs/memory-management/overview.mtf)
 - [codebase style guide](docs/src/developer-docs/style-guide/style-guide.mtf)
 - [language cheatsheet](docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf)

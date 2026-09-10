@@ -22,7 +22,8 @@ A colon opens a block. A semicolon closes that block.
 - Indentation is for readability. Explicit delimiters define block boundaries.
 - The language has no general authored lexical-block construct or control-flow labels.
 - Immediate `identifier:` headers in executable statement position are reserved for declared regions. Full declared-region semantics remain deferred.
-- Exact `_:` is invalid. Keyword-led semantic scopes such as `async:` remain distinct.
+- Normal control-flow keywords remain ordinary language forms. Future compiler-owned directive blocks use `$async:` and `$checked:`; both spellings are deferred and are not declared regions.
+- Exact `_:` is invalid.
 
 ### Reading the shape
 

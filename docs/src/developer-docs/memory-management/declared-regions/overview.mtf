@@ -12,7 +12,7 @@ Accepted deferred `name:` / `into name` semantics, count-free bulk lifetimes and
 - Must not decide: current implementation support, borrow-checker algorithm, physical arena representation, backend allocation or implementation order
 - Invariant: a declared region is a hard, count-free semantic lifetime boundary that cannot be silently widened, and its storage is never released individually
 
-The final source surface has no `group` keyword, dedicated general lexical-block construct, anonymous `_:` region or control-flow labels. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Keyword-led semantic scopes such as `async:` remain separate from programmer-declared regions.
+The final source surface has no `group` keyword, dedicated general lexical-block construct, anonymous `_:` region or control-flow labels. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Future compiler-owned scopes such as `$async:` remain separate from programmer-declared regions.
 
 Count-free describes the declared region's own allocation families. A retained edge stored inside a declared region whose target is an externally owned REC family is still a counted persistent edge into that external family, released at declared-region exit before bulk reclamation.
 

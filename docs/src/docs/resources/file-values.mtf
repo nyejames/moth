@@ -15,6 +15,26 @@ A file path written in expression position evaluates to a `String`. There is no 
 
 Every accepted file value above has language type `String`. Nothing exposes a file object, a filesystem handle or an output path to the program.
 
+### Page metadata uses ordinary resource values
+
+The accepted queued `$page` directive can receive a resource-bearing `String` in
+metadata such as `favicon`:
+
+[codeblock, $code("moth"):
+    $page(
+        favicon = @assets/logo.svg,
+    )
+]
+
+This is normal source resource use. The path resolves from the module root, keeps
+its structural resource anchor and is rendered by the builder in the document's
+output context. It introduces no page-URL value or new file kind; `.moth` remains
+without a file value.
+
+Until `$page` is implemented, current operational pages continue to use the
+reserved `page_*` declarations.
+
+
 ### Content files reuse their `content` constant
 
 A direct `.mtf` or `.md` value is the same folded `content` constant a dependency clause binds. The file is compiled once, by its normal owner.

@@ -1,10 +1,17 @@
     This cheatsheet describes the final design for the language. The @../progress (progress matrix)
     is the authority for what the current Alpha compiler implements and which targets support it.
 
-    Direct and source `#Config` values and explicit `@project` access shown below are implemented.
-    The entry-local `config:` example is accepted design but remains deferred. Other mechanisms may
-    be accepted end-state design that is not yet implemented.
-    For more detailed breakdowns, see the @../ (Moth documentation).
+    **Current support.** The Alpha compiler implements grouped `project`/`html` records,
+    direct and source `#Config of T` contracts, explicit `@project`, activity-based HTML
+    entries, reserved `page_*` metadata and `export:`.
+
+    **Accepted queued design.** The `$` general marker, `$config`, `$project`,
+    `$html_builder`, root-only `$page`, explicit root purpose and capability-checked
+    `io.set_title` are not yet available in Alpha.
+
+    **Deferred.** `$feature`, `$layout`, `$export` migration, `$async:`, `$checked:`,
+    `$test` and custom metadata remain future work. For more detailed breakdowns, see
+    the @../ (Moth documentation).
 
 ## Rules to internalise first
 
@@ -17,8 +24,8 @@
 - `!` is the typed error path. `?` is the option path. `assert` is for invariants.
 - `@path` starts dependencies and file paths. Source dependencies omit extensions; file paths in value position keep them.
 - Names never shadow another visible name.
-- `#Config of T` declares a typed build configuration constant.
-- A compile-time-known `Bool` can specialise an ordinary `if`; there is no `#Config if`.
+- Accepted queued input contracts use `$config` before one typed `#` binding; ordinary constants still require initializers, while marked required non-optional inputs may omit one and marked optional inputs may resolve to absence.
+- A compile-time-known `Bool` can specialise an ordinary `if`; current `#Config of Bool` values and future `$config` values use that path. Neither can remove declarations or dependencies; structural selection waits for `$feature`.
 - Source cannot inspect OS, architecture, backend or target identity.
 - General closures, anonymous callables, generic function values, macros, exceptions, trait objects and operator overloading are outside scope.
 - Named monomorphic non-capturing function references remain design pending.
@@ -171,7 +178,7 @@
 
 Moth has no general authored lexical-block construct or control-flow labels. Structured control flow introduces scope. A statically selected `if true:` remains an ordinary branch and can provide rare local name isolation without adding another scope form.
 
-Bare `identifier:` headers are reserved for declared regions. The compiler currently reports that accepted declared-region surface as deferred, and exact `_:` is invalid. Keyword-led semantic scopes such as `async:` remain separate.
+Bare `identifier:` headers are reserved for declared regions. The compiler currently reports that accepted declared-region surface as deferred, and exact `_:` is invalid. Normal control-flow keywords remain ordinary forms. Future compiler-owned blocks use `$async:` and `$checked:`; both spellings are deferred and are not declared regions.
 
 Naming conventions:
 
@@ -180,7 +187,7 @@ Naming conventions:
 - Traits use `ALL_CAPS`.
 - A visible name cannot be redeclared while it remains in scope.
 
-`Config` and its case-insensitive, leading-underscore keyword-shadow variants are reserved. There is no `import` keyword.
+`Config` and its case-insensitive, leading-underscore keyword-shadow variants remain reserved by current `#Config` support. Identifier reclamation is pending until cutover to `$config`; accepted directive spellings do not reserve ordinary `config`, `Config`, `project` or `html_builder` names. The file `config.moth` and `@project` retain separate path and package semantics. There is no `import` keyword.
 
 Symbolic binary operators and assignment require spaces on both sides:
 
@@ -236,13 +243,18 @@ String equality compares content with `is` and `is not`. Strings do not support 
 Mutability belongs to a binding or access operation, not to type identity.
 `names ~{String}` declares a mutable binding whose semantic type is `{String}`.
 
-A constant:
+A normal constant:
 
 - has an initializer
 - is immutable
 - may depend only on visible compile-time values
 - must fully fold
 - cannot use a same-file forward reference
+
+Only an accepted queued `$config`-marked required, non-optional input may omit its
+initializer; an optional input may also omit one and resolves to absence. A `$config`
+input with an initializer uses it as the fallback; ordinary configuration-looking
+names are not implicit providers.
 
 Visible dependency-bound constants are already folded and may be used.
 Cross-file constants in the same module follow the module's declaration dependency ordering.
@@ -871,7 +883,11 @@ A direct top-level const fragment prefixes the template with `#`:
     ]
 ]
 
-The direct form is valid only as entry-selected top-level fragment syntax and must fully fold. It contributes page content but does not become runtime HIR.
+In the accepted queued design, a direct root fragment requires an explicit purpose
+with an applicable consumer. `$page` is the initial HTML purpose, but it is not
+implemented yet; current Alpha still uses activity-based entry selection and
+reserved `page_*` metadata. The fragment must fully fold and never becomes runtime
+HIR.
 
 Const control flow keeps the same template shape:
 
@@ -1015,7 +1031,10 @@ Use choices for runtime heterogeneity. Moth has no trait objects, dynamic trait 
 
 ## Templates
 
-Templates are `String` values:
+In the accepted queued design, direct top-level templates require an explicit root
+purpose with an applicable consumer. `$page` is the first HTML purpose, but it is
+not implemented yet; current Alpha still uses activity-based entry selection.
+A bound or returned template remains a `String` value and is not a page fragment.
 
 [codeblock, $code("moth"):
     message = [: Hello, [name].]
@@ -1024,7 +1043,10 @@ Templates are `String` values:
     ]
 ]
 
-Static templates fold. Runtime templates lower only needed work. A direct top-level template in an entry-selected root is a page fragment. A bound/returned template is not.
+Static templates fold. Runtime templates lower only needed work. A direct top-level
+template contributes output only when its root has an explicit purpose with an
+applicable consumer. `$page` is queued and not implemented yet; a bound or returned
+template remains a `String` value.
 
 [table:
     [th:
@@ -1117,7 +1139,10 @@ Template `else if` is valid even though statement `else if` is not. Loops suppor
 
 ## Reactivity
 
-Reactivity V1 is a constrained source, subscription and live-template sink model, not a closure system.
+**Current Reactivity V1, superseded by the queued Wiring design.** The `$`
+binding and subscription forms below belong to the current reactive
+implementation, not Wiring or general directives. See @../reactivity
+(Reactivity) for that implemented surface. Wiring uses no `$` binding marker.
 
 [codeblock, $code("moth"):
     count $Int = 0
@@ -1135,7 +1160,10 @@ A plain capture is a snapshot. `$(source)` records a live read-only dependency:
     live_string = [: Count: [$(count)]]
 ]
 
-The result remains `String`. Observable updates happen only at supported sinks. V1 supports a direct top-level HTML-JS runtime fragment:
+The result remains `String`. Observable updates happen only at supported sinks.
+The current Alpha supports a direct top-level HTML-JS runtime fragment through
+activity-based entry selection. The following example belongs to that
+predecessor implementation, not the queued `$page` surface:
 
 [codeblock, $code("moth"):
     count $Int = 0
@@ -1154,7 +1182,9 @@ A subscription accepts one bare reactive source identifier, not a field path, ca
 
 Reactive parameters preserve source identity for reads/subscriptions, grant no mutation and have no defaults. Passing a source to ordinary `T` takes a snapshot. `$T` is not a wrapper type.
 
-Field/path and item subscriptions, expression tracking, derived values, events/actions/effects, `$bind(...)`, component messages, IO sinks, fine-grained DOM updates and keyed diffing remain design-incomplete.
+Future work belongs to the queued Wiring replacement. This predecessor section
+does not reserve new `$` spellings or authorise reactive binding and subscription
+expansion.
 
 ## `.mtf` and `.md` content files
 
@@ -1261,7 +1291,14 @@ A module is rooted by one directory-scoped `@*.moth` or `+*.moth`. The suffix is
         └── pages/@page.moth
 ]
 
-A normal `@` root may contain declarations, one `export:`, entry `config:`, top-level runtime work and page fragments. Top-level work becomes dormant `start` code and runs once only when that module is selected as an entry. Depending on a module never runs it. `start` has no `Error!` slot, so top-level fallible work uses `catch`.
+A normal `@` root may contain declarations, one `export:`, top-level runtime work
+and direct page fragments. In the accepted queued design, runtime work or direct
+output requires an explicit root purpose with an applicable consumer; `$page` is the
+initial HTML purpose and remains queued. Current Alpha still uses activity-based
+entry selection and reserved `page_*` metadata. Top-level work becomes dormant
+`start` code and runs once only when that module is selected as an entry. Depending
+on a module never runs it. `start` has no `Error!` slot, so top-level fallible work
+uses `catch`.
 
 `export:` is the only cross-module public marker:
 
@@ -1283,7 +1320,10 @@ A normal `@` root may contain declarations, one `export:`, entry `config:`, top-
 
 Items outside remain private. Public surfaces cannot expose private types, traits or evidence. Receiver methods become visible with their exported type.
 
-A source-tree `+*.moth` creates an API-only scoped support package named by its directory, such as `@shared`. It has no `start`, page fragment or route and is the mechanism for sharing declarations between normal siblings. Direct normal-sibling dependencies remain invalid unless a future design explicitly changes this.
+`export:` is current. A later `$export` migration will replace it rather than leave
+two permanent public markers; directive-block support remains undecided.
+
+A source-tree `+*.moth` creates an API-only scoped support package named by its directory, such as `@shared`. It has no `start`, page fragment or route and is the mechanism for sharing declarations between normal siblings. Support packages may hold reusable ordinary `#` constants without custom `$project` metadata. Direct normal-sibling dependencies remain invalid unless a future design explicitly changes this.
 
 A project-root `+*.moth` beside `config.moth` is the optional external package facade. It is API-only, not visible internally and cannot expose public or reachable dependence on private `@project` values.
 
@@ -1294,11 +1334,47 @@ Registered external packages use ordinary file clauses:
     @community/markdown as markdown
 ]
 
-Only direct dependencies are source-visible. Project-level declaration, version and alias syntax is design-gated. The old `import @package` proposal is invalid.
+Only direct dependencies are source-visible. Project dependency declarations and
+alias forms remain design-gated; accepted `$project` metadata is configured only in
+`config.moth`. The old `import @package` proposal is invalid.
 
 ## Project configuration
 
-`config.moth` is one self-contained compile-time file, not a module:
+`config.moth` is one self-contained compile-time file, not a module. It has no
+source dependencies, package resolution, runtime declarations or authored file-value
+paths.
+
+**Accepted queued configuration:**
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+`$project` has strict predefined fields. `name` and `version` are required;
+`version` has no directive default. The `"0.1.0"` fallback belongs to the starter
+`$config` input, not `$project`. `entry_root` defaults to `"src"`, and the remaining
+project and HTML settings use their documented defaults. A bare `$html_builder` is
+valid; authored empty `()` is invalid for directives. Multi-builder configuration
+waits for `$feature`.
+
+Only an explicit `$config` declaration creates an input contract. An ordinary
+`version #String = "1.0"` is a helper constant, and a project field named `version`
+does not satisfy a source input contract. Ordinary constants always have
+initializers; only a marked required non-optional input may omit one, while a marked
+optional input may also omit one and resolves to absence. Source defaults
+remain one primitive literal or `none`, not a name, template, call, cast, operator,
+collection or record.
+
+**Current Alpha configuration until cutover:**
 
 [codeblock, $code("moth"):
     project #= |
@@ -1313,18 +1389,19 @@ Only direct dependencies are source-visible. Project-level declaration, version 
     |
 ]
 
-The command selects the builder first. One `project` record is required. `project.name` gives stable identity. Earlier helper constants may feed later fields. Other top-level records are builder/tooling sections. Config has no runtime declarations, functions, named support types, dependencies, fragments or `export:`.
-
-Build configuration values use primitive or optional types:
+Current direct and source input contracts still use `#Config of T`; they are not the
+accepted end-state provider model:
 
 [codeblock, $code("moth"):
     api_url #Config of String = "http://localhost:8080"
     optional_label #Config of String? = none
 ]
 
-A source default is one literal or `none`, not a name, template, call, cast, operator, collection or record. Pass explicit values with `--input name=value`.
-
-CLI inference is immediate: `true`/`false` -> `Bool`, a whole number -> `Int`, a decimal or exponent -> `Float`, `'c'` -> `Char`, a quoted literal -> `String`, and anything else -> `String`. Use an explicitly quoted String for `"true"` or `"42"`; omit an optional input to resolve to `none`. Contracts require exact types, except a present `T` may satisfy `T?`; no other coercion occurs.
+CLI inference is immediate: `true`/`false` -> `Bool`, a whole number -> `Int`, a
+decimal or exponent -> `Float`, `'c'` -> `Char`, a quoted literal -> `String`, and
+anything else -> `String`. Use an explicitly quoted String for `"true"` or `"42"`;
+omit an optional input to resolve to `none`. Contracts require exact types, except a
+present `T` may satisfy `T?`; no other coercion occurs.
 
 [codeblock, $code("bash"):
     moth build . --input analytics=true
@@ -1342,28 +1419,51 @@ Project fields enter source through explicit `@project`:
     label = [: Version [version]]
 ]
 
-`@project` is never implicit or directly re-exported. Each dependency has its own config and inputs.
+`@project` is never implicit or directly re-exported. Each dependency has its own
+configuration and input namespace.
 
-An entry-local `config:` block is accepted design but remains deferred. It may appear only at a
-normal root's top level:
+## Page roots and metadata
+
+**Accepted queued design.** `$page` is root-only HTML metadata and the initial
+application purpose. It is valid at most once on a normal module root (or an
+explicitly selected synthetic single-file root), not in an ordinary file, support
+root, facade, `config.moth` or `export:` block. There is no ordinary-file page,
+`index.moth` convention or homepage requirement at `entry_root`.
+
 [codeblock, $code("moth"):
-    favicon_url #= [@assets/favicon.svg]
-
-    config:
-        html #= |
-            title = "Moth docs",
-            favicon = favicon_url,
-        |
-    ;
+    $page(
+        title = "Moth",
+        description = "A language for creating reliable software",
+        lang = "en",
+        favicon = @assets/favicon.svg,
+    )
 ]
 
-It contains section records, uses ordinary compile-time visibility and creates no symbol/runtime value. Dependencies, helpers, types and `#Config` declarations stay outside. Project and entry schemas do not merge.
+The six optional `String?` metadata arguments are `title`, `description`, `lang`,
+`favicon`, `body_style` and `head`; omitted values use `none`. A direct root
+fragment, runtime binding or top-level call requires an explicit purpose with an
+applicable consumer. `$page` is the only initial purpose; future `$test` remains
+deferred. Assigned or returned templates stay ordinary `String` values.
+
+`check` accepts valid zero-page projects but still rejects unpurposed runtime work.
+HTML application `build` and `dev` need a page somewhere under `entry_root`, while
+single-file HTML output requires `$page`. Fixed `$page` metadata is distinct from
+the queued `io.set_title` browser capability; the latter changes the live title
+without changing static metadata, routes or output files. Until the cutover, current
+Alpha pages retain reserved `page_title`, `page_head` and related declarations.
+
 
 ## Builders, targets and commands
 
-One command selects one artefact builder, one profile and any tooling overlays. The compiler frontend remains backend-neutral. Builders provide config schemas, packages, directives, source kinds, entry policy, capabilities and output policy.
+One command selects one artefact builder, one profile and any tooling overlays. The
+compiler frontend remains backend-neutral. Builders own registered directive
+signatures, config-only contexts, packages, source kinds, entry policy, capabilities
+and output policy. Unknown or unavailable directives are errors, not silently ignored.
 
 The HTML builder turns selected normal roots into routes and documents. Mixed HTML output assigns reachable functions to JavaScript or Wasm automatically. Source has no target-selection annotations, platform/backend query values or target-conditioned source; the builder interprets stable semantics and selects physical targets.
+
+Multi-builder source selection waits for `$feature`; HTML is the only implemented
+builder assumption described here.
 
 `moth check` performs the same reachable target validation as a build without writing artefacts.
 
@@ -1384,6 +1484,11 @@ The prelude exposes `io` as `@core/io`. Console helpers accept exactly one `Stri
     io.line("Hello")
     io.line([: count = [count]])
 ]
+
+`io.set_title` is accepted queued design: it takes one `String` content input, has no
+source-visible result and requires a browser document-title capability. Reachable
+calls on an unsupported host are rejected before lowering; it is not a `Void` form
+and makes no Wasm promise.
 
 
 Annotated project-local JavaScript exposes free functions and optional opaque types:
@@ -1409,10 +1514,9 @@ WIT V1 is also value-only. Resources, callbacks, async, futures, streams, shared
 ## No stable syntax yet
 Do not infer forms for:
 
-- project dependency declarations, versions, lockfiles, registry/local/Git sources
-- entry-local `config:` blocks
+- project dependency declarations, dependency versions, lockfiles, registry/local/Git sources
 - named non-capturing function references or primitive-backed newtypes
-- async scopes, coroutines, channels or suspension
+- `$async:` and `$checked:` block semantics, async/coroutine/channel implementation and suspension
 - reactive paths, derived values, events/effects, `$bind` or component messages
 - direct choice payload access/narrowing or nested payload patterns
 - lossy `Float <-> NumberN`, Number formatting helpers or broader Byte APIs

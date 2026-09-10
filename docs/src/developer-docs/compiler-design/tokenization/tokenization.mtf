@@ -131,7 +131,7 @@ Some mistakes die at the first cut:
 
 ## Boundary of ownership
 
-Tokenization recognises spelling, locations and delimiter context. It may reject unsupported directive forms at the syntax level through the merged directive registry.
+Tokenization recognises directive spelling through the supplied registry, locations and delimiter context. It preserves enough metadata for later placement and availability diagnostics; it does not implement directive semantics or silently skip unsupported forms.
 
 It does **not**:
 
@@ -165,7 +165,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 - **Accepted design:** located tokens and retained source preparation.
 - **Current implementation:** progress rows for source-kind coverage.
-- **Queued work:** queued numeric work may extend the `Number`, `NumberN` and `Byte` surface. The ownership split stays fixed: `numeric_text` owns lexical grammar, AST owns semantic typing, HIR owns numeric domains and failure.
+- **Queued work:** `general-directives-and-project-config-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership. Queued numeric work may extend the `Number`, `NumberN` and `Byte` surface; the ownership split stays fixed: `numeric_text` owns lexical grammar, AST owns semantic typing, HIR owns numeric domains and failure.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 
 ## Exit state

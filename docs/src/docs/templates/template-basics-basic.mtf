@@ -16,3 +16,7 @@ A nested template inserts a value from the surrounding scope.
 
 Templates can build plain text, Markdown, HTML, CSS or another string-based
 format. They may be finished during compilation or built at runtime.
+
+In the accepted queued design, direct top-level templates need an explicit root
+purpose. `$page` is queued and is not implemented yet; assigned or returned templates
+remain ordinary values.

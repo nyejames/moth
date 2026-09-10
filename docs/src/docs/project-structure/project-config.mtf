@@ -1,19 +1,196 @@
-**Implemented grouped config and build-config values.** This page defines the grouped project-config contract, direct and source `#Config` contracts and the immutable explicit `@project` interface implemented by the compiler. `config.moth` authors one grouped `project` record plus builder sections such as `html`. Retired flat keys (`project #= "html"`, `dev_folder`, `output_folder` and `package_folders`) are rejected. Former top-level builder fields such as `origin` no longer configure the builder; unregistered names remain private helpers. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current support.
+**Current support versus accepted design.** The Alpha compiler still accepts grouped `project` and `html` records, direct `#Config` fields and open extra project metadata. Closed `$project` / `$html_builder` configuration, required `version` and earlier `$config` contracts are accepted queued design. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
 
-`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies or package resolution.
+`config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths.
 
-### Canonical config
+### Accepted config
 
 [codeblock, $code("moth"):
-    project_metadata #= |
-        channel = "alpha",
-    |
+    $config
+    version #String = "0.1.0"
 
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+A fixed literal version also works. A contract named `version` does not satisfy an omitted `$project` argument. A project field named `version` does not satisfy a source input contract.
+
+The required generated starter, once implementation lands, keeps the same version contract and explicit `version = version` argument. It may also pass retained scaffold fields such as `author`, `license` and selected HTML defaults. Do not treat `"0.1.0"` as a `$project` default.
+
+### `$project`
+
+`config.moth` contains exactly one `$project` invocation. The positional order is:
+
+[table:
+    [th:
+        [: Parameter]
+        [: Type]
+        [: Default]
+        [: Configurable value permitted]
+    ]
+
+    [td:
+        [: `name`]
+        [: `String`]
+        [: Required]
+        [: No]
+    ]
+
+    [td:
+        [: `version`]
+        [: `String`]
+        [: Required]
+        [: Yes]
+    ]
+
+    [td:
+        [: `entry_root`]
+        [: `String`]
+        [: `"src"`]
+        [: No]
+    ]
+
+    [td:
+        [: `author`]
+        [: `String?`]
+        [: `none`]
+        [: Yes]
+    ]
+
+    [td:
+        [: `license`]
+        [: `String?`]
+        [: `none`]
+        [: Yes]
+    ]
+
+    [td:
+        [: `template_const_loop_iteration_limit`]
+        [: `Int`]
+        [: The existing compiler-owned default]
+        [: No]
+    ]
+]
+
+The signature is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes only these predefined fields.
+
+`name`, `entry_root` and `template_const_loop_iteration_limit` remain fixed-only, including through helper constants. Missing `version` is diagnosed even when an unused input contract named `version` exists.
+
+### `$html_builder`
+
+An authored HTML directory project contains exactly one `$html_builder` invocation. Bare `$html_builder` uses defaults. `$html_builder()` is invalid. The command selects the builder first; this directive never selects a backend or platform.
+
+The positional order and defaults are:
+
+[table:
+    [th:
+        [: Parameter]
+        [: Type]
+        [: Default]
+    ]
+
+    [td:
+        [: `dev_output`]
+        [: `String`]
+        [: `"dev"`]
+    ]
+
+    [td:
+        [: `release_output`]
+        [: `String`]
+        [: `"release"`]
+    ]
+
+    [td:
+        [: `origin`]
+        [: `String`]
+        [: `"/"`]
+    ]
+
+    [td:
+        [: `page_url_style`]
+        [: `String`]
+        [: `"trailing_slash"`]
+    ]
+
+    [td:
+        [: `redirect_index_html`]
+        [: `Bool`]
+        [: `true`]
+    ]
+
+    [td:
+        [: `html_lang`]
+        [: `String`]
+        [: `"en"`]
+    ]
+
+    [td:
+        [: `html_title_prefix`]
+        [: `String`]
+        [: `""`]
+    ]
+
+    [td:
+        [: `html_title_postfix`]
+        [: `String`]
+        [: `""`]
+    ]
+
+    [td:
+        [: `html_favicon`]
+        [: `String?`]
+        [: `none`]
+    ]
+
+    [td:
+        [: `html_inject_charset`]
+        [: `Bool`]
+        [: `true`]
+    ]
+
+    [td:
+        [: `html_inject_viewport`]
+        [: `Bool`]
+        [: `true`]
+    ]
+
+    [td:
+        [: `html_inject_color_scheme`]
+        [: `Bool`]
+        [: `true`]
+    ]
+
+    [td:
+        [: `html_inject_core_css`]
+        [: `Bool`]
+        [: `true`]
+    ]
+
+    [td:
+        [: `html_body_style`]
+        [: `String`]
+        [: `""`]
+    ]
+]
+
+`page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in `$page` metadata because `config.moth` rejects authored file-value paths.
+
+Unknown or inactive unsupported directives error. Multi-builder configuration waits for `$feature`. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic path and do not invent `$project` / `$html_builder` source.
+
+### Current grouped config
+
+Until the cutover, operational config still looks like:
+
+[codeblock, $code("moth"):
     project #= |
         name = "moth_docs",
         version = "0.1.0",
         entry_root = "src",
-        metadata = project_metadata,
     |
 
     html #= |
@@ -22,43 +199,10 @@
     |
 ]
 
-### Structure
-
-- One required open `project` const record provides stable project identity.
-- `project.name` is required and must be a valid Moth project identifier.
-- Private helper constants declared before use are allowed.
-- Top-level builder and tooling section records are allowed.
-- All sections are folded, but only active sections are schema-validated.
-- The active builder project section is required, even when empty.
-- Inactive sections are parsed and folded, then discarded.
-- Project and entry schemas are separate with no shared fields.
-- Project fields may contain folded scalar values, optionals, collections, templates-as-strings and nested anonymous const records. Nested records are declare-first: a `|...|` list does not contain another `|...|` list.
-- Builder sections use backend-neutral folded values and cannot declare `#Config`.
-- Output settings are builder-owned.
-
-### Direct project `#Config` fields
-
-A direct field of `project` may declare `#Config of T` only when the selected project schema marks
-that field `Configurable` and its value has a supported primitive or optional primitive shape.
-Registered fixed-only identity, source-discovery and compiler-control fields reject `#Config`; a
-primitive shape alone does not make them configurable. The compiler resolves an eligible field from
-explicit typed command or programmatic input, a compatible builder global, the declaration default
-or a missing-input diagnostic. Nested project fields cannot declare `#Config` contracts.
-
-See @#build-inputs (Build configuration values) for the full source and CLI contract. See @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design) for the build-system authority and `@project` contract.
-
-### Rejected in config
-
-- Every source dependency clause, including relative, project, Core, Builder, dependency-package and binding-backed clauses.
-- Runtime declarations, mutable bindings, functions, named support types, traits, conformances.
-- Standalone templates and top-level const page fragments.
-- `export:`.
-
-### Config is loaded before module discovery
-
-The command selects the builder before config schema validation. `config.moth` does not select the builder. Config is parsed and folded before Stage 0 source-tree indexing begins.
+Retired flat keys remain rejected. Keep live `docs/config.moth` on this current path.
 
 ### Related concepts
 
-- For the source tree layout see @#project-layout (Project layout).
-- For package discovery see @../packages/#project-local-packages (Project-local packages).
+- For `$config` input contracts see @#build-inputs (Build configuration values).
+- For `$page` see @#entry-config (Entry metadata and page directives).
+- For general directive grammar see @../directives (Directives).

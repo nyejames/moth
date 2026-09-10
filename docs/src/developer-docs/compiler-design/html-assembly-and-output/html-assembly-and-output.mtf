@@ -2,6 +2,8 @@
 
 Every earlier stage produced records. The HTML builder's job is to turn the right records into one working document and a safe output set without rediscovering source structure or letting each backend spray files into the tree. This is harvest time, not another season of growth from seed.
 
+The Alpha builder currently receives grouped `html` settings and reserved `page_*` metadata. The resolved `$html_builder` settings and root-only `$page` metadata described here are accepted queued handoff facts; output ownership, fragment order and resource rules remain shared.
+
 This is the last primary stop on the chronological route. The fragment at the end is still:
 
 [codeblock, $code("html"):
@@ -20,7 +22,7 @@ The builder consumes explicit inputs such as:
 - runtime helpers and shared runtime modules
 - external glue and import maps
 - reachable resource uses and the stable origins behind them
-- entry config values the builder schema allows
+- resolved `$page` metadata and `$html_builder` settings
 
 If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
 
@@ -226,7 +228,7 @@ Backend generation failures belong to the backend article. Assembly failures bel
 
 - **Accepted design:** build-system-owned output writing and manifests, and structural resource anchors the builder lowers once placement and a URL context exist.
 - **Current implementation:** HTML, resource and backend progress rows. Resource linking uses structural Resource/SiteRoot pieces, exact live-origin unions and builder-owned URL contexts.
-- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` and entry-config plans.
+- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` and `html-page-directives-and-runtime-title-plan.md`.
 - **Deferred or outside scope:** backend-owned output directories, content-addressed output names and general resource transformation pipelines. Stale artefact cleanup itself is accepted and current, scoped to manifest paths the selected builder and profile own.
 
 ## Exit state

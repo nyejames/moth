@@ -4,17 +4,19 @@ philosophy before implementation.
 
 ### Macros and broad metaprogramming
 
-General-purpose macros, procedural macros, derive macros and AST macros create
-a second compile-time language and make code harder to inspect. Templates,
-constants and builder directives provide the constrained compile-time surface.
+Arbitrary user macros, procedural macros, derive macros and AST macros create a
+second compile-time language and make code harder to inspect. Builder
+directives that transform AST are excluded as well. Compiler-known directives
+may provide constrained language structure, templates, metadata and
+configuration, but they cannot become a user-extensible macro system.
 
 ### General closures and broad function-value mechanisms
 
 General closures, anonymous callable values, generic function values and
 higher-order polymorphism are outside scope. These mechanisms add broad
-function-value semantics and solver pressure. Reactivity covers many
-closure-heavy template cases without adding general function values. Hidden
-event-handler closures remain outside the language model as well.
+function-value semantics and solver pressure. Constrained template and builder
+contracts can cover explicit UI integration without general function values.
+Hidden event-handler closures remain outside the language model as well.
 
 ### Dynamic trait values
 
@@ -123,9 +125,16 @@ outside scope.
 
 ### General lexical blocks and control-flow labels
 
-Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Anonymous `_:` blocks and brace replacements remain outside scope. Structured control flow introduces ordinary lexical scopes, while bare `identifier:` headers belong exclusively to declared regions.
+Moth has no dedicated general lexical-block construct. `block` is an ordinary
+identifier, so `block:` has the same declared-region meaning as any valid
+`name:` header. Anonymous `_:` blocks and brace replacements remain outside
+scope. Structured control flow introduces ordinary lexical scopes, while bare
+`identifier:` headers belong exclusively to declared regions.
 
-Arbitrary statement labels, labelled `break`, labelled `continue` and `goto` remain outside scope. Unlabelled loop exits stay structural and target the nearest enclosing loop. Keyword-led semantic scopes such as `async:` remain distinct because their keyword carries language-defined behaviour.
+Arbitrary statement labels, labelled `break`, labelled `continue` and `goto`
+remain outside scope. Unlabelled loop exits stay structural and target the
+nearest enclosing loop. Future compiler-owned scopes such as `$async:` remain
+distinct because their marker carries language-defined behaviour.
 
 ### Source-visible RC and dynamic shared ownership
 
@@ -154,8 +163,8 @@ project-visible no-GC mode.
 
 ### Target-conditional source and backend-specific semantics
 
-Moth excludes target, OS, architecture and backend identity from source semantics. In particular, the
-language has no:
+Moth excludes physical target, OS, architecture and backend identity from
+source semantics. In particular, the language has no:
 
 - `target_os`, `target_arch`, backend-name or target-name source queries
 - `is_wasm`, `is_javascript` or `is_browser` style build flags
@@ -163,11 +172,33 @@ language has no:
 - target-conditioned declarations and exports
 - target-conditioned receiver methods, traits or conformances
 - backend-dependent language legality or observable semantics
-- use of `#Config` to recreate these mechanisms
+- use of ordinary `$config` or static `if` to recreate these mechanisms
 
-The replacement is builder capability surfaces, target-contract validation, external/builder packages,
-and backend-owned lowering and artefact policy. Source can use a stable capability API without learning
-which backend implements it. Backends receive validated topology and may not reconsider source legality.
+Ordinary `$config` values and static `if` cannot remove declarations or
+dependencies. Future `$feature` is the separate structural direction: it may
+select source structure before graph and declaration publication using
+bootstrap-known feature data and high-level selected-builder identity. Known
+feature names must be distinguished from enabled features so typos cannot
+silently disable code; predicate, nesting and config-declaration grammar
+belongs to the future plan.
+
+Builder identity is not physical target identity. The replacement is builder
+capability surfaces, target-contract validation, external/builder packages and
+backend-owned lowering and artefact policy. Excluded regions will not resolve
+contained builder directives against the active surface, but they still need a
+sound structural boundary. Directive-controlled template lexing must be
+addressed before arbitrary unknown syntax can be skipped.
+
+### Deferred structural directives
+
+Future `$layout` constrains representation while preserving nominal identity.
+C order alone is not a complete ABI contract, and SoA is not automatically a
+scalar layout option. Future `$export` replaces rather than permanently
+duplicates export syntax; block support remains undecided.
+
+`$test` is a deferred root-purpose direction. Runner, command and lifecycle
+details are not yet defined. A separate custom-metadata directive remains open
+design, so strict `$project` metadata remains the interim boundary.
 
 ### Read next
 

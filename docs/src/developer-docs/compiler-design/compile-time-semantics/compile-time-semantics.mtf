@@ -20,7 +20,7 @@ After checking and folding, it becomes a **backend-neutral compile-time value**.
 
 Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.
 
-Resolved build configuration values and source `#Config` primitives enter as ordinary folded constants. They create no runtime wrapper type and no special HIR node category.
+Current typed build configuration values and source `#Config` primitives (the Alpha spelling) enter as ordinary folded constants. Accepted `$config` contracts resolve into the same backend-neutral constant lane; they create no runtime wrapper type and no special HIR node category.
 
 ## Static Bool control flow
 
@@ -36,9 +36,13 @@ fully checked authored AST
 -> HIR
 ]
 
-Stage 4 adds no config-specific branch node. Both branches are frontend-valid before selection, and only
-active generated requests and executable facts survive. HIR never redoes the decision, and Moth source
-has no platform-conditional source mechanism.
+Stage 4 specialises ordinary executable work from resolved configuration values:
+
+- both branches of an ordinary `if` remain frontend-valid
+- a known `Bool` selects the active executable branch after source discovery
+- no declaration, dependency or export topology changes
+
+Stage 4 adds no config-value branch node. HIR never redoes the decision, and Moth source has no platform-conditional source mechanism. Future compiler-owned `$feature` is a separate deferred structural-selection mechanism: it may select source structure before graph and declaration publication, but it is not another evaluator.
 
 [diagram:
     [$insert("label"): What leaves the runtime program entirely]
@@ -87,7 +91,7 @@ has no platform-conditional source mechanism.
             [$insert("href"): ../hir/]
             [$insert("eyebrow"): Absent]
             [$insert("title"): Nothing reaches HIR]
-            No config branch node, no runtime wrapper type, no second evaluation. The question is closed.
+            No config-value branch node, no runtime wrapper type, no second evaluation. Future `$feature` selection is a separate pre-graph concern, not a Stage 4 evaluator.
         ]
     ]
 ]
@@ -160,8 +164,8 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
 - **Current implementation:** folded constants, typed build configuration values, immutable `@project` and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The rich numeric redesign is deferred.
-- **Queued work:** `number_type_numeric_plan.md` and `entry-config-blocks-runtime-title-plan.md`.
-- **Deferred or outside scope:** trait objects and broad runtime reflection.
+- **Queued work:** `number_type_numeric_plan.md`, plus the accepted general-directive/config and HTML page-purpose migrations.
+- **Deferred or outside scope:** structural `$feature` selection, trait objects and broad runtime reflection.
 
 ## Exit state
 

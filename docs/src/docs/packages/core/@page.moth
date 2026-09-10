@@ -19,8 +19,9 @@ page_head #= language_theme_head
     Most Core packages require explicit dependency clauses. Unlike large standard-library
     preludes, Moth exposes only a small always-available surface such as `io`.
 
-    Builder and backend support can differ. The @../../progress (progress
-    matrix) records current availability.
+    Builder and backend support can differ. The @../../progress/packages-and-builders
+    (packages and builders progress matrix) records current package availability and
+    important accepted follow-ups.
 
     ## Package pages
 

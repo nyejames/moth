@@ -1,0 +1,37 @@
+# Compiler-facing directive routing
+
+This index routes contributors to the accepted general-directive contract and the compiler and build sections that consume it. It is not a second semantic reference and is not imported by the public Directives page.
+
+## Canonical language reference
+
+- `docs/src/docs/directives/directives.mtf` owns general marker, ownership, context, arguments, attachment and unknown/unavailable/placement rules.
+- `docs/src/docs/directives/directives-basic.mtf` teaches the short accepted surface.
+- Template-specific meanings stay in `docs/src/docs/templates/template-directives.mtf`.
+- Exact `$project`, `$config`, `$html_builder` and `$page` signatures stay in the project-structure references.
+
+## Compiler handoffs
+
+Read `docs/compiler-design-overview.md`:
+
+- `Architectural invariants` for shared call syntax and configuration versus future `$feature`.
+- `Compiler input and result boundary` for retained directive syntax and non-HIR metadata.
+- `Frontend stages > Stage 1: tokenization` for registered-surface recognition.
+- `Frontend stages > Stage 2: header syntax and interface binding` for declaration-prefix metadata and the project config compilation service.
+- `Frontend stages > Stage 4: AST semantics > Call-shaped syntax and assertion intrinsics` for directive consumers of the one parser and router.
+- `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records` for `$config` spelling, explicit-only contracts and bootstrap versus source timing.
+
+## Build-system handoffs
+
+Read `docs/build-system-design.md`:
+
+- `Selected command and capability surface` for owned directive signatures and config-only contexts.
+- `Project bootstrap` for `$project`, `$html_builder`, bootstrap `$config` and the closed project-directive table.
+- `Source contracts and static specialisation` under bootstrap for matching, precedence and both-branches frontend validation.
+- `Root metadata and purpose directives` for root-only `$page` and explicit purpose.
+- `Entry candidates and selection` and `Command and tooling policies` for page-entry and zero-page check rules.
+
+## Status and sequencing
+
+- `docs/src/docs/progress/@page.moth` owns current support.
+- `docs/roadmap/roadmap.md` owns implementation order.
+- Design-scope files under `docs/src/docs/design-scope/` own accepted, deferred and excluded boundaries.

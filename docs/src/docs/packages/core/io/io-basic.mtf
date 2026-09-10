@@ -60,4 +60,10 @@ Pointer helpers report button state and coordinates.
 ]
 
 Buttons use `"left"`, `"middle"` and `"right"`. Coordinates use `Float` values.
+
+`io.set_title` is an accepted queued browser helper with one `String` input and no
+source-visible result. Reachable calls on unsupported hosts are rejected before
+lowering; it is not a `Void` form and makes no Wasm promise. See @./ (Core IO advanced)
+for the capability contract.
+
 For the full contract including backend behaviour, teardown rules and deferred surfaces, see @./ (Core IO advanced).

@@ -1,36 +1,85 @@
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The builder selects which modules become entries. Entry assembly activates `start` exactly once. Dependency modules expose only their public interface and never activate their root work.
+**Current support versus accepted design.** The Alpha builder still treats authored runtime work and fragments as HTML entry activity. The accepted queued design requires an explicit root purpose. Initially, only root-only `$page` supplies the HTML purpose. Dependency roots remain non-activating in both designs.
+
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. Entry assembly activates that module-owned `start` exactly once for a selected page. A dependency exposes declarations without activating its root.
+
+### Explicit root purpose
+
+Top-level executable work or direct output requires a recognised purpose with an
+applicable consumer. `$page` is the initial and only HTML purpose in the
+accepted design:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+The purpose applies to the whole normal root rather than to statements after
+the directive. A root with only functions, types, constants or other API
+declarations remains valid without a page. An unmarked root with authored
+runtime work, direct output or fragments still needs a purpose even when an
+optimisation could prove the work unreachable. A static `if false`, an empty
+direct fragment and an immutable runtime binding do not erase the authored
+role.
+
+Future `$test` may provide a non-page purpose for a separate testing consumer.
+It is deferred and cannot make a root valid today. A metadata directive also
+cannot authorise runtime work merely because it appears in the file.
+
+### Comment and documentation exemptions
+
+Semantically classified `$doc`, `$note` and `$todo` templates are
+documentation/comment processing. They do not need a root purpose and do not
+create an HTML entry by themselves. This exemption follows the template's
+semantic category, not whether its rendered output happens to be empty.
+
+Assigned or returned template values are ordinary values, not direct output.
+Their containing runtime code follows the normal purpose rule.
 
 ### Entry-activated root runtime
 
-The entry-selected module root's top-level runtime code becomes a dormant compiler-synthesised `start` function for that module. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements.
-
-### Normal files
-
-Normal helper files define reusable declarations. They do not own an export block and cannot contain top-level runtime statements. The module root binds those declarations and decides which names become public.
+The selected module root's top-level runtime code becomes a dormant
+compiler-synthesised `start` function. Entry assembly activates it exactly
+once. This includes top-level bindings, function calls and other runtime
+statements. Helper files define reusable declarations. They do not own an
+export block, an independent `start` or an entry.
 
 ### Page fragments
 
 Two forms of direct top-level template in a module root become page fragments:
 
-- A const fragment uses the `#` prefix before the opening bracket. It must fold at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. It is evaluated by the module's `start` function when entry assembly activates it, and inserted into the page at runtime.
+- A const fragment uses the `#` prefix before the opening bracket. It folds at compile time and is emitted as static HTML.
+- A runtime fragment uses the plain bracket form without `#`. It is evaluated by the module's `start` function when entry assembly activates it and inserted into the page at runtime.
 
-Assigned or returned templates are not page fragments by themselves. Only direct top-level templates in the entry-selected module root become fragments.
+The builder preserves source order between static and runtime fragments. Static
+fragments are emitted immediately. Runtime fragments use generated slots in the
+HTML document, then the embedded JavaScript calls the module start function and
+fills those slots.
 
-### Source order
+### Metadata-only pages
 
-The HTML builder preserves source order between static and runtime fragments. Static fragments are emitted immediately. Runtime fragments use generated slots in the HTML document, then the embedded JavaScript calls the module start function and fills those slots.
+A root with only `$page` metadata still emits a complete page with default
+document metadata. A page containing only resource-bearing metadata also emits
+the complete document and the resources it uses. It does not need non-empty
+executable HIR, an artificial fragment or generated runtime code.
 
 ### Dependency roots
 
-Dependency module roots never activate their root runtime. When a module root is bound for its public API, its top-level runtime code, start body and page fragments remain dormant. Only its exported declarations remain available.
+Dependency module roots never activate their root runtime. When a module is
+bound for its public API, its top-level runtime code, `start` body and page
+fragments remain dormant. Only exported declarations remain available.
+
+The purpose policy still applies when a root is compiled as a provider. A
+consumer cannot make invalid unpurposed runtime work legal by keeping it
+dormant. Valid dependency access and `check` remain non-activating, but neither
+operation suppresses a purpose diagnostic.
 
 ### Do not put page fragments in helper files
 
-Helper files should define reusable declarations. The module root should bind and use them. Page-producing top-level templates belong in the entry-selected module root only.
+Helper files should define reusable declarations. The module root should bind
+and use them. Page-producing top-level templates belong in the selected module
+root only. An ordinary file cannot become a page by containing a fragment.
 
 ### Related concepts
 
-- For template semantics see @../templates/#template-basics (Template basics).
-- For compile-time templates see @../constants/#const-templates (Const templates).
-- For module root roles see @#module-roots (Module roots).
+- For module identity and root filenames see @#module-roots (Module roots).
+- For page metadata and command policy see @#entry-config (Entry metadata and page directives).
+- For routes and synthetic single-file pages see @#html-routing-and-artifacts (HTML routing and artefacts).

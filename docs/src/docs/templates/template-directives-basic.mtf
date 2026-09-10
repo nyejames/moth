@@ -1,4 +1,8 @@
-Directives change how a template is interpreted.
+`$` is the general directive marker. This page covers template-specific meanings.
+For general directive ownership and syntax, see @../directives (Directives).
+
+These template directives are current support; general non-template forms are
+accepted queued design. See @../directives (Directives) for their shared rules.
 
 They begin with `$`.
 
@@ -17,7 +21,7 @@ Common directives include:
 - `$note` and `$todo` for ignored template notes
 - `$html`, `$css` and `$code` in HTML projects
 
-Builders can add their own directives.
+Builders may add constrained template-formatting directives only.
 
 A formatter applies only to the template that declares it. Nested child
 templates choose their own formatter.

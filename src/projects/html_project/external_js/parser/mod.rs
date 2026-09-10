@@ -46,6 +46,28 @@ pub(crate) fn parse_js_module(source: &str, registry: &RuntimeModuleRegistry) ->
     orchestrator.run()
 }
 
+/// Import, require and re-export findings under the first-party zero-third-party policy.
+///
+/// WHAT: reuses the HTML JS module scanner and the v1 runtime-module registry.
+/// WHY: first-party validation must not own a second JavaScript lexer or a second allowlist.
+pub(crate) fn first_party_javascript_import_messages(source: &str) -> Vec<String> {
+    let registry = RuntimeModuleRegistry::v1();
+    let scanned = scan_exports(source, &registry);
+    scanned
+        .diagnostics
+        .into_iter()
+        .filter_map(|diagnostic| match diagnostic.kind {
+            JsDiagnosticKind::DynamicImport
+            | JsDiagnosticKind::ArbitraryImport
+            | JsDiagnosticKind::UnsupportedRuntimeImportForm
+            | JsDiagnosticKind::UnknownRuntimeImportName
+            | JsDiagnosticKind::CommonJsExport
+            | JsDiagnosticKind::ReExport => Some(diagnostic.message),
+            _ => None,
+        })
+        .collect()
+}
+
 struct ParseOrchestrator<'a> {
     source: &'a str,
     registry: &'a RuntimeModuleRegistry,

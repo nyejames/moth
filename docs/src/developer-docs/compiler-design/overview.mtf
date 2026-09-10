@@ -143,7 +143,7 @@ Educational pages explain those authorities. They do not outrank them.
 
 - **Accepted design:** a staged compiler library with build-owned project orchestration, immutable module artefacts, entry-selected roots, per-function target assignment and a validated memory plan per physical variant.
 - **Current implementation:** the frontend through borrow validation, canonical module compilation, scoped packages, typed project config and the HTML builder's JavaScript path. Consult the progress matrix rather than this series for row-level detail.
-- **Queued work:** the mixed JavaScript and Wasm backend plan, entry-local config blocks, the numeric redesign and the collector-free memory and REC plans.
+- **Queued work:** the mixed JavaScript and Wasm backend plan, the accepted general-directive/config and HTML page-purpose migrations, the numeric redesign and the collector-free memory and REC plans.
 - **Deferred or outside scope:** lifetime-region validation, memory-strategy planning, REC, artefact reuse and persistence, trait objects and source-visible reference types.
 
 Read the series as the accepted destination, with each page's own status section marking where today diverges.

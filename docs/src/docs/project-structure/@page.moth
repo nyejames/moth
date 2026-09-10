@@ -55,8 +55,9 @@ page_head #= language_theme_head
     and a builder that selects the final artefacts.
 
     Normal module roots start with `@`. Support and package-facade roots start
-    with `+`. The rest of the filename stays cosmetic, while `export:` defines
-    the public API and the builder decides which normal roots become entries.
+    with `+`. The rest of the filename stays cosmetic. `export:` currently
+    defines the public API. `$page` will declare HTML artefacts; today the
+    builder still selects entries from implemented root activity.
 ]
 
 #[section:
@@ -132,7 +133,7 @@ page_head #= language_theme_head
 #[section:
     [doc_level:
         [$insert("key"):entry-config]
-        [$insert("title"):Entry config]
+        [$insert("title"):Entry metadata and page directives]
         [$insert("advanced"):[entry_config]]
 
         [entry_config_basic]

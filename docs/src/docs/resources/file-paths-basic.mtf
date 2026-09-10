@@ -38,3 +38,7 @@ A web address somewhere else is not a project file, so write it as an ordinary s
 ]
 
 The compiler leaves strings alone. It never copies, rewrites or watches them.
+
+Queued `$page` metadata uses the same module-root-relative resource paths as other
+source expressions. It does not create a page URL, make `.moth` a file value, or
+remove the `config.moth` path prohibition.

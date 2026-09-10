@@ -1,0 +1,47 @@
+@directives content as directives
+
+@directives-basic content as directives_basic
+
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager
+
+page_title #= "Directives"
+page_description #= "General compiler and builder directives in Moth, including configuration, pages and shared argument rules."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Directives
+
+    # Directives
+
+    `$` introduces a registered compiler or builder directive. Template
+    formatters already use this marker. The accepted general family extends it
+    to configuration, page metadata and later compiler-owned blocks.
+
+    Template directives are implemented. The general non-template family is
+    accepted design and is not yet available in the Alpha compiler.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):directives]
+        [$insert("title"):Directives]
+        [$insert("advanced"):[directives]]
+
+        [directives_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../templates/]
+        [$insert("previous_title"):Templates]
+        [$insert("next_path"):../project-structure/]
+        [$insert("next_title"):Project structure]
+    ]
+]

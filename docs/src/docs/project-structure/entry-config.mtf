@@ -1,72 +1,110 @@
-**Implemented `@project`; entry-local config deferred.** Direct and source `#Config` contracts and the immutable `@project` interface are implemented. Root-local `config:` blocks remain deferred under the entry-config implementation plan. See @../progress (Progress) for current status.
+**Current support versus accepted design.** Explicit `@project` is implemented. HTML pages currently become entries from root runtime work or fragments and use reserved `page_title`, `page_head` and related names. Root-only `$page`, explicit purposes and capability-checked `io.set_title` are accepted queued design. Keep live operational `page_*` declarations until that cutover. See @../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
 
-This page covers explicit `@project` access and the accepted, separately deferred entry-local `config:` contract.
+This page owns entry metadata and page directives. It no longer describes accepted `config:` blocks.
 
 ### `@project`
 
-The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
-
-`@project` exposes direct project fields as namespace members. It doesn't expose another value named `project`.
-
-Normal project modules and project-owned support packages may explicitly bind `@project`. It is never implicitly injected.
-
-The following may not claim the `@project` root:
-
-- child modules
-- scoped support packages
-- dependency aliases
-- Core packages
-- Builder packages
-- binding-backed packages
-
-`@project` cannot be directly re-exported.
-
-Internal project modules may expose declarations derived from project values. The compiler retains project-context provenance on every affected public semantic fact. The external project package facade rejects prohibited project-context exposure.
+`@project` is an explicitly bound immutable namespace. The accepted `$project`
+directive publishes its predefined fields only. Today's grouped record also
+publishes supported extra metadata until that configuration cutover.
 
 [codeblock, $code("moth"):
-    @project version, entry_root
+    @project version
 
-    page_title #= [: v[version]]
+    footer #= [: v[version]]
 ]
 
-### Entry-local `config:` blocks
+Normal project modules and eligible project-owned support packages may bind it.
+It is never implicitly injected or directly re-exported. Project-package
+exposure restrictions and field provenance still apply. Config helper and input
+bindings do not become project metadata merely because they exist.
 
-An entry `config:` block is root-local builder metadata. It isn't an embedded `config.moth` source file.
+See @#project-config (Project configuration) for the field contract and
+@#build-inputs (Build configuration values) for independent input resolution.
 
-Placement rules:
+### `$page`
 
-- valid only at the top level of a normal module root
-- at most one block per normal root
-- invalid in normal non-root files
-- invalid in support roots
-- invalid in the project package facade
-- invalid inside `export:`
-- invalid inside executable bodies
-- invalid in `config.moth`
+`$page` is accepted queued HTML-builder metadata and the first planned root purpose. Bare `$page` uses the declared defaults. `$page()` is invalid.
 
-The block contains section records only. Dependency clauses, aliases, helper constants, support types and source `#Config` declarations live outside the block in the normal root file.
+[codeblock, $code("moth"):
+    $page(
+        title = "Moth",
+        description = "A language for creating reliable software",
+        lang = "en",
+        favicon = @assets/favicon.svg,
+    )
+]
 
-The block uses the root file's ordinary compile-time visibility. It may reference:
+The positional parameter order is `title`, `description`, `lang`, `favicon`, `body_style`, `head`. All six accept compile-time `String?` values, including structural resource-bearing Strings, and default to `none`.
 
-- dependency-bound constants
-- `@project`
-- same-file constants declared before the block
-- resolved source `#Config` constants
-- foldable local const-record types
-- selected-builder compile-time values available through normal module dependency clauses
+Placement:
 
-Same-file forward references remain invalid.
+- top level of a normal module root, at most once
+- the explicitly selected synthetic single-file root, at most once
+- invalid in helper files, support roots, facades, `config.moth`, bodies, `export:` and a second `$page` in the same root
 
-The block creates no ordinary module symbol, HIR or project-global value. It cannot contain `project` or change project-level builder behaviour. It may contain active artefact-builder and tooling-overlay sections.
+`$page` describes the whole root. Same-file forward references in its arguments remain invalid.
 
-Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.
+### Initial document metadata
 
-Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Dependency modules never apply their entry metadata to a consumer.
+Every parameter is `String? = none`. `none` means no page override, including
+when supplied explicitly. A present empty String remains a present value where
+the existing metadata domain permits it.
 
-Only active artefact-builder settings contribute entry activity.
+- A present `title` supplies the base title. Otherwise use the existing
+  route-title fallback, then the project name. Apply the builder's initial title
+  prefix and postfix to that base title.
+- An absent `description` emits no description element. Absent `lang`,
+  `favicon` and `body_style` use the HTML builder's document defaults.
+- An absent `head` adds no markup. A present `head` is one folded String
+  inserted as HTML with its meaningful whitespace preserved.
+
+Escape title text and attribute values for their existing HTML contexts.
+`head` is deliberately authored HTML, not title text. Compose it through normal
+constant/template expressions. There are no typed head nodes, repeated-call
+merges, `+=` metadata updates or last-write-wins behaviour.
+
+These are specific document-shell fallbacks, not generic inheritance between
+project and page configuration. Keep the same shell policy for HTML-JS and the
+existing HTML-Wasm output path.
+
+### Metadata ownership and resources
+
+Arguments use ordinary root-file compile-time visibility, including earlier
+same-file constants, dependency-bound constants, explicit `@project` members
+and resolved source configuration values. Same-file forward references remain
+invalid.
+
+The module folds its own metadata once and stores owned non-HIR facts. Provider
+metadata never becomes consumer metadata, and entry activation never compiles
+it again. Resource and site-root anchors survive folding and remapping until
+output planning. Retain the authored argument spans on metadata resource uses.
+
+A tracked favicon enters the ordinary graph and resource pipeline. Only uses
+reachable from selected metadata, fragments or code enter output unions.
+Builder resource handling never scans rendered HTML or HIR constant names.
+A metadata-only page can therefore emit its document and resources without
+artificial runtime work.
+
+Runtime title mutation is a separate, queued Core IO capability. Its exact
+behaviour is defined in @../packages/core/io/ (Core IO).
+
+
+### Explicit root purpose
+
+Top-level executable work or direct output requires a recognised purpose with a consumer. Only `$page` works initially. Functions, types and constants without purpose remain a valid API-only root. Semantically classified `$doc`, `$note` or `$todo` templates do not require a purpose. Future `$test` is a later non-page purpose; it cannot satisfy validation until implemented.
+
+### Command policy
+
+A declaration-only root at `entry_root` is valid. HTML application `build` and `dev` need a page somewhere below it, not necessarily a homepage at `entry_root`. `check` accepts valid zero-page projects and still rejects unpurposed runtime work. Single-file HTML output requires `$page`.
+
+### Current page metadata
+
+Until the cutover, operational pages keep reserved names such as `page_title` and `page_head`. Do not add live `$page` statements merely because this page documents them.
 
 ### Related concepts
 
-- For build configuration values see @#build-inputs (Build configuration values).
-- For module root rules see @#module-roots (Module roots).
-- For the full entry config contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).
+- For module identity versus artefacts see @#module-roots (Module roots).
+- For fragments and `start` see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For routes and command-specific no-page rules see @#html-routing-and-artifacts (HTML routing and artefacts).
+- For general directive grammar see @../directives (Directives).

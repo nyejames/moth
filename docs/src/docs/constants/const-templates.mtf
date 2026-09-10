@@ -1,3 +1,5 @@
+**Current support versus accepted design.** The Alpha compiler currently selects HTML entries from authored root activity and still uses reserved `page_*` metadata. The accepted queued design requires an explicit root purpose; `$page` is the first HTML purpose, but it is not implemented yet.
+
 A template can be required to finish during compilation.
 
 ### Named const templates
@@ -12,14 +14,15 @@ A normal constant binding can hold a folded template string.
     ]
 ]
 
-This creates a compile-time `String` value.
-
-It does not contribute a page fragment by itself.
+This creates a compile-time `String` value. A template assigned to a binding or
+returned from a function remains a value and does not become a page fragment by itself.
 
 ### Direct top-level const fragments
 
-In an active HTML module root, the direct top-level const-template form contributes a
-compile-time page fragment.
+In the accepted queued design, direct root const-template fragments require an explicit
+purpose with an applicable consumer. `$page` is the initial HTML purpose. Until that
+cutover, the current compiler continues to use activity-based entry selection and the
+reserved `page_*` metadata path; the `$page` spelling is not a working directive.
 
 [codeblock, $code("moth"):
     #[$md:
@@ -27,11 +30,11 @@ compile-time page fragment.
     ]
 ]
 
-The direct form:
+The direct form, when the root has an applicable purpose:
 
-- is valid only as top-level entry-selected fragment syntax
+- is valid only as top-level root fragment syntax
 - must fully fold
-- records its position relative to entry-selected runtime fragments
+- records its position relative to runtime fragments
 - is handed to the project builder
 - never becomes HIR runtime code
 

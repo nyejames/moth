@@ -4,4 +4,4 @@
 //! WHY: backend-specific package binding code belongs beside the JS backend, while shared package
 //! identity and signatures stay in `src/builder_surface`.
 
-mod core;
+pub(crate) mod core;

@@ -1,16 +1,26 @@
-**Partial implementation.** The source-package and module foundations are partially implemented. The complete external facade and project-context contract remains partial. This page defines the accepted final contract.
+**Current support versus accepted design.** Source-package and module
+foundations are partially implemented. The complete external facade and
+project-context contract remains partial. This page defines the accepted final
+contract. The facade is API-only: no generic directive can turn it into an
+application entry.
 
-The project package facade exposes a project's public API to external consumers. It is an API-only module compiled through the ordinary compiler pipeline with project-facade visibility supplied by Stage 0.
+The project package facade exposes a project's public API to external
+consumers. It is compiled through the ordinary compiler pipeline with
+project-facade visibility supplied by Stage 0.
 
 ### The facade root
 
-One optional project-root `+*.moth` file beside `config.moth` defines the external project package facade. The suffix after `+` is cosmetic.
+One optional project-root `+*.moth` file beside `config.moth` defines the
+external project package facade. The suffix after `+` is cosmetic.
 
-The facade may define and export its own legal API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants.
+The facade may define and export its own legal API-only declarations: functions,
+structs, choices, type aliases, traits and compile-time constants.
 
 ### Special assembly namespace
 
-Stage 0 gives the facade a special assembly namespace rooted at `entry_root`. Through that namespace it may reference the public interfaces of descendant modules below `entry_root`, regardless of ordinary lexical module visibility.
+Stage 0 gives the facade a special assembly namespace rooted at `entry_root`.
+Through that namespace it may reference the public interfaces of descendant
+modules below `entry_root`, regardless of ordinary lexical module visibility.
 
 ### Facade restrictions
 
@@ -21,14 +31,20 @@ The facade:
 - cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
 - rejects top-level runtime work and page fragments
+- cannot declare root-only `$page` metadata
 - has no implicit `start`
-- emits no route
+- emits no route or HTML artefact
 
-Support roots and the project package facade reject top-level runtime work and page fragments. They don't merely stay inactive.
+Support roots and the project package facade reject top-level runtime work and
+page fragments. They don't merely stay inactive. Generic directives also cannot
+promote a facade or support root into an application entry. A future directive
+cannot weaken this API-only boundary without an explicit contract owned by the
+facade/package design.
 
 ### Project package assembly
 
-The compiler produces an immutable facade module artefact and public interface. `ProjectPackageAssembly` is a separate link plan over:
+The compiler produces an immutable facade module artefact and public interface.
+`ProjectPackageAssembly` is a separate link plan over:
 
 - the compiled facade artefact
 - selected descendant public interfaces
@@ -37,26 +53,38 @@ The compiler produces an immutable facade module artefact and public interface. 
 
 Assembly never recompiles or mutates the facade.
 
-A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.
+A project may be both an application and a package. Without the facade it has
+no externally consumable Moth package surface.
 
 The facade package identity comes from `project.name`.
 
 ### External package eligibility
 
-The build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private `@project`. This includes an exported function that calls a private project-dependent helper.
+The build system rejects any declaration whose public semantic facts or
+reachable executable implementation directly or transitively depend on private
+`@project`. This includes an exported function that calls a private
+project-dependent helper.
 
-The validator doesn't treat implementation-only dependence as a reusable package specialisation mechanism.
+The validator doesn't treat implementation-only dependence as a reusable
+package specialisation mechanism.
 
 ### Dependency package facades
 
-A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency's private `@project`.
+A dependency package exposes its facade and immutable artefacts to consumers.
+Consumers never see the dependency's private `@project`.
 
-No declaration exposed through a dependency package facade may directly or transitively depend on that dependency's private `@project`. Private declarations may use the dependency's own `@project` only when no external package export can reach or expose them.
+No declaration exposed through a dependency package facade may directly or
+transitively depend on that dependency's private `@project`. Private
+declarations may use the dependency's own `@project` only when no external
+package export can reach or expose them.
 
-Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs don't implicitly satisfy a dependency's `#Config` contracts.
+Configuration namespaces are scoped to one project or package compilation
+boundary. A consuming command's unqualified CLI or programmatic inputs don't
+implicitly satisfy a dependency's `$config` contracts.
 
 ### Related concepts
 
 - For module root rules see @#module-roots (Module roots).
+- For page purpose and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
 - For the full facade contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

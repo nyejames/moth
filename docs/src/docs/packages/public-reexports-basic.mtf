@@ -17,3 +17,6 @@ Other modules can now depend on `Card` and `render_card` through the module's pu
 ]
 
 `LocalCard` is file-local. It is not public. Only dependency selections inside the `export:` block become public re-exports.
+
+`export:` is current. A later `$export` migration will replace it; directive-block
+support is undecided, so both spellings are not a permanent pair.

@@ -146,7 +146,7 @@ Ordinary declarations inside a declared region are not implicitly declared-regio
 
 A declared region with no direct or straight-line nested placement targeting it emits an unused-region warning. A plain declaration does not count as placement merely because it is lexically inside the declared region.
 
-Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Exact `_:` is invalid, and the source language has no control-flow labels. Keyword-led semantic scopes such as `async:` remain separate because their keyword carries language-defined execution and lifetime behaviour.
+Moth has no dedicated general lexical-block construct. `block` is an ordinary identifier, so `block:` has the same declared-region meaning as any other valid `name:` header. Exact `_:` is invalid, and the source language has no control-flow labels. Future compiler-owned scopes such as `$async:` remain separate because their marker carries language-defined execution and lifetime behaviour.
 
 ## into declaration placement
 

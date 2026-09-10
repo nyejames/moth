@@ -27,11 +27,14 @@ Key alignment rules:
 
 Future diagnostic coverage needed for:
 
-- config sections and section-aware schema validation
+- directive placement, signature, required-input and unknown/unavailable-name diagnostics
+- root-purpose diagnostics for unpurposed authored runtime or direct output
 - `@project` field collisions and provenance
 - source input contract conflicts and restricted defaults
 - package facade provenance rejection
 - output manifest conflicts
+
+Do not implement config-block syntax, inactive-section folding or legacy-name migration scanners as future work. Historical completed-phase evidence below remains evidence of past cleanup.
 
 ## Current state
 

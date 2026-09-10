@@ -43,6 +43,7 @@ jobs:
           - benchmarks
           - timers-erasure
           - source-audit
+          - first-party-deps
           - honesty-audit
 
     steps:
@@ -72,7 +73,7 @@ jobs:
 
       # Reports are review evidence, so they are uploaded whether the gate passed or failed.
       - name: Upload machine-readable reports
-        if: always() && (matrix.gate == 'honesty-audit' || matrix.gate == 'integration' || matrix.gate == 'feature-matrix')
+        if: always() && (matrix.gate == 'honesty-audit' || matrix.gate == 'integration' || matrix.gate == 'feature-matrix' || matrix.gate == 'first-party-deps')
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.gate }}-${{ matrix.os }}

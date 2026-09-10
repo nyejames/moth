@@ -1,0 +1,158 @@
+**Accepted queued design.** `$` is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, `$config`, `$project`, `$html_builder` and `$page` are accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects still use grouped `project`/`html` records, `#Config of T` contracts and reserved `page_*` metadata. See @../progress (Progress) for current support.
+
+`$` does not mean harmless metadata. Compiler-owned semantic directives may impose real language or structural contracts. Builder extensions remain constrained: they may supply template directives and consume metadata, configuration and root-purpose facts, but they cannot rewrite functions, change nominal identity, mutate HIR, alter visibility or weaken borrow and lifetime rules.
+
+This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact `$project`, `$config`, `$html_builder` and `$page` signatures live in the project-structure references linked below.
+
+### Marker and non-goals
+
+In the accepted directive design, `$` introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The queued Wiring replacement uses no `$` marker. Current reactive bindings remain an explicitly superseded Alpha surface until their removal. There is no accepted `with` attribute keyword.
+
+Users and source packages cannot define, alias, import or override semantic directives. Frontend names are authoritative. Duplicate registrations and name conflicts are rejected rather than resolved by last registration.
+
+Directive names do not reserve the corresponding ordinary identifiers. `$project`, `$config` and `$html_builder` do not reserve `project`, `config`, `Config` or `html_builder` outside directive syntax. File semantics for `config.moth` and the `@project` dependency root remain separately reserved.
+
+This is not a generic attribute or macro framework. It does not guarantee that every future directive can target every statement.
+
+### Ownership and context
+
+Config-only is a placement and processing-phase restriction. It is not a second registry and is not synonymous with compiler ownership.
+
+[table:
+    [th:
+        [: Category]
+        [: Owner]
+        [: Context]
+    ]
+
+    [td:
+        [: Template directive]
+        [: Compiler or builder]
+        [: A template head, including the head of a nested template]
+    ]
+
+    [td:
+        [: Declaration modifier]
+        [: Compiler]
+        [: `$config` on one eligible compile-time declaration. Future `$layout` and `$export` have separate semantic contracts; `$export` block support remains undecided]
+    ]
+
+    [td:
+        [: Project configuration]
+        [: Compiler-owned `$project` or builder-owned `$html_builder`]
+        [: Standalone items in `config.moth` only]
+    ]
+
+    [td:
+        [: Normal-root metadata or purpose]
+        [: Builder]
+        [: Standalone items on a normal module root. `$page` is the first planned HTML purpose]
+    ]
+
+    [td:
+        [: Semantic source block]
+        [: Compiler]
+        [: Future `$async:` and `$checked:` blocks. Their implementations remain deferred]
+    ]
+
+    [td:
+        [: Structural source selection]
+        [: Compiler]
+        [: Future `$feature` selection before graph and declaration publication]
+    ]
+]
+
+`$html_builder` is HTML-builder-owned and config-only. `$project` is compiler-owned at the language boundary and config-only. The existing build owner still applies validated project settings. `$config` is compiler-owned and legal in both bootstrap and specified source declarations.
+
+### Arguments
+
+One ordinary call parser, one parameter-slot router and one default validator own directive arguments.
+
+- A directive with supplied arguments uses `$name(arguments)`.
+- A directive with no supplied arguments uses `$name`.
+- Authored empty `()` is invalid for directives, even when every parameter has a default.
+- Ordinary function calls keep `f()`. Only the directive entry boundary rejects empty parentheses.
+- Arguments and defaults are compile-time values. Runtime values, exclusive or mutable arguments and escaping control flow are invalid.
+- Positional arguments, named arguments, ordering, duplicates, unknown names, commas and multiline whitespace use the shared call owner.
+
+[codeblock, $code("moth"):
+    $project("my_site", "0.1.0")
+    $html_builder
+]
+
+The same project invocation may use named arguments: `$project(name = "my_site", version = "0.1.0")`. These are alternative spellings of the one required invocation, not two invocations in one config file.
+
+`$project()` and `$html_builder()` are invalid. Bare `$html_builder` still runs required-parameter and default validation.
+
+Template directives move onto the same argument-list owner without changing their existing value domains, head compatibility, formatter behaviour or literal-body modes. Slot labels, indices and helper templates remain compiler-known template argument categories. See @../templates/#template-directives (Template directives).
+
+### Attachment
+
+The descriptor fixes the directive's form.
+
+- `$project` and `$html_builder` are standalone items. They never modify the next declaration.
+- `$config` modifies exactly one following declaration, ignoring ordinary lexer trivia such as whitespace and `--` comments. It does not cross an intervening source item or block boundary.
+- A dangling `$config` is an error. Duplicate `$config` modifiers on one declaration are errors.
+- Source modifiers may occupy their own line or precede their target on the same line where ordinary token boundaries permit it. Documentation uses the separate-line form.
+- Standalone directives follow ordinary item boundaries. There is no semicolon statement terminator, comma-separated `with` clause or new block delimiter.
+
+### Unknown, unavailable and placement
+
+Recognition, permitted placement, diagnostics and tooling share one registration authority. Context is checked after name recognition.
+
+- An unknown directive in active source is an error.
+- A known but unimplemented directive is a deferred-feature diagnostic, never a successful no-op and never a working root purpose.
+- A known directive in the wrong place receives a placement diagnostic.
+- Ordinary static `if false` does not suppress frontend directive errors. Both branches remain frontend-valid.
+
+### Configuration example
+
+Accepted `config.moth` shape:
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+A fixed literal version also works. A contract named `version` does not satisfy an omitted `$project` argument. A project field named `version` does not satisfy a source input contract.
+
+Exact field tables, required version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
+
+### Page example
+
+`$page` is the accepted queued HTML-builder directive for normal-root metadata and page purpose. Ordinary files, support roots, facades and `config.moth` cannot declare pages. Its implementation will supply the first root purpose in this directive family.
+
+[codeblock, $code("moth"):
+    $page(
+        title = "Moth",
+        description = "A language for creating reliable software",
+        lang = "en",
+        favicon = @assets/favicon.svg,
+    )
+]
+
+Bare `$page` is the default invocation. `$page()` is invalid. Exact arguments, command policy and runtime title live in @../project-structure/#entry-config (Entry metadata and page directives).
+
+Until that implementation lands, operational pages keep reserved `page_title`, `page_head` and related declarations.
+
+### Future blocks
+
+Future compiler-owned blocks use `$name(...): ... ;` or `$name: ... ;`. `$async:` and `$checked:` are the accepted future source-block spellings. Recognition of a name for diagnostics is not semantic implementation. Block bodies, `$feature` predicate algebra, `$layout` representation contracts, `$export` migration and `$test` as a later non-page purpose remain future work.
+
+`$feature` is structural source selection before graph and declaration publication. Ordinary `$config` values and static `if` cannot remove declarations or dependencies. Multi-builder projects wait for `$feature`.
+
+### Related concepts
+
+- For template-specific directive meanings see @../templates/#template-directives (Template directives).
+- For project and HTML configuration signatures see @../project-structure/#project-config (Project config).
+- For input contracts see @../project-structure/#build-inputs (Build configuration values).
+- For `$page` and root purpose see @../project-structure/#entry-config (Entry metadata and page directives).
+- For accepted, deferred and excluded boundaries see @../design-scope (Design scope).

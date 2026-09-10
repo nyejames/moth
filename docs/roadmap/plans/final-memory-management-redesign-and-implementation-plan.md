@@ -15,6 +15,8 @@ Milestone A is closed after the final multi-edge REC and target-aware physical-p
 
 The Retained Edge Counting plan owns the detailed REC analysis, ABI, counter and lowering contract. This plan owns the complete source semantics, analysis boundaries, inferred regions, cleanup frontiers, declared regions, field-sensitive allocation splitting, physical memory planning, backend/profile parity, channel prerequisites and repository-wide documentation migration.
 
+Physical layout and field-sensitive splitting consume validated representation constraints when compiler-owned `$layout` contracts exist. Detailed layout policy stays with its permanent language authority and the later struct-layout TODO plan. This plan does not invent ABI, C layout or SoA options.
+
 The former `docs/roadmap/plans/grouped-memory-design.md` plan is superseded as the umbrella memory roadmap. Its still-valid declared-region implementation detail is folded into Phases 7 and 8 and into the canonical declared-region pages, and the old plan is deleted. Do not reintroduce a second overlapping implementation authority.
 
 ## Current state

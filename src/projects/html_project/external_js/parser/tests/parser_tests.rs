@@ -663,6 +663,33 @@ const m = import("./helper.js");
 }
 
 #[test]
+fn require_call_rejected() {
+    let source = r#"
+const helper = require("./helper.js");
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsExport]);
+}
+
+#[test]
+fn star_reexport_rejected() {
+    let source = r#"
+export * from "./helper.js";
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExport]);
+}
+
+#[test]
+fn import_meta_is_not_an_import_declaration() {
+    let source = r#"
+const url = import.meta.url;
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+}
+
+#[test]
 fn arbitrary_static_import_rejected() {
     let source = r#"
 import { foo } from "./helper.js";

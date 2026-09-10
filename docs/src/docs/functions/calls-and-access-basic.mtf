@@ -24,3 +24,6 @@ Fresh values do not use `~`:
 [codeblock, $code("moth"):
     increment(1)
 ]
+
+Ordinary function calls keep their usual syntax, including empty `f()`. Directives
+share the call rules but reject an authored empty `()`; see @./ (Calls and access advanced).

@@ -65,7 +65,7 @@ An ordinary statically known `if true:` can provide a rare local lexical scope:
 
 This is not a special block alias. It follows ordinary static Bool `if` rules, preserves the selected branch scope and disappears before HIR. It does not create a declared region or change ancestor-placement legality.
 
-Keyword-led semantic scopes such as `async:` remain distinct. Their keyword describes language-defined execution behaviour rather than naming a user-declared lifetime region.
+Future compiler-owned scopes such as `$async:` remain distinct. Their marker describes language-defined execution behaviour rather than naming a user-declared lifetime region.
 
 ### `into` declaration position
 

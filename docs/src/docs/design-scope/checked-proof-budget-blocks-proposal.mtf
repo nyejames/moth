@@ -1,5 +1,7 @@
-This is an open design proposal. It is not accepted syntax, a progress-matrix
-feature or an implementation promise.
+This is an open design proposal. `$checked:` is the agreed future source-block
+spelling and direction, but proof-tier semantics, placement and implementation
+remain unresolved. It is not a progress-matrix feature or an implementation
+promise.
 
 ### Core idea
 
@@ -8,17 +10,17 @@ proves common programs without turning every build into symbolic execution.
 Some safe programs still need substantially more path, value or loop reasoning
 than the normal checker should spend by default.
 
-The proposal introduces a lexical **proof-budget scope**. The working name is a
-checked block:
+The proposal introduces a lexical **proof-budget scope**. Its agreed future
+source-block spelling is `$checked:`:
 
 [codeblock, $code("moth"):
-    checked:
+    $checked:
         -- difficult but safe alias relationships
     ;
 ]
 
-The example spelling is illustrative only. The final keyword, placement rules
-and exact scope shape remain open.
+The spelling and compiler-owned direction are settled for future documentation.
+The exact placement rules, scope shape and proof-tier semantics remain open.
 
 A checked scope would let the compiler spend much more compile time proving the
 same static safety rules. It would not make code outside the scope less checked.
@@ -222,11 +224,10 @@ borrow legality, lifetime topology and physical memory planning into one solver.
 
 ### Open questions
 
-The design remains open on:
+The spelling and compiler-owned direction are agreed; the design remains open on:
 
-- whether `checked` is the right name
 - whether the feature should be block-only or also allow a whole function
-- how nested checked scopes compose
+- how nested `$checked:` scopes compose
 - which deep proof families are worth supporting first
 - how the compiler reports a true conflict versus exhausted proof effort
 - which compact exit facts may escape the scope
@@ -234,8 +235,9 @@ The design remains open on:
 - whether narrow path-feasibility solving is worthwhile after custom Moth-specific domains
 - what deterministic hard limits provide useful power without pathological builds
 
-The syntax should remain unaccepted until Boracle demonstrates a meaningful set
-of safe programs that need the deeper tier and the compiler can explain those
+The `$checked:` source block must remain unimplemented and must not be treated
+as accepted proof-tier behaviour until Boracle demonstrates a meaningful set of
+safe programs that need the deeper tier and the compiler can explain those
 proofs clearly.
 
 ### Why the proposal may fit Moth

@@ -12,8 +12,6 @@ language design. Implementation may be absent, partial or target-limited. A
 deferred feature may appear in the progress matrix and may have a structured
 deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 
-Examples of deferred features:
-
 - declared regions (`name:` / `into name`)
 - mandatory lifetime-region and escape validation
 - choice payload field access without pattern matching
@@ -22,6 +20,7 @@ Examples of deferred features:
 - generic external package functions and types
 - package manager, versions and lockfiles
 - broader standard trait taxonomy
+- future compiler-owned `$async:` blocks
 - field/path reactive subscriptions
 - first-class filesystem path values, directory values and runtime filesystem access
 - source-file reflection and reading `.moth` source as text
@@ -41,16 +40,45 @@ Current open questions include:
 
 - distinct primitive-backed nominal wrapper or newtype syntax
 - narrow references to named, monomorphic, non-capturing functions
-- @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), an opt-in
-  lexical scope that may permit much deeper static analysis in exchange for
-  substantially slower compilation
+- @#checked-proof-budget-blocks-proposal (checked proof-budget blocks), whose
+  agreed future source-block spelling is `$checked:` but whose proof-tier
+  semantics, placement and soundness evidence remain open
 
-The checked-block name and example spelling are only working proposal language.
-The safety rules, source meaning and runtime behaviour would remain the same
-inside and outside the scope.
+The `$checked:` spelling and compiler-owned direction do not make research
+obligations, deterministic limits or normal safety laws implemented or fully
+accepted. The safety rules, source meaning and runtime behaviour must remain
+the same inside and outside any eventual scope.
 
 Transparent aliases remain transparent regardless of whether a distinct
 primitive-backed nominal wrapper enters the language.
+
+### Directive and structural-selection boundaries
+
+Compiler-known general directives are an accepted direction. Arbitrary user
+macros and builder directives that transform AST remain outside scope.
+Constrained builder directives may provide templates, metadata and
+configuration, but cannot rewrite language semantics.
+
+Ordinary `$config` values and static `if` cannot remove declarations or
+dependencies. Future `$feature` may select source structure before graph and
+declaration publication from bootstrap-known feature data and high-level
+selected-builder identity. Known feature names must be distinguished from
+enabled features so typos cannot silently disable code; predicate, nesting and
+config-declaration grammar belongs to the future plan.
+
+Physical backend, target, OS and architecture queries remain outside scope.
+Builder identity is not physical target identity. Excluded regions will not
+resolve contained builder directives against the active surface, but still need
+a sound structural boundary. Directive-controlled template lexing must be
+addressed before arbitrary unknown syntax can be skipped.
+
+Future `$layout` constrains representation while preserving nominal identity; C
+order alone is not a complete ABI contract, and SoA is not automatically a
+scalar layout option. `$export` will replace rather than permanently duplicate
+export syntax, while block support remains undecided. `$test` is a deferred
+root-purpose direction with runner, command and lifecycle details undefined.
+A separate custom-metadata directive remains open design, so `$project` stays
+strict.
 
 ### Outside scope
 

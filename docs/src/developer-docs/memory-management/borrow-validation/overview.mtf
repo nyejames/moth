@@ -12,7 +12,11 @@ Roots, joins, optional transfer safety and facts.
 
 This output contract is solver-independent. The current alpha lattice, root approximation and advisory drop candidates are current scaffolding rather than permanent architecture; a stronger production borrow checker may replace them without changing the contract or source legality.
 
-A future checked proof-budget proposal may let selected lexical scopes authorise substantially deeper conflict-directed analysis. It would preserve the same safety contract and ordinary fast path. It is not accepted syntax or current production behaviour.
+A future `$checked:` proof-budget block may authorise substantially deeper
+conflict-directed analysis. Its spelling and compiler-owned direction are
+reserved for that future surface, while proof-tier semantics and soundness
+evidence remain open. It preserves the same safety contract and ordinary fast
+path; it is not current production behaviour.
 
 ## Main paths
 

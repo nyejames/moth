@@ -97,7 +97,7 @@ Moth's compiler library holds frontend and analysis stages. The project tool and
             [$insert("href"): ../starting-a-build/]
             [$insert("eyebrow"): Build system]
             [$insert("title"): Which files, in which order?]
-            Chooses the command, reads project config and builds the source graph.
+            Chooses the command, bootstraps project config through the compiler service and builds the source graph.
         ]
     ]
 
@@ -206,7 +206,7 @@ Later articles assign exact diagnostic ownership. Here only the families matter:
 
 - **Accepted design:** a staged compiler library plus a build-owned project pipeline.
 - **Current implementation:** follow the progress matrix. Do not treat transitional backend handoff details as permanent law.
-- **Queued work:** the mixed JavaScript/Wasm backend plan. Canonical module compilation and scoped packages already landed.
+- **Queued work:** the mixed JavaScript/Wasm backend plan and the accepted general-directive/config and HTML page-purpose migrations. Canonical module compilation and scoped packages already landed.
 - **Deferred or outside scope:** this article does not teach a universal compiler taxonomy for every language.
 
 ## Exit state

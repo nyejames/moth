@@ -1,30 +1,27 @@
 Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-**Implemented contract.** Direct and source `#Config`, typed `--input` values and explicit `@project` are supported. Entry-local `config:` blocks remain deferred; see @../progress (Progress) for current support.
+**Current support versus accepted design.** Direct and source `#Config` and typed `--input` values are supported. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
 
-### `#Config` values
-
-A direct project field can use `#Config of String`:
+### Accepted `$config`
 
 [codeblock, $code("moth"):
-    project #= |
-        name = "my_project",
-        version #Config of String = "0.1.0",
-        entry_root = "src",
-    |
-]
-
-Source modules use the same spelling:
-
-[codeblock, $code("moth"):
-    analytics #Config of Bool = false
+    $config
+    analytics #Bool = false
 
     if analytics:
         send_analytics()
     ;
 ]
 
-`#Config` values feed ordinary `if`; there is no `#Config if`.
+The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer. Ordinary constants still need one.
+
+Only `$config` declarations create contracts. A `$project` field named `version` does not supply a source input named `version`.
+
+### Current `#Config`
+
+[codeblock, $code("moth"):
+    analytics #Config of Bool = false
+]
 
 ### Command examples
 
@@ -34,6 +31,6 @@ Source modules use the same spelling:
     moth build . --input api_url=https://example.com
 ]
 
-Bare `true` and `false` infer as `Bool`, whole numbers as `Int`, decimal values as `Float`, and other text falls back to `String`. Quote `"true"` when a String is intended. Omitted optional values can resolve to `none`.
+Bare `true` and `false` infer as `Bool`, whole numbers as `Int`, decimal values as `Float`, and other text falls back to `String`. Quote `"true"` when a String is intended.
 
-Build configuration cannot inspect operating-system, architecture, backend or target identity; builders handle platform mapping.
+Build configuration cannot inspect operating-system, architecture, backend or target identity.

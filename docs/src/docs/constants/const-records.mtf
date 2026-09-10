@@ -8,7 +8,7 @@ A fully folded struct instance stored in a constant may become a const record.
 
     defaults #= Defaults("Moth", 2026)
 
-    page_title #= defaults.title
+    site_title #= defaults.title
 ]
 
 ### Contract
@@ -38,6 +38,11 @@ Use one folded field when runtime code needs the value.
 Const records preserve their struct-backed field names and types.
 
 They do not introduce structural typing or anonymous runtime record identity.
+Ordinary records retain the full language capability of ordinary compile-time values.
+Removing magic configuration record names does not change struct construction, field
+projection or the restrictions on using a complete const record at runtime. Explicit
+`$config` declarations are the accepted queued input-contract spelling, rather than
+special record names; Alpha currently uses `#Config of T`.
 
 ### Anonymous const records
 

@@ -11,7 +11,7 @@
 > external-review correction checkpoint below. Related-site ownership, generic re-anchoring,
 > direct premerge failure ownership, structured renderer facts, and source/test-owner cleanup are
 > resolved here.
-> Phase 2 remains paused for external user review.
+> Phase 1 is delivered on main. The next implementation slice is Phase 2 on the rebased continuation branch, with package work proceeding in parallel. The roadmap retains the separate checkpoint before Phase 4.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -68,7 +68,7 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 final review-correction pass complete in `3c9c776a8`; Phase 2 remains paused for external user review.
+- Phase: Phase 1 is complete and delivered on main. Next: Phase 2 after refreshing the continuation branch and baseline. Package work proceeds in parallel under the roadmap checkpoints.
 - Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
   deterministic publication while preserving exact authored spans and typed infrastructure failures.
 - Current code evidence: project and linked-module backend diagnostics carry explicit boundary ownership;
@@ -98,7 +98,7 @@ CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
 - The exact correction checkpoint, feature-matrix result and full-gate result are recorded in the
   correction evidence below.
-- Phase 2 remains pending external user review.
+- Phase 2 is the next slice on the rebased continuation branch. Establish its actual workspace state and validation baseline when work starts.
 HISTORICAL_ACCEPTED_SLICES:
 The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
 are not current workspace validation or checkpoint claims.

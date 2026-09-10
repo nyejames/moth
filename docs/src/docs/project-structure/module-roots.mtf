@@ -1,8 +1,10 @@
-A non-config file whose name starts with `@` and ends with `.moth` is the module root for its containing directory.
+**Current support versus accepted design.** Alpha projects still select HTML entries from implemented root activity. The accepted queued page design makes `$page` the explicit artefact declaration. Current `export:` blocks remain implemented; the later `$export` migration is deferred.
+
+A normal module root defines the identity of one directory-scoped module. It does not define a page merely because its filename contains `page`.
 
 ### Root filename semantics
 
-The filename after `@` has no language-level semantic role. These are all equivalent module root spellings:
+A non-config file whose name starts with `@` and ends with `.moth` is the module root for its containing directory. The filename after `@` has no language-level semantic role:
 
 [codeblock, $code("moth"):
     @page.moth
@@ -11,11 +13,11 @@ The filename after `@` has no language-level semantic role. These are all equiva
     @anything.moth
 ]
 
-The compiler treats each one as the module root for its directory. The HTML route comes from the directory position, not from the root filename.
+The compiler treats each spelling as the root for its directory. The HTML route comes from the directory position, not from the root filename. After the page cutover, a root declares an HTML artefact only with a root-only `$page` directive.
 
 ### One root per directory
 
-A source directory may contain at most one non-config `@*.moth` file. Two or more normal module-root files in one directory are rejected with `MOTH-CONFIG-0001`.
+A source directory may contain at most one non-config `@*.moth` file. Two or more normal module-root files in one directory are rejected with `MOTH-CONFIG-0001`. The explicitly selected synthetic single-file root forms its own module and follows the single-file page rule.
 
 ### Config files are not module roots
 
@@ -54,30 +56,31 @@ Neither `@page.moth` nor `@site.moth` is bound directly. Do not add the root fil
 
 ### Normal files belong to the surrounding module
 
-Files without `@` in the same directory as a root file are normal source files within that module. They contribute declarations that the module root can bind and export. They do not execute top-level runtime code independently.
+Files without `@` in the same directory as a root are normal source files within that module. They contribute declarations that the module root can bind and export. They do not execute top-level runtime code independently, and they cannot become page entries by themselves.
 
-### Active versus dependency module roots
+### Root identity, page purpose and activation
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. When the builder selects that module as an entry, entry assembly activates `start` exactly once. Binding the module exposes only its public interface and never activates its root work.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The current builder selects entries from authored runtime or fragment activity. The accepted design instead requires an authored root purpose, initially `$page`, before the builder selects an HTML artefact.
 
-- **Entry-selected root**: the builder selects this module as an entry. Entry assembly activates its dormant `start` and its direct top-level templates become page fragments.
-- **Dependency root**: its top-level runtime and page-fragment activity is inactive. Only the declarations selected by `export:` are visible through the module boundary.
+[codeblock, $code("moth"):
+    $page
+]
 
-### API-only roots
+Helpers remain declarations inside the surrounding module. They never own an entry, an independent `start` or a page. Binding a module exposes only its public interface and never activates its root work. A selected page root activates its module-owned `start` once and assembles its direct fragments in source order.
 
-A module root with no builder-relevant top-level activity (no runtime code, no
-const fragments and no runtime fragments) remains API-only. It may export
-declarations but produces no builder artefact.
+### Visibility status
+
+`export:` is the implemented public-API block. It controls which legal root declarations and direct selections cross a module boundary. The accepted future `$export` migration will replace this spelling rather than leave both forms as permanent alternatives. Whether a future export directive supports a block remains undecided. Do not use `$export` as current syntax.
 
 ### Migrating older module projects
 
 - Rename the project config file to plain `config.moth`.
 - Keep one non-config `@*.moth` root per source directory. Merge old `@page.moth` and `@mod.moth` roles when they shared a directory.
-- Replace inline `export` declarations and dependency clauses with one strict `export:` block in the module root.
+- Keep current `export:` blocks until the later `$export` migration is implemented.
 - Bind the module directory or package prefix. Do not bind the normal module-root filename directly.
 
 ### Related concepts
 
-- For the export block see @#public-api (Public API).
-- For root activity and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For HTML routes see @#html-routing-and-artifacts (HTML routing and artefacts).
+- For the export block and its current status see @#public-api (Public API).
+- For root purpose, runtime and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For HTML routes and command policy see @#html-routing-and-artifacts (HTML routing and artefacts).

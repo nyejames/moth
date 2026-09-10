@@ -20,6 +20,12 @@ impl<'hir> JsEmitter<'hir> {
         self.out.push('\n');
     }
 
+    pub(crate) fn emit_javascript_source(&mut self, source: &str) {
+        for line in source.lines() {
+            self.emit_line(line);
+        }
+    }
+
     pub(crate) fn with_indent<F>(&mut self, mut callback: F)
     where
         F: FnMut(&mut Self),

@@ -1,13 +1,8 @@
-Entry config covers implemented explicit access to project-level values through `@project` and the
-deferred root-local `config:` block.
-
-**Implemented:** `@project` binding reads project fields. **Deferred:** entry-local `config:` blocks
-remain outside current compiler support. See @../progress (Progress) for implementation status.
+**Current support versus accepted design.** `@project` is implemented. `$page` is accepted queued design. Pages today still use reserved `page_title` and related names. See @../progress (Progress).
 
 ### Using `@project`
 
-Bind `@project` to read project fields like `version` or `entry_root` inside a
-module:
+Bind `@project` to read predefined project fields:
 
 [codeblock, $code("moth"):
     @project version
@@ -15,23 +10,21 @@ module:
     footer #= [: v[version]]
 ]
 
-`@project` is never implicitly injected. Bind it explicitly when you need it.
+`@project` is never implicitly injected.
 
-### Entry-local `config:` blocks
+### Root-only `$page`
 
-A normal module root may contain one optional `config:` block with builder
-metadata for that entry:
+`$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
 
 [codeblock, $code("moth"):
-    config:
-        html #= |
-            title = "About",
-        |
-    ;
+    $page(title = "About")
 ]
 
-The block lives at the top level of the root file, outside `export:` and outside
-executable bodies. It creates no module symbols or runtime values.
+Bare `$page` uses defaults. `$page()` is invalid. Title, description, language, favicon, body style and head content are optional compile-time arguments.
+
+`$page` is the initial document metadata. Runtime `io.set_title` is a later capability-checked call, not a rewrite of that metadata.
+
+HTML `build` and `dev` need a page somewhere under `entry_root`. `check` can accept a valid project with no page. Future `$test` is a later non-page purpose.
 
 ### Related concepts
 

@@ -65,6 +65,12 @@ Public names in the export block must not collide with each other. Duplicate pub
 
 Re-exporting a symbol that does not exist in the target file is rejected. Re-exporting a private declaration that is not visible in the target file is rejected.
 
+`export:` is the implemented public-API marker. The accepted later direction is a
+`$export` migration that replaces it rather than permanently duplicating the syntax;
+the directive block form remains undecided. Do not treat both spellings as a stable
+alternative pair.
+
+
 ### No legacy inline export syntax
 
 Legacy inline `export` syntax (without the `:` block delimiter) is rejected with `MOTH-SYNTAX-0001`. The strict `export:` block is the only public API marker. See @../project-structure/#public-api (Public API) for the full export-block rules.

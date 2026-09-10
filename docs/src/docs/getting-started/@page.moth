@@ -19,7 +19,13 @@ page_head #= language_theme_head
     # Getting Started with moth
 
     `moth` compiles and tools Moth projects.
-    You use it from the command-line to create new projects, check them, build them and run the hot-reloading dev server.
+    You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
+
+    **Support notice.** The Alpha compiler still accepts grouped `project` and
+    `html` records, direct `#Config` fields and reserved `page_*` metadata.
+    The accepted `$config`, `$project`, `$html_builder` and root-only `$page`
+    forms below are queued design. `moth new` does not emit those forms yet.
+    Keep live projects on the current syntax until the implementation cutover.
 
     Other tooling continues rapid development.
 
@@ -52,8 +58,8 @@ page_head #= language_theme_head
 
         [data:
             [$md:`new html`]
-            [: Creates a complete HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the default scaffold including `src/@page.moth`, an empty legacy `lib/` placeholder, output manifests and an optional .gitignore. The `lib/` folder has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
+            [: Creates the current HTML project scaffold.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates the current-syntax config, a conventional `src/@page.moth` root, an empty legacy `lib/` placeholder, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or a live `$page` declaration. The `lib/` folder has no special meaning in the accepted package design. Use structural `+*.moth` packages under the source tree for project-local packages.]
         ]
 
         [data:
@@ -123,8 +129,40 @@ page_head #= language_theme_head
 #[section, $md:
     ## Create a new HTML project
 
-    The scaffold creates a default project with config, a starter page, generated output folders, build manifests and an optional .gitignore.
-    The HTML project builder itself has more rules than this page needs to cover. See @../project-structure (the project structure guide) for page layout, routing, assets, fragments and generated output details.
+    The current scaffold creates a project with current-syntax config, a
+    conventional root, generated output folders, build manifests and an
+    optional .gitignore. It does not yet emit the accepted starter below.
+    The HTML project builder itself has more rules than this page needs to
+    cover. See @../project-structure (the project structure guide) for page
+    layout, routing, assets, fragments and generated output details.
+
+    ### Accepted starter shape (queued)
+
+    The accepted design keeps the version in an explicit input contract and
+    passes it to the required project field:
+
+    [codeblock, $code("moth"):
+        $config
+        version #String = "0.1.0"
+
+        $project(
+            name = "my_site",
+            version = version,
+            entry_root = "src",
+        )
+
+        $html_builder
+    ]
+
+    A normal module root declares an HTML page separately. The accepted page
+    directive is root-only and does not belong in helper files:
+
+    [codeblock, $code("moth"):
+        $page
+    ]
+
+    `moth new` does not emit these accepted forms yet. Keep operational
+    scaffolds on their current grouped config and reserved page metadata.
 
     Start a new project:
 
@@ -197,7 +235,7 @@ page_head #= language_theme_head
 
     - `dev/` and `release/` are output folders.
     - `.moth_manifest` files are build-system metadata for safe stale-output cleanup.
-    - `src/@page.moth` is the conventional module root with a starter page. The filename is cosmetic.
+    - `src/@page.moth` is the current conventional module root. The filename is cosmetic; it does not mean that the accepted root-only `$page` syntax is implemented.
     - The current scaffold creates an empty legacy `lib/` placeholder. It has no special package meaning. Use structural `+*.moth` packages under the source tree for project-local packages.
 
     ### Using --force

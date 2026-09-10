@@ -1,3 +1,15 @@
+**Current support versus accepted design.** The Alpha compiler currently uses `#Config of T` for build-input contracts. The accepted queued spelling is `$config` before one explicitly typed top-level `#` binding; see @../project-structure/#build-inputs (Build configuration values).
+
+`$config` is a marker for an input contract, not a replacement for ordinary constants:
+
+[codeblock, $code("moth"):
+    $config
+    api_url #String
+]
+
+Only a marked `$config` input can omit an initializer: a required non-optional input
+then reports a missing-input error, while an optional input resolves to absence.
+
 `#` marks a compile-time constant binding.
 
 [codeblock, $code("moth"):
@@ -14,7 +26,11 @@
     name #Type = value
 ]
 
-- Every constant must have an initializer.
+Every ordinary constant must have an initializer.
+
+- A `$config`-marked required, non-optional input may omit its initializer and reports a missing-input error when no value is supplied.
+- A `$config`-marked optional input may omit its initializer and resolves to absence.
+- A `$config`-marked input with an initializer uses that initializer as its fallback.
 - A constant is immutable.
 - A mutable marker cannot be combined with `#`.
 - Without an annotation, the initializer supplies the type.

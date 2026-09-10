@@ -1,4 +1,5 @@
-This is an open proposal. The name and syntax are not accepted yet.
+This is an open design proposal. `$checked:` is the agreed future source-block
+spelling and direction; proof-tier semantics and implementation remain open.
 
 ### What it would do
 
@@ -6,7 +7,7 @@ A checked proof-budget block would let the compiler spend much more time trying
 to prove difficult code safe:
 
 [codeblock, $code("moth"):
-    checked:
+    $checked:
         -- code that needs unusually deep analysis
     ;
 ]
@@ -44,6 +45,8 @@ carefully about loop generations, specialise call summaries or prove that two
 indexes cannot refer to the same element.
 
 Boracle will research these proof techniques before Moth decides whether a
-source feature is worthwhile. The proposal should become accepted design only
+future `$checked:` block can provide a sound, useful proof tier. The spelling
+does not make the research obligations, deterministic limits or safety
+requirements implemented or fully accepted. The proposal should advance only
 if the deeper tier proves a useful class of safe programs that the normal
 checker deliberately rejects for compile-time cost reasons.

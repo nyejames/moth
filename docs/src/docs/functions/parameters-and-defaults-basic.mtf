@@ -21,3 +21,6 @@ A default makes a parameter optional at the call site:
 ]
 
 The call supplies `subject` by name and keeps the default prefix.
+
+Ordinary calls, including empty `f()`, keep their normal syntax. Directive calls share
+the same argument rules but reject an authored empty `()`.

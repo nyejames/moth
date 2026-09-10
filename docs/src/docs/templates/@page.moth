@@ -41,7 +41,9 @@ page_head #= language_theme_head
 
     Templates form Moth's only string-composition system. Square brackets can
     join short values, format Markdown or HTML and compose larger layouts with
-    slots, wrappers and control flow.
+    slots, wrappers and control flow. Template `$` directives remain owned
+    here; the accepted general directive family is documented at
+    @../directives (Directives).
 
     Other languages often split this work across concatenation, interpolation
     and a separate template language. Moth keeps one typed `String` result and

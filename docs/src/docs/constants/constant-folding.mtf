@@ -1,3 +1,5 @@
+**Current support versus accepted design.** The Alpha compiler currently accepts `#Config of T` inputs. The accepted queued form uses `$config` on a typed `#` binding; ordinary constant folding and ordinary `if` syntax remain the language mechanisms.
+
 A constant initializer must fully evaluate during AST construction.
 
 [codeblock, $code("moth"):
@@ -85,13 +87,20 @@ Those facts do not:
 
 ### Static Bool control flow
 
-An ordinary `if` condition may fold to a known `Bool`, including an implemented `#Config of Bool`
-value. Both branches first parse, resolve and type-check as normal source. Stage 4 then selects one
-branch, preserving the selected branch's lexical scope; inactive executable work does not reach HIR
-or later analysis. Runtime conditions remain runtime branches.
+An ordinary `if` condition may fold to a known `Bool`. In current Alpha syntax this
+includes an implemented `#Config of Bool` value. In the accepted queued design, a
+`$config`-marked `Bool` input feeds the same ordinary `if`; `$config` does not add a
+separate conditional form.
 
-This is not target conditional compilation. `#Config of Bool` uses the same general folded constant
-and ordinary-`if` mechanism. Advisory const facts do not create source constants or structural
-conditional compilation.
+Both branches first parse, resolve and type-check as normal source. Stage 4 then selects
+one branch, preserving the selected branch's lexical scope; inactive executable work does
+not reach HIR or later analysis. Runtime conditions remain runtime branches.
 
-Stage 4 performs this selection after final constant values and full branch validation, then derives terminality and executable facts from the selected AST.
+This is not target conditional compilation. Ordinary `$config` values and static `if`
+cannot remove declarations or dependencies. Future structural source selection waits for
+`$feature`; advisory const facts do not create source constants or structural conditional
+compilation.
+
+Stage 4 performs this selection after final constant values and full branch validation,
+then derives terminality and executable facts from the selected AST.
+

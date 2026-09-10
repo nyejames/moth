@@ -14,7 +14,7 @@ Think of four layers plus records of what changed:
 
 **Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, reactive features, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
 
-**Compiler and builder metadata.** Dormant root activity, folded fragment values and insertion indexes, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Resolved root-local entry metadata is accepted design and deferred.
+**Compiler and builder metadata.** Dormant root activity, folded fragment values and insertion indexes, `$page` root metadata, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Resolved `$page` metadata is accepted design and deferred.
 
 **Fingerprints** are an accepted design layer over those lanes, meant to let reuse say what changed. They are not a lane the current artefact retains. The compiler computes fingerprint facts during a build and today's builds do not keep them for later comparison.
 

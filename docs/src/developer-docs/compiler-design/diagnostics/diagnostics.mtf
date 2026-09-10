@@ -22,7 +22,7 @@ Each stage owns the failures it is uniquely equipped to see.
 
     [td:
         [: Stage 0, graph and config]
-        [: unresolved provider, invalid root role, no entry configured]
+        [: unresolved provider, invalid root role, or a command-required entry missing]
     ]
 
     [td:

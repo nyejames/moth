@@ -1,3 +1,5 @@
+**Current support versus accepted design.** Static `if` is implemented with current `#Config of T` values. The accepted queued input spelling is a `$config` prefix on an ordinary typed `#` binding.
+
 The compiler must finish a constant before runtime code begins.
 
 [codeblock, $code("moth"):
@@ -11,8 +13,8 @@ It cannot use a runtime variable or call a runtime function.
 
 When a constant expression is invalid, the compiler reports it during the build instead of leaving the failure for runtime.
 
-Static Bool `if` specialisation is implemented for ordinary `if` syntax, including conditions from
-`#Config of Bool` values:
+Static Bool `if` specialisation is implemented for ordinary `if` syntax, including
+current `#Config of Bool` values:
 
 [codeblock, $code("moth"):
     enabled #Config of Bool = false
@@ -21,3 +23,7 @@ Static Bool `if` specialisation is implemented for ordinary `if` syntax, includi
         perform_optional_work()
     ;
 ]
+
+The accepted queued spelling places `$config` before a typed `#` binding and feeds
+the same ordinary `if`; it is not available in Alpha and cannot remove declarations
+or dependencies. Future structural selection belongs to `$feature`.

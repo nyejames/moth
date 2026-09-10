@@ -5,8 +5,9 @@ Moth's build system selects a command and capability surface, bootstraps project
 This document is the single source of truth for accepted build-system, project graph, builder, tooling, link and output architecture. It describes the intended end state, including contracts that are not fully implemented yet. It is not an implementation-status report.
 
 The typed direct and source `#Config` contracts, shared primitive command inputs and immutable
-explicit `@project` interface are implemented. Entry-local `config:` blocks remain deferred; other
-accepted end-state contracts are labelled in their owning sections.
+explicit `@project` interface are implemented. General non-template directives, `$config` prefixes,
+closed `$project` / `$html_builder` configuration, root-only `$page` and explicit root purposes are
+accepted queued design. Other accepted end-state contracts are labelled in their owning sections.
 
 `docs/compiler-design-overview.md` is mandatory prerequisite reading. It owns semantic identities, public interfaces, compiler stages, module artefact contents, generated-function compilation, fingerprints and target-validation semantics. This document owns how projects and packages orchestrate those compiler contracts.
 
@@ -14,6 +15,7 @@ Companion authorities:
 
 - `docs/compiler-design-overview.md` for core compiler architecture
 - `docs/src/developer-docs/language/overview.mtf` and the canonical unsuffixed references it selects for source syntax and language semantics
+- `docs/src/docs/directives/directives.mtf` for general directive syntax, ownership and argument rules
 - `docs/src/docs/design-scope/` for design bias and scope boundaries
 - `docs/src/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime topology, retained-edge liveness, declared regions, affine ownership, Retained Edge Counting and backend memory lowering
 - `docs/src/developer-docs/style-guide/style-guide.mtf` for implementation standards
@@ -33,7 +35,7 @@ refactors or thorough reviews.
 | Task | Read in this document | Also read when affected |
 |---|---|---|
 | Command selection, builder capabilities or tooling overlays | `Selected command and capability surface`; `Command and tooling policies` | The compiler sections for any new semantic capability or validation root |
-| `config.moth`, project fields, `#Config`, `@project`, builder sections, entry config or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build configuration values and const records` when compiler folding or handoff changes |
+| `config.moth`, project fields, `$config`, `@project`, builder directives, root metadata or bootstrap order | `Project bootstrap` and the exact relevant subsection | `docs/compiler-design-overview.md` > `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records` when compiler folding or handoff changes |
 | Source discovery, ownership, semantic source sets, check-only units or source preparation | `Source indexing and source sets`; `Prepared-source orchestration` | `docs/compiler-design-overview.md` > `Compiler input and result boundary` and the relevant Stage 1 to Stage 3 section |
 | Module roots, dependency topology, support packages, project facades, namespaces or package classification | `Project and package topology` and the exact relevant subsection | The canonical unsuffixed project-structure and package language references |
 | Dependency, Core or Builder source package graphs | `Project and package topology > Dependency package graphs` or `Core and Builder source package graphs` | Compiler public-interface, provenance, fingerprint and generated-function sections |
@@ -64,10 +66,10 @@ refactors or thorough reviews.
 - Graph and input membership is conservative and comes from physical-target-bearing authored file references; output emission is exact and comes from entry or package reachability. Reachability never decides graph membership, and graph membership never forces emission. `SourceKindNoFileValue` and site-root `@/` have no physical target, source membership, input or watch record.
 - Resource origin, byte source, emitted output path and rendered URL are four separate facts owned by the build system after the compiler has published semantic resource facts.
 - Builders assign every reachable resource use one semantic URL context. No builder scans rendered HTML, CSS, Markdown or arbitrary strings to rediscover resources.
-- Build configuration may specialise executable behaviour, but it cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology.
+- Ordinary `$config` values and static `if` may specialise executable behaviour, but they cannot change source discovery, semantic source sets, dependency graphs, declaration or export existence, or package topology. Future `$feature` is a separate pre-graph structural-selection contract.
 - Source semantics remain target and platform agnostic.
 - Builders and backend capability metadata map stable source semantics to target-specific artefacts.
-- Builders must not expose target identity through `#Config`.
+- Builders must not expose target identity through `$config`.
 - A statically decided Bool `if` is specialised by Stage 4 before HIR and downstream executable analysis.
 - Parallel scheduling, reuse and caching preserve deterministic identities, diagnostics and output order.
 
@@ -87,24 +89,23 @@ The current CLI selects the HTML builder implicitly. Final builder-selection syn
 
 The selected builder exposes a bootstrap capability surface before config compilation:
 
-- project config schema
-- entry config schema
-- tooling overlay schemas
+- owned compiler and builder directive signatures
+- config-only contexts for `$project` and `$html_builder`
 - source-backed Core and Builder packages
 - binding-backed packages
-- style directives
+- template directives
 - external import providers
 - builder runtime packages
 - supported source file kinds
 - builder-provided primitive build globals
 - target-affinity and capability metadata
 
-Frontend-owned directives and compiler-owned builtins are added to this surface. A builder cannot replace them.
+Frontend-owned directives and compiler-owned builtins are added to this surface. A builder cannot replace them. HTML remains the only implemented artefact builder for this work. Unknown or inactive unsupported directive forms are rejected rather than silently ignored.
 
 Explicit command inputs are parsed into typed primitive values before config or source contracts are
 matched. Programmatic command APIs construct the same typed carrier. Builder-provided primitive globals
 must express stable semantic configuration; target or platform identity is not a valid builder-provided
-`#Config` global. Target intent remains build-system input and is not source-visible configuration.
+`$config` global. Target intent remains build-system input and is not source-visible configuration.
 
 One artefact builder runs per `build` or `dev` invocation. Tooling overlays extend analysis and validation. They do not become competing artefact builders.
 
@@ -135,7 +136,7 @@ tokenization
 
 Config stops after the folded AST boundary. It produces no HIR or borrow facts.
 
-That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded values, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Config schema definition, validation policy and application to the project record stay build-owned. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
+That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded directive-invocation facts, explicit input-contract results, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Application of validated project and HTML settings stays with the existing typed builder and config owners. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
 
 The compiler service returns the config source's live span builder with its outcome. Bootstrap
 retains it through schema application and output validation on successful and diagnosed paths,
@@ -147,17 +148,19 @@ produce spans.
 
 Allowed source includes:
 
-- one required open `project` const record
-- private top-level helper constants declared before their uses
-- top-level builder and tooling section records
+- earlier private helper constants declared before their uses
+- standalone `$config` contracts
+- exactly one `$project` invocation
+- exactly one `$html_builder` invocation for an authored HTML directory project
 - scalar and optional constants
-- anonymous const records
+- anonymous const records used as ordinary helpers
 - collections of supported folded values
 - foldable templates represented by their folded string result
 
 Rejected source includes:
 
 - every source dependency clause, including relative, project, Core, Builder, dependency and binding-backed clauses
+- authored file-value paths
 - runtime declarations
 - mutable bindings
 - functions
@@ -165,60 +168,56 @@ Rejected source includes:
 - traits and conformances
 - standalone top-level templates
 - page fragments
+- `$page`
 - `export:`
 - nested config files or companion config sources
+- inactive-builder sections retained for later use
 
 Project config creates no source-visible declarations. Its folded outputs enter the project through specialised build-system interfaces only.
 
-Short shape:
+Short accepted shape:
 
 ```moth
-default_channel #= "alpha"
+$config
+version #String = "0.1.0"
 
-project_metadata #= |
-    channel = default_channel,
-|
-
-project #= |
-    name = "moth_docs",
-    version #Config of String = "0.1.0",
+$project(
+    name = "my_site",
+    version = version,
     entry_root = "src",
-    metadata = project_metadata,
-|
+)
 
-html #= |
-    dev_output = "dev",
-    release_output = "release",
-|
+$html_builder
 ```
 
-`config.moth` does not select the builder. The command has already done so.
+A fixed literal version also works. Having a contract named `version` does not satisfy an omitted `$project` argument. `config.moth` does not select the builder. The command has already done so. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic configuration path and do not invent `$project` / `$html_builder` source declarations.
 
-### Project record
+### Project directive
 
-The open `project` record is required.
+`config.moth` contains exactly one `$project` invocation. It publishes validated project identity and settings through the existing config result and predefined `@project` interface. It does not create a local source symbol named `project`.
 
-`project.name` is required, must be a valid Moth project identifier and provides stable project identity. It is not inferred from the checkout directory.
+The positional parameter order is:
 
-Compiler-owned project fields are strictly schema-validated. Additional folded metadata is allowed.
+| Parameter | Type | Default | Configurable value permitted |
+|---|---|---|---|
+| `name` | `String` | Required | No. |
+| `version` | `String` | Required | Yes. |
+| `entry_root` | `String` | `"src"` | No. |
+| `author` | `String?` | `none` | Yes. |
+| `license` | `String?` | `none` | Yes. |
+| `template_const_loop_iteration_limit` | `Int` | The existing compiler-owned default limit | No. |
 
-Public project values may contain:
+`name` must be a valid Moth project identifier and is not inferred from the checkout directory. Directory-project `entry_root` remains a relative directory strictly beneath the project root. `version` has no declaration default; `"0.1.0"` belongs to the starter `$config` example, not to `$project`. Missing version is diagnosed even when an unused input contract named `version` exists.
 
-- folded scalar values
-- optional scalar values
-- nested anonymous const records
-- collections of supported folded values
-- folded templates represented as strings
+The signature is closed. Arbitrary metadata fields, misspelled standard fields and `metadata = ...` are rejected. Ordinary helper records in config remain ordinary private constants. Project-wide reusable constants belong in ordinary source or support packages.
 
-Project fields follow ordinary anonymous-record initializer rules. They do not gain implicit sibling scope. Reusable derived values belong in earlier private helper constants.
+Retain existing field-domain and output/source-path validation. Project identity, source-discovery and compiler-control settings remain fixed-only: reject `$config` dependence in `$project`'s `name`, `entry_root` and `template_const_loop_iteration_limit` arguments, including dependence through earlier helper constants. An ordinary compile-time value without input dependence remains valid. A folded value equal to a literal is not evidence that it was fixed.
 
-The completed `project` record must be available before a builder or tooling section references it.
+### Bootstrap `$config` declarations
 
-### Direct project `#Config` fields
+Only explicit `$config` declarations create input contracts. `$config` is a prefix on one following explicitly typed top-level `#` binding. The binding name is the input name, the type is the contract and `=` is the fallback. Required non-optional inputs may omit the initializer. There is no `$config(default)` form and no type-position or value-position directive.
 
-A direct field of `project` may declare a build-config contract only when the selected project schema marks that field `Configurable` and its value has a supported primitive or optional primitive shape. Registered `FixedOnly` identity, source-discovery and compiler-control fields reject `#Config`; a primitive shape alone does not make them configurable.
-
-Accepted build-configuration value types are:
+Accepted contract types are:
 
 - `String`
 - `Int`
@@ -227,23 +226,20 @@ Accepted build-configuration value types are:
 - `Char`
 - optional forms of those types
 
-Nested project fields cannot declare `#Config`. Nested project fields do not provide unqualified source input values.
+`$config` is compiler-owned declaration metadata. It is not a type constructor, source dependency clause or wrapper type. The semantic type of a marked binding remains the declared `T`.
 
-`#Config` is a compiler-owned qualifier on a compile-time declaration. It is not a type constructor,
-source dependency clause or wrapper type. The semantic type of `value #Config of T` is `T`.
+Project fields and ordinary helper constants never implicitly supply or block same-named inputs. Remove the fixed-project-field provider tier and its override-blocking semantics.
 
-A direct project `#Config` value resolves in this order:
+Bootstrap contracts resolve in this order:
 
-1. explicit CLI or programmatic build input
-2. builder-provided primitive global
-3. the folded declaration default
-4. a structured missing-input diagnostic
+1. explicit CLI or programmatic input for that name
+2. a compatible builder-provided primitive global
+3. the declaration's validated fallback or optional absence
+4. a required-input diagnostic
 
-Resolution happens during config compilation before Stage 0 applies fields such as `entry_root`.
+Resolution of bootstrap contracts happens during config compilation before Stage 0 applies fields such as `entry_root`. Config fallbacks may use the existing allowed single-file compile-time surface and earlier visible helper values. They must finish as a supported primitive or optional primitive. Same-file forward references remain errors.
 
-Project defaults may use the ordinary allowed single-file config constant surface. Their final folded value becomes part of the project-wide contract.
-
-A fixed direct project field is not a `#Config` contract. When a same-name source `#Config` uses the same primitive type and optionality, the fixed field is its authoritative provider and blocks CLI override. Same-name source declarations must still agree with each other on required or default state and on the normalised default value.
+An explicit input without a bootstrap or selected-source contract is unknown, even if it matches a project metadata field.
 
 ### Command build-input typing
 
@@ -284,11 +280,11 @@ policy.
 
 ### `ProjectGlobalsInterface` and `@project`
 
-The folded `project` record produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
+The folded `$project` directive produces a specialised immutable `ProjectGlobalsInterface` under the permanently reserved `@project` dependency root.
 
 The interface contains:
 
-- stable field identities
+- stable field identities for the predefined project fields only
 - folded backend-neutral values
 - source locations
 - field-level fingerprints
@@ -299,7 +295,7 @@ The interface contains:
 
 It is classified as project-local and Moth-source-backed for provenance and capability purposes, but it is not discovered as a normal source package.
 
-`@project` exposes direct project fields as namespace members. It does not expose another value named `project`.
+`@project` exposes those predefined fields as namespace members. It does not expose another value named `project`. Config helper constants and `$config` input declarations are not implicitly public project metadata.
 
 Normal project modules and project-owned support packages may explicitly declare a dependency on `@project`. It is never implicitly injected.
 
@@ -320,11 +316,11 @@ Project field dependencies are recorded at field granularity as semantic facts f
 reuse. Current dev orchestration does not consume them for targeted invalidation; source locations and
 resolution origins remain provenance, not semantic fingerprint inputs.
 
-### Source `#Config` contracts
+### Source contracts and static specialisation
 
-Source `#Config` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
+Source `$config` is intentionally narrow so every project-wide contract can be validated before module AST compilation.
 
-A source declaration may use only the accepted primitive or optional types listed for project fields.
+A source declaration may use only the accepted primitive or optional types listed for bootstrap contracts. Only a single explicitly typed top-level compile-time binding is eligible.
 
 A source default must be self-contained. The only accepted forms are:
 
@@ -348,7 +344,7 @@ Source defaults cannot contain:
 - a record
 - another resolved build configuration value
 
-This restriction is deliberate. Stage 0 does not run a second general constant evaluator before AST.
+This restriction is deliberate. Source-contract preparation can normalise the literal without opening provider interfaces or evaluating module AST. Stage 0 does not run a second general constant evaluator before AST.
 
 Header syntax preparation normalises each source contract into a small build-input shape:
 
@@ -366,116 +362,57 @@ Exact names may change. `BuildInputType` is limited to the accepted primitive an
 
 The barrier validates all contracts in the command's selected source graph before module AST compilation.
 
-Same-name contracts must agree on:
+Matching declarations within one compilation boundary agree on name, primitive type, optionality, required or default state and normalised default value. Explicit overrides do not excuse conflicting defaults. Same-file duplicate declaration and no-shadowing rules still apply. Matching names in separate selected modules can refer to one input contract without merging their local declaration identities.
 
-- primitive type
-- optionality
-- required or default state
-- normalised default value
+Selected-source contracts resolve in this order:
 
-Different defaults are conflicting contracts.
+1. the already-resolved matching bootstrap `$config` contract, after compatibility validation
+2. explicit input for a source-only contract
+3. a compatible builder-provided primitive global
+4. the common source fallback or optional absence
+5. a required-input diagnostic
 
-The project-wide resolution order is:
-
-1. a compatible fixed direct project field, which is authoritative and cannot be overridden
-2. a resolved direct project `#Config` field
-3. explicit CLI or programmatic input for a source-only contract
-4. a builder-provided primitive global
-5. the shared source default
-6. a missing-input diagnostic
-
-A direct project `#Config` contract and every same-name source contract must still agree before the resolved project value is supplied to source modules.
-
-Unknown explicit inputs are diagnosed only after every selected source contract is known.
+A project field named `version` does not satisfy a source input contract. `$project(version = "1.0")` creates project metadata, not a `version` input provider. Unknown explicit inputs are diagnosed only after every selected source contract is known. Each project or package boundary owns its own namespace; consumer input does not satisfy dependency contracts implicitly.
 
 The resolved value enters module AST as an ordinary folded constant. It creates no runtime wrapper,
 dependency symbol category, HIR node or new visibility rule.
 
-### Static Bool executable specialisation
-
-`#Config of Bool` uses ordinary `if`; no `#Config if` syntax exists. Both branches complete Stage 4
+`$config` of `Bool` uses ordinary `if`; no `$config if` syntax exists. Both branches complete Stage 4
 frontend validation before a known Bool selects the executable branch. The selected branch keeps its
 lexical scope. Only active executable work reaches HIR and downstream generated-function, borrow,
 lifetime, link, target and backend systems. Static selection changes executable facts, not source
-structure or graph topology. See the compiler authority for the exact Stage 4 ownership contract.
+structure or graph topology. Ordinary static `if false` does not suppress frontend directive errors.
+See the compiler authority for the exact Stage 4 ownership contract.
 
-### Builder and tooling sections
+### `$html_builder` and builder settings
 
-Every top-level const record other than `project` is a potential builder or tooling section.
+For an authored HTML directory project, `config.moth` contains exactly one `$html_builder` invocation. Bare `$html_builder` supplies all defaults. The command selects the builder first. This invocation never selects a backend, builder or runtime platform.
 
-The active artefact builder project section is required, even when empty.
+HTML settings remain a closed directive signature consumed by the existing typed HTML config owner. They use backend-neutral folded values rather than builder-specific nominal types. Unknown parameters are errors. Known unavailable directives error. Unknown directives error. Inactive-builder sections are not folded or ignored as a holding area. Multi-builder source and configuration await structural `$feature` selection.
 
-Each builder or tooling overlay declares separate recursive schemas for project settings and entry settings.
+These settings consume permitted folded input values and do not declare their own `$config` contracts. Config still rejects source dependencies and authored file-value paths. Tracked file resources belong in later root-local `$page` metadata.
 
-A schema may declare:
+Project and page signatures stay distinct. There is no generic cross-scope field inheritance or merge system. Builder output-path settings and defaults remain builder-owned.
 
-- accepted fields
-- nested record shapes
-- folded value shapes
-- required fields
-- defaulted fields
-- closed value domains
-- stable section and field identities where useful
+### Root metadata and purpose directives
 
-The active builder and active tooling sections are schema-validated. Unknown fields in an active section are diagnostics.
+Root metadata and purpose directives are root-local builder facts. They are not an embedded `config.moth` source file.
 
-Inactive or unavailable sections are still parsed, name-resolved and folded. They are not schema-validated and are not retained in `ProjectCompilation`.
+`$page` is HTML-builder-owned normal-root metadata and an entry-purpose declaration. Placement rules:
 
-This permits one config file to contain future or inactive sections without loading every schema.
+- valid only at the top level of a normal module root, at most once
+- valid on the explicitly selected source in synthetic single-file HTML mode, at most once
+- invalid in ordinary non-root files, support roots, facades, `config.moth`, function bodies, ordinary branches, loops, declaration initializers, template heads and `export:` blocks
 
-Duplicate section names are rejected. A section name cannot collide with another top-level constant.
+`$page` describes the whole root regardless of source position. It does not enable a mode for subsequent statements. Style places it early, after any earlier constants or dependencies needed by its arguments. Argument visibility remains ordinary file visibility. Same-file forward references are invalid even though the purpose applies to the whole root.
 
-Builder and tooling section fields cannot declare `#Config`. They consume already folded project values and use backend-neutral folded values rather than builder-specific nominal types. This is a permanent ownership boundary.
+Header syntax retains the invocation and its ordinary dependency and reference facts. Module AST checks and folds it once through ordinary module visibility. Metadata is stored in that module's non-HIR lane. It creates no ordinary declaration, public export, runtime value or project global.
 
-Project and entry schemas do not share fields. There is no `ProjectAndEntry` or equivalent shared-scope escape hatch. Project and entry settings do not implicitly inherit, merge or override one another.
+Typed metadata arguments may use earlier same-file constants, dependency-bound constants, explicit `@project` members, resolved source `$config` values and the existing foldable expression and template surface. Resource-bearing strings stay structural. Consumers never inherit or apply provider page metadata.
 
-Complex release optimisation remains outside the fast frontend path unless correctness requires it.
+Authored root runtime or direct output requires an implemented purpose with a consumer. Only `$page` works initially. Comment and documentation semantics and API-only declarations are exempt. Future `$test` is documented but cannot satisfy validation until implemented. Unmarked executable candidates cannot silently vanish merely because entry filtering selects `$page`.
 
-### Entry-local `config:` blocks
-
-An entry `config:` block is root-local builder metadata. It is not an embedded `config.moth` source file.
-
-Placement rules:
-
-- valid only at the top level of a normal module root
-- at most one block per normal root
-- invalid in normal non-root files
-- invalid in support roots
-- invalid in the project package facade
-- invalid inside `export:`
-- invalid inside executable bodies
-- invalid in `config.moth`
-
-The block contains section records only.
-
-Dependency clauses, aliases, helper constants, support types and source `#Config` declarations live outside the block in the normal root file.
-
-The block uses the root file's ordinary compile-time visibility. It may reference:
-
-- dependency-bound constants
-- `@project`
-- same-file constants declared before the block
-- resolved source `#Config` constants
-- foldable local const-record types
-- selected-builder compile-time values available through normal module dependency clauses
-
-Same-file forward references remain invalid.
-
-Header syntax records its local dependencies. AST folds it through the ordinary module semantic path.
-
-The block creates no ordinary module symbol, HIR or project-global value.
-
-It cannot contain `project` or change project-level builder behaviour.
-
-It may contain active artefact-builder and tooling-overlay sections.
-
-Active entry sections are schema-validated. Inactive sections are parsed and folded but not schema-validated.
-
-The block is optional. Its active artefact-builder section is also optional so tooling-only metadata remains possible.
-
-Every normal module selected into the current command's semantic graph has its block validated whether or not an entry activates it. Modules reached through dependency clauses never apply their entry metadata to the declaring file.
-
-Only active artefact-builder settings contribute entry activity.
+Every normal module selected into the current command's semantic graph has its root metadata and purpose validated whether or not an entry activates it. Modules reached through dependency clauses never apply their page metadata to the consumer.
 
 ### Fixed bootstrap order
 
@@ -483,49 +420,26 @@ The command and bootstrap flow is:
 
 ```text
 select command, artefact builder, build profile and tooling overlays
--> parse explicit command inputs into typed primitive values
--> construct compiler and builder bootstrap capability surface
--> compile and validate config
--> resolve direct project #Config values
--> derive entry_root and @project
--> build the canonical source index and provider graphs
--> collect and resolve selected source #Config contracts
--> compile dependency-ordered waves
-   -> bind provider interfaces
-   -> order local declarations
-   -> run AST semantics
-      -> validate both ordinary-if branches
-      -> specialise known Bool control flow
-      -> commit active generated requests and executable summaries
-   -> lower and validate HIR
-   -> borrow-validate
-   -> produce local lifetime constraints, lifetime facts and exported summaries
--> publish the module's completed generated delta
+-> parse explicit command inputs into typed primitives
+-> construct the compiler and builder capability surface
+-> compile config through the named compiler service
+-> publish input-contract results and predefined @project fields separately
+-> derive entry_root and construct the canonical source index and provider graphs
+-> collect and resolve selected-source input contracts
+-> compile dependency-ordered waves through the canonical module service
+-> publish complete module results and their generated deltas
 -> assemble a success-only ProjectCompilation
 -> plan entry/package roots and exact reachable unions
--> instantiate lifetime summaries with builder lifecycle roots
--> validate complete lifetime topology
--> complete intervals, frontiers and epochs
--> produce backend-neutral memory requirements
--> target-affinity analysis and partition
--> target validation
--> create candidate physical-variant scopes
--> target/profile-specific family/layout refinement
--> revalidate affected refined family-edge facts
--> memory-strategy planning
--> ValidatedMemoryPlan validation
--> plan fingerprint and final variant key
--> backend lowering
--> collector-free artefact verification when required
+-> perform link, target and memory planning
+-> lower validated physical variants and emit owned outputs
 ```
 
-`check` performs every step through `ValidatedMemoryPlan` and stops before lowering.
+Config remains one self-contained source with no runtime or dependency graph. Its compiler service resolves helpers, input contracts and directive arguments before build-owned settings application. Source contracts resolve only after graph discovery and before module AST semantics.
 
-Config compilation tokenizes and parses one self-contained `config.moth`, orders config declarations,
-resolves direct project `#Config` sources while AST folds config, and validates the completed project
-record and active project sections. Inactive config sections are folded during config compilation even
-though their schemas are not active. Project config creates no source dependency graph. Source `#Config`
-resolution happens only after the selected graph exists; it does not affect graph construction.
+Future `$feature` selection is deferred. It must act after bootstrap facts are available and before excluded source publishes graph or declaration facts.
+
+The canonical module service owns the local semantic sequence in `docs/compiler-design-overview.md`. `HTML project builder > Mixed-target planning and validation` owns the detailed link-to-output order for HTML. `check` performs the applicable planning and validation and stops before lowering and output emission.
+
 
 ## Source indexing and source sets
 
@@ -543,6 +457,8 @@ Reject:
 - a symlink-resolved path equal to the project root
 
 Single-file compilation remains a separate synthetic-module mode.
+
+The index inventories module roots. It does not scan arbitrary `.moth` files as pages. Root purpose selection consumes retained directive facts. Unmarked executable candidates cannot silently vanish.
 
 The source index owns:
 
@@ -603,6 +519,8 @@ This distinction lets tooling diagnose abandoned or disconnected source without 
 
 Stage 0 asks the compiler to perform tokenization and header syntax preparation once for each selected source candidate.
 
+These discovery rules apply to retained source. Ordinary static `if` excludes no source at this stage. Future `$feature` selection must exclude inactive regions before they publish provider, file-reference or declaration facts.
+
 The compilation boundary keeps a `SourceDatabaseBuilder` beside immutable source lookup services.
 Tokenization borrows a source's original live span builder; each `SourcePreparationDelta` returns
 that builder outside its success or failure result. File workers and chunk merges return every
@@ -624,7 +542,8 @@ Prepared syntax may contain:
 - structural provider references
 - structural file references
 - local declaration-ordering hints
-- source `#Config` contract shells
+- retained `$config` input-contract shells
+- retained root metadata and purpose directives
 - dormant root activity shells
 - compile-time fragment placement metadata
 - diagnostics and warnings
@@ -654,7 +573,7 @@ byte-source facts.
 Every authored physical-target-bearing file-value path is graph-active, independently of AST
 reachability, constant folding and static branch specialisation. `SourceKindNoFileValue` is
 retained only as a structural diagnostic fact with no physical target, semantic-source membership,
-physical-source or watch record. Graph membership is never decided by output reachability, and `#Config`
+physical-source or watch record. Graph membership is never decided by output reachability, and `$config`
 cannot alter file dependency topology.
 
 Because a newly discovered content source may itself contain file references, discovery is a
@@ -674,13 +593,13 @@ The loop's rules are what make it deterministic:
 - resource files found in newly added sources enter the same build-input registry as any other
 - ordering and diagnostics do not depend on the order in which the worklist happened to insert
 
-Retained source `#Config` contract shells do not create structural provider edges, dependency symbol
+Retained source `$config` contract shells do not create structural provider edges, dependency symbol
 bindings or topology changes. Their later resolved values are consumed only by ordinary module AST
-semantics.
+semantics. Root purpose selection also consumes retained facts rather than rediscovering source.
 
 When a provider interface is available, the compiler's interface-binding phase resolves retained dependency clauses into stable dependency symbol bindings and final visibility. Binding does not reparse source.
 
-The three classes remain distinct:
+The four reference classes remain distinct:
 
 - structural provider references for Stage 0
 - structural file references for Stage 0 graph and input resolution
@@ -724,19 +643,21 @@ A directory contains at most one module root.
 - The suffix after `@` or `+` is cosmetic.
 - `config.moth` is not a module root.
 
-A normal module may own dormant top-level runtime work and page fragments.
+A normal module may own dormant top-level runtime work and page fragments. `$page` declares an HTML
+artefact; the root file still defines module identity. Helpers remain non-entry files.
 
 Support modules and the project package facade are API-only:
 
 - no implicit `start`
 - no top-level runtime statements
 - no page fragments
-- no route or builder artefact
+- no route, builder artefact or page purpose
 - ordinary runtime code inside functions remains valid
 
-`export:` is the only public visibility marker.
+`export:` is the current public visibility marker. Accepted future direction replaces it with
+`$export`; both forms will not remain permanent alternatives.
 
-Every normal module in the command's semantic graph has dormant root work fully compiled, borrow-validated and locally lifetime-analysed. Entry assembly activates already compiled work only.
+Every normal module in the command's semantic graph has dormant root work fully compiled, borrow-validated and locally lifetime-analysed. Entry assembly activates already compiled work only. Authored unpurposed root runtime or direct output is diagnosed rather than dropped from the inventory.
 
 ### Module-root-relative dependency clauses
 
@@ -876,7 +797,7 @@ Assembly never recompiles or mutates the facade.
 
 A project may be both an application and a package. Without the facade it has no externally consumable Moth package surface.
 
-The facade package identity comes from `project.name`.
+The facade package identity comes from the `$project` directive's `name` argument.
 
 ### Namespace and collision policy
 
@@ -908,7 +829,6 @@ Packages are classified on independent axes.
 ```rust
 enum PackageOrigin {
     Core,
-    Standard,
     Builder,
     ProjectLocal,
     Dependency,
@@ -930,7 +850,6 @@ Accepted mappings include:
 - annotated project-local `.js`: ProjectLocal origin and ExternalBinding backing
 - dependency source package: Dependency origin and MothSource backing
 
-`Standard` remains valid even when no current package uses it.
 
 Origin and backing classify provenance and implementation. They do not change:
 
@@ -986,7 +905,7 @@ Persistent or precompiled dependency artefacts may later replace source compilat
 
 Package declaration syntax, registries, remote fetching, version solving and lockfiles remain deferred.
 
-Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `#Config` contracts.
+Build-configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `$config` contracts.
 
 A dependency resolves its contracts from its own config, defaults and compatible builder-provided globals. No implicit cross-boundary input lookup or same-name inheritance is allowed.
 
@@ -1103,11 +1022,11 @@ For `check`, the command may retain successful independent artefacts internally 
 - dependency package facades and artefacts
 - generated functions completed while compiling those modules
 
-It performs target validation, backend lowering and output writing when compilation succeeds.
+HTML application `build` requires a `$page` somewhere under `entry_root`. Single-file HTML output requires `$page` on the synthetic root. It performs target validation, backend lowering and output writing when compilation succeeds.
 
 ### `dev`
 
-The first `dev` build compiles the complete graph required by its selected entries and package policy.
+The first `dev` build compiles the complete graph required by its selected entries and package policy. HTML application `dev` has the same page-entry requirement as `build`.
 
 Current dev rebuilds produce a fresh successful graph and recompute semantic fingerprint facts during
 frontend compilation. Those facts are not retained after the build. Retention, comparison and
@@ -1124,6 +1043,8 @@ alongside persistent compatibility work.
 - required Core and Builder source package graphs
 - required dependency package surfaces
 - reachable generated requests
+
+Directory-project `check` permits a valid zero-page source tree. It still diagnoses unpurposed root runtime or direct output. A declaration-only root at `entry_root` is valid. Single-file `check` of a declaration-only synthetic root is valid; runtime or output work without purpose is invalid.
 
 It applies selected-target planning and validation to actual linkable roots without backend code generation or output writing.
 
@@ -1143,59 +1064,26 @@ An overlay may add:
 
 It does not duplicate target packages, source kinds, directives, binding metadata or capability definitions.
 
-Tooling-only entry config never creates an artefact entry.
+Tooling-only metadata never creates an artefact entry.
 
 ## Generated-function boundary
 
-The compiler owns generic template validation, call-site inference, request identity, generated HIR, generated borrow facts, and generated lifetime facts and summaries.
+`docs/compiler-design-overview.md` > `Generated concrete functions` owns request identity, canonicalisation, deduplication, materialisation and semantic convergence.
 
-The build system owns:
+The build system supplies an immutable view of published generated identities and summaries to each canonical module compilation. It owns boundary publication, completed sidecar storage, placement and reuse. The compiler returns the completed generated delta with the module transaction. Base module artefacts remain immutable.
 
-- project-wide or package-wide request aggregation
-- the published set every request is deduplicated against, lent as an immutable view
-- boundary request availability: which providers have published, and therefore which module compiles next
-- completed sidecar storage and transactional publication
-- sidecar placement
-- reuse across entries
+Nested requests converge inside that transaction. They do not create extra module jobs or alter provider-wave ordering. Only requests from the specialised active AST are published, including the existing suppression of inactive assertion-message work. Build code neither filters those requests afterwards nor installs summaries or reruns HIR and borrow stages.
 
-Build-owned generated scheduling means boundary request availability, publication and reuse. It does not include request deduplication, generated HIR materialisation, HIR mutation, borrow rechecks or call-summary convergence. Those are compiler semantics completed inside one module compilation transaction, from an immutable view of already published generated identities and summaries that the build system supplies. The build system owns the set a request is measured against; the compiler decides that an already published identity needs no new materialisation.
+Cross-package instances belong to the consuming compilation. A diagnosed generated result exposes no partial sidecar and blocks dependent entry or package output. Internal failures abort the owning compilation boundary.
 
-Requests are keyed by stable generic declaration identity, canonical concrete type identities and required evidence identities.
-
-The fixed point is reached inside one module's compiler transaction, not by build-side rescheduling. A request raised
-while materialising another generated body is canonicalised and completed in the same transaction, so the boundary sees
-one finished generated delta per module and never schedules a second pass to converge generated work. Module waves come
-from the module dependency graph; generated requests do not add or reorder them.
-
-Each successful generated sidecar entry carries its own generated-local type context, HIR, borrow facts, lifetime facts and summaries, link facts and fingerprints. It does not mutate a base module artefact.
-
-Only requests committed from the Stage 4 specialised active AST reach the project or package
-boundary. Generic calls in an inactive static branch are frontend-validated but do not cause
-materialisation or generated sidecar work. The same compiler-owned provisional request boundary
-applies to a compile-time-true assertion message: the message is validated, then its inactive
-request delta is discarded before generated-function publication. Build orchestration does not
-filter assertion requests after the AST stage.
-
-Cross-package instances belong to the consuming compilation. Dependency base artefacts remain immutable.
-
-A diagnosed generated request blocks only entries or package exports that require it. The build system does not expose a partial generated artefact.
 
 ## Entry and package link planning
 
 ### Entry candidates and selection
 
-Builder-relevant root activity selects normal modules as artefact entries.
+`$page` declares HTML entries, including empty default roots and metadata-only pages. Runtime work or fragments alone are no longer the accepted trigger. A package facade is not an implicit HTML page.
 
-For HTML, entry activity includes:
-
-- dormant root runtime work
-- compile-time page fragments
-- runtime page fragments
-- resolved active HTML entry settings
-
-A tooling-only section does not create an artefact entry.
-
-Prepared root-activity shells identify early candidates. When entry status depends on folded metadata, the candidate module compiles before final selection.
+Retained `$page` presence identifies an entry candidate before argument folding, including a descendant page not imported by the site root. The candidate becomes a page only after its ordinary module and metadata validation succeeds. Bare `$page` creates a page even with no runtime work or fragments. Use the existing normal-module root inventory, retaining unmarked executable roots for purpose diagnostics rather than scanning ordinary files as page entries.
 
 One canonical normal module may produce several `EntryAssembly` values. The HTML builder initially produces at most one route entry per normal module.
 
@@ -1207,7 +1095,7 @@ An `EntryAssembly` selects one already compiled normal module and activates only
 - dormant top-level runtime work
 - runtime page fragments
 - compile-time page fragments
-- resolved active entry settings
+- resolved page metadata
 - entry-owned runtime requirements
 
 Normal modules reached through dependency clauses expose public interfaces without executing root work.
@@ -1266,22 +1154,22 @@ The HTML builder owns route, document, browser-runtime and mixed JavaScript and 
 
 For each HTML entry, the builder:
 
-1. selects the active normal module
+1. selects the active normal module whose root declared `$page`
 2. activates its already compiled dormant root work
 3. merges compile-time fragments at their recorded runtime insertion indexes
 4. creates runtime fragment slots
 5. invokes active `start` once through the selected runtime path
 6. hydrates runtime fragments in source order
-7. assembles route HTML and companion artefacts
+7. assembles route HTML and companion artefacts from resolved metadata and existing directory routes
 
-HIR carries runtime code only. Compile-time fragments and document structure live in compiler metadata and entry plans.
+HIR carries runtime code only. Compile-time fragments and document structure live in compiler metadata and entry plans. Directory routes, fragment order and dependency dormancy are unchanged. Reachable `io.set_title` requires an advertised browser document-title capability and is rejected before lowering on unsupported hosts; there is no silent runtime no-op.
 
-Modules without HTML artefact activity remain available to the graph but produce no route, runtime glue or emitted resources.
+A module without `$page` produces no independent HTML entry. Its reachable declarations, runtime requirements and resources may still contribute to a consuming page or package assembly. Authored root runtime work or direct output without an implemented purpose is diagnosed.
 
 ### Mixed-target planning and validation
 
 Source contains no target-selection annotations and cannot query whether a function will become
-JavaScript or Wasm. `#Config` cannot carry target or backend identity. Automatic partitioning and
+JavaScript or Wasm. `$config` cannot carry target or backend identity. Automatic partitioning and
 capability rejection are builder/compiler services over platform-agnostic source; builder capability
 surfaces expose stable semantics rather than physical target names.
 
@@ -1329,22 +1217,7 @@ Validation is a compiler service over the completed build-owned partition. A tar
 
 ### Physical variants
 
-Partitioning is entry-specific. A physical variant is not complete, and cannot be deduplicated, until its memory plan exists. The required order is:
-
-```text
-partition
--> candidate physical variant
--> target validation
--> target/profile-specific family and layout refinement
--> revalidate affected family-edge facts
--> target/profile memory planning
--> ValidatedMemoryPlan validation
--> memory-plan fingerprint
--> final physical-variant key
--> deduplication/reuse
-```
-
-Target partition first creates a candidate physical-variant scope. Memory planning then creates the final physical plan for that scope. Only after that may physical variants be deduplicated. Variants whose pre-plan layout identity matches are not reusable before their memory plans exist.
+Partitioning is entry-specific. Follow `Mixed-target planning and validation` through family/layout refinement, memory-plan validation and fingerprinting before constructing the final physical-variant key. Matching pre-plan layouts alone do not establish reuse. Deduplication applies only to completed validated variants.
 
 The final conceptual physical-variant key contains:
 
@@ -1387,7 +1260,7 @@ Project and package link planning instantiates local lifetime summaries with bui
 
 `ProjectCompilation` or the link plan conceptually carries project-level validated lifetime topology. That topology is shared and target-independent, and it does not carry one project-global physical memory plan. Exact Rust shape remains open.
 
-Its handoff to physical planning is a set of backend-neutral memory requirements: allocation-family identity, validated lifetime owner, intervals, frontiers and epochs, retained-edge and retention-domain facts, retention cardinality, REC candidacy facts, declared-region membership, affine transfer and cleanup candidates, hidden-destination constraints, lifecycle constraints and external-boundary constraints. They must not contain any selected physical strategy, host-GC representation, allocator choice, counter layout, arena layout, target-specific handle representation, concrete retained-edge obligation transition or planned affine-responsibility transition.
+The handoff is the compiler-owned backend-neutral memory requirements defined in `docs/compiler-design-overview.md` > `Lifetime-region and escape validation > Backend-neutral memory requirements`. These facts describe validated lifetimes and retention constraints, not selected physical strategies or concrete ownership/count transitions.
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs, not builder-specific source-law exceptions. Builder lifecycles cannot change language validity. Lifecycle-root instantiation is what lets reactive and mounted storage that outlives a lexical function still satisfy one lifetime owner and the retained-edge outlives rule.
 
@@ -1397,50 +1270,13 @@ External boundary profile and capability metadata belong on the builder surface 
 
 ### Memory-strategy plans
 
-After link-level topology validation succeeds, and after build-owned target partition and target validation have established a candidate physical variant, the compiler-owned memory planner selects one physical strategy per allocation family: stack or inline placement, static affine cleanup, inferred region allocation, declared-region bulk reclamation, Retained Edge Counting or a host garbage-collected representation. The planner produces a `ValidatedMemoryPlan` containing allocation-family layouts, selected representations, affine cleanup decisions, inferred-region and declared-region placement, cleanup and destruction plans, REC decisions and physical coalescing decisions.
+After target-contract validation, the build system supplies the candidate physical variant, build profile, validated topology, backend-neutral requirements and capability metadata to the compiler-owned memory planner. The planner refines families and layouts, validates the result and returns one `ValidatedMemoryPlan` for that target/profile variant.
 
-Validated topology and backend-neutral memory requirements remain shared link facts. Each target/profile physical variant receives its own `ValidatedMemoryPlan` after partition and validation.
+The build system orchestrates this call without selecting strategies or mutating semantic facts. Shared topology and backend-neutral requirements remain reusable across variants. Backends realise the returned plan rather than choosing ownership, cleanup or count transitions.
 
-The build system owns target partition, physical-variant orchestration, the build profile and target/backend capability metadata, and invokes the planner once per candidate physical variant. The planner stays compiler-owned. Backends consume the finished plan and never select their own strategy or reconsider source legality. Imprecise planning retains conservatively; a missing physical strategy after successful topology validation is `CompilerError`.
+The complete plan contents, strategy outcomes and publication invariants are defined in `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `ValidatedMemoryPlan contract`. Compiler-stage ownership and conservative refinement fallback are defined in `docs/compiler-design-overview.md` > `Lifetime-region and escape validation`.
 
-`ValidatedMemoryPlan` is scoped to one physical variant and carries:
-
-```text
-physical variant identity and capability inputs
-post-refinement allocation-family graph
-one selected physical family plan for every reachable family
-region plans and complete exits
-declared-region plans and complete exits
-planned affine-responsibility transitions
-planned retained-edge obligation transitions
-hidden-destination plans
-cleanup plans
-destruction plans
-REC layout and counter decisions
-physical coalescing decisions
-normalised memory-plan identity inputs
-```
-
-Every reachable post-refinement family receives exactly one selected plan from `Stack`, `Inline`, `Affine`, `InferredRegion`, `DeclaredRegion`, `REC` and `HostGC`. Exact Rust enum decomposition remains open; no accepted outcome may be omitted.
-
-Plan validation runs before the plan is published and fingerprinted, and proves:
-
-1. Every reachable post-refinement family has exactly one selected physical plan.
-2. Every plan family belongs to this physical-variant scope.
-3. Every retained-edge transition refers to valid direct post-refinement families.
-4. Every family preserves its one validated semantic lifetime owner.
-5. Every affine obligation reaches a planned discharge or safe transfer on every relevant path.
-6. Every inferred region has complete exits.
-7. Every declared region has complete bulk exits.
-8. Declared-region-owned families are never individually releasable and never REC-selected.
-9. Every REC family is acyclic and has a valid counter layout.
-10. Every REC family keeps its validated fallback region.
-11. Every destruction plan processes outgoing obligations exactly once.
-12. Every projection representation preserves or recovers the allocation-family base.
-13. Every hidden destination satisfies its validated destination and retained-edge constraints.
-14. Every physical coalescing decision preserves the original semantic topology.
-15. `HostGC` is rejected for a capable full-control release variant.
-16. Normalised plan identity is deterministic for identical inputs.
+A plan is validated before its fingerprint enters the final physical-variant key. `HTML project builder > Physical variants` owns deduplication and reuse policy.
 
 ### Backend capability metadata and collector-free verification
 
@@ -1591,8 +1427,8 @@ completes before any resource byte is read.
 ### Exact resource unions
 
 Entry planning unions resource uses from the selected `start`, reachable source and generated
-functions, runtime fragments, compile-time fragments, selected entry settings and reachable provider
-runtime requirements.
+functions, runtime fragments, compile-time fragments, selected page metadata and reachable provider
+runtime requirements. Authored metadata use locations and original spans stay with those uses.
 
 Package planning unions externally selected exports, resource-bearing exported folded values,
 reachable source and generated implementations and provider runtime requirements permitted by the
@@ -1658,7 +1494,7 @@ distinct paths.
 
 ## Output ownership
 
-Artefact builders own output-path settings and defaults in their private project config section.
+Artefact builders own output-path settings and defaults from their config-only directive contracts.
 
 Builders that produce no artefacts register no output settings.
 
@@ -1667,7 +1503,7 @@ HTML defaults remain:
 - development: `dev`
 - release: `release`
 
-A selected builder may override those defaults through its active project section.
+The HTML builder accepts output-root overrides through `$html_builder`.
 
 Every output root must be:
 

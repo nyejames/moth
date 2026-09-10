@@ -11,6 +11,7 @@ page_head #= theme_head
 #[section, $md:
     **Design draft:** This page is a future-facing design document for language and compiler planning.
     It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented.
+    `$async:` is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its block semantics remain deferred, and this page delivers no implementation.
 
     Moth approaches async and concurrency by making **control flow explicit** and **communication safe by default**.
 
@@ -31,14 +32,14 @@ page_head #= theme_head
 #[section, $md:
     ## Core idea
 
-    Async in Moth is built around three concepts:
+    The draft uses these primitives:
 
     [styled_table:
         [header: [: Concept] [: Syntax] [: Meaning] ]
 
         [data:
             [: Channels ]
-            [: [$html:<code>Channel(Int)</code>] ]
+            [: typed channel declaration (future) ]
             [: Create typed communication endpoints ]
         ]
 
@@ -57,7 +58,7 @@ page_head #= theme_head
         [data:
             [: Coroutine ]
             [: [$html:<code>spawn</code>] ]
-            [: Start cooperative work inside an async scope ]
+            [: Start cooperative work inside a compiler-owned async scope ]
         ]
 
         [data:
@@ -68,10 +69,13 @@ page_head #= theme_head
 
         [data:
             [: Scope ]
-            [: [$html:<code>async:</code>] ]
+            [: compiler-owned directive block ]
             [: Bound the lifetime of spawned coroutines ]
         ]
     ]
+
+    The future `$async:` block is compiler-owned language structure. It is not
+    builder metadata or a builder extension.
 
     The intended model is:
 
@@ -85,17 +89,22 @@ page_head #= theme_head
 
     Instead, they communicate by sending values through typed channels.
 
-    A channel is created with `Channel`, which takes a carried value type and returns two endpoints:
+    The separately accepted future channel construction is:
 
     [codeblock, $code("moth"):
-        reader, writer = Channel(Int)
+        reader, writer Channel of AppMessage = Channel()
     ]
 
-    In this example:
+    In this declaration:
 
     - `writer` is the sending endpoint
     - `reader` is the receiving endpoint
-    - the channel carries values of type `Int`
+    - the channel carries values of type `AppMessage`
+    - `Channel()` is the value-position constructor, with its type supplied by the receiving declaration
+
+    The endpoint-parameter grammar for larger coroutine examples remains
+    unresolved, so this page does not prescribe legacy constructor or endpoint
+    generic spellings.
 
     You can think of this as a one-way pipe for values of a specific type.
 ]
@@ -156,32 +165,20 @@ page_head #= theme_head
 
     A coroutine is a function that can suspend and resume execution.
 
-    Coroutines are started with `spawn` and must run inside an `async` scope.
+    Coroutines are started with `spawn` and must run inside a `$async:` scope.
 
-    Example coroutine functions:
+    The endpoint-parameter grammar for larger coroutine declarations is not
+    fixed. This page therefore does not invent typed `producer` or `consumer`
+    parameters. Their bodies use the accepted channel operations:
 
     [codeblock, $code("moth"):
-        producer |writer ~Channel[Int]|:
-            loop 0 to 10 |i|:
-                i >> writer
-                yield
-            ;
-        ;
-
-        consumer |reader ~Channel[Int]|:
-            loop:
-                value << reader
-                io.line(value)
-            ;
-        ;
+        message >> writer
+        value << reader
     ]
 
-    In this example:
-
-    - `producer` sends integers into the channel
-    - `consumer` receives and prints them
-    - neither coroutine shares mutable memory directly
-    - all interaction happens through the channel
+    A future implementation must preserve endpoint direction, mandatory
+    send-transfer and bounded task lifetime. Neither endpoint passing nor a
+    complete coroutine function signature is implemented here.
 ]
 
 #[section, $md:
@@ -219,15 +216,17 @@ page_head #= theme_head
 #[section, $md:
     ## Structured async scopes
 
-    Coroutines run inside an `async` scope.
+    Coroutines run inside a `$async:` scope. `$async:` is compiler-owned
+    language structure, not builder metadata.
 
     [codeblock, $code("moth"):
-        async:
-            ...
+        $async:
+            reader, writer Channel of AppMessage = Channel()
+            yield
         ;
     ]
 
-    An `async` scope means:
+    A `$async:` scope means:
 
     - coroutines may be spawned inside the scope
     - suspension is allowed inside the scope
@@ -235,24 +234,11 @@ page_head #= theme_head
     - spawned coroutines are bounded by the scope
     - no detached background task can silently outlive its data
 
-    Example:
+    The declaration above is a future syntax illustration, not a runnable
+    program. Scheduling, endpoint passing and channel runtime behaviour remain
+    deferred.
 
-    [codeblock, $code("moth"):
-        async:
-            reader, writer = Channel(Int)
-
-            spawn producer(writer)
-            spawn consumer(reader)
-
-            loop:
-                yield
-            ;
-        ;
-    ]
-
-    This makes concurrency structured and bounded.
-
-    You can see where async work starts, where it may suspend, and where it must be contained.
+    This makes the intended concurrency boundary visible and bounded.
 ]
 
 #[section, $md:
@@ -296,38 +282,26 @@ page_head #= theme_head
 #[section, $md:
     ## Full example
 
+    A larger producer/consumer example is intentionally omitted. Its
+    endpoint-parameter grammar is unresolved, and this page does not prescribe
+    alternate constructor or endpoint-generic spellings.
+
+    The accepted future declaration and scope spelling are shown together:
+
     [codeblock, $code("moth"):
-        producer |writer ~Channel(Int)|:
-            loop 0 to 10 |i|:
-                i >> writer
-                yield
-            ;
-        ;
-
-        consumer |reader ~Channel(Int)|:
-            loop:
-                value << reader
-                io.line(value)
-            ;
-        ;
-
-        async:
-            reader, writer = Channel(Int)
-
-            spawn producer(writer)
-            spawn consumer(reader)
-
-            loop:
-                yield
-            ;
+        $async:
+            reader, writer Channel of AppMessage = Channel()
+            ...
         ;
     ]
 
-    This example has three visible forms of async behaviour:
+    The intended design has three visible forms of async behaviour:
 
     - `spawn` starts concurrent work
     - `>>` and `<<` communicate through the channel
     - `yield` explicitly gives the scheduler a chance to run other work
+
+    No implementation is delivered by this design page.
 ]
 
 #[section, $md:
@@ -385,8 +359,8 @@ page_head #= theme_head
     - timeout syntax
     - select-style waiting on multiple channels
     - async host function imports
+    - endpoint passing and coroutine parameter grammar
     - interaction with closures and captured mutable access
-    - whether `["Channel[Int]"]` remains the final channel type syntax
     - any parallel coroutine model, which requires an accepted atomic counting design first
 
     These should be designed as extensions, not packed into the first implementation.
@@ -397,15 +371,15 @@ page_head #= theme_head
 
     This design is not implemented yet.
 
+    `$async:` is the agreed future spelling for a compiler-owned directive
+    block, not builder metadata. Its semantics, lowering and runtime support
+    remain deferred; no implementation is delivered by this page.
+
     It is intended as a future reference for language design and compiler implementation planning.
 
-    The first implementation should likely focus on:
-
-    - parsing and rejecting async syntax deliberately
-    - defining the HIR representation for suspension-capable control flow
-    - validating what values may live across suspension points
-    - modelling channel endpoints as typed values
-    - lowering a minimal cooperative coroutine model in one backend
+    Any implementation must preserve the accepted channel memory rules:
+    mandatory send-transfer, bounded lifetime, independent graphs, failed-send
+    responsibility and non-atomic REC under cooperative scheduling.
 
     The important part is to keep the source model explicit and structured.
 ]

@@ -1,6 +1,6 @@
 # Why Moth makes different choices
 
-If you arrive from Rust, JavaScript, TypeScript or a C-family language, Moth will look slightly sideways. Templates live in the language. Moves hide from source syntax. The build system reads a typed config file. Complexity seems to move into the compiler on purpose.
+If you arrive from Rust, JavaScript, TypeScript or a C-family language, Moth will look slightly sideways. Templates live in the language. Moves hide from source syntax. The build system orchestrates a typed config file through compiler-owned folding. Complexity seems to move into the compiler on purpose.
 
 That move *is* the purpose.
 
@@ -150,7 +150,7 @@ When you propose an example, ask whether the progress matrix already supports it
 
 - **Accepted design:** design-scope, compiler and memory authorities agree on the bias above.
 - **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values and explicit `@project` are implemented.
-- **Queued work:** numeric semantics, mixed backend plans and entry-local config remain labelled by plan status.
+- **Queued work:** numeric semantics, mixed backend plans, and the accepted general-directive/config and HTML page-purpose migrations remain labelled by plan status.
 - **Deferred or outside scope:** rejected language families stay outside scope even when a neighbouring language loves them.
 
 ## Exit state

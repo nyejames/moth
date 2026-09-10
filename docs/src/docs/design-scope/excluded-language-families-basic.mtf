@@ -2,14 +2,16 @@ Moth says no to many features that other languages include. Here is why.
 
 ### No general macros
 
-Macros create a second language inside your code. Moth uses templates,
-constants and builder directives for compile-time work instead.
+Arbitrary macros and builder directives that transform AST create a second
+language inside your code. Compiler-known directives may provide constrained
+structure, templates or metadata, but they are not a user-extensible macro
+system.
 
 ### No general closures or higher-order function values
 
 General closures and higher-order function values add complexity to the type
-system and make code harder to follow. Moth uses reactivity for the common UI
-pattern that closures usually solve.
+system and make code harder to follow. Constrained template and builder
+contracts cover explicit integration without general function values.
 
 ### No dynamic trait values
 
@@ -28,8 +30,20 @@ structure. This keeps programs predictable and easy to read.
 
 ### No platform-specific source branches
 
-Moth code does not ask whether it is compiling for an operating system, architecture, JavaScript or
-Wasm. Builders handle that choice.
+Moth code does not ask whether it is compiling for an operating system,
+architecture, JavaScript, Wasm or another physical backend. Builder identity is
+not physical target identity; builders handle platform mapping.
+
+Ordinary `$config` values and static `if` cannot remove declarations or
+dependencies. Future `$feature` may select source structure before graph
+publication from bootstrap-known data and selected-builder identity. Known
+feature names must be distinguished from enabled features so typos cannot
+silently disable code. Excluded regions still need a sound structural boundary
+before unknown syntax can be skipped.
+
+Future `$layout` preserves nominal identity, `$export` replaces rather than
+duplicates export syntax, and `$test` remains a deferred root purpose. Custom
+metadata is open design, so `$project` stays strict.
 
 ### No explicit lifetime and ownership type system
 

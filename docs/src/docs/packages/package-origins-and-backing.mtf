@@ -7,7 +7,7 @@ Origin describes ownership and distribution:
 - **Core**: compiler-owned packages such as `@core/io` and `@core/math`.
 - **Builder**: packages selected by a project builder, including `@html` and `@web/canvas`.
 - **ProjectLocal**: scoped `+*.moth` support packages, the project-root package facade and annotated project-local JavaScript files.
-- **Standard** and **Dependency**: reserved for future package-system support.
+- **Dependency**: reserved for future package-system support.
 
 ### Package backing
 

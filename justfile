@@ -12,6 +12,8 @@ validate-common:
 
     @echo "source audit"
     just source-audit
+    @echo "first-party dependency audit"
+    just first-party-deps
 
     @echo "unit tests"
     cargo test --workspace --quiet -- --format terse
@@ -84,6 +86,11 @@ source-audit:
 # Measure LocalSpan start/length bit-split candidates over the representative corpus.
 span-census:
     cargo run --quiet --package xtask --bin xtask -- span-census
+
+# Check first-party package implementation roots for manifests, vendored dependencies and
+# unapproved bare JavaScript runtime imports.
+first-party-deps:
+    cargo run --quiet --package xtask --bin xtask -- first-party-deps
 
 # Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
 # features across the resolve graph and always enables `timers` through xtask's dependency, so it
@@ -174,6 +181,9 @@ ci-gate-timers-erasure:
 
 ci-gate-source-audit:
     just source-audit
+
+ci-gate-first-party-deps:
+    just first-party-deps
 
 ci-gate-honesty-audit:
     just test-honesty-audit

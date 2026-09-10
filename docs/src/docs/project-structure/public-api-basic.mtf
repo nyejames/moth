@@ -1,4 +1,9 @@
-Declarations are private to their module by default. The `export:` block marks what other modules can see.
+**Current versus future.** `export:` is the implemented public API marker.
+The later `$export` migration will replace it. Its directive-block syntax is
+undecided, and the two forms won't remain permanent alternatives.
+
+Declarations are private to their module by default. The `export:` block marks
+what other modules can see.
 
 ### A compact export block
 
@@ -18,4 +23,9 @@ Declarations are private to their module by default. The `export:` block marks w
 
 ### Private by default
 
-Files in the same module can see each other's declarations. Other modules can only see what the `export:` block makes public.
+Files in the same module can see each other's declarations. Other modules can
+only see what the root's `export:` block makes public. The `#` marker means
+compile-time constant, not public visibility.
+
+Re-export direct selections inside the same current block. Don't use `$export`
+until its migration and syntax land.

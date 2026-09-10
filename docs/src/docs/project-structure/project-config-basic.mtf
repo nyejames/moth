@@ -1,8 +1,27 @@
-**Implemented grouped config and build-config values.** This page teaches the grouped config shape, direct and source `#Config` contracts and explicit `@project` access supported today. Retired flat keys are rejected. Former top-level builder fields no longer configure the builder. Entry-local `config:` blocks remain deferred. See @../progress (Progress) for current support.
+**Current support versus accepted design.** Today `config.moth` still uses grouped `project` and `html` records. `$project`, `$html_builder` and a required `version` argument are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
 
 `config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source dependencies.
 
-### A minimal config
+### Accepted starter
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+`version` is required on `$project`. The `"0.1.0"` default belongs to the example `$config` contract, not to `$project`. Passing `version = version` is explicit; the name match alone is not enough.
+
+`$html_builder` configures the already selected HTML builder. Bare `$html_builder` uses defaults. Empty parentheses are invalid.
+
+### Current grouped config
 
 [codeblock, $code("moth"):
     project #= |
@@ -16,10 +35,4 @@
     |
 ]
 
-### Structure
-
-- One required `project` record provides project identity and settings.
-- `project.name` is required for stable identity.
-- Builder sections like `html` hold builder-specific settings.
-- The command selects the builder before config validation. `config.moth` does not select the builder.
-- Only active sections are schema-validated.
+The command selects the builder before config validation.

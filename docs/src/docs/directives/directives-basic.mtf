@@ -1,0 +1,37 @@
+**Accepted queued design.** `$` introduces a registered compiler or builder directive. Template directives such as `$md` and `$code` are implemented. General non-template directives are accepted design and are not yet available in the Alpha compiler. See @../progress (Progress) for current support.
+
+A `$` marker is not automatically harmless metadata. Compiler-owned directives may impose real contracts. Builder extensions cannot rewrite functions or weaken language safety.
+
+### Current versus accepted syntax
+
+Today, `config.moth` still uses grouped `project` and `html` records, and pages still use reserved names such as `page_title`. The accepted configuration shape is:
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+`$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
+
+[codeblock, $code("moth"):
+    $page(title = "Moth")
+]
+
+### Arguments
+
+- Supply arguments with `$name(arguments)`.
+- Supply none with `$name`.
+- Authored empty `()` is invalid for directives.
+- Ordinary function calls still use `f()`.
+
+`$html_builder` and `$page` may be written with no parentheses when every parameter has a default. `$html_builder()` and `$page()` are invalid.
+
+Exact signatures live in @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and page directives).

@@ -8,14 +8,18 @@ A constant template is finished during compilation.
     ]
 ]
 
-A direct top-level const template in an active HTML module root can also become part of the
-generated page:
+A direct top-level const template needs an explicit root purpose in the accepted
+queued design. `$page` is the first HTML purpose but is not implemented yet; the
+Alpha compiler still uses activity-based entry selection and reserved `page_*`
+metadata.
 
 [codeblock, $code("moth"):
     #[$md:
         # Compile-time heading
     ]
 ]
+
+Assigned or returned templates remain ordinary values, not direct page fragments.
 
 Const template loops have an iteration limit so an accidental build-time loop
 cannot run forever.

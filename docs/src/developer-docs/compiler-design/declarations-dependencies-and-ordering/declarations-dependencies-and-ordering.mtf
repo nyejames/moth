@@ -13,7 +13,7 @@ From located tokens, syntax preparation extracts **shells**:
 - const-template, active-root start-body and trait-incompatibility shells
 - root-activity and fragment-placement metadata for normal roots
 - structural provider references and structural file references for the graph
-- source `#Config` contract shells
+- source configuration-contract shells and retained directive-prefix metadata (`#Config` is the current spelling; `$config` is the accepted queued prefix)
 - local declaration-ordering hints
 - source locations and remap information
 
@@ -139,7 +139,7 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 
 - **Accepted design:** `PreparedHeaderSyntax`, `BoundModuleHeaders` and distinct relationship classes.
 - **Current implementation:** header and dependency progress rows.
-- **Queued work:** no named roadmap plan changes these contracts. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
+- **Queued work:** `general-directives-and-project-config-plan.md` updates retained directive and input-contract metadata; canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
 - **Deferred or outside scope:** this page does not teach body type checking.
 
 ## Exit state

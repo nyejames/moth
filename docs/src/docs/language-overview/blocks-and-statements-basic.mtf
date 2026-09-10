@@ -18,3 +18,6 @@ Use indentation to make nesting easy to see:
         io.line("Ready!")
     ;
 ]
+
+Future compiler-owned blocks use `$async:` and `$checked:`; they are deferred and
+remain distinct from normal control-flow keywords and declared `name:` regions.

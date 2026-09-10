@@ -45,12 +45,20 @@ The complete no-shadowing contract is documented by
 @../bindings/#shadowing (Values and bindings). Dependency aliases and module API
 names have additional collision rules in the Packages documentation.
 
-### Reserved configuration names
+### Configuration names
 
-**Accepted deferred.** The `config` identifier family is compiler-reserved. Keyword-shadow matching
-is case-insensitive and strips leading underscores, so `config`, `Config`, `CONFIG`, `_config`,
-`_Config` and equivalent shadows cannot be user declarations. This reserves one vocabulary for
-`config.moth`, entry `config:` blocks and `#Config`.
+The accepted queued project and page directives use the `$` marker: `$config`,
+`$project`, `$html_builder` and `$page`. There is no accepted `config:` block or
+`#Config` qualifier.
+Directive spellings do not reserve ordinary identifiers, so `config`, `Config`,
+`project` and `html_builder` remain ordinary names outside directive syntax.
+The file `config.moth` and the dependency root `@project` retain their separate
+path and package semantics.
+
+**Current support and cutover.** The Alpha compiler still supports `#Config` and
+currently reserves its case-insensitive, leading-underscore keyword-shadow names.
+Identifier reclamation is pending until the cutover to `$config`; code targeting
+the current compiler must follow its current reservation policy.
 
 `import` is not a keyword. `Import` is an ordinary valid PascalCase user name:
 

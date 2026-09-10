@@ -12,7 +12,7 @@ A constant can hold a fully known struct value.
 Read its fields during compilation or use one field in runtime code:
 
 [codeblock, $code("moth"):
-    page_title #= defaults.title
+    site_title #= defaults.title
     io.line(defaults.title)
 ]
 

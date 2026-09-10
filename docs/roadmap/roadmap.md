@@ -4,28 +4,41 @@ This is the main todo list and future design / implementation roadmap for Moth.
 
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
 
-Use the [Progress Matrix](docs/src/docs/progress/@page.moth) as a reference for what is currently implemented, partially complete or deferred.
+Use the [Compiler Progress Matrix](docs/src/docs/progress/@page.moth) for language, compiler, memory and backend status.
+Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
 
 ---
 
 # Plans
 
-- [Diagnostics and tokens optimised memory layout plan](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md): Active
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) — Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
-- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) — Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Phase 1 is complete on main. Continue Phases 2 and 3 on token-and-diagnostic-data-layout-changes, rebased onto main, while the package programme proceeds in parallel. Retain the Phase 3/4 checkpoint below.
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md) - Continue on packages-and-builder-progress-plan after its foundation and documentation baseline is squash-merged into main. Rebase the continuing branch onto that merge. Package work runs in parallel with data-layout Phase 2 onward, subject to each slice's compiler prerequisites and the programme's merge-isolation rules.
+- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after data-layout Phase 3 and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+- [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward after the Wiring and native result-slot checkpoints are merged and the continuation branch is rebased onto main. Independent package work continues in parallel.
+- [Automatic Markdown heading section links](./plans/automatic-markdown-section-links-plan.md)
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
+- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 - [Windows ci failures further investigation](./plans/test-suite-honesty-exposed-failures.md)
 - Improve the `tmp/test_brackets.mtf` error example.
-- [Entry-local config blocks and runtime title](./plans/entry-config-blocks-runtime-title-plan.md)
+- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: shared directive syntax, explicit $config contracts and strict $project/$html_builder configuration
+- [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 - [Number and numeric semantics](./plans/number_type_numeric_plan.md)
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md)
 - [Never return contracts](./plans/never-return-contract-plan.md)
+- TODO plan: Struct layout directives. Define compiler-owned $layout contracts, permitted field types, alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 - Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
 - [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
+- TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
+- TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
+- TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
+
+Parallel branches rebase after the initial squash merge, after shared compiler input or representation checkpoints land and before accepting a slice that consumes those changes. Re-run the owning validation gate after each rebase. Parallel scheduling does not remove package-specific prerequisites or permit compatibility wrappers around superseded compiler APIs.
 
 ## Adding and maintaining plans
 
-This roadmap owns the order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
+This roadmap owns the normal serial order. A plan owns its own work and nothing else. Mark a plan as active after the plan bullet point itself, don't create a new heading or move the plan bullet elsewhere.
 
 **Name prerequisites, do not link them.** State what must already be delivered and what it gives you - "extensionless dependency clauses and the retained path syntax table", not a path to the plan that built them. A plan file is a work item with a short life. Naming the capability keeps a plan readable after its prerequisite is gone, and lets the chain be reordered or have new work inserted without editing every downstream plan.
 
@@ -36,6 +49,8 @@ This roadmap owns the order. A plan owns its own work and nothing else. Mark a p
 **Delete a plan in the commit that completes it.** Do not mark it complete and commit that, then delete it later - the intermediate state is a file that claims to be work and is not. Removing it in the completion commit means the commit that finished the work is also the commit that retired the plan, so Git history alone answers "when did this land". A deleted plan is recoverable if it is genuinely needed again.
 
 **Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/src/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
+
+**Package programme exception.** The umbrella and package-level plans under `docs/roadmap/plans/packages/` are living implementation companions rather than ordinary short-lived plans. They may link one another and specialised package implementation plans in that directory. Package-level plans remain after a current version completes so later work retains implementation rationale, quirks and blockers. Completed checklists should be removed or compressed. A specialised one-shot plan may still be retired after its durable decisions and follow-ups move into the living package plan. Canonical package documentation remains the semantic authority. The main roadmap links only the umbrella programme, and the normal deletion and no-plan-link rules still apply everywhere else.
 
 ---
 
@@ -130,23 +145,18 @@ No plan owns this. The bounded operational oracle plan deliberately excluded CLI
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 
-## Reactivity follow-ups
+## Directive follow-ups
 
-After the initial reactivity surface:
+- `$async:` is the accepted future compiler-owned async block spelling. Semantics remain on the public Async draft and Wiring channel contract, not this TODO list.
+- `$checked:` is the accepted future compiler-owned proof-budget block spelling. Proof-tier algorithms remain an open proposal under Design Scope and the checked-proof-budget research pages.
+- `$export` block support is undecided. The queued export-directive TODO owns the later choice of prefix-only versus optional block form. Keep one final visibility syntax.
+- A possible separate custom-metadata directive remains open design. `$project` stays a closed predefined-field signature in the meantime.
 
-- reactive template control flow
-- field and path subscriptions
-- collection item subscriptions
-- expression dependency tracking
-- derived reactive values
-- template-owned event, action and effect syntax
-- `$bind(...)`
-- typed component messages
-- IO sink design
-- fine-grained DOM updates
-- nested reactive regions
-- keyed loop diffing
-- HTML-Wasm support
+Permanent owners: `docs/src/docs/directives/directives.mtf`, `docs/src/docs/design-scope/`, `docs/src/docs/async/@page.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
+
+## Wiring follow-ups
+
+Wiring replaces Reactivity V1. The queued foundation removes reactive bindings, subscriptions and implicit live-string behaviour. Later observation, route application and UI runtime work require explicit accepted contracts. The former reactivity follow-up list does not authorise restoring `$bind`, reactive binding modes or subscription expansion.
 
 ## Hash map follow-ups
 
@@ -207,9 +217,9 @@ The [package dependency declarations and package-manager foundations plan](./pla
 
 - Should try to prevent dependency explosion as much as possible, make adding dependencies with lots of dependencies harder or discouraged.
 - Idea of "Golden" packages (and silver, bronze etc):
-    1. Golden dependencies have 0 dependencies themselves (outside of std or core)
-    2. Silver dependencies only have golden dependencies
-    3. Bronze dependencies only have silver or gold dependencies
+    1. Golden dependencies have 0 dependencies themselves outside first-party Core packages.
+    2. Silver dependencies only have golden dependencies.
+    3. Bronze dependencies only have silver or gold dependencies.
     4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
 - Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
 - The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.

@@ -27,6 +27,8 @@ The canonical REC page now exists. REC implementation remains deferred and follo
 
 This plan owns the detailed compiler and runtime contract for Retained Edge Counting, abbreviated REC. The main memory-management plan should explain when REC exists and link here. It should not duplicate the implementation details in this document.
 
+Physical layout refinement may later consume validated `$layout` representation constraints. REC does not define those contracts; the later struct-layout TODO plan and language authority do.
+
 ## Purpose
 
 Moth statically validates one legal lifetime topology for every accepted allocation. Full-memory-control release backends lower that topology without a tracing collector. Last-use analysis, affine cleanup responsibility and inferred regions handle most values without runtime alias counting.

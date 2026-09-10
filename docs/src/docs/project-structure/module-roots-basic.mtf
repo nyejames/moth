@@ -1,3 +1,5 @@
+**Current versus accepted.** The Alpha builder still finds HTML entries from root activity. The accepted design uses a root-only `$page` declaration. Current `export:` blocks are implemented; later `$export` migration remains deferred.
+
 Each source directory can contain one module root. A normal module uses an
 `@*.moth` root, while an API-only support package uses a `+*.moth` root.
 
@@ -11,12 +13,25 @@ two roots or mix an `@*.moth` root with a `+*.moth` root.
 
 Normal module-root files have no direct dependency form. Bind the directory's public module surface.
 
-The `@` in `@page.moth` marks the file as a module root on disk. The `@` in `@pages` starts a dependency path. They share the same symbol but are not combined. Do not write `@@pages`. The second `@` is invalid.
+The `@` in `@page.moth` marks the file as a module root on disk. The `@` in
+`@pages` starts a dependency path. They share the same symbol but are not
+combined. Do not write `@@pages`. The second `@` is invalid.
 
 [codeblock, $code("moth"):
     @pages
 ]
 
-### Two roles
+### Root and helper roles
 
-A module can become a page entry or a dependency. The compiler checks its top-level work in both cases, but that work runs only when the builder selects the module as an entry.
+The root file defines the module identity. Files without `@` remain helpers in
+that module. Helpers cannot become entries or pages on their own.
+
+After the accepted page cutover, an HTML artefact needs an explicit root
+purpose:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+`export:` currently controls public declarations. The later `$export` spelling
+will replace it; both forms won't remain permanent alternatives.

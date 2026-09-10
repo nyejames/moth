@@ -56,6 +56,7 @@ pub mod benchmarking;
 pub mod build_system;
 mod builder_surface;
 mod compiler_frontend;
+pub mod first_party_js;
 
 mod backends {
     pub(crate) mod backend_feature_validation;

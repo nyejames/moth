@@ -19,3 +19,6 @@ Scoped support packages are `+*.moth` roots in the project source tree. The cont
 ]
 
 `@blog` resolves to the `blog` directory's support root. The package's public surface comes from its `export:` block.
+
+Support packages can hold reusable ordinary `#` constants; no custom `$project`
+metadata is required.

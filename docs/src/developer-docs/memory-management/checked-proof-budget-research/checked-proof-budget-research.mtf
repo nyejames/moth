@@ -2,17 +2,22 @@
 
 ## Status
 
-This is an open design proposal. It is not accepted Moth syntax, current compiler behaviour or a roadmap implementation commitment.
+This is an open design proposal. `$checked:` is the agreed future source-block
+spelling and compiler-owned direction, but proof-tier semantics, placement and
+implementation remain unresolved. It is not accepted source behaviour or a
+roadmap implementation commitment.
 
-The working idea is a lexical checked scope that lets the compiler use a much larger deterministic proof budget for difficult static analysis. The current spelling is illustrative:
+The proposal is a lexical checked scope that could let the compiler use a much
+larger deterministic proof budget for difficult static analysis:
 
 [codeblock, $code("moth"):
-    checked:
+    $checked:
         -- difficult but safe value and alias relationships
     ;
 ]
 
-Current Boracle work should preserve the architectural option without implementing source syntax prematurely.
+Current Boracle work should preserve the architectural option without
+implementing source syntax prematurely.
 
 ## Core contract
 
@@ -222,9 +227,9 @@ Each consumer keeps its existing owner and contract. Checked scopes must not col
 
 ## Open design questions
 
-The proposal still needs evidence and decisions for:
+The `$checked:` spelling and compiler-owned direction are agreed. The proposal
+still needs evidence and decisions for:
 
-- final source name and syntax
 - block-only versus function-level placement
 - nested scope composition
 - which facts can escape the checked scope
@@ -236,7 +241,9 @@ The proposal still needs evidence and decisions for:
 - whether narrow SMT or SAT queries are useful after custom domains
 - interaction with incremental compilation and proof-result fingerprints
 
-Until those questions are resolved, compiler code should use internal effort or experiment vocabulary rather than a source-visible `CheckedBlock` semantic category.
+Until those questions are resolved, compiler code should use internal effort or
+experiment vocabulary rather than implementing a source-visible `$checked:`
+semantic category.
 
 ## Hard boundaries
 

@@ -24,6 +24,12 @@ source-authored receiver methods share this routing policy.
 
 Host functions and compiler-owned builtin member calls are positional-only.
 
+### Shared call syntax
+
+Directives use the same ordinary call parser, parameter-slot router and default
+validation as functions. Ordinary `f()` remains unchanged; only a directive's
+entry syntax rejects an authored empty `()`, even when every parameter has a default.
+
 ### Shared parameters
 
 A shared parameter receives an ordinary argument without `~`.

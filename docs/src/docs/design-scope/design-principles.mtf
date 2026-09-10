@@ -22,7 +22,7 @@ source-language obligations.
 
     [td:
         [: Compile-time generation]
-        [: Templates, constants and builder directives]
+        [: Templates, constants and compiler- or builder-owned directives]
     ]
 
     [td:
@@ -88,17 +88,46 @@ source-language obligations.
 
 ### Platform-agnostic source and builder ownership
 
-Source expresses stable semantics rather than target identity. Source cannot inspect the OS,
-architecture, backend or target, and cannot condition imports, declarations, exports or bodies on
-target identity. Implemented `#Config` values provide typed project/build configuration, and
-explicit `@project` provides immutable project fields; neither is platform detection. Entry-local
-`config:` blocks remain deferred.
+Source expresses stable semantics rather than target identity. Source cannot
+inspect the OS, architecture, backend or physical target, and cannot condition
+imports, declarations, exports or bodies on target identity. Ordinary `$config`
+values and static `if` are not structural selection mechanisms: they cannot
+remove declarations or dependencies. Strict `$project` metadata and explicit
+builder capabilities likewise do not expose physical target identity.
 
-Builders cannot expose target identity as pseudo-config values. A selected builder may expose stable
-capability APIs, and compiler target validation rejects unsupported reachable capability use. Project
-builders own target partition and output form, the compiler-owned memory planner owns physical memory
-strategy per target/profile variant, and backends realise those decisions. This boundary is intentional
-outside-scope policy, not merely deferred syntax.
+Future `$feature` is the separate structural direction. It may select source
+structure before graph and declaration publication using bootstrap-known feature
+data and the high-level selected-builder identity. Known feature names must be
+distinguished from enabled features so a typo cannot silently disable code; its
+predicate, nesting and config-declaration grammar belongs to a future plan.
+
+Builders cannot expose target identity as pseudo-config values. Builder identity
+is not physical target identity. A selected builder may expose stable capability
+APIs, compiler target validation rejects unsupported reachable capability use,
+and backends realise builder-owned target partition and output policy. This is
+intentional outside-scope policy, not merely deferred syntax.
+
+### Directive and representation boundaries
+
+Compiler-known general directives are an accepted direction for language and
+structural semantics. Arbitrary user macros and builder directives that
+transform AST are excluded; constrained builder directives may provide
+templates, metadata and configuration without rewriting language semantics.
+
+Excluded source regions will not resolve their contained builder directives
+against the active directive surface. They still need a sound structural
+boundary. A future plan must address directive-controlled template lexing
+before arbitrary unknown syntax can be skipped.
+
+Future `$layout` constrains representation while preserving nominal identity.
+C order alone is not a complete ABI contract, and SoA is not automatically a
+scalar layout option. Future `$export` replaces rather than permanently
+duplicates the current export-block syntax; whether it supports a directive
+block remains undecided.
+
+`$test` is a deferred root-purpose direction; its runner, command and
+lifecycle details are undefined. A separate custom-metadata directive remains
+open design, so `$project` stays strict in the meantime.
 
 ### Design review questions
 

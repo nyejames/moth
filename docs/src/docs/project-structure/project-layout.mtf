@@ -1,4 +1,32 @@
-A Moth project is a directory tree with one strict config file, a source entry root and generated output folders.
+**Current support versus accepted design.** The Alpha compiler still uses
+grouped `project` and `html` records, direct `#Config` fields and reserved
+`page_*` metadata. The accepted `$config`, `$project`, `$html_builder` and
+root-only `$page` forms are queued, and `moth new` does not emit them yet.
+
+A Moth project is a directory tree with one strict config file, a source entry
+root and generated output folders.
+
+### Accepted starter shape
+
+The accepted starter keeps the version as an explicit configuration input and
+passes it to the required project field:
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
+
+This is accepted queued design, not a claim about the current `moth new`
+scaffold. Keep operational projects on their current grouped config until the
+implementation cutover.
 
 ### Project root contents
 
@@ -27,41 +55,71 @@ A Moth project is a directory tree with one strict config file, a source entry r
 
 ### Structural packages
 
-Project-local source-backed packages are structural `+*.moth` support packages. A `+*.moth` file in a source directory marks that directory as a scoped support package root named by its containing directory.
+Project-local source-backed packages are structural `+*.moth` support packages.
+A `+*.moth` file in a source directory marks that directory as a scoped
+support package root named by its containing directory.
 
-In the example above, `shared/+package.moth` creates the scoped `@shared` support package. It is visible to its owner normal module, normal sibling modules and their descendants. It is not dependency-bound from its own private implementation subtree or from another support package in the same scope.
+In the example above, `shared/+package.moth` creates the scoped `@shared`
+support package. It is visible to its owner normal module, normal sibling
+modules and their descendants. It is not dependency-bound from its own private
+implementation subtree or from another support package in the same scope.
 
-No folder gains package meaning without a `+*.moth` root. Ordinary directories do not automatically become packages.
+No folder gains package meaning without a `+*.moth` root. Ordinary directories
+do not automatically become packages.
 
-The optional project-root `+*.moth` facade beside `config.moth` is a separate mechanism for assembling public descendant surfaces for external consumers. It is not a scoped support package.
+The optional project-root `+*.moth` facade beside `config.moth` is a separate
+mechanism for assembling public descendant surfaces for external consumers. It
+is not a scoped support package.
 
 For the full package contract see @../packages/#project-local-packages (Project-local packages).
 
 ### Normal module-root files inside source directories
 
-A non-config file whose name starts with `@` and ends with `.moth` is a module root. The filename after `@` has no language-level semantic role. `@page.moth`, `@mod.moth`, `@api.moth` and `@anything.moth` are all equivalent root filenames.
+A non-config file whose name starts with `@` and ends with `.moth` is a module
+root. The filename after `@` has no language-level semantic role.
+`@page.moth`, `@mod.moth`, `@api.moth` and `@anything.moth` are equivalent root
+filenames.
 
-The `moth new html` scaffold generates `src/@page.moth` as a conventional default. That convention does not make `@page.moth` a special compiler role. Any `@*.moth` filename in a source directory marks that directory as a module root.
+The current `moth new html` scaffold may use `src/@page.moth` as a conventional
+root filename. That convention does not make the filename a page. In the
+accepted design, the root file declares an HTML artefact with a root-only
+`$page` directive:
 
-### Implementation note
+[codeblock, $code("moth"):
+    $page
+]
 
-The `moth new html` scaffold generates `config.moth`, `src/@page.moth` and a `.gitignore`. The retired flat config keys are rejected by the compiler. See @../progress/ (the progress matrix) for current status.
+Helpers in ordinary files stay inside the surrounding module and cannot become
+entries on their own.
+
+### Current scaffold notice
+
+The current scaffold creates current-syntax `config.moth`, a conventional
+`src/@page.moth` root and a `.gitignore`. It does not yet emit the accepted
+starter `$config`/`$project`/`$html_builder` shape or a live `$page`
+declaration. Do not infer implementation support from this teaching example.
 
 ### Source versus output
 
 Developers own source directories. The builder generates output folders and
-owns their stale-output cleanup. Treat generated artefacts as output, not source.
+owns their stale-output cleanup. Treat generated artefacts as output, not
+source.
 
 ### Builder-neutral frontend versus builder-owned output
 
-The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.
+The compiler frontend discovers modules, resolves dependencies, checks types,
+lowers code and validates borrowing. A project builder then decides how
+compiled modules become real output files. The current user-facing builder is
+the HTML project builder.
 
 This separation lets the same frontend feed other builders. The frontend does
 not decide which modules produce artefacts. The builder owns that decision.
 
 ### Only config.moth has config semantics
 
-No other filename has config meaning. `@config.moth` is a module root, not a config file. Alternate config filenames, compatibility handling and config-specific diagnostics for other names are not supported.
+No other filename has config meaning. `@config.moth` is a module root, not a
+config file. Alternate config filenames, compatibility handling and
+config-specific diagnostics for other names are not supported.
 
 ### Related concepts
 

@@ -1,4 +1,24 @@
-A Moth project has one config file, one source root and generated output folders.
+**Current versus accepted.** Alpha scaffolds still use grouped config and
+reserved page metadata. The accepted `$config`/`$project`/`$html_builder` and
+root-only `$page` forms are queued. `moth new` doesn't emit them yet.
+
+A Moth project has one config file, one source root and generated output
+folders.
+
+### Accepted starter config
+
+[codeblock, $code("moth"):
+    $config
+    version #String = "0.1.0"
+
+    $project(
+        name = "my_site",
+        version = version,
+        entry_root = "src",
+    )
+
+    $html_builder
+]
 
 ### Where things live
 
@@ -10,17 +30,26 @@ A Moth project has one config file, one source root and generated output folders
 
 Each source directory can have one root file. An `@*.moth` root creates a normal
 module. The text after `@` stays cosmetic, so `@page.moth`, `@api.moth` and
-`@mod.moth` all create the same root role.
+`@mod.moth` all create the same root role. A root becomes an HTML artefact only
+when it declares a root-only page:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+The current scaffold's `src/@page.moth` filename doesn't mean it already has
+this accepted page syntax.
 
 ### Shared scoped packages
 
 A `+*.moth` root creates a scoped support package instead of a normal module.
 For example, `shared/+package.moth` creates `@shared`. Its owner module, normal
-sibling modules and their descendants may depend on it. Other support packages in
-the same scope and the package's private implementation subtree cannot. A
+sibling modules and their descendants may depend on it. Other support packages
+in the same scope and the package's private implementation subtree cannot. A
 directory cannot contain both `@*.moth` and `+*.moth` roots.
 
-The current scaffold creates an empty legacy `lib/` folder. It has no special meaning in the accepted package design.
+The current scaffold creates an empty legacy `lib/` folder. It has no special
+meaning in the accepted package design.
 
 ### Outputs are generated
 

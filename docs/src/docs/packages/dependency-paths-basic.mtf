@@ -15,3 +15,6 @@ Dependencies make names visible. Every source dependency resolves from the bindi
 ]
 
 `@markdown` resolves to a scoped `+*.moth` support package visible in the binding module's lexical scope.
+
+`export:` remains current; a later `$export` migration is accepted direction with
+block support undecided. It does not change module-root-relative resolution.

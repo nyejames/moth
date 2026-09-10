@@ -193,11 +193,37 @@ Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use 
 
 `io.input.close(~input)` releases the input handle. Call it when the input handle no longer needs polling. The handle requires mutable access for close because teardown mutates the underlying host state.
 
+### Queued document-title helper
+
+**Accepted queued design.** `io.set_title(text)` takes one ordinary shared
+`String`, returns no source-visible value and has no recoverable error channel.
+
+[codeblock, $code("moth"):
+    $page(title = "Initial title")
+
+    io.set_title("Loaded")
+]
+
+The call sets the live document title to exactly the supplied String content.
+It does not reapply the initial title prefix or postfix, mutate `$page`
+metadata, change the route or rewrite the static output file.
+
+A stable binding identity carries a browser document-title requirement in
+per-function link facts. HTML-JS will supply that capability. A standalone or
+embedded JavaScript host is eligible only when it explicitly supplies the same
+host contract. The existing whole-module HTML-Wasm path rejects reachable calls
+before lowering. Later mixed output may keep the call on its JavaScript side
+through ordinary affinity rules, without a Wasm title bridge in this work.
+
+Emit the helper only for reachable calls on a capable host and use Moth's
+canonical String-content conversion. An unreachable call or one removed by
+ordinary static specialisation contributes no target requirement, but its
+source is still frontend-validated. A host missing a facility it advertised
+violates its host contract. Unsupported hosts never receive a silent no-op.
+
 ### Backend behaviour
 
 HTML-JS maps console helpers to the browser console and input helpers to window and document-level keyboard and pointer polling. HTML-Wasm rejects reachable Core IO calls before lowering until it gains equivalent support.
-
-Browser input events arrive through the host event loop. A synchronous infinite Moth loop can stop new input from arriving. Yield control back to the event loop between polling cycles.
 
 ### Unsupported source forms
 

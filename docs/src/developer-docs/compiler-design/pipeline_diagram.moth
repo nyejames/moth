@@ -32,11 +32,11 @@ compiler_pipeline #= [diagram:
                 ]
                 [detail:
                     [$insert("href"): ./starting-a-build/]
-                    config.moth folding
+                    Capability surface
                 ]
                 [detail:
                     [$insert("href"): ./starting-a-build/]
-                    Capability surface
+                    config.moth folding
                 ]
                 ]
             ]

@@ -109,7 +109,18 @@ observable semantics for their topics.
 - `docs/src/docs/templates/template-control-flow.mtf`
 - `docs/src/docs/templates/markdown-formatting.mtf`
 
+### Directives
+
+- `docs/src/docs/directives/directives.mtf`
+
+Contributor routing for compiler and build handoffs lives in
+`docs/src/docs/directives/overview.mtf`. That file is not a public page import.
+Template-specific directive meanings stay in
+`docs/src/docs/templates/template-directives.mtf`. Exact `$project`, `$config`,
+`$html_builder` and `$page` signatures stay in the project-structure references.
+
 ### Constants and compile-time behaviour
+
 
 - `docs/src/docs/constants/constant-bindings.mtf`
 - `docs/src/docs/constants/constant-folding.mtf`

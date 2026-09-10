@@ -30,7 +30,7 @@ A `.mtf` or `.md` path gives you what the file says, not where it lives.
 [codeblock, $code("moth"):
     license #= @legal/license.md
 
-    page #= [$html:
+    footer #= [$html:
         <footer>[license]</footer>
     ]
 ]
@@ -46,3 +46,7 @@ A `.moth` path gives you nothing: source files hold declarations, and declaratio
 A file path is a build dependency wherever you write it, even in a constant nothing reads. The compiler checks it exists and watches it for changes.
 
 Reaching the output is separate. A file that no page ends up using is never copied into your site.
+
+Queued `$page` metadata can use the same resource-bearing `String` for a field such
+as `favicon`. It remains ordinary module-relative resource use, not a page URL or
+a `.moth` file value.

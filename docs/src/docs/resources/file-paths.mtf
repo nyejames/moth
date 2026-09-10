@@ -58,6 +58,23 @@ That resolves to `src/images/logo.svg`.
 
 Each physical-target-bearing file path is resolved once. Repeating it in the same module reuses the already resolved result. A `SourceKindNoFileValue` occurrence has no physical target and is not resolved.
 
+### Page metadata uses ordinary resource paths
+
+In the accepted queued design, root page metadata uses the same file-path
+expressions as other source code. A tracked favicon remains a resource-bearing
+`String`:
+
+[codeblock, $code("moth"):
+    $page(
+        favicon = @assets/favicon.svg,
+    )
+]
+
+The path resolves from the owning module root, enters the normal resource pipeline
+and is rendered relative to the output artefact that observes it. `$page` does not
+create a page-URL expression, and `.moth` still has no file value.
+
+
 ### Filesystem ownership
 
 A file path may address only a regular file inside the current module or package's private filesystem ownership.
@@ -120,6 +137,10 @@ These remain ordinary untracked strings:
 They are not checked, copied, rewritten, watched or included in resource unions. Write a URL as a string when you mean a URL.
 
 ### Every physical-target-bearing path is a build input
+
+This rule applies within the source selected for the build. Ordinary static `if`
+keeps both branches in that source. Future `$feature` exclusion is a separate,
+still-deferred mechanism that acts before graph facts are published.
 
 A physical-target-bearing file path is a build dependency wherever it is authored, before any question of reachability. This includes a path in:
 

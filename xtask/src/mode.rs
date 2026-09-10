@@ -26,6 +26,7 @@ Modes:
   feature-matrix       Run every curated feature lane and report the outcome table
   feature-lane-check   Check feature-lane coverage and write the coverage report
   source-audit         Apply the broad-source architecture bans and write their report
+  first-party-deps     Check first-party package roots for third-party runtime dependencies
   honesty-audit        Classify the test-honesty findings and write the canonical inventory
                        (use --update-evidence to refresh the tracked durable copy)
   span-census          Measure LocalSpan bit-split candidates over the corpus";
@@ -72,6 +73,8 @@ pub enum BenchmarkMode {
     SourceAudit,
     /// Measure LocalSpan bit-split candidates over the representative corpus.
     SpanCensus,
+    /// Check first-party package roots for third-party runtime dependencies.
+    FirstPartyDeps,
     /// Classify the test-honesty findings and write the canonical honesty inventory.
     ///
     /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
@@ -127,6 +130,7 @@ impl BenchmarkMode {
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
             "source-audit" => Some(BenchmarkMode::SourceAudit),
             "span-census" => Some(BenchmarkMode::SpanCensus),
+            "first-party-deps" => Some(BenchmarkMode::FirstPartyDeps),
             _ => None,
         };
 

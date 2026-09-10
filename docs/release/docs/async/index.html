@@ -427,8 +427,8 @@ td {
     </div>
 </nav>
  <h1 style="font-size: 2em;text-align: center;"> COROUTINES AND ASYNC IN MOTH</h1>
-<section class="container"><p><strong>Design draft:</strong> This page is a future-facing design document for language and compiler planning. It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented.</p><p>Moth approaches async and concurrency by making <strong>control flow explicit</strong> and <strong>communication safe by default</strong>.</p><p>Instead of hiding async behind keywords like <code>async</code> / <code>await</code> or complex runtime abstractions, Moth uses a small set of primitives that make data flow, suspension and concurrency visible in the syntax.</p><p>At a high level:</p><ul><li>Coroutines are lightweight, cooperative tasks</li><li>Coroutines communicate using typed channels</li><li>Concurrency is structured and scoped</li><li>Suspension points are visible in code</li><li>The compiler can enforce safety rules around shared data, references and task lifetimes</li></ul><p>The goal is async code that remains readable, predictable and analysable.</p></section>
-<section class="container"><h2>Core idea</h2><p>Async in Moth is built around three concepts:</p><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+<section class="container"><p><strong>Design draft:</strong> This page is a future-facing design document for language and compiler planning. It is not final user-facing documentation, and the syntax, semantics and implementation details may change before this feature is implemented. <code>$async:</code> is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its block semantics remain deferred, and this page delivers no implementation.</p><p>Moth approaches async and concurrency by making <strong>control flow explicit</strong> and <strong>communication safe by default</strong>.</p><p>Instead of hiding async behind keywords like <code>async</code> / <code>await</code> or complex runtime abstractions, Moth uses a small set of primitives that make data flow, suspension and concurrency visible in the syntax.</p><p>At a high level:</p><ul><li>Coroutines are lightweight, cooperative tasks</li><li>Coroutines communicate using typed channels</li><li>Concurrency is structured and scoped</li><li>Suspension points are visible in code</li><li>The compiler can enforce safety rules around shared data, references and task lifetimes</li></ul><p>The goal is async code that remains readable, predictable and analysable.</p></section>
+<section class="container"><h2>Core idea</h2><p>The draft uses these primitives:</p><table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
 
     
     <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
@@ -441,7 +441,7 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Channels </td>
- <td style="padding: 0.1em 0.5em; "> <code>Channel(Int)</code> </td>
+ <td style="padding: 0.1em 0.5em; "> typed channel declaration (future) </td>
  <td style="padding: 0.1em 0.5em; "> Create typed communication endpoints </td>
         </tr>
 
@@ -460,7 +460,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Coroutine </td>
  <td style="padding: 0.1em 0.5em; "> <code>spawn</code> </td>
- <td style="padding: 0.1em 0.5em; "> Start cooperative work inside an async scope </td>
+ <td style="padding: 0.1em 0.5em; "> Start cooperative work inside a compiler-owned async scope </td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -471,19 +471,19 @@ td {
 
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Scope </td>
- <td style="padding: 0.1em 0.5em; "> <code>async:</code> </td>
+ <td style="padding: 0.1em 0.5em; "> compiler-owned directive block </td>
  <td style="padding: 0.1em 0.5em; "> Bound the lifetime of spawned coroutines </td>
         </tr>
             
 
-</table><p>The intended model is:</p><p>&gt; Async is structured control flow plus safe message passing.</p></section>
-<section class="container"><h2>Channels</h2><p>Coroutines should not share mutable state by default.</p><p>Instead, they communicate by sending values through typed channels.</p><p>A channel is created with <code>Channel</code>, which takes a carried value type and returns two endpoints:</p><pre style="
+</table><p>The future <code>$async:</code> block is compiler-owned language structure. It is not builder metadata or a builder extension.</p><p>The intended model is:</p><p>&gt; Async is structured control flow plus safe message passing.</p></section>
+<section class="container"><h2>Channels</h2><p>Coroutines should not share mutable state by default.</p><p>Instead, they communicate by sending values through typed channels.</p><p>The separately accepted future channel construction is:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'>reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span></code></pre><p>In this example:</p><ul><li><code>writer</code> is the sending endpoint</li><li><code>reader</code> is the receiving endpoint</li><li>the channel carries values of type <code>Int</code></li></ul><p>You can think of this as a one-way pipe for values of a specific type.</p></section>
+"><code class='codeblock'>reader, writer <span class='moth-code-nominal'>Channel</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>AppMessage</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span></code></pre><p>In this declaration:</p><ul><li><code>writer</code> is the sending endpoint</li><li><code>reader</code> is the receiving endpoint</li><li>the channel carries values of type <code>AppMessage</code></li><li><code>Channel()</code> is the value-position constructor, with its type supplied by the receiving declaration</li></ul><p>The endpoint-parameter grammar for larger coroutine examples remains unresolved, so this page does not prescribe legacy constructor or endpoint generic spellings.</p><p>You can think of this as a one-way pipe for values of a specific type.</p></section>
 <section class="container"><h2>Sending values</h2><p>Values are sent into a channel with <code>&gt;&gt;</code>.</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
@@ -499,25 +499,14 @@ td {
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'>value <span class='moth-code-operator'>&lt;&lt;</span> reader</code></pre><p>The value flows left out of the channel and is assigned to <code>value</code>.</p><p>Receiving may suspend the current coroutine until a value is available.</p><p>Like sending, this is a visible suspension point.</p></section>
-<section class="container"><h2>Coroutines</h2><p>A coroutine is a function that can suspend and resume execution.</p><p>Coroutines are started with <code>spawn</code> and must run inside an <code>async</code> scope.</p><p>Example coroutine functions:</p><pre style="
+<section class="container"><h2>Coroutines</h2><p>A coroutine is a function that can suspend and resume execution.</p><p>Coroutines are started with <code>spawn</code> and must run inside a <code>$async:</code> scope.</p><p>The endpoint-parameter grammar for larger coroutine declarations is not fixed. This page therefore does not invent typed <code>producer</code> or <code>consumer</code> parameters. Their bodies use the accepted channel operations:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'><span class='moth-code-function'>producer</span> <span class='moth-code-delimiter'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span>i<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-        i <span class='moth-code-operator'>&gt;&gt;</span> writer
-        <span class='moth-code-keyword'>yield</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span>
-
-<span class='moth-code-function'>consumer</span> <span class='moth-code-delimiter'>|</span>reader <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>[</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span><span class='moth-code-delimiter'>:</span>
-        value <span class='moth-code-operator'>&lt;&lt;</span> reader
-        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>In this example:</p><ul><li><code>producer</code> sends integers into the channel</li><li><code>consumer</code> receives and prints them</li><li>neither coroutine shares mutable memory directly</li><li>all interaction happens through the channel</li></ul></section>
+"><code class='codeblock'>message <span class='moth-code-operator'>&gt;&gt;</span> writer
+value <span class='moth-code-operator'>&lt;&lt;</span> reader</code></pre><p>A future implementation must preserve endpoint direction, mandatory send-transfer and bounded task lifetime. Neither endpoint passing nor a complete coroutine function signature is implemented here.</p></section>
 <section class="container"><h2>Yield</h2><p><code>yield</code> explicitly suspends the current coroutine and allows other coroutines to run.</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
@@ -537,66 +526,32 @@ td {
         <span class='moth-code-keyword'>yield</span>
     <span class='moth-code-delimiter'>;</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>Here, <code>yield</code> prevents one long-running coroutine from starving others.</p><p>Suspension is always visible in the code.</p><p>There are no hidden pause points.</p></section>
-<section class="container"><h2>Structured async scopes</h2><p>Coroutines run inside an <code>async</code> scope.</p><pre style="
+<section class="container"><h2>Structured async scopes</h2><p>Coroutines run inside a <code>$async:</code> scope. <code>$async:</code> is compiler-owned language structure, not builder metadata.</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'><span class='moth-code-keyword'>async</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-operator'>..</span>.
-<span class='moth-code-delimiter'>;</span></code></pre><p>An <code>async</code> scope means:</p><ul><li>coroutines may be spawned inside the scope</li><li>suspension is allowed inside the scope</li><li>channel send and receive operations may suspend inside the scope</li><li>spawned coroutines are bounded by the scope</li><li>no detached background task can silently outlive its data</li></ul><p>Example:</p><pre style="
-    padding-left: 1em;
-    border-radius: 5px;
-    max-width: 100%;
-    white-space: pre;
-    overflow-x: auto;
-"><code class='codeblock'><span class='moth-code-keyword'>async</span><span class='moth-code-delimiter'>:</span>
-    reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span>
-
-    spawn <span class='moth-code-function'>producer</span><span class='moth-code-delimiter'>(</span>writer<span class='moth-code-delimiter'>)</span>
-    spawn <span class='moth-code-function'>consumer</span><span class='moth-code-delimiter'>(</span>reader<span class='moth-code-delimiter'>)</span>
-
-    <span class='moth-code-keyword'>loop</span><span class='moth-code-delimiter'>:</span>
-        <span class='moth-code-keyword'>yield</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>This makes concurrency structured and bounded.</p><p>You can see where async work starts, where it may suspend, and where it must be contained.</p></section>
+"><code class='codeblock'><span class='moth-code-directive'>$async</span><span class='moth-code-delimiter'>:</span>
+    reader, writer <span class='moth-code-nominal'>Channel</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>AppMessage</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-keyword'>yield</span>
+<span class='moth-code-delimiter'>;</span></code></pre><p>A <code>$async:</code> scope means:</p><ul><li>coroutines may be spawned inside the scope</li><li>suspension is allowed inside the scope</li><li>channel send and receive operations may suspend inside the scope</li><li>spawned coroutines are bounded by the scope</li><li>no detached background task can silently outlive its data</li></ul><p>The declaration above is a future syntax illustration, not a runnable program. Scheduling, endpoint passing and channel runtime behaviour remain deferred.</p><p>This makes the intended concurrency boundary visible and bounded.</p></section>
 <section class="container"><h2>Why not viral async types?</h2><p>Moth should avoid making async infect every function type by default.</p><p>The draft model does not rely on a special <code>Future[T]</code> return type everywhere, and it does not require every caller to become async just because one operation may suspend.</p><p>Instead:</p><ul><li>suspension is only valid in async-capable contexts</li><li>suspension points are explicit</li><li>channels make communication visible</li><li>spawned work is scoped</li><li>the compiler can reject unsafe use across scope boundaries</li></ul><p>The goal is not to hide async.</p><p>The goal is to make async local and visible.</p></section>
 <section class="container"><h2>Safety model</h2><p>The async model should preserve Moth&#39;s normal safety rules.</p><p>Async code should not allow:</p><ul><li>data races</li><li>dangling references into completed scopes</li><li>detached tasks that keep using local state</li><li>hidden mutable sharing between coroutines</li><li>unbounded background work by default</li></ul><p>Channels are the main communication primitive because they give the compiler a clear place to reason about ownership, borrowing and transfer.</p><p>Mutable shared state may be possible later through specific safe abstractions, but it should not be the default async model.</p></section>
-<section class="container"><h2>Full example</h2><pre style="
+<section class="container"><h2>Full example</h2><p>A larger producer/consumer example is intentionally omitted. Its endpoint-parameter grammar is unresolved, and this page does not prescribe alternate constructor or endpoint-generic spellings.</p><p>The accepted future declaration and scope spelling are shown together:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
     max-width: 100%;
     white-space: pre;
     overflow-x: auto;
-"><code class='codeblock'><span class='moth-code-function'>producer</span> <span class='moth-code-delimiter'>|</span>writer <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-delimiter'>|</span>i<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-        i <span class='moth-code-operator'>&gt;&gt;</span> writer
-        <span class='moth-code-keyword'>yield</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span>
-
-<span class='moth-code-function'>consumer</span> <span class='moth-code-delimiter'>|</span>reader <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>loop</span><span class='moth-code-delimiter'>:</span>
-        value <span class='moth-code-operator'>&lt;&lt;</span> reader
-        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span>value<span class='moth-code-delimiter'>)</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span>
-
-<span class='moth-code-keyword'>async</span><span class='moth-code-delimiter'>:</span>
-    reader, writer <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>)</span>
-
-    spawn <span class='moth-code-function'>producer</span><span class='moth-code-delimiter'>(</span>writer<span class='moth-code-delimiter'>)</span>
-    spawn <span class='moth-code-function'>consumer</span><span class='moth-code-delimiter'>(</span>reader<span class='moth-code-delimiter'>)</span>
-
-    <span class='moth-code-keyword'>loop</span><span class='moth-code-delimiter'>:</span>
-        <span class='moth-code-keyword'>yield</span>
-    <span class='moth-code-delimiter'>;</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>This example has three visible forms of async behaviour:</p><ul><li><code>spawn</code> starts concurrent work</li><li><code>&gt;&gt;</code> and <code>&lt;&lt;</code> communicate through the channel</li><li><code>yield</code> explicitly gives the scheduler a chance to run other work</li></ul></section>
+"><code class='codeblock'><span class='moth-code-directive'>$async</span><span class='moth-code-delimiter'>:</span>
+    reader, writer <span class='moth-code-nominal'>Channel</span> <span class='moth-code-keyword'>of</span> <span class='moth-code-nominal'>AppMessage</span> <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Channel</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-operator'>..</span>.
+<span class='moth-code-delimiter'>;</span></code></pre><p>The intended design has three visible forms of async behaviour:</p><ul><li><code>spawn</code> starts concurrent work</li><li><code>&gt;&gt;</code> and <code>&lt;&lt;</code> communicate through the channel</li><li><code>yield</code> explicitly gives the scheduler a chance to run other work</li></ul><p>No implementation is delivered by this design page.</p></section>
 <section class="container"><h2>Compiler lowering</h2><p>The exact lowering strategy is not final.</p><p>A future compiler implementation may lower coroutines into state machines.</p><p>Conceptually, each coroutine needs to preserve:</p><ul><li>its current execution point</li><li>its live local values</li><li>pending channel operations</li><li>any values that cross suspension points</li><li>enough ownership and borrow information to remain memory safe</li><li>the affine cleanup responsibility of any value transferred through a channel</li></ul><p>This fits Moth&#39;s broader compiler direction:</p><ul><li>AST validates syntax and types</li><li>HIR makes control flow explicit</li><li>borrow validation checks safe access</li><li>backend lowering decides how coroutines are represented for the target runtime</li></ul><p>Async should be represented semantically before backend-specific lowering.</p></section>
 <section class="container"><h2>Backend considerations</h2><p>This design depends on backend capabilities.</p><p>Important open questions include:</p><ul><li>how WebAssembly stack switching evolves</li><li>how browsers expose scheduling and suspension</li><li>how native Wasm runtimes expose async host calls</li><li>how Moth should integrate with browser event loops</li><li>how game engines or embedded hosts should drive scheduling</li><li>whether early JS output should use generator-style lowering, explicit state machines, or host promises</li></ul><p>The user-facing syntax should remain stable even if backend strategies differ.</p></section>
-<section class="container"><h2>Deferred design questions</h2><p>Several details should be deliberately deferred until the basic model is proven:</p><ul><li>cancellation semantics</li><li>channel buffering</li><li>channel close behaviour</li><li>task failure propagation</li><li>timeout syntax</li><li>select-style waiting on multiple channels</li><li>async host function imports</li><li>interaction with closures and captured mutable access</li><li>whether <code>Channel[Int]</code> remains the final channel type syntax</li><li>any parallel coroutine model, which requires an accepted atomic counting design first</li></ul><p>These should be designed as extensions, not packed into the first implementation.</p></section>
-<section class="container"><h2>Current status</h2><p>This design is not implemented yet.</p><p>It is intended as a future reference for language design and compiler implementation planning.</p><p>The first implementation should likely focus on:</p><ul><li>parsing and rejecting async syntax deliberately</li><li>defining the HIR representation for suspension-capable control flow</li><li>validating what values may live across suspension points</li><li>modelling channel endpoints as typed values</li><li>lowering a minimal cooperative coroutine model in one backend</li></ul><p>The important part is to keep the source model explicit and structured.</p></section>
+<section class="container"><h2>Deferred design questions</h2><p>Several details should be deliberately deferred until the basic model is proven:</p><ul><li>cancellation semantics</li><li>channel buffering</li><li>channel close behaviour</li><li>task failure propagation</li><li>timeout syntax</li><li>select-style waiting on multiple channels</li><li>async host function imports</li><li>endpoint passing and coroutine parameter grammar</li><li>interaction with closures and captured mutable access</li><li>any parallel coroutine model, which requires an accepted atomic counting design first</li></ul><p>These should be designed as extensions, not packed into the first implementation.</p></section>
+<section class="container"><h2>Current status</h2><p>This design is not implemented yet.</p><p><code>$async:</code> is the agreed future spelling for a compiler-owned directive block, not builder metadata. Its semantics, lowering and runtime support remain deferred; no implementation is delivered by this page.</p><p>It is intended as a future reference for language design and compiler implementation planning.</p><p>Any implementation must preserve the accepted channel memory rules: mandatory send-transfer, bounded lifetime, independent graphs, failed-send responsibility and non-atomic REC under cooperative scheduling.</p><p>The important part is to keep the source model explicit and structured.</p></section>
 <script>
 function __moth_is_ref(value) {
 return value !== null && typeof value === "object" && value.__moth_ref === true;

@@ -43,10 +43,15 @@ Consumers see only the support facade's `export:` surface. They cannot address `
 
 ### Depended-on package roots do not produce routes
 
-Code depends on a support package root rather than activating it as an HTML route.
-Support roots reject top-level runtime work and page fragments. They export
-declarations but produce no HTML artefact. See
-@../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
+Support roots are API-only and cannot declare `$page` or another application
+purpose. They reject top-level runtime work and direct page fragments, export
+declarations instead and produce no HTML artefact. The accepted root-purpose rule
+initially recognises `$page` only on normal module roots; future `$test` remains
+deferred. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
+
+Support packages may hold reusable ordinary `#` constants and expose them through
+their current public surface. They do not need custom `$project` metadata; project
+metadata remains the separate `config.moth` contract.
 
 ### Origin and backing are separate
 

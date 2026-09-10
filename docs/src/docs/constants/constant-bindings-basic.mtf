@@ -14,3 +14,10 @@ They can be used by other compile-time values:
 ]
 
 Use a normal binding when the value belongs to runtime code.
+
+The initializer exception below belongs to accepted queued `$config` design; current
+Alpha input contracts still use `#Config of T`.
+
+Ordinary constants always need an initializer. A marked `$config` input may omit one;
+required non-optional inputs then report missing input and optional inputs resolve to
+absence. See @../../project-structure/#build-inputs (Build configuration values).

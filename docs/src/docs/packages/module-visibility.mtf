@@ -81,6 +81,11 @@ Circular dependency clauses between files in the same module are accepted when t
 
 There is no way to bypass the module public-surface boundary by choosing a different dependency path. All cross-module dependency clauses go through the same resolution and visibility check.
 
+`export:` is the implemented public marker. A later `$export` migration is accepted
+direction, but block support remains undecided; `export:` and `$export` will not be
+permanent alternatives.
+
+
 ### Related concepts
 
 - For the export block see @../project-structure/#public-api (Public API).

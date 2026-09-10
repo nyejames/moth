@@ -1,16 +1,34 @@
-The module root file owns your page's runtime work. Helper files provide declarations.
+**Current versus accepted.** Alpha HTML entries still come from root activity. The accepted design requires a root purpose, initially `$page`. Dependencies never activate their roots.
 
 ### Root activation
 
-Top-level runtime code in the module root becomes a dormant `start`. It runs only when the builder selects that module as an entry. Helper files never run their own top-level code.
+Top-level runtime code in a selected module root becomes a dormant `start`. It
+runs once when that module becomes a page entry. Helper files provide
+declarations and never own an entry or an independent start.
+
+### Purpose and comments
+
+An unmarked root with authored runtime work or direct output needs a purpose,
+even inside `if false`. API-only declarations need no purpose. Semantically
+classified `$doc`, `$note` and `$todo` templates count as documentation and
+don't need one.
+
+An accepted page can contain metadata alone:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+It still emits a complete document. A dependency cannot make unpurposed
+runtime work legal by keeping it dormant.
 
 ### Page fragments
 
-Direct top-level templates in the root become page fragments:
+Direct top-level templates in the selected root remain fragments:
 
-- A const fragment (the `#` prefix form) folds at compile time and becomes static HTML.
-- A runtime fragment (the plain bracket form) runs when the module is activated as an entry and fills a slot in the page.
+- A const fragment (the `#` prefix form) becomes static HTML.
+- A runtime fragment (the plain bracket form) runs through the root's `start`.
 
-### Helpers
-
-Helper files define functions, types and constants. They do not own an export block. The root binds them and chooses what becomes public. Do not put page fragments in helper files.
+The builder keeps static and runtime fragments in source order. Assigned or
+returned templates are ordinary values, and helpers cannot create page
+fragments by themselves.

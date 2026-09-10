@@ -299,8 +299,9 @@ fn top_level_usage_lists_every_audit_mode() {
     for mode in [
         "honesty-audit",
         "source-audit",
-        "feature-lane-check",
+        "first-party-deps",
         "span-census",
+        "feature-lane-check",
     ] {
         assert!(
             TOP_LEVEL_USAGE.contains(mode),
