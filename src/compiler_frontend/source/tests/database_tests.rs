@@ -1,6 +1,7 @@
 use super::{
-    SourceDatabase, SourceId, SourceKind, SourceProvenance, SourceRegistrationIndex,
-    line_index::LinePosition, record::ensure_source_snapshot_fits,
+    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceId, SourceKind,
+    SourceProvenance, SourceRegistrationIndex, line_index::LinePosition,
+    record::ensure_source_snapshot_fits,
 };
 
 use crate::builder_surface::SourceFileKind;
@@ -8,6 +9,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::mem::{align_of, size_of};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::test_support::database_with_retained_text;
 
@@ -39,6 +41,32 @@ fn source_id_try_from_index_spans_the_full_compact_domain() {
         None,
         "indexes beyond the u32 domain must be rejected without a lossy cast"
     );
+}
+
+#[test]
+fn frozen_identity_handle_is_single_assignment() {
+    let identity = Arc::new(FrozenIdentityContext::from_parts(
+        StringTable::new(),
+        SourceDatabase::empty(),
+    ));
+    let other_identity = Arc::new(FrozenIdentityContext::from_parts(
+        StringTable::new(),
+        SourceDatabase::empty(),
+    ));
+    let handle = FrozenIdentityHandle::new();
+
+    assert!(handle.get().is_none());
+    handle
+        .install(Arc::clone(&identity))
+        .expect("first frozen identity assignment should succeed");
+    assert!(handle.get().is_some());
+    handle
+        .install(Arc::clone(&identity))
+        .expect("reinstalling the same frozen identity should be idempotent");
+    let error = handle
+        .install(other_identity)
+        .expect_err("a handle must reject a different frozen identity");
+    assert!(error.msg.contains("two different contexts"));
 }
 
 #[test]

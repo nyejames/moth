@@ -56,7 +56,8 @@ mod span_tests;
 pub(crate) mod test_support;
 
 pub(crate) use database::{
-    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders,
+    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseRetentionMetrics,
+    SourceSpanBuilders,
 };
 pub(crate) use frozen_identity::{FrozenIdentityContext, FrozenIdentityHandle};
 pub(crate) use id::SourceId;

@@ -4,6 +4,9 @@ use super::{
     span::{SourceSpan, SpanJoinError},
 };
 
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticPayload, SourceSpanCapacityResource,
+};
 use std::cmp::Ordering;
 
 use crate::compiler_frontend::compiler_errors::ErrorType;
@@ -492,11 +495,9 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
     assert_eq!(error.length(), 1023);
     assert_eq!(error.reason(), SpanCapacityReason::ExtendedTableFull);
 
-    // The real exhausted table must keep token construction failures in preparation's
-    // infrastructure lane. The lexer diagnoses the unterminated literal before token
-    // construction, then capture hits the exhausted table and aborts terminally: the
-    // diagnosis is replaced by the capacity failure carrying the offending exact range,
-    // so no span is silently dropped.
+    // The real exhausted table must classify a long authored token as a typed source diagnostic
+    // at the tokenizer boundary. The rejected interval remains in the payload, while the primary
+    // span uses the file-owned inline source-start anchor and does not append another row.
     let source = format!("\"{}\"", "x".repeat(1023));
     let path = Path::new("capacity.moth");
     let mut strings = StringTable::new();
@@ -520,10 +521,30 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
         &mut builder,
     )
     .expect_err("minting a long token must report exhausted source storage");
-    let FileFrontendPrepareFailure::Infrastructure(error) = failure else {
-        panic!("token storage failure must not become an authored-source diagnosis");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("token storage exhaustion must remain an authored-source diagnosis");
     };
-    assert_eq!(error.error_type, ErrorType::File);
+    assert_eq!(
+        error.diagnostic.identity().code,
+        "MOTH-SYNTAX-0036",
+        "capacity diagnostics need a stable descriptor identity"
+    );
+    assert_eq!(
+        error.diagnostic.primary_span,
+        Some(SourceSpan::new(source_id, LocalSpan::source_start())),
+        "capacity diagnostics must retain the owning file's inline source-start anchor"
+    );
+    match &error.diagnostic.payload {
+        DiagnosticPayload::SourceSpanCapacity {
+            start,
+            length,
+            resource,
+        } => {
+            assert_eq!((*start, *length), (0, source.len() as u32));
+            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpanTable);
+        }
+        payload => panic!("unexpected source-capacity payload: {payload:?}"),
+    }
 
     assert_eq!(builder.len(), last_usable_index as usize + 1);
     let mut malformed_builder = ExtendedSpanBuilder::new();
@@ -539,15 +560,27 @@ fn last_usable_extended_index_encodes_and_one_past_it_is_capacity_error() {
         &mut strings,
         &mut malformed_builder,
     )
-    .expect_err("capture must abort terminally when the source's span table is exhausted");
-    // The unterminated literal is diagnosed before token construction; capture then hits the
-    // exhausted table. No source span may be fabricated after local-span allocation fails.
-    let FileFrontendPrepareFailure::Infrastructure(error) = failure else {
-        panic!("capture exhaustion must surface the terminal capacity failure");
+    .expect_err("the unterminated literal must report exhausted source storage");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("source-owned span exhaustion must remain an authored-source diagnosis");
     };
-    assert_eq!(error.error_type, ErrorType::File);
-    assert_eq!(error.source_span, None);
-    assert_eq!(error.host_path, None);
+    assert_eq!(error.diagnostic.identity().code, "MOTH-SYNTAX-0036");
+    assert_eq!(
+        error.diagnostic.primary_span,
+        Some(SourceSpan::new(malformed_id, LocalSpan::source_start())),
+        "the malformed file must remain the diagnostic's owning source",
+    );
+    match &error.diagnostic.payload {
+        DiagnosticPayload::SourceSpanCapacity {
+            start,
+            length,
+            resource,
+        } => {
+            assert_eq!((*start, *length), (0, malformed_source.len() as u32));
+            assert_eq!(*resource, SourceSpanCapacityResource::ExtendedSpanTable);
+        }
+        payload => panic!("unexpected malformed-source capacity payload: {payload:?}"),
+    }
     assert_eq!(malformed_builder.len(), last_usable_index as usize + 1);
 }
 
@@ -1100,4 +1133,17 @@ fn exact_reports_end_overflow_at_u32_boundary_without_wrapping() {
         assert_eq!(error.length(), maximum_length + 1);
         assert_eq!(error.reason(), SpanCapacityReason::EndUnrepresentable);
     }
+}
+
+#[test]
+fn end_unrepresentable_capacity_stays_on_compiler_error_lane() {
+    let mut builder = ExtendedSpanBuilder::new();
+    let error = LocalSpan::exact(u32::MAX, 1, &mut builder)
+        .expect_err("a range beyond u32::MAX must be rejected");
+    let anchor = SourceSpan::new(SourceId::from_index(7), LocalSpan::source_start());
+
+    let compiler_error = CompilerDiagnostic::from_span_capacity_error(error, Some(anchor))
+        .expect_err("an unrepresentable end is a compiler invariant failure");
+    assert_eq!(compiler_error.error_type, ErrorType::Compiler);
+    assert_eq!(compiler_error.source_span, Some(anchor));
 }

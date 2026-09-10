@@ -5,12 +5,13 @@
 //! tooling without carrying final prose in compiler stages.
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagnosticLabel {
     pub(crate) span: Option<SourceSpan>,
+    pub(crate) frozen_identity_handle: Option<FrozenIdentityHandle>,
     pub style: DiagnosticLabelStyle,
     pub message: Option<DiagnosticLabelMessage>,
 }
@@ -22,9 +23,30 @@ impl DiagnosticLabel {
     ) -> Self {
         Self {
             span,
+            frozen_identity_handle: None,
             style: DiagnosticLabelStyle::Secondary,
             message,
         }
+    }
+
+    pub(crate) fn secondary_with_frozen_identity(
+        span: Option<SourceSpan>,
+        message: Option<DiagnosticLabelMessage>,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) -> Self {
+        Self {
+            span,
+            frozen_identity_handle: Some(frozen_identity_handle),
+            style: DiagnosticLabelStyle::Secondary,
+            message,
+        }
+    }
+
+    pub(crate) fn set_frozen_identity_handle(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        self.frozen_identity_handle = Some(frozen_identity_handle);
     }
 
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {

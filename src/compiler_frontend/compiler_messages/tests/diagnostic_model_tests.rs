@@ -19,7 +19,7 @@ use super::{
     UnsupportedOperatorCategory, is_well_formed_reason_key,
 };
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType, merge_stage_messages,
+    CompilerError, CompilerMessages, ErrorType, RenderFrozenContext,
 };
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
@@ -29,13 +29,14 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 fn span<T>(_path: T) -> Option<SourceSpan> {
     None
@@ -603,36 +604,167 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
 }
 
 #[test]
-fn merge_stage_messages_preserves_render_type_context_with_warnings() {
-    let string_table = StringTable::new();
-    let type_environment = TypeEnvironment::new();
-    let diagnostic = CompilerDiagnostic::type_mismatch(
-        type_environment.builtins().int,
-        type_environment.builtins().string,
-        TypeMismatchContext::Assignment,
-        None,
-    );
-    let warning = CompilerDiagnostic::unreachable_match_arm(None);
-    let messages = CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
-        .with_type_context_for_all_diagnostics(type_environment);
+fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
+    let mut frozen_table = StringTable::new();
+    let frozen_name = frozen_table.intern("frozen-name");
+    let frozen_path = InternedPath::from_single_str("FrozenType", &mut frozen_table);
+    let frozen_identity = Arc::new(FrozenIdentityContext::from_parts(
+        frozen_table.clone(),
+        SourceDatabase::empty(),
+    ));
 
-    let merged = merge_stage_messages(messages, &[warning], &string_table);
-    let rendered_lines =
+    let make_frozen_messages = || {
+        let local_table = frozen_table.clone();
+        let mut type_environment = TypeEnvironment::new();
+        let (_, frozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path: frozen_path.clone(),
+            fields: Box::new([]),
+            generic_parameters: None,
+            const_record: false,
+        });
+        let diagnostics = vec![
+            CompilerDiagnostic::unknown_value_name(frozen_name, None),
+            CompilerDiagnostic::type_mismatch(
+                frozen_type,
+                type_environment.builtins().int,
+                TypeMismatchContext::Assignment,
+                None,
+            ),
+        ];
+        let mut messages = CompilerMessages::from_diagnostics(diagnostics, local_table)
+            .with_type_context_for_all_diagnostics(type_environment);
+        messages.render_frozen_contexts.push(RenderFrozenContext {
+            diagnostic_range: 0..2,
+            identity: Arc::clone(&frozen_identity),
+        });
+        messages
+    };
+
+    let make_unfrozen_messages = || {
+        let mut local_table = StringTable::new();
+        let unfrozen_name = local_table.intern("unfrozen-name");
+        let unfrozen_path = InternedPath::from_single_str("UnfrozenType", &mut local_table);
+        let mut type_environment = TypeEnvironment::new();
+        let (_, unfrozen_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+            id: NominalTypeId(0),
+            path: unfrozen_path,
+            fields: Box::new([]),
+            generic_parameters: None,
+            const_record: false,
+        });
+        CompilerMessages::from_diagnostics(
+            vec![
+                CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
+                CompilerDiagnostic::type_mismatch(
+                    unfrozen_type,
+                    type_environment.builtins().int,
+                    TypeMismatchContext::Assignment,
+                    None,
+                ),
+            ],
+            local_table,
+        )
+        .with_type_context_for_all_diagnostics(type_environment)
+    };
+
+    let make_mixed_messages = || {
+        let mut messages = make_frozen_messages();
+        messages.append_messages_preserving_context(make_unfrozen_messages());
+        messages
+    };
+
+    let mut standalone_messages = make_mixed_messages();
+    let mut standalone_table = StringTable::new();
+    standalone_table.intern("standalone-collision");
+    let standalone_remap = standalone_table.merge_from(standalone_messages.string_table.as_ref());
+    standalone_messages.remap_string_ids(&standalone_remap);
+    standalone_messages.string_table = Box::new(standalone_table);
+    let standalone_rendered =
         crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
-            &merged,
-        );
+            &standalone_messages,
+        )
+        .join("\n");
+    assert!(
+        standalone_rendered.contains("frozen-name"),
+        "{standalone_rendered}"
+    );
+    assert!(
+        standalone_rendered.contains("unfrozen-name"),
+        "{standalone_rendered}"
+    );
+    assert!(
+        standalone_rendered.contains("expected FrozenType"),
+        "{standalone_rendered}"
+    );
+    assert!(
+        standalone_rendered.contains("expected UnfrozenType"),
+        "{standalone_rendered}"
+    );
 
-    assert_eq!(merged.render_type_contexts().len(), 1);
-    assert_eq!(rendered_lines.len(), 2);
-    assert!(
-        rendered_lines[0].contains("expected Int, found String"),
-        "errors should render before warnings; first line should be the type mismatch, got: {}",
-        rendered_lines[0]
+    let mut aggregate_table = StringTable::new();
+    aggregate_table.intern("aggregate-collision");
+    let mut messages = CompilerMessages::empty(aggregate_table);
+    messages.append_messages_preserving_context(standalone_messages);
+    // Repeat the same mixed-owner append. The second merge is non-identity for both local
+    // tables, so this checks that ownership survives more than one aggregation step.
+    messages.append_messages_preserving_context(make_mixed_messages());
+
+    assert_eq!(
+        messages
+            .render_type_contexts()
+            .iter()
+            .map(|context| context.diagnostic_range.clone())
+            .collect::<Vec<_>>(),
+        vec![0..2, 2..4, 4..6, 6..8]
     );
-    assert!(
-        !rendered_lines[0].contains("TypeId("),
-        "type names should be rendered, not raw type ids"
+    assert_eq!(
+        messages
+            .render_frozen_contexts
+            .iter()
+            .map(|context| context.diagnostic_range.clone())
+            .collect::<Vec<_>>(),
+        vec![0..2, 4..6]
     );
+
+    let frozen_name_id = StringId::from_index(0);
+    assert_eq!(
+        messages.string_table.resolve(frozen_name_id),
+        "aggregate-collision"
+    );
+    for diagnostic_index in [0, 4] {
+        let DiagnosticPayload::UnknownName { name, .. } =
+            &messages.diagnostic_slice()[diagnostic_index].payload
+        else {
+            panic!("expected frozen unknown-name diagnostic");
+        };
+        assert_eq!(*name, frozen_name_id);
+        assert_eq!(
+            messages
+                .frozen_identity_context_for_diagnostic(diagnostic_index)
+                .expect("frozen diagnostic owner")
+                .try_resolve_string(*name),
+            Some("frozen-name")
+        );
+    }
+    for diagnostic_index in [2, 6] {
+        let DiagnosticPayload::UnknownName { name, .. } =
+            &messages.diagnostic_slice()[diagnostic_index].payload
+        else {
+            panic!("expected unfrozen unknown-name diagnostic");
+        };
+        assert_eq!(messages.string_table.resolve(*name), "unfrozen-name");
+    }
+
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &messages,
+        )
+        .join("\n");
+    assert!(rendered.contains("frozen-name"), "{rendered}");
+    assert!(rendered.contains("unfrozen-name"), "{rendered}");
+    assert!(rendered.contains("expected FrozenType"), "{rendered}");
+    assert!(rendered.contains("expected UnfrozenType"), "{rendered}");
 }
 
 #[test]

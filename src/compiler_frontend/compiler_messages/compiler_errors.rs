@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! Frontend/compiler stages
-//!   -> CompilerDiagnostic { kind, severity, primary_span, labels, payload }
+//!   -> CompilerDiagnostic { kind, severity, primary_span, primary owner, labels, payload }
 //!   -> DiagnosticBag accumulates one or many diagnostics locally
 //!   -> CompilerMessages owns ordered diagnostics + frozen identity range rows plus
 //!      transitional table/source rows at stage/build boundaries
@@ -80,8 +80,9 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
-    FrozenIdentityContext, SourceDatabase, SourceSpan, SpanCapacityError, SpanCapacityReason,
+    FrozenIdentityContext, SourceDatabase, SourceSpan, SpanCapacityError,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
@@ -122,9 +123,10 @@ pub struct CompilerMessages {
     ///
     /// WHAT: owns one or many immutable identity contexts with range-aligned lookup. Each row
     /// pairs an `Arc<FrozenIdentityContext>` with the diagnostic range produced against it.
-    /// WHY: the frozen context is authoritative for retained source spans and path/string
-    /// resolution; ranges shift alongside diagnostics during aggregation with first-match
-    /// precedence. Frozen IDs are already final and must never be remapped.
+    /// WHY: the frozen context is authoritative for every retained fact in its range, including
+    /// compact string IDs. Ranges shift alongside diagnostics during aggregation with
+    /// first-match precedence; facts covered by a row must move with that owner and never be
+    /// remapped through a mutable table.
     pub(crate) render_frozen_contexts: Vec<RenderFrozenContext>,
 
     /// Per-diagnostic source snapshots used by diagnostic renderers (transitional).
@@ -149,6 +151,9 @@ pub struct CompilerMessages {
 const _: () = assert!(std::mem::size_of::<CompilerMessages>() <= 128);
 #[derive(Debug, Clone)]
 pub(crate) struct RenderTypeContext {
+    /// Range whose `TypeId` payloads resolve against this environment. When the range is covered
+    /// by a frozen identity row, the environment's `StringId`s belong to that row's immutable
+    /// string table and must move unchanged with it.
     pub(crate) diagnostic_range: Range<usize>,
     pub(crate) type_environment: TypeEnvironment,
 }
@@ -554,11 +559,14 @@ impl CompilerMessages {
     ///
     /// WHAT: moves diagnostics and all frozen/source/type render-context ranges from `messages`
     ///       into this set, offsets the appended ranges by the current diagnostic count, and
-    ///       remaps diagnostic-owned IDs into this set's table.
+    ///       remaps only premerge facts into this set's table.
     /// WHY: final aggregation consumes module-local message owners without cloning their
-    ///       diagnostics or string tables. Each incoming table is merged exactly once before its
-    ///       diagnostics and type environments are appended; the outer infrastructure error keeps
-    ///       its own typed source span and host path.
+    ///       diagnostics or string tables. Each incoming table is merged exactly once before
+    ///       the diagnostics and type environments are appended. A diagnostic covered by an
+    ///       incoming frozen identity row already owns its string IDs (and its type context);
+    ///       those facts move unchanged with that row while premerge facts are rewritten for the
+    ///       mutable aggregate table. The outer infrastructure error keeps its own typed source
+    ///       span and host path.
     pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
         let CompilerMessages {
             mut diagnostics,
@@ -569,14 +577,16 @@ impl CompilerMessages {
             mut render_type_contexts,
         } = messages;
         let remap = self.string_table.merge_from(string_table.as_ref());
-        if !remap.is_identity() {
-            for diagnostic in &mut diagnostics {
-                diagnostic.remap_string_ids(&remap);
-            }
-            for type_context in &mut render_type_contexts {
-                type_context.type_environment.remap_string_ids(&remap);
-            }
-        }
+        remap_diagnostics_preserving_frozen_context(
+            &mut diagnostics,
+            &remap,
+            &render_frozen_contexts,
+        );
+        remap_type_contexts_preserving_frozen_context(
+            &mut render_type_contexts,
+            &remap,
+            &render_frozen_contexts,
+        );
 
         let shift = self.diagnostics.len();
         self.diagnostics.append(&mut diagnostics);
@@ -602,6 +612,23 @@ impl CompilerMessages {
         if let Some(error) = infrastructure_error {
             self.set_infrastructure_error(*error);
         }
+    }
+    /// Remap premerge facts into another mutable string-table domain.
+    ///
+    /// Facts covered by a [`RenderFrozenContext`] already belong to that row's immutable identity
+    /// owner. They must remain byte-for-byte in the owner's ID domain while any premerge
+    /// diagnostic or type-context facts continue through the supplied mutable-table remap.
+    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        remap_diagnostics_preserving_frozen_context(
+            &mut self.diagnostics,
+            remap,
+            &self.render_frozen_contexts,
+        );
+        remap_type_contexts_preserving_frozen_context(
+            &mut self.render_type_contexts,
+            remap,
+            &self.render_frozen_contexts,
+        );
     }
 
     /// Resolve the source database that produced one diagnostic.
@@ -658,20 +685,176 @@ impl CompilerMessages {
         .with_optional_frozen_identity(frozen_identity)
     }
 
+    /// Install late-bound generic donor owners for one stable package domain.
+    ///
+    /// A diagnosed module can fail before its declaring module's materialisation context reaches
+    /// the successful-boundary installation walk. Labels still carry the donor's package identity,
+    /// so the final render tail installs the exact frozen context without guessing from a colliding
+    /// `SourceId` or the diagnostic's requester domain.
+    pub(crate) fn install_frozen_identity_handles_for_domain(
+        &self,
+        domain: &StablePackageIdentity,
+        identity: &Arc<FrozenIdentityContext>,
+    ) -> Result<(), CompilerError> {
+        for diagnostic in &self.diagnostics {
+            if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                && handle.domain() == Some(domain)
+            {
+                handle.install(Arc::clone(identity))?;
+            }
+            for label in &diagnostic.labels {
+                let Some(handle) = label.frozen_identity_handle.as_ref() else {
+                    continue;
+                };
+                if handle.domain() == Some(domain) {
+                    handle.install(Arc::clone(identity))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reject any donor label that reached the final boundary without an owning identity.
+    ///
+    /// Unknown domains are compiler bugs, not permission to reinterpret a donor span through the
+    /// requester or project-root context.
+    pub(crate) fn ensure_frozen_identity_handles_installed(&self) -> Result<(), CompilerError> {
+        for diagnostic in &self.diagnostics {
+            if diagnostic
+                .primary_frozen_identity_handle
+                .as_ref()
+                .is_some_and(|handle| handle.get().is_none())
+            {
+                return Err(CompilerError::compiler_error(
+                    "diagnostic primary reached the frozen render boundary without its donor identity",
+                ));
+            }
+            for label in &diagnostic.labels {
+                let Some(handle) = label.frozen_identity_handle.as_ref() else {
+                    continue;
+                };
+                if handle.get().is_none() {
+                    return Err(CompilerError::compiler_error(
+                        "diagnostic label reached the frozen render boundary without its donor identity",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn render_type_contexts(&self) -> &[RenderTypeContext] {
         &self.render_type_contexts
     }
+}
+fn diagnostic_is_frozen(diagnostic_index: usize, frozen_contexts: &[RenderFrozenContext]) -> bool {
+    frozen_contexts
+        .iter()
+        .any(|context| context.diagnostic_range.contains(&diagnostic_index))
+}
 
-    pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        // Frozen identity rows are intentionally left untouched: frozen IDs are already final.
-        for diagnostic in self.diagnostics.iter_mut() {
+fn remap_diagnostics_preserving_frozen_context(
+    diagnostics: &mut [CompilerDiagnostic],
+    remap: &StringIdRemap,
+    frozen_contexts: &[RenderFrozenContext],
+) {
+    if remap.is_identity() {
+        return;
+    }
+
+    for (diagnostic_index, diagnostic) in diagnostics.iter_mut().enumerate() {
+        if !diagnostic_is_frozen(diagnostic_index, frozen_contexts) {
             diagnostic.remap_string_ids(remap);
         }
-        for type_context in &mut self.render_type_contexts {
-            type_context.type_environment.remap_string_ids(remap);
+    }
+}
+
+/// Split a type-context range at frozen-owner boundaries.
+///
+/// A producer normally gives one type environment to one owner range. Splitting the uncommon
+/// mixed range keeps that invariant true even when a caller composes frozen and premerge
+/// diagnostics into one incoming vessel: frozen segments retain the original environment while
+/// premerge segments receive a remapped clone.
+fn type_context_segments(
+    range: &Range<usize>,
+    frozen_contexts: &[RenderFrozenContext],
+) -> Vec<(Range<usize>, bool)> {
+    if range.is_empty() {
+        return vec![(range.clone(), false)];
+    }
+
+    let mut boundaries = vec![range.start, range.end];
+    for frozen_context in frozen_contexts {
+        let start = range.start.max(frozen_context.diagnostic_range.start);
+        let end = range.end.min(frozen_context.diagnostic_range.end);
+        if start < end {
+            boundaries.push(start);
+            boundaries.push(end);
         }
     }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut segments: Vec<(Range<usize>, bool)> =
+        Vec::with_capacity(boundaries.len().saturating_sub(1));
+    for window in boundaries.windows(2) {
+        let segment = window[0]..window[1];
+        if segment.is_empty() {
+            continue;
+        }
+        let is_frozen = diagnostic_is_frozen(segment.start, frozen_contexts);
+        if let Some((previous, previous_is_frozen)) = segments.last_mut()
+            && *previous_is_frozen == is_frozen
+            && previous.end == segment.start
+        {
+            previous.end = segment.end;
+        } else {
+            segments.push((segment, is_frozen));
+        }
+    }
+    segments
+}
+
+fn remap_type_contexts_preserving_frozen_context(
+    type_contexts: &mut Vec<RenderTypeContext>,
+    remap: &StringIdRemap,
+    frozen_contexts: &[RenderFrozenContext],
+) {
+    if remap.is_identity() {
+        return;
+    }
+
+    let incoming = std::mem::take(type_contexts);
+    let mut remapped = Vec::with_capacity(incoming.len());
+    for context in incoming {
+        let segments = type_context_segments(&context.diagnostic_range, frozen_contexts);
+        let segment_count = segments.len();
+        let mut environment = Some(context.type_environment);
+
+        for (segment_index, (diagnostic_range, is_frozen)) in segments.into_iter().enumerate() {
+            // Keep one owned environment for the final segment and clone only when a mixed range
+            // must expose both owner domains. Homogeneous premerge/frozen rows stay move-only.
+            let mut type_environment = if segment_index + 1 == segment_count {
+                environment
+                    .take()
+                    .expect("type-context environment must have one owner")
+            } else {
+                environment
+                    .as_ref()
+                    .expect("type-context environment must have one owner")
+                    .clone()
+            };
+            if !is_frozen {
+                type_environment.remap_string_ids(remap);
+            }
+            remapped.push(RenderTypeContext {
+                diagnostic_range,
+                type_environment,
+            });
+        }
+    }
+    *type_contexts = remapped;
 }
 
 #[derive(Debug, Eq, Hash, PartialEq, Clone)]
@@ -708,23 +891,6 @@ pub struct CompilerError {
     pub metadata: HashMap<CompilerErrorMetadataKey, String>,
 }
 
-/// Merge warnings produced by an earlier frontend stage into a later message set.
-///
-/// WHAT: preserves diagnostic order and render type-context ranges while attaching the caller's
-///       current string table to the returned boundary container.
-/// WHY: stage orchestration and HIR-derived convergence share this diagnostic boundary, so the
-///      neutral compiler-message owner keeps warning composition out of either coordinator.
-pub(crate) fn merge_stage_messages(
-    messages: CompilerMessages,
-    warnings: &[CompilerDiagnostic],
-    string_table: &StringTable,
-) -> CompilerMessages {
-    let mut messages = messages;
-    messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-    messages.string_table = Box::new(string_table.clone());
-    messages
-}
-
 impl CompilerError {
     pub fn new(
         msg: impl Into<String>,
@@ -740,34 +906,29 @@ impl CompilerError {
         }
     }
 
-    /// Span exhaustion shares the existing source-size failure lane until Phase 5 reclassifies
-    /// it. The optional source span preserves any already-encoded provenance without requiring
-    /// callers to fabricate a span when packing failed before one could be created.
+    /// Classify an unrepresentable source-span end as a compiler invariant failure.
+    ///
+    /// Extended-table exhaustion is converted into a typed source diagnostic by
+    /// `CompilerDiagnostic::from_span_capacity_error`; this constructor is reserved for the
+    /// accepted-source-size invariant that cannot represent `start + length`.
     pub(crate) fn source_span_capacity(
         error: SpanCapacityError,
         source_span: Option<SourceSpan>,
     ) -> Self {
-        let (message, error_type) = match error.reason() {
-            SpanCapacityReason::ExtendedTableFull => (
-                format!(
-                    "this source needs an exact span at byte offset {} with length {}, but \
-                     its span table cannot hold another long or late range",
-                    error.start(),
-                    error.length(),
-                ),
-                ErrorType::File,
+        debug_assert!(
+            matches!(
+                error.reason(),
+                crate::compiler_frontend::source::SpanCapacityReason::EndUnrepresentable
             ),
-            SpanCapacityReason::EndUnrepresentable => (
-                format!(
-                    "span at byte offset {} with length {} ends past u32::MAX in a source \
-                     that was accepted as addressable; this is a compiler bug",
-                    error.start(),
-                    error.length(),
-                ),
-                ErrorType::Compiler,
-            ),
-        };
-        Self::new(message, source_span, error_type)
+            "only unrepresentable span ends use the compiler-error capacity lane",
+        );
+        let message = format!(
+            "span at byte offset {} with length {} ends past u32::MAX in a source \
+             that was accepted as addressable; this is a compiler bug",
+            error.start(),
+            error.length(),
+        );
+        Self::new(message, source_span, ErrorType::Compiler)
     }
 
     /// Attach structured guidance metadata to this error and return it for chaining.

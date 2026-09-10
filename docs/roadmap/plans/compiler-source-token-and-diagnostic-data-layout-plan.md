@@ -7,10 +7,10 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 complete. The source, token and diagnostic representation cutover, focused corrections,
-> independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`,
-> `134aebf63`, `749f9c3f0` and `eb6416312`. The plan and benchmark evidence closeout sequence is
-> committed through `1f6d4a81` (following `38e68d2a5`).
+> Phase 1 review-correction pass is complete and committed after the external-review correction
+> checkpoint below. The retained-memory evidence gap, ownership boundary findings, and feature-lane
+> regression are resolved here.
+> Phase 2 remains paused for external user review.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -67,17 +67,21 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 complete; Phase 2 is paused for external user review.
+- Phase: Phase 1 review-correction pass complete; Phase 2 remains paused for external user review.
 - Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
   deterministic publication while preserving exact authored spans and typed infrastructure failures.
-- Current code evidence: the old source-location identity model and boxed `CompilerDiagnostic`
-  boundaries are absent from production sources; typed infrastructure failures use `CompilerError`.
-- Validation evidence: `just validate`, the data-layout benchmark, span census, cross-target checks and
-  focused correction review passed; current measurements are recorded in the Phase 1 closeout below.
+- Current code evidence: generic donor labels carry production, package-domain-tagged frozen identity
+  handles; each project/package diagnostic range resolves through its own frozen context;
+  authored extended-span exhaustion is `MOTH-SYNTAX-0036`; clean outcomes skip the frozen render
+  tail.
+- Validation evidence: focused ownership, capacity, merge, renderer and retention regressions pass;
+  the feature matrix and full local validation gate are recorded in the correction checkpoint;
+  the five-run retained-layout/allocator probe is recorded there and in
+  `benchmarks/frontend-optimization-results.md`.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  stale diagnostic-boxing comment cleanup `eb6416312`; plan/evidence closeout sequence through
-  `1f6d4a81` (following `38e68d2a5`).
+  stale diagnostic-boxing comment cleanup `eb6416312`; the external-review correction checkpoint is
+  the commit containing the correction section below.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0` and
@@ -85,8 +89,9 @@ Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749
 `38e68d2a5`).
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1 source, token, diagnostic and renderer cutover is committed and validated.
-- The worktree is clean at the current closeout sequence through `1f6d4a81`.
+- Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
+- The exact correction checkpoint, feature-matrix result and full-gate result are recorded in the
+  correction evidence below.
 - Phase 2 remains pending external user review.
 HISTORICAL_ACCEPTED_SLICES:
 The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
@@ -1172,6 +1177,10 @@ the code checkpoint, correction review and evidence block below:
 
 ### Phase 1 closeout evidence (2026-09-10)
 
+This is the original closeout record, retained for provenance. Its statement that no retained-memory
+delta was measured is superseded by the external-review correction checkpoint below; the correction
+checkpoint is the current Phase 1 acceptance record.
+
 The final Phase 1 code checkpoint is `eb6416312`, following obsolete span-allowance cleanup
 `749f9c3f0`, cross-target correction checkpoint `134aebf63`, representation-correction checkpoint
 `e1f16cb49` and implementation checkpoint `a9f9744de`. The correction review found no blockers.
@@ -1201,6 +1210,48 @@ The source-byte and extended-table figures are span-census corpus evidence, not 
 text was copied during rendering. The bounded benchmark runner reports timings and counters rather
 than aggregate retained heap bytes; no unmeasured memory delta is claimed here. Cross-target
 Clippy passed for the installed Linux and Windows targets; no other platform lane was available.
+
+### External review correction checkpoint
+
+The external review reopened the Phase 1 gate for a bounded correction pass. This checkpoint records
+the applied decisions, the regressions that defend them and the current retained-memory evidence.
+The full validation gate below is green; the final audit is the independent acceptance checkpoint.
+Phase 2 remains paused for external user review.
+
+| Review finding | Correction now owned by Phase 1 |
+| --- | --- |
+| Cross-package generic spans could resolve through the requester identity, and the production donor handle was unavailable. | `FrozenIdentityHandle::get` is production-readable and carries an optional stable-package domain; generic materialised body/declaration/substitution labels carry their donor handle; donor-owned generic primary spans carry the requesting materialisation context's handle; render contexts resolve those facts through their explicit handles; project/package ranges install separate frozen identities at the final boundary; an unresolved handle is an infrastructure error rather than a project-root fallback. The imported-generic regression uses colliding `SourceId` values and a donor span beyond the inline limit, while the nested imported-generic regression proves the final package installation is reachable for a donor-owned primary span. |
+| Authored extended-span exhaustion could lose its file identity or enter the infrastructure lane. | `SourceSpanCapacity` is a typed `MOTH-SYNTAX-0036` source diagnostic with exact rejected bounds and an already representable file source-start primary span. `EndUnrepresentable` remains the compiler-invariant lane. The real tokenizer exhaustion path is covered. |
+| Frozen diagnostics and type contexts were remapped as if they belonged to the mutable aggregate table. | Merge/remap now partitions frozen and premerge ranges: frozen diagnostics and type environments retain their owner IDs, premerge facts remap once, and mixed type-context ranges split at owner boundaries. Repeated nonidentity appends cover diagnostic names and type names. |
+| Empty-file EOF positions and spanless message labels disappeared at render time. | Mutable and frozen renderers retain the valid empty-file `0:0` path/coordinate with an empty excerpt; invalid source IDs/ranges remain unresolved; spanless message-only labels render as message records. |
+| A test-only full aggregation implementation and legacy stage handoffs obscured the final boundary. | The duplicate `into_render_messages` test implementation and `merge_stage_messages` path are removed. Stage handoffs use `PremergeDiagnosticBatch`; the one remaining `CompilerMessages` classifier is explicitly documented as the deferred AST/HIR API boundary rather than a second aggregation owner. |
+| Frozen construction-only state and APIs remained reachable, and clean results froze empty render contexts. | Frozen source storage drops reverse canonical lookup and load-failure state; dead frozen forwarders and allowances are removed; the clean-result return occurs after every producer has contributed and before freeze; the frozen-handle test lives with source database tests. |
+| Earlier evidence had no retained-memory partition and only single-run timings. | The feature-gated memory probe now reports exact snapshot bytes, extended rows, source identity slots, diagnostic records, label slots and frozen-context records beside aggregate live/peak allocator deltas. Five independent invocations per matched `docs`, `warning-heavy.moth` and `diagnosed/` workloads, medians and ranges, plus predecessor peak/after-report comparisons, are recorded in `benchmarks/frontend-optimization-results.md`. |
+
+Focused correction verification on the Apple M1 Pro used the actual changed surfaces:
+
+| Command | Result |
+| --- | --- |
+| `cargo test --lib imported_generic_materialisation_preserves_donor_identity_with_colliding_sources_and_extended_label` | pass; project-primary and package-donor labels resolve under colliding source IDs, including an extended donor row |
+| `cargo test -p moth imported_nested_generic_materialisation_preserves_call_site_identity_with_colliding_sources` | pass; a nested donor-owned primary span resolves through the package identity rather than the colliding project snapshot |
+| `cargo test -p moth generated_materialisation_preserves_exact_request_span_in_recursive_diagnostic` | pass; recursive generated-request primaries retain their exact request span through the requester-owned frozen context |
+| `cargo test --lib last_usable_extended_index_encodes_and_one_past_it_is_capacity_error` | pass; real tokenizer exhaustion remains typed `MOTH-SYNTAX-0036` with exact bounds |
+| `cargo test --lib append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners` | pass; repeated nonidentity append preserves frozen names/type contexts and remaps premerge facts |
+| `cargo test --lib empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt` | pass; mutable and frozen empty-file EOF resolution retain path and `0:0` |
+| `cargo test --lib spanless_message_label_renders_without_a_source_position` | pass; message-only labels remain visible |
+| `cargo test -p moth --features timers,benchmark_counters,data_layout_memory_probe merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identity` | pass; the fixture introduces chunk-local paths after the shared base so the frozen-output remap skip observes a real nonidentity append |
+| `cargo check --quiet --locked --bin data_layout_memory_probe --features data_layout_memory_probe` | pass |
+
+The complete validation gate then passed:
+
+| Command | Result |
+| --- | --- |
+| `just validate` | native featured all-target Clippy passed; 5,086 moth + 17 CLI + 825 xtask tests passed; integration 1,951/1,951; source audit 1,325 files; docs check clean; 82 benchmark preflights, all 3 scaling series and timer erasure passed |
+| `cargo run --quiet -- tests --terse` | 1,951/1,951 integration cases correct |
+| `cargo fmt --all -- --check`; `git diff --check` | pass |
+
+The correction checkpoint is the commit containing this section. No Phase 2 slice starts from this
+plan until that commit has passed the independent final audit.
 
 ### Review-derived corrections supporting Phase 1 closeout
 

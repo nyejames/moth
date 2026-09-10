@@ -100,16 +100,20 @@ pub(crate) fn format_label_messages_with_context(
         let Some(message) = &label.message else {
             continue;
         };
+        let style_name = match label.style {
+            DiagnosticLabelStyle::Secondary => "info",
+        };
         let Some(position) = context.label_position(label) else {
+            if label.span.is_none() {
+                let message_text = diagnostic_label_message_text(message, context);
+                rendered_labels.push(format!("{style_name}: - {message_text}"));
+            }
             continue;
         };
         let label_line =
             display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
         let label_col =
             display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
-        let style_name = match label.style {
-            DiagnosticLabelStyle::Secondary => "info",
-        };
         let message_text = diagnostic_label_message_text(message, context);
 
         rendered_labels.push(format!(

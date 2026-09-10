@@ -33,7 +33,9 @@ use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::source_tree_index::SourceTreeIndex;
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+};
 use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashMap;
@@ -318,6 +320,12 @@ impl ProjectModuleGraph {
     /// All graph nodes in deterministic `ModuleId` order.
     pub(crate) fn nodes(&self) -> &[ProjectModuleGraphNode] {
         &self.nodes
+    }
+    /// The stable package identity shared by every module in this boundary.
+    pub(crate) fn stable_package_identity(&self) -> Option<&StablePackageIdentity> {
+        self.nodes
+            .first()
+            .map(|node| node.stable_origin().package())
     }
 
     /// The canonical node for one module identity.

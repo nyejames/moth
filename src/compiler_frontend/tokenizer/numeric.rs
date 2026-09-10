@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::{NumericLiteralSign, NumericLiteralToken};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
 use crate::return_token;
 
@@ -50,7 +50,7 @@ pub(super) fn tokenize_numeric_literal(
             return Err(CompilerDiagnostic::invalid_number_literal(
                 authored_id,
                 NumberLiteralErrorReason::MultipleDecimalPoints,
-                Some(stream.current_source_span()?),
+                Some(current_source_span(stream)?),
             )
             .into());
         }
@@ -107,7 +107,7 @@ pub(super) fn tokenize_numeric_literal(
             Err(CompilerDiagnostic::invalid_number_literal(
                 authored_id,
                 reason,
-                Some(stream.current_source_span()?),
+                Some(current_source_span(stream)?),
             )
             .into())
         }

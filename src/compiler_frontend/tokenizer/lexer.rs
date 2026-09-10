@@ -17,7 +17,9 @@ use crate::compiler_frontend::keywords::{
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SpanCapacityError};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -58,19 +60,52 @@ impl From<CompilerError> for TokenizeFailure {
     }
 }
 
-impl From<SpanCapacityError> for TokenizeFailure {
-    fn from(error: SpanCapacityError) -> Self {
-        Self::Infrastructure(CompilerError::source_span_capacity(error, None))
+/// Map one source-owned span packing failure without allocating another span from the builder.
+///
+/// The inline source-start anchor is always representable, so ExtendedTableFull retains the
+/// rejected range as typed facts while EndUnrepresentable stays on the compiler-invariant lane.
+pub(crate) fn map_span_capacity_error(
+    source: SourceId,
+    error: SpanCapacityError,
+) -> TokenizeFailure {
+    let source_start = SourceSpan::new(source, LocalSpan::source_start());
+    match CompilerDiagnostic::from_span_capacity_error(error, Some(source_start)) {
+        Ok(diagnostic) => TokenizeFailure::Diagnosed(diagnostic),
+        Err(error) => TokenizeFailure::Infrastructure(error),
     }
+}
+
+/// Encode a tokenizer-owned source span while retaining the stream's source identity on failure.
+pub(crate) fn current_source_span(stream: &mut TokenStream<'_>) -> TokenizeResult<SourceSpan> {
+    let source = stream.file_id;
+    stream
+        .current_source_span()
+        .map_err(|error| map_span_capacity_error(source, error))
+}
+
+/// Encode an exact tokenizer-owned source range while retaining its source identity on failure.
+pub(crate) fn source_span_for_bytes(
+    stream: &mut TokenStream<'_>,
+    start: u32,
+    end: u32,
+) -> TokenizeResult<SourceSpan> {
+    let source = stream.file_id;
+    stream
+        .source_span_for_bytes(start, end)
+        .map_err(|error| map_span_capacity_error(source, error))
 }
 
 /// Mint the token the stream has just finished reading, from its anchored start to the cursor.
 ///
 /// WHY: `return_token!` expands to this call, so every authored token in the lexer takes its
-/// span from the one encoder and reports a span-capacity failure through the shared
-/// `CompilerError::source_span_capacity` boundary.
+/// span from the one encoder. A rejected extended-table row is reported through the typed
+/// diagnostic lane with the stream's own inline source-start anchor; an unrepresentable end
+/// remains a compiler-invariant failure.
 pub(crate) fn mint_token(stream: &mut TokenStream<'_>, kind: TokenKind) -> TokenizeResult<Token> {
-    stream.new_token(kind).map_err(TokenizeFailure::from)
+    let source = stream.file_id;
+    stream
+        .new_token(kind)
+        .map_err(|error| map_span_capacity_error(source, error))
 }
 
 #[macro_export]
@@ -384,7 +419,7 @@ fn symbolic_spacing_error(
     construct: SymbolicSpacingConstruct,
     missing: MissingWhitespace,
 ) -> TokenizeResult<CompilerDiagnostic> {
-    let span = Some(stream.current_source_span()?);
+    let span = Some(current_source_span(stream)?);
     Ok(CompilerDiagnostic::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidSymbolicSpacing {
             error: SymbolicSpacingError { construct, missing },
@@ -406,7 +441,7 @@ fn missing_whitespace_side(missing_left: bool, missing_right: bool) -> Option<Mi
 fn unary_negation_spacing_error(
     stream: &mut TokenStream<'_>,
 ) -> TokenizeResult<CompilerDiagnostic> {
-    let span = Some(stream.current_source_span()?);
+    let span = Some(current_source_span(stream)?);
     Ok(CompilerDiagnostic::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing,
         span,
@@ -678,7 +713,7 @@ fn get_token_kind(
             if let Some(source_kind) = stream.initial_template_close_rejection() {
                 return Err(CompilerDiagnostic::unescaped_implicit_template_close(
                     source_kind,
-                    Some(stream.current_source_span()?),
+                    Some(current_source_span(stream)?),
                 )
                 .into());
             }
@@ -742,10 +777,9 @@ fn get_token_kind(
                 return_token!(TokenKind::CharLiteral(c), stream);
             };
 
-            return Err(CompilerDiagnostic::invalid_char_literal(Some(
-                stream.current_source_span()?,
-            ))
-            .into());
+            return Err(
+                CompilerDiagnostic::invalid_char_literal(Some(current_source_span(stream)?)).into(),
+            );
         }
 
         // -----------------
@@ -953,7 +987,7 @@ fn get_token_kind(
 
             return Err(CompilerDiagnostic::common_syntax_mistake(
                 CommonSyntaxMistakeReason::UnsupportedUnaryPlus,
-                Some(stream.current_source_span()?),
+                Some(current_source_span(stream)?),
             )
             .into());
         }
@@ -1246,7 +1280,7 @@ fn get_token_kind(
 
         return Err(CompilerDiagnostic::invalid_character(
             current_char,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     } // 'next_token loop
@@ -1258,17 +1292,15 @@ fn tokenize_style_directive(
     string_table: &mut StringTable,
 ) -> TokenizeResult<Token> {
     if stream.mode != TokenizeMode::TemplateHead {
-        return Err(CompilerDiagnostic::invalid_character(
-            '$',
-            Some(stream.current_source_span()?),
-        )
-        .into());
+        return Err(
+            CompilerDiagnostic::invalid_character('$', Some(current_source_span(stream)?)).into(),
+        );
     }
 
     let Some(&first_char) = stream.peek() else {
         return Err(CompilerDiagnostic::unexpected_end_of_file(
             None,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     };
@@ -1276,7 +1308,7 @@ fn tokenize_style_directive(
     if !first_char.is_alphabetic() && first_char != '_' {
         return Err(CompilerDiagnostic::invalid_character(
             first_char,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -1307,7 +1339,7 @@ fn tokenize_style_directive(
         return Err(CompilerDiagnostic::invalid_style_directive(
             directive,
             supported,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     };
@@ -1356,7 +1388,7 @@ pub(crate) fn tokenize_identifier_or_keyword(
         }
 
         return Err(
-            CompilerDiagnostic::invalid_identifier(Some(stream.current_source_span()?)).into(),
+            CompilerDiagnostic::invalid_identifier(Some(current_source_span(stream)?)).into(),
         );
     }
 }

@@ -649,10 +649,9 @@ opt-in lane with its own named command:
 
     [td:
         [: `timers-counters`]
-        [: `timers`, `benchmark_counters`]
-        [: collector-backed counters and the counter summary carried by a timing session]
+        [: `timers`, `benchmark_counters`, `data_layout_memory_probe`]
+        [: the collector-backed counters and the retained-layout allocator probe]
     ]
-
     [td:
         [: `scoped-blocks`]
         [: `checked_blocks`, `async_blocks`]

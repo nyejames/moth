@@ -303,6 +303,7 @@ fn is_allowed_wall_clock_source(relative: &str) -> bool {
         relative,
         "src/benchmarking/frontend.rs"
             | "src/benchmarking/span_census.rs"
+            | "src/bin/data_layout_memory_probe.rs"
             | "src/compiler_tests/integration_test_runner/assertions/node_harness.rs"
             | "src/compiler_tests/integration_test_runner/runner.rs"
             | "src/projects/cli.rs"

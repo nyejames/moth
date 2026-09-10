@@ -1886,7 +1886,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut synthetic_spans = ExtendedSpanBuilder::new();
     let mut synthetic_output = parsed_prepared_output(
-        "synthetic.moth",
+        "synthetic-output.moth",
         "io.line([: [@docs/synthetic.md]])\n",
         &mut string_table,
         &mut synthetic_spans,
@@ -1906,14 +1906,14 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let mut first_spans = ExtendedSpanBuilder::new();
     let mut second_spans = ExtendedSpanBuilder::new();
     let first_output = parsed_prepared_output(
-        "first.moth",
+        "first-output.moth",
         "",
         &mut first_local_table,
         &mut first_spans,
         first_id,
     );
     let second_output = parsed_prepared_output(
-        "second.moth",
+        "second-output.moth",
         "",
         &mut second_local_table,
         &mut second_spans,

@@ -8,7 +8,7 @@
 use super::*;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticLabel};
 use crate::compiler_frontend::source::FrozenIdentityContext;
-use crate::compiler_frontend::source::line_index::LinePosition;
+use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthChar;
@@ -97,19 +97,55 @@ impl<'a> DiagnosticRenderContext<'a> {
     /// attached owner intentionally have no physical source position.
     pub(crate) fn primary_position(
         self,
-        diagnostic: &CompilerDiagnostic,
+        diagnostic: &'a CompilerDiagnostic,
     ) -> Option<DiagnosticPrimaryPosition<'a>> {
-        diagnostic
-            .primary_span
-            .and_then(|span| self.resolve_span(span))
+        let span = diagnostic.primary_span?;
+        if let Some(frozen_identity_handle) = diagnostic.primary_frozen_identity_handle.as_ref() {
+            if let Some(frozen_identity) = frozen_identity_handle.get() {
+                return self.resolve_span_in_frozen(frozen_identity, span);
+            }
+
+            // Legacy failure boundaries render before the final frozen identity is published.
+            // Their range-bound source database is the exact owner retained for that diagnostic;
+            // use it only while no message-level frozen context exists.
+            if self.frozen_identity.is_none() {
+                return self.resolve_span_in_database(span);
+            }
+            return None;
+        }
+
+        self.resolve_span(span)
     }
 
-    /// Resolve one secondary label span through the attached source identity owner.
-    pub(crate) fn label_position(
+    /// Resolve one secondary label span through its explicit owner when present.
+    ///
+    /// Ordinary labels remain compact and use the diagnostic context. A donor-owned label is
+    /// different: its source IDs belong to the handle's frozen context, so an uninstalled handle
+    /// returns no position rather than silently falling back to the requester context.
+    pub(crate) fn label_position<'label>(
         self,
-        label: &DiagnosticLabel,
-    ) -> Option<DiagnosticPrimaryPosition<'a>> {
-        label.span.and_then(|span| self.resolve_span(span))
+        label: &'label DiagnosticLabel,
+    ) -> Option<DiagnosticPrimaryPosition<'label>>
+    where
+        'a: 'label,
+    {
+        let span = label.span?;
+        if let Some(frozen_identity_handle) = label.frozen_identity_handle.as_ref() {
+            if let Some(frozen_identity) = frozen_identity_handle.get() {
+                return self.resolve_span_in_frozen(frozen_identity, span);
+            }
+
+            // Legacy failure boundaries render before the final frozen identity is published.
+            // Their range-bound source database is the exact owner retained for that diagnostic;
+            // use it only while no message-level frozen context exists. A missing source database
+            // still returns no position, never a requester or project-root guess.
+            if self.frozen_identity.is_none() {
+                return self.resolve_span_in_database(span);
+            }
+            return None;
+        }
+
+        self.resolve_span(span)
     }
 
     fn resolve_span(self, span: SourceSpan) -> Option<DiagnosticPrimaryPosition<'a>> {
@@ -123,18 +159,19 @@ impl<'a> DiagnosticRenderContext<'a> {
 
         self.resolve_span_in_database(span)
     }
-    fn resolve_span_in_frozen(
+
+    fn resolve_span_in_frozen<'identity>(
         self,
-        frozen: &'a FrozenIdentityContext,
+        frozen: &'identity FrozenIdentityContext,
         span: SourceSpan,
-    ) -> Option<DiagnosticPrimaryPosition<'a>> {
+    ) -> Option<DiagnosticPrimaryPosition<'identity>> {
         let source = span.source();
         let slot = frozen.get(source)?;
         let line_index = frozen.line_index(source)?;
         let range = span.byte_range(frozen);
         let start = line_index.position(range.start())?;
         let end = line_index.position(range.end())?;
-        let line = line_index.line_text(start.line)?;
+        let line = line_text_or_empty_file_eof(line_index, start)?;
         let path_id = frozen.source_logical_path(source)?;
         let mut scratch = Vec::new();
         let path = PathBuf::from(frozen.render_path(path_id, &mut scratch));
@@ -157,7 +194,7 @@ impl<'a> DiagnosticRenderContext<'a> {
         let range = span.byte_range(source_database);
         let start = line_index.position(range.start())?;
         let end = line_index.position(range.end())?;
-        let line = line_index.line_text(start.line)?;
+        let line = line_text_or_empty_file_eof(line_index, start)?;
         let path = source_database
             .legacy_logical_path(source)
             .to_path_buf(self.string_table);
@@ -171,6 +208,17 @@ impl<'a> DiagnosticRenderContext<'a> {
             line,
         })
     }
+}
+
+/// Return a validated retained line, allowing only the exact EOF position of an empty snapshot to
+/// use an empty excerpt. Ordinary out-of-range positions must remain unresolved.
+fn line_text_or_empty_file_eof<'a>(
+    line_index: LineIndex<'a>,
+    position: LinePosition,
+) -> Option<&'a str> {
+    line_index.line_text(position.line).or_else(|| {
+        (line_index.line_count() == 0 && position.line == 0 && position.column == 0).then_some("")
+    })
 }
 
 /// Display-cell tab stop for caret geometry. A tab advances the caret to the next multiple of

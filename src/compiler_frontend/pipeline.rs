@@ -418,6 +418,10 @@ impl<'a> CompilerFrontend<'a> {
             }
         };
 
+        let frozen_identity_handle = module_origin
+            .as_ref()
+            .map(|origin| FrozenIdentityHandle::for_domain(origin.package().clone()))
+            .unwrap_or_else(FrozenIdentityHandle::new);
         let file_value_resolution = Some(Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                 resolved_file_references,
@@ -425,7 +429,7 @@ impl<'a> CompilerFrontend<'a> {
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
-            frozen_identity_handle: FrozenIdentityHandle::new(),
+            frozen_identity_handle,
         }));
         Ast::new(
             AstBuildInput {

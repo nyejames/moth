@@ -2,7 +2,8 @@ use crate::bench_observations::BenchmarkObservationError;
 use crate::bench_types::BenchmarkGroup;
 
 use moth::benchmarking::{
-    FrontendBenchmarkCounter, FrontendBenchmarkReport, FrontendBenchmarkStage,
+    FrontendBenchmarkCounter, FrontendBenchmarkReport, FrontendBenchmarkRetention,
+    FrontendBenchmarkStage,
 };
 
 use crate::benchmark_manifest::{
@@ -21,6 +22,7 @@ fn report_to_observations_converts_stages_and_counters() {
         total_ms: 42.0,
         warning_count: 0,
         warning_codes: Vec::new(),
+        retention: FrontendBenchmarkRetention::default(),
         stages: vec![
             FrontendBenchmarkStage {
                 name: "frontend.ast.total".to_string(),
@@ -68,6 +70,7 @@ fn report_to_observations_rejects_empty_stages() {
         total_ms: 1.0,
         warning_count: 0,
         warning_codes: Vec::new(),
+        retention: FrontendBenchmarkRetention::default(),
         stages: Vec::new(),
         counters: Vec::new(),
     };
@@ -87,6 +90,7 @@ fn report_to_observations_sums_repeated_stages_and_validates_values() {
         total_ms: 1.0,
         warning_count: 0,
         warning_codes: Vec::new(),
+        retention: FrontendBenchmarkRetention::default(),
         stages: vec![
             FrontendBenchmarkStage {
                 name: "frontend.ast.total".to_owned(),

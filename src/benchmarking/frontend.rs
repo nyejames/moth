@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
+use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
@@ -79,7 +80,36 @@ pub enum FrontendBenchmarkOutcome {
     Diagnosed,
 }
 
+/// Retained source and diagnostic storage observed at the frontend render boundary.
+///
+/// These values are layout counters, not allocator ownership attribution. The probe records them
+/// beside live/peak allocator deltas so repeated runs can distinguish retained source snapshots,
+/// extended span rows, source identities and diagnostic labels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrontendBenchmarkRetention {
+    pub source_snapshot_bytes: usize,
+    pub extended_span_rows: usize,
+    pub source_identity_slots: usize,
+    pub diagnostic_records: usize,
+    pub diagnostic_label_slots: usize,
+    pub frozen_context_records: usize,
+}
+
+impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
+    fn from(metrics: FrozenRenderRetentionMetrics) -> Self {
+        Self {
+            source_snapshot_bytes: metrics.source_snapshot_bytes,
+            extended_span_rows: metrics.extended_span_rows,
+            source_identity_slots: metrics.source_identity_slots,
+            diagnostic_records: metrics.diagnostic_records,
+            diagnostic_label_slots: metrics.diagnostic_label_slots,
+            frozen_context_records: metrics.frozen_context_records,
+        }
+    }
+}
+
 /// Report produced by a completed frontend benchmark run.
+
 #[derive(Debug, Clone)]
 pub struct FrontendBenchmarkReport {
     /// Whether compilation completed cleanly or with user-facing diagnostics.
@@ -93,6 +123,7 @@ pub struct FrontendBenchmarkReport {
     pub total_ms: f64,
     pub warning_count: usize,
     pub warning_codes: Vec<String>,
+    pub retention: FrontendBenchmarkRetention,
     pub stages: Vec<FrontendBenchmarkStage>,
     pub counters: Vec<FrontendBenchmarkCounter>,
 }
@@ -290,7 +321,7 @@ pub fn run_frontend_benchmark(
         FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
     };
 
-    let (messages, compilation_failed) = match compile_project_frontend_with_inputs(
+    let (messages, retention, compilation_failed) = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
@@ -301,9 +332,9 @@ pub fn run_frontend_benchmark(
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
-        Ok(frontend) => (
-            frontend
-                .into_render_messages_with_frozen_identity(
+        Ok(frontend) => {
+            let (messages, retention) = frontend
+                .into_render_messages_with_frozen_identity_and_metrics(
                     &mut string_table,
                     project_source_files.take(),
                     None,
@@ -312,10 +343,10 @@ pub fn run_frontend_benchmark(
                     kind: FrontendBenchmarkFailureKind::Compilation,
                     diagnostic_codes: Vec::new(),
                     message: error.msg,
-                })?,
-            false,
-        ),
-        Err(messages) => (messages, true),
+                })?;
+            (messages, FrontendBenchmarkRetention::from(retention), false)
+        }
+        Err(messages) => (messages, FrontendBenchmarkRetention::default(), true),
     };
 
     #[cfg(feature = "timers")]
@@ -396,6 +427,7 @@ pub fn run_frontend_benchmark(
         total_ms,
         warning_count,
         warning_codes,
+        retention,
         stages,
         counters,
     })

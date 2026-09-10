@@ -12,7 +12,7 @@ use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeFailure};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -312,7 +312,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     bootstrap_borrow_analysis: BorrowCheckReport,
     warnings: &[CompilerDiagnostic],
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BorrowCheckReport, CompilerMessages> {
+) -> Result<BorrowCheckReport, PremergeFailure> {
     let base_public_origins = hir_module
         .function_ids_by_origin
         .keys()
@@ -445,12 +445,14 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         }
     }
 
-    borrow_analysis.ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("Convergence queue did not analyze the base module"),
-            &compiler.string_table,
-        )
-    })
+    borrow_analysis
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error("Convergence queue did not analyze the base module"),
+                &compiler.string_table,
+            )
+        })
+        .map_err(PremergeFailure::from)
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.

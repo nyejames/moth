@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::generic_functions::{
     recursive_generic_function_instantiation,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::PremergeFailure;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
@@ -63,7 +64,7 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PremergeFailure> {
     for request_id in request_ids {
         let identity = transaction
             .identity(*request_id)
@@ -100,20 +101,29 @@ fn materialise_generated_request<'build>(
     requester_context: &ModuleMaterialisationPreparation,
     compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PremergeFailure> {
     match transaction
         .enter(request_id)
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
     {
         GeneratedRequestEntry::Complete => return Ok(()),
         GeneratedRequestEntry::Recursive => {
+            let diagnostic = recursive_generic_function_instantiation(
+                Some(compiler.string_table.intern(&request.display_name)),
+                request.call_span,
+            );
+            let diagnostic = if request.call_span.is_some() {
+                diagnostic.with_primary_frozen_identity_handle(
+                    requester_context.frozen_identity_handle.clone(),
+                )
+            } else {
+                diagnostic
+            };
             return Err(CompilerMessages::from_diagnostic(
-                recursive_generic_function_instantiation(
-                    Some(compiler.string_table.intern(&request.display_name)),
-                    request.call_span,
-                ),
+                diagnostic,
                 compiler.string_table.clone(),
-            ));
+            )
+            .into());
         }
         GeneratedRequestEntry::Materialise => {}
     }
@@ -355,4 +365,5 @@ fn materialise_generated_request<'build>(
             GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
         )
         .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
+        .map_err(PremergeFailure::from)
 }

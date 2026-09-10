@@ -145,8 +145,8 @@ pub fn compile_project_frontend(
         FrontendCompilationMode::Canonical,
     );
     result.map(|mut frontend| {
-        // This no-input seam renders through the transitional source fallback in focused
-        // frontend tests, so retain the finalized project owner with the typed outcome.
+        // Retain the finalized owner so the config-free seam can pass it to the canonical frozen
+        // render tail without cloning source snapshots.
         frontend.project_source_database = project_source_files;
         frontend
     })

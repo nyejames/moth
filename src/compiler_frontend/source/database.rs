@@ -57,10 +57,11 @@ pub struct SourceDatabase {
 
 /// Lookup-only source identity storage published after the mutable build boundary.
 ///
-/// The freeze operation moves every source slot, retained snapshot, load failure, canonical-path
-/// index and path-trie allocation out of [`SourceDatabase`]. In particular, source text,
-/// line-start tables and extended-span entries are never copied. The mutable reverse lookup map
-/// owned by [`PathInternerBuilder`] is dropped while its append-only [`PathTable`] is moved here.
+/// The freeze operation moves every source slot, retained snapshot and path-trie allocation out of
+/// [`SourceDatabase`]. Construction-only load failures and canonical-path lookup state are dropped
+/// at this boundary. In particular, source text, line-start tables and extended-span entries are
+/// never copied. The mutable reverse lookup map owned by [`PathInternerBuilder`] is dropped while
+/// its append-only [`PathTable`] is moved here.
 ///
 /// A frozen owner has no registration or loading operations. All identities and snapshots it
 /// exposes are the exact ones finalized by [`SourceDatabaseBuilder::finish`].
@@ -68,12 +69,15 @@ pub struct SourceDatabase {
 pub struct FrozenSourceDatabase {
     slots: Vec<SourceSlot>,
     loaded: Vec<SourceRecord>,
-    #[allow(dead_code)] // Retained for deferred frozen-source failure lookups.
-    load_failures: Vec<CompilerError>,
-    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookups.
-    canonical_to_id: FxHashMap<PathBuf, SourceId>,
     paths: PathTable,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SourceDatabaseRetentionMetrics {
+    pub(crate) source_snapshot_bytes: usize,
+    pub(crate) extended_span_rows: usize,
+    pub(crate) source_identity_slots: usize,
+}
+
 impl Default for SourceDatabase {
     fn default() -> Self {
         Self {
@@ -90,27 +94,43 @@ impl SourceDatabase {
     pub fn empty() -> Self {
         Self::default()
     }
+    /// Summarize the source allocations retained by this mutable boundary.
+    ///
+    /// The counters describe the exact storage that crosses the freeze boundary; construction-only
+    /// reverse lookup and load-failure state are intentionally excluded.
+    pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
+        SourceDatabaseRetentionMetrics {
+            source_snapshot_bytes: self.loaded.iter().map(|record| record.text.len()).sum(),
+            extended_span_rows: self
+                .loaded
+                .iter()
+                .filter_map(|record| record.extended_spans.as_ref())
+                .map(ExtendedSpanTable::len)
+                .sum(),
+            source_identity_slots: self.slots.len(),
+        }
+    }
+
     /// Consume the finalized mutable database into lookup-only source storage.
     ///
     /// This is the terminal source lifecycle operation. It moves the registration slots, loaded
-    /// source snapshots, line-start tables, installed extended-span tables, load failures,
-    /// canonical index and path nodes without copying any of those allocations. Callers must
-    /// invoke this only after [`SourceDatabaseBuilder::finish`] has installed every live span
-    /// builder; a frozen owner has no mutation path for completing that work.
+    /// source snapshots, line-start tables, installed extended-span tables and path nodes without
+    /// copying any of those allocations. Construction-only load failures and canonical-path lookup
+    /// state are dropped here. Callers must invoke this only after
+    /// [`SourceDatabaseBuilder::finish`] has installed every live span builder; a frozen owner has
+    /// no mutation path for completing that work.
     pub(crate) fn freeze(self) -> FrozenSourceDatabase {
         let SourceDatabase {
             slots,
             loaded,
-            load_failures,
-            canonical_to_id,
+            load_failures: _,
+            canonical_to_id: _,
             path_interner,
         } = self;
 
         FrozenSourceDatabase {
             slots,
             loaded,
-            load_failures,
-            canonical_to_id,
             paths: path_interner.freeze(),
         }
     }
@@ -635,16 +655,6 @@ impl SourceDatabase {
     }
 }
 impl FrozenSourceDatabase {
-    /// Iterate over physical source slots in deterministic source-identity order.
-    #[allow(dead_code)] // Retained for deferred frozen-source iteration consumers.
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
-        debug_assert_eq!(
-            self.slots.first().map(|slot| slot.provenance),
-            Some(SourceProvenance::CompilationRoot)
-        );
-        self.slots[1..].iter()
-    }
-
     /// Resolve one physical source slot by its compact identity.
     ///
     /// The compilation-root identity is intentionally excluded: it owns no physical source
@@ -654,60 +664,10 @@ impl FrozenSourceDatabase {
         (slot.provenance != SourceProvenance::CompilationRoot).then_some(slot)
     }
 
-    /// Resolve the unique physical slot for an exact frozen logical-path identity.
-    ///
-    /// A path ID identifies a spelling in this owner's path table, but multiple source slots may
-    /// intentionally share that spelling. Returning no slot on ambiguity prevents a renderer
-    /// from choosing another source's snapshot.
-    #[allow(dead_code)] // Retained for deferred frozen-source logical-path lookup consumers.
-    pub(crate) fn unique_record_for_logical_path(
-        &self,
-        logical_path: PathId,
-    ) -> Option<&SourceSlot> {
-        let mut matches = self.iter().filter(|slot| slot.logical_path == logical_path);
-        let slot = matches.next()?;
-        if matches.next().is_some() {
-            return None;
-        }
-        Some(slot)
-    }
-
-    /// Resolve a physical source slot by its canonical filesystem path.
-    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookup consumers.
-    pub(crate) fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
-        let id = self.canonical_to_id.get(canonical_path)?;
-        self.get(*id)
-    }
-
     /// Borrow the immutable logical-path trie moved across the source freeze boundary.
     #[inline]
     pub(crate) fn paths(&self) -> &PathTable {
         &self.paths
-    }
-
-    /// Reconstruct the legacy path view for a frozen source identity.
-    ///
-    /// This is the frozen equivalent of [`SourceDatabase::legacy_logical_path`]. The frozen
-    /// slot stores only its `PathId`, so the component vector is rebuilt from the frozen
-    /// [`PathTable`] parent links and is never retained by the database. Component IDs are
-    /// reused verbatim, so ambiguity semantics match the mutable bridge: the view is
-    /// returned even when several slots share the same spelling.
-    #[allow(dead_code)] // Retained for deferred frozen-source path compatibility consumers.
-    pub(crate) fn legacy_logical_path(&self, source: SourceId) -> InternedPath {
-        let path_id = self
-            .slots
-            .get(source.index())
-            .unwrap_or_else(|| {
-                panic!(
-                    "source identity {} is absent from the frozen source database; this is a compiler bug",
-                    source.index()
-                )
-            })
-            .logical_path;
-        let table = self.paths();
-        let mut components = Vec::with_capacity(table.depth(path_id) as usize);
-        table.resolve_components(path_id, &mut components);
-        InternedPath::from_components(components)
     }
 
     /// Return the compact logical path identity assigned to one physical source.
@@ -715,25 +675,10 @@ impl FrozenSourceDatabase {
         self.get(id).map(|slot| slot.logical_path)
     }
 
-    /// Borrow the exact retained snapshot for one loaded physical source.
-    #[allow(dead_code)] // Retained for deferred frozen-source snapshot consumers.
-    pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
-        self.loaded_record(id).map(|record| record.text.as_ref())
-    }
-
     /// Construct a line index over one retained frozen snapshot.
     pub(crate) fn line_index(&self, id: SourceId) -> Option<LineIndex<'_>> {
         let record = self.loaded_record(id)?;
         Some(LineIndex::new(&record.text, &record.line_starts))
-    }
-
-    /// Return the structured load failure retained for one source, when its load failed.
-    #[allow(dead_code)] // Retained for deferred frozen-source failure consumers.
-    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
-        match &self.get(id)?.load {
-            SourceLoadStatus::Failed(index) => self.load_failures.get(index.index()),
-            SourceLoadStatus::Pending | SourceLoadStatus::Loaded(_) => None,
-        }
     }
 
     /// Resolve the loaded source record addressed by a physical source identity.
@@ -889,10 +834,10 @@ impl SourceDatabaseBuilder {
     /// Freeze every returned builder and consume construction state into lookup-only storage.
     ///
     /// WHY: the terminal publish `Arc` must be minted after this consume, never shared out of
-    /// the builder. `canonical_to_id` and the path interner stay with the frozen database:
-    /// frozen consumers still resolve canonical paths (notably the missing-source loader and
-    /// message renderers), so dropping that reverse lookup waits for 1F1's `FrozenIdentityContext`
-    /// decision. An outstanding transient share is an ownership bug.
+    /// the builder. The mutable database remains responsible for canonical-path lookup and load
+    /// failures during construction; [`SourceDatabase::freeze`] drops that construction-only state
+    /// before publishing finalized slots, snapshots and the path table. An outstanding transient
+    /// share is an ownership bug.
     pub(crate) fn finish(mut self) -> Result<SourceDatabase, CompilerError> {
         self.sync_loaded_records();
         let mut sources = Arc::try_unwrap(self.sources)

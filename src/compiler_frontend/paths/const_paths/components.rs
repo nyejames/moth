@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span};
 use crate::compiler_frontend::tokenizer::tokens::TokenStream;
 
 use super::PathComponents;
@@ -54,7 +54,7 @@ fn parse_quoted_component(
         let Some(next) = stream.peek().copied() else {
             return Err(CompilerDiagnostic::invalid_path(
                 PathKind::MissingClosingQuote,
-                Some(stream.current_source_span()?),
+                Some(current_source_span(stream)?),
             )
             .into());
         };
@@ -73,7 +73,7 @@ fn parse_quoted_component(
             let Some(escaped) = stream.peek().copied() else {
                 return Err(CompilerDiagnostic::invalid_path(
                     PathKind::MissingClosingQuote,
-                    Some(stream.current_source_span()?),
+                    Some(current_source_span(stream)?),
                 )
                 .into());
             };
@@ -86,7 +86,7 @@ fn parse_quoted_component(
                 _ => {
                     return Err(CompilerDiagnostic::invalid_path(
                         PathKind::InvalidEscape,
-                        Some(stream.current_source_span()?),
+                        Some(current_source_span(stream)?),
                     )
                     .into());
                 }
@@ -121,7 +121,7 @@ pub(super) fn parse_bare_component(
     if value.is_empty() {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::EmptyComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -199,7 +199,7 @@ fn validate_path_component(
     if component.is_empty() {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::EmptyComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -211,7 +211,7 @@ fn validate_path_component(
     if !was_quoted && component.starts_with('@') {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::LeadingAtInPathComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -223,7 +223,7 @@ fn validate_path_component(
 
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -231,7 +231,7 @@ fn validate_path_component(
     if component.ends_with('.') {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -242,7 +242,7 @@ fn validate_path_component(
     {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -250,7 +250,7 @@ fn validate_path_component(
     if is_reserved_windows_name(component) {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::InvalidComponent,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }

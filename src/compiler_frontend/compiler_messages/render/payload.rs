@@ -208,6 +208,11 @@ fn render_payload_message(
         DiagnosticPayload::InvalidCharacter { character } => {
             format!("Invalid character: '{character}'")
         }
+        DiagnosticPayload::SourceSpanCapacity {
+            start,
+            length,
+            resource,
+        } => source_span_capacity_message(*start, *length, *resource),
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidNumberLiteral {
             literal_text,
@@ -551,6 +556,20 @@ fn render_payload_message(
         }
         DiagnosticPayload::None => String::new(),
     }
+}
+
+fn source_span_capacity_message(
+    start: u32,
+    length: u32,
+    resource: SourceSpanCapacityResource,
+) -> String {
+    let resource_name = match resource {
+        SourceSpanCapacityResource::ExtendedSpanTable => "extended span table",
+    };
+    format!(
+        "This source needs an exact span at byte offset {start} with length {length}, but its \
+         {resource_name} cannot hold another long or late range."
+    )
 }
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {

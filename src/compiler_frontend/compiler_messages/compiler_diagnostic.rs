@@ -23,13 +23,15 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
     LegacyDependencyClauseReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
     NumberLiteralErrorReason, OperatorOperandPosition, PathKind, ProjectContextEscapeReason,
-    RangeOperandKind, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    UnsupportedOperatorCategory,
+    RangeOperandKind, RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind,
+    TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
+    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::{
+    FrozenIdentityHandle, SourceId, SourceSpan, SpanCapacityError, SpanCapacityReason,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -38,6 +40,8 @@ pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
     pub severity: DiagnosticSeverity,
     pub(crate) primary_span: Option<SourceSpan>,
+    /// Owner for a primary span that belongs to a materialised donor context.
+    pub(crate) primary_frozen_identity_handle: Option<FrozenIdentityHandle>,
     pub labels: Vec<DiagnosticLabel>,
     pub payload: DiagnosticPayload,
 }
@@ -67,6 +71,7 @@ impl CompilerDiagnostic {
             kind,
             severity,
             primary_span,
+            primary_frozen_identity_handle: None,
             labels: Vec::new(),
             payload,
         }
@@ -74,6 +79,14 @@ impl CompilerDiagnostic {
 
     pub(crate) fn with_labels(mut self, labels: Vec<DiagnosticLabel>) -> Self {
         self.labels = labels;
+        self
+    }
+
+    pub(crate) fn with_primary_frozen_identity_handle(
+        mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) -> Self {
+        self.primary_frozen_identity_handle = Some(frozen_identity_handle);
         self
     }
 
@@ -777,6 +790,27 @@ impl CompilerDiagnostic {
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter),
             span,
             DiagnosticPayload::InvalidCharacter { character },
+        )
+    }
+    /// Report an authored range that could not receive another extended-span row.
+    ///
+    /// The primary span is an already representable source-owned anchor. The rejected range is
+    /// retained as facts in the payload, so reporting this failure never attempts another
+    /// allocation from the exhausted table.
+    pub(crate) fn source_span_capacity(
+        start: u32,
+        length: u32,
+        resource: SourceSpanCapacityResource,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::SourceSpanCapacity),
+            span,
+            DiagnosticPayload::SourceSpanCapacity {
+                start,
+                length,
+                resource,
+            },
         )
     }
 
@@ -1845,6 +1879,28 @@ impl CompilerDiagnostic {
     // ------------------------------------------------------------------
     //  Supporting Methods
     // ------------------------------------------------------------------
+
+    /// Classify a source-span packing failure at the source-owning boundary.
+    ///
+    /// Extended-table exhaustion is authored input and therefore remains a typed diagnostic.
+    /// An unrepresentable end violates the accepted source-size invariant and stays on the
+    /// compiler-invariant error lane.
+    pub(crate) fn from_span_capacity_error(
+        error: SpanCapacityError,
+        span: Option<SourceSpan>,
+    ) -> Result<Self, CompilerError> {
+        match error.reason() {
+            SpanCapacityReason::ExtendedTableFull => Ok(Self::source_span_capacity(
+                error.start(),
+                error.length(),
+                SourceSpanCapacityResource::ExtendedSpanTable,
+                span,
+            )),
+            SpanCapacityReason::EndUnrepresentable => {
+                Err(CompilerError::source_span_capacity(error, span))
+            }
+        }
+    }
 
     /// Validate the exact spans retained by one preparation diagnostic.
     ///

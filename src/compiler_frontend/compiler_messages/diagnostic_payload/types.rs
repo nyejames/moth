@@ -23,6 +23,14 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
+/// Which compact source-span table rejected an authored range.
+///
+/// The source identity remains on the diagnostic's primary span; this fact records the
+/// exhausted source-owned capacity without allocating another extended row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceSpanCapacityResource {
+    ExtendedSpanTable,
+}
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
 ///

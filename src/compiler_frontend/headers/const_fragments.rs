@@ -11,7 +11,9 @@ use crate::compiler_frontend::headers::types::{
     Header, HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseFailure,
     LocalDeclarationOrderingHint,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan, SpanJoinError};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanJoinError,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
@@ -38,11 +40,11 @@ pub(super) fn create_top_level_const_template(
     // can treat const templates exactly like regular templates.
     let mut body = Vec::with_capacity(10);
     body.push(opening_template_token);
-
     let start_span = SourceSpan::new(
         token_stream.file_id,
         token_stream.tokens[token_stream.index].span,
     );
+    let source_start = SourceSpan::new(token_stream.file_id, LocalSpan::source_start());
 
     let closing_bracket = context.string_table.intern("]");
     crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
@@ -88,11 +90,14 @@ pub(super) fn create_top_level_const_template(
         .join(end_span, span_builder)
         .map_err(|error| match error {
             SpanJoinError::Capacity(error) => {
-                CompilerError::source_span_capacity(error, Some(start_span))
+                match CompilerDiagnostic::from_span_capacity_error(error, Some(source_start)) {
+                    Ok(diagnostic) => HeaderParseFailure::Diagnostic(diagnostic),
+                    Err(error) => HeaderParseFailure::Infrastructure(error),
+                }
             }
-            SpanJoinError::DifferentSources { .. } => {
-                CompilerError::compiler_error("const-template span join crossed source identities")
-            }
+            SpanJoinError::DifferentSources { .. } => HeaderParseFailure::Infrastructure(
+                CompilerError::compiler_error("const-template span join crossed source identities"),
+            ),
         })?;
 
     let template_tokens =

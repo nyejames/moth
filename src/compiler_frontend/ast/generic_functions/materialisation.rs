@@ -436,11 +436,15 @@ fn generated_file_value_resolution_services(
     module_origin: Option<StableModuleOriginIdentity>,
     stage0_resolution_facts: Arc<Stage0ResolutionFacts>,
 ) -> Rc<FileValueResolutionServices> {
+    let frozen_identity_handle = module_origin
+        .as_ref()
+        .map(|origin| FrozenIdentityHandle::for_domain(origin.package().clone()))
+        .unwrap_or_else(FrozenIdentityHandle::new);
     Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(stage0_resolution_facts),
         module_resources,
         module_origin,
-        frozen_identity_handle: FrozenIdentityHandle::new(),
+        frozen_identity_handle,
     })
 }
 
@@ -795,6 +799,9 @@ impl GenericTemplateArtefact {
                 timing_context
             );
             AstEmitter::new(&phase_context, &mut environment, 1)
+                .with_generic_call_site_identity_handle(
+                    requester_context.frozen_identity_handle.clone(),
+                )
                 .emit_generated_request(request, string_table_ref)?
         };
         let mut build_result = {

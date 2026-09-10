@@ -67,7 +67,7 @@ pub use frontend::{
     FrontendBenchmarkBuildProfile, FrontendBenchmarkCounter, FrontendBenchmarkError,
     FrontendBenchmarkFailureKind, FrontendBenchmarkInput, FrontendBenchmarkInputValue,
     FrontendBenchmarkOptions, FrontendBenchmarkOutcome, FrontendBenchmarkReport,
-    FrontendBenchmarkStage, run_frontend_benchmark,
+    FrontendBenchmarkRetention, FrontendBenchmarkStage, run_frontend_benchmark,
 };
 
 pub use span_census::{

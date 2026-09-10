@@ -8,7 +8,9 @@
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidStringEscapeReason};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::lexer::TokenizeResult;
+use crate::compiler_frontend::tokenizer::lexer::{
+    TokenizeResult, current_source_span, source_span_for_bytes,
+};
 use crate::compiler_frontend::tokenizer::newline_handling::{
     consume_pending_carriage_return_newline, normalize_consumed_carriage_return_newline,
 };
@@ -36,7 +38,7 @@ pub(super) fn tokenize_raw_string(
         token_value.push(ch);
     }
 
-    Err(CompilerDiagnostic::unterminated_string_literal(Some(stream.current_source_span()?)).into())
+    Err(CompilerDiagnostic::unterminated_string_literal(Some(current_source_span(stream)?)).into())
 }
 
 /// WHAT: lexes a double-quoted string slice, decoding only the supported escapes.
@@ -55,7 +57,7 @@ pub(super) fn tokenize_string(
 
         let Some(ch) = stream.next() else {
             return Err(CompilerDiagnostic::unterminated_string_literal(Some(
-                stream.current_source_span()?,
+                current_source_span(stream)?,
             ))
             .into());
         };
@@ -128,11 +130,8 @@ fn escape_span(
     stream: &mut TokenStream<'_>,
     start_byte: u32,
     end_byte: u32,
-) -> Result<
-    crate::compiler_frontend::source::SourceSpan,
-    crate::compiler_frontend::source::SpanCapacityError,
-> {
-    stream.source_span_for_bytes(start_byte, end_byte)
+) -> TokenizeResult<crate::compiler_frontend::source::SourceSpan> {
+    source_span_for_bytes(stream, start_byte, end_byte)
 }
 
 pub(super) fn tokenize_template_body(

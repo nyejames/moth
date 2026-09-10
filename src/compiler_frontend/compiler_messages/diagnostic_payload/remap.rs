@@ -190,7 +190,8 @@ impl DiagnosticPayload {
                 }
             }
 
-            DiagnosticPayload::InvalidCharacter { .. }
+            DiagnosticPayload::SourceSpanCapacity { .. }
+            | DiagnosticPayload::InvalidCharacter { .. }
             | DiagnosticPayload::InvalidStringEscape { .. }
             | DiagnosticPayload::InvalidGenericApplication { .. }
             | DiagnosticPayload::InvalidPath { .. }

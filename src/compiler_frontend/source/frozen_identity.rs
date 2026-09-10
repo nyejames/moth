@@ -1,9 +1,9 @@
 //! Lookup-only source, path and string identity after the mutable build boundary.
 //!
-//! WHAT: owns the finalized source database beside the merged immutable string table used by its
-//!       logical-path components.
-//! WHY:  source snapshots, line starts, extended spans, canonical paths and path nodes must cross
-//!       one consuming boundary without a second source database or copied source text.
+//! WHAT: owns the finalized source slots, snapshots, and path trie beside the merged immutable
+//!       string table used by logical-path components.
+//! WHY:  source slots, source snapshots, line starts, extended spans and path nodes must cross one
+//!       consuming boundary without a second source database or copied source text.
 //!
 //! [`FrozenIdentityContext::from_parts`] consumes the merged root [`StringTable`] and a finalized
 //! [`SourceDatabase`]. The source database moves its existing arrays and path table into a
@@ -18,14 +18,13 @@
 //! string allocation is copied.
 
 use super::line_index::LineIndex;
-use super::{FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord, SourceSlot};
+use super::{FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringId, StringTable,
 };
-use std::path::Path;
 use std::sync::Arc;
 
 /// Late-bound owner for one generic body or scope chain's final frozen identity.
@@ -35,18 +34,49 @@ use std::sync::Arc;
 /// their `SourceId`; they never expose a donor ID without an owner that can resolve it after the
 /// mutable source builder is dropped.
 #[derive(Clone, Debug)]
-pub(crate) struct FrozenIdentityHandle(Arc<std::sync::OnceLock<Arc<FrozenIdentityContext>>>);
+pub(crate) struct FrozenIdentityHandle {
+    identity: Arc<std::sync::OnceLock<Arc<FrozenIdentityContext>>>,
+    /// Stable package domain for the source IDs carried by this handle.
+    ///
+    /// Source IDs are only unique inside one project/package database, so a donor handle must
+    /// retain the owning package identity while its frozen context is still late-bound. The
+    /// domain is shared by cheap handle clones and is not inferred from a colliding SourceId.
+    domain: Option<Arc<StablePackageIdentity>>,
+}
+
+impl PartialEq for FrozenIdentityHandle {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.identity, &other.identity)
+    }
+}
+
+impl Eq for FrozenIdentityHandle {}
 
 impl FrozenIdentityHandle {
     pub(crate) fn new() -> Self {
-        Self(Arc::new(std::sync::OnceLock::new()))
+        Self {
+            identity: Arc::new(std::sync::OnceLock::new()),
+            domain: None,
+        }
+    }
+
+    /// Create a handle whose spans belong to one stable project/package identity domain.
+    pub(crate) fn for_domain(domain: StablePackageIdentity) -> Self {
+        Self {
+            identity: Arc::new(std::sync::OnceLock::new()),
+            domain: Some(Arc::new(domain)),
+        }
+    }
+
+    pub(crate) fn domain(&self) -> Option<&StablePackageIdentity> {
+        self.domain.as_deref()
     }
 
     pub(crate) fn install(
         &self,
         identity: Arc<FrozenIdentityContext>,
     ) -> Result<(), CompilerError> {
-        if let Some(existing) = self.0.get() {
+        if let Some(existing) = self.identity.get() {
             if Arc::ptr_eq(existing, &identity) {
                 return Ok(());
             }
@@ -54,14 +84,17 @@ impl FrozenIdentityHandle {
                 "frozen identity handle was assigned two different contexts",
             ));
         }
-        self.0.set(identity).map_err(|_| {
+        self.identity.set(identity).map_err(|_| {
             CompilerError::compiler_error("frozen identity handle was assigned concurrently")
         })
     }
 
-    #[cfg(test)]
+    /// Borrow the installed identity after the owning compilation boundary freezes.
+    ///
+    /// A missing identity is deliberately observable: callers carrying a donor handle must not
+    /// reinterpret its source IDs through the requester's context.
     pub(crate) fn get(&self) -> Option<&FrozenIdentityContext> {
-        self.0.get().map(Arc::as_ref)
+        self.identity.get().map(Arc::as_ref)
     }
 }
 
@@ -81,7 +114,8 @@ impl FrozenIdentityContext {
     /// Consume the merged root string table and finalized source database.
     ///
     /// The source database's [`SourceDatabase::freeze`] operation moves retained snapshots,
-    /// installed extended-span tables, failures, canonical paths and its path trie. No source
+    /// installed extended-span tables and its path trie. Construction-only load failures and
+    /// canonical-path lookup state are dropped before the frozen owner is published. No source
     /// text or span storage is cloned, and no independent path table is created. The frozen
     /// string allocation is placed behind a shared owner so later package domains can reuse it
     /// through [`Self::from_shared_strings`] without copying.
@@ -95,8 +129,9 @@ impl FrozenIdentityContext {
     /// Reuse an already-frozen shared string allocation for another finalized source database.
     ///
     /// Only the source owner moves: [`SourceDatabase::freeze`] moves this domain's retained
-    /// snapshots, installed extended-span tables, failures, canonical paths and path trie into a
-    /// fresh [`FrozenSourceDatabase`]. Sharing the owner shares the one merged root string
+    /// snapshots, installed extended-span tables and path trie into a fresh
+    /// [`FrozenSourceDatabase`]. Construction-only load failures and canonical-path lookup state
+    /// are dropped before publication. Sharing the owner shares the one merged root string
     /// allocation created by [`Self::from_parts`]; no source text or string allocation is copied.
     /// Callers must pass the exact shared table that issued the [`StringId`] components stored
     /// in `sources`' path trie.
@@ -108,13 +143,6 @@ impl FrozenIdentityContext {
             sources: sources.freeze(),
             strings,
         }
-    }
-
-    /// Borrow the lookup-only source owner.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source lookup consumers.
-    pub(crate) fn sources(&self) -> &FrozenSourceDatabase {
-        &self.sources
     }
 
     /// Borrow the immutable string table used by compact string IDs.
@@ -138,16 +166,8 @@ impl FrozenIdentityContext {
         self.sources.paths()
     }
 
-    /// Resolve a string ID in this identity context.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-identity string lookup consumers.
-    pub(crate) fn resolve_string(&self, id: StringId) -> &str {
-        self.strings.resolve(id)
-    }
-
-    /// Fallibly resolve a string ID in this identity context.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-identity string lookup consumers.
+    /// Fallibly resolve a string ID in this identity context for source/diagnostic model tests.
+    #[cfg(test)]
     pub(crate) fn try_resolve_string(&self, id: StringId) -> Option<&str> {
         self.strings.try_resolve(id)
     }
@@ -161,34 +181,10 @@ impl FrozenIdentityContext {
             .render_portable_frozen(path, &self.strings, scratch)
     }
 
-    /// Iterate over physical source slots in deterministic source-identity order.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source iteration consumers.
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, SourceSlot> {
-        self.sources.iter()
-    }
-
     /// Resolve one physical source slot by compact identity.
     #[inline]
-    pub(crate) fn get(&self, id: SourceId) -> Option<&SourceSlot> {
+    pub(crate) fn get(&self, id: SourceId) -> Option<&super::SourceSlot> {
         self.sources.get(id)
-    }
-
-    /// Resolve one physical source slot by canonical filesystem path.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source canonical lookup consumers.
-    pub(crate) fn get_by_canonical_path(&self, canonical_path: &Path) -> Option<&SourceSlot> {
-        self.sources.get_by_canonical_path(canonical_path)
-    }
-
-    /// Resolve the unique physical source for an exact frozen logical-path identity.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source logical-path lookup consumers.
-    pub(crate) fn unique_record_for_logical_path(
-        &self,
-        logical_path: PathId,
-    ) -> Option<&SourceSlot> {
-        self.sources.unique_record_for_logical_path(logical_path)
     }
 
     /// Return the compact logical-path identity assigned to one physical source.
@@ -197,74 +193,15 @@ impl FrozenIdentityContext {
         self.sources.source_logical_path(id)
     }
 
-    /// Reconstruct the legacy path view for one frozen source identity.
-    ///
-    /// This is the frozen equivalent of [`SourceDatabase::legacy_logical_path`]. The
-    /// component vector is rebuilt from the frozen path table on each call and is never
-    /// retained.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source path compatibility consumers.
-    pub(crate) fn legacy_logical_path(&self, id: SourceId) -> InternedPath {
-        self.sources.legacy_logical_path(id)
-    }
-
-    /// Borrow the exact retained source snapshot for one physical source.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source snapshot consumers.
-    pub(crate) fn retained_text(&self, id: SourceId) -> Option<&str> {
-        self.sources.retained_text(id)
-    }
-
     /// Construct a line index over one retained source snapshot.
     #[inline]
     pub(crate) fn line_index(&self, id: SourceId) -> Option<LineIndex<'_>> {
         self.sources.line_index(id)
     }
 
-    /// Return a source's structured load failure, when loading failed.
-    #[inline]
-    #[allow(dead_code)] // Retained for deferred frozen-source failure consumers.
-    pub(crate) fn source_load_error(&self, id: SourceId) -> Option<&CompilerError> {
-        self.sources.source_load_error(id)
-    }
-
     /// Resolve the loaded source record for exact frozen span resolution.
     #[inline]
     pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
         self.sources.source_record(id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{FrozenIdentityContext, FrozenIdentityHandle};
-    use crate::compiler_frontend::source::SourceDatabase;
-    use crate::compiler_frontend::symbols::string_interning::StringTable;
-    use std::sync::Arc;
-
-    #[test]
-    fn frozen_identity_handle_is_single_assignment() {
-        let identity = Arc::new(FrozenIdentityContext::from_parts(
-            StringTable::new(),
-            SourceDatabase::empty(),
-        ));
-        let other_identity = Arc::new(FrozenIdentityContext::from_parts(
-            StringTable::new(),
-            SourceDatabase::empty(),
-        ));
-        let handle = FrozenIdentityHandle::new();
-
-        assert!(handle.get().is_none());
-        handle
-            .install(Arc::clone(&identity))
-            .expect("first frozen identity assignment should succeed");
-        assert!(handle.get().is_some());
-        handle
-            .install(Arc::clone(&identity))
-            .expect("reinstalling the same frozen identity should be idempotent");
-        let error = handle
-            .install(other_identity)
-            .expect_err("a handle must reject a different frozen identity");
-        assert!(error.msg.contains("two different contexts"));
     }
 }

@@ -252,10 +252,15 @@ pub enum DiagnosticPayload {
     // -----------------
     //  Syntax Payloads
     // -----------------
+    SourceSpanCapacity {
+        start: u32,
+        length: u32,
+        resource: SourceSpanCapacityResource,
+    },
+
     InvalidCharacter {
         character: char,
     },
-
     InvalidStringEscape {
         reason: InvalidStringEscapeReason,
     },

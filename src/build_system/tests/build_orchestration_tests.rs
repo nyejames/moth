@@ -1032,22 +1032,22 @@ fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() 
         let identity = messages
             .frozen_identity_context_for_diagnostic(0)
             .expect("frontend diagnostics should retain their frozen identity context");
-        let source_id = identity
-            .get_by_canonical_path(
-                &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize"),
-            )
-            .expect("main source should remain registered")
-            .id;
         let diagnostic = errors
             .iter()
             .find(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035")
             .expect("named-type diagnostic should be retained");
+        let source_span = diagnostic
+            .primary_span
+            .expect("frontend diagnostic should retain its authored span");
+        let source = identity
+            .get(source_span.source())
+            .expect("frozen identity should resolve the diagnostic source");
+        let canonical_path =
+            fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize");
         assert_eq!(
-            diagnostic
-                .primary_span
-                .expect("frontend diagnostic should retain its authored span")
-                .source(),
-            source_id,
+            source.canonical_os_path.as_deref(),
+            Some(canonical_path.as_path()),
+            "frozen identity should retain the diagnostic source's canonical path"
         );
     }
 }

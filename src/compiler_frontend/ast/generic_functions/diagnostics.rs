@@ -11,20 +11,22 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
-/// Carries the source spans and substitution facts needed to rewrite a
+/// Carries the source spans, donor identity and substitution facts needed to rewrite a
 /// concrete-body diagnostic into a call-site-primary generic instantiation diagnostic.
 ///
-/// WHAT: bundles the call-site span, generic declaration span, and substitution
-/// payload consumed by `with_generic_instantiation_context`.
-/// WHY: emitter code can build this once and avoid duplicating the diagnostic
-/// rewrite logic at each call site.
+/// WHAT: bundles the call-site span, generic declaration span, donor identity and substitution
+///       payload consumed by `with_generic_instantiation_context`.
+/// WHY: emitter code can build this once and avoid duplicating the diagnostic rewrite logic at
+///      each call site.
 #[derive(Clone, Debug)]
 pub(crate) struct GenericInstantiationDiagnosticContext {
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) declaration_span: Option<SourceSpan>,
+    pub(crate) frozen_identity_handle: Option<FrozenIdentityHandle>,
+    pub(crate) call_site_frozen_identity_handle: Option<FrozenIdentityHandle>,
     pub(crate) substitutions: Vec<GenericSubstitutionDiagnostic>,
 }
 
@@ -110,10 +112,21 @@ pub(crate) fn with_generic_instantiation_context(
     let GenericInstantiationDiagnosticContext {
         call_span,
         declaration_span,
+        frozen_identity_handle,
+        call_site_frozen_identity_handle,
         substitutions,
     } = context;
 
+    if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
+        for label in &mut diagnostic.labels {
+            label.set_frozen_identity_handle(frozen_identity_handle.clone());
+        }
+    }
+
     let body_span = diagnostic.primary_span;
+    if call_span.is_some() {
+        diagnostic.primary_frozen_identity_handle = call_site_frozen_identity_handle;
+    }
     diagnostic.primary_span = call_span;
     let mut new_labels = Vec::with_capacity(diagnostic.labels.len() + 3);
 
@@ -123,10 +136,18 @@ pub(crate) fn with_generic_instantiation_context(
             .iter()
             .any(|label| label.span == Some(span))
     {
-        new_labels.push(DiagnosticLabel::secondary(
-            Some(span),
-            Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-        ));
+        let label = match frozen_identity_handle.as_ref() {
+            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
+                Some(span),
+                Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
+                frozen_identity_handle.clone(),
+            ),
+            None => DiagnosticLabel::secondary(
+                Some(span),
+                Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
+            ),
+        };
+        new_labels.push(label);
     }
 
     if let Some(span) = declaration_span
@@ -135,17 +156,33 @@ pub(crate) fn with_generic_instantiation_context(
             .iter()
             .any(|label| label.span == Some(span))
     {
-        new_labels.push(DiagnosticLabel::secondary(
-            Some(span),
-            Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite),
-        ));
+        let label = match frozen_identity_handle.as_ref() {
+            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
+                Some(span),
+                Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite),
+                frozen_identity_handle.clone(),
+            ),
+            None => DiagnosticLabel::secondary(
+                Some(span),
+                Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite),
+            ),
+        };
+        new_labels.push(label);
     }
 
     if !substitutions.is_empty() {
-        new_labels.push(DiagnosticLabel::secondary(
-            declaration_span,
-            Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }),
-        ));
+        let label = match frozen_identity_handle.as_ref() {
+            Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
+                declaration_span,
+                Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }),
+                frozen_identity_handle.clone(),
+            ),
+            None => DiagnosticLabel::secondary(
+                declaration_span,
+                Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }),
+            ),
+        };
+        new_labels.push(label);
     }
 
     new_labels.extend(diagnostic.labels);

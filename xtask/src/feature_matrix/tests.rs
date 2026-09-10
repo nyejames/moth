@@ -97,14 +97,14 @@ fn a_lane_command_names_every_feature_it_enables() {
     let lane = FeatureLane {
         name: "timers-counters",
         package: "moth",
-        features: &["timers", "benchmark_counters"],
+        features: &["timers", "benchmark_counters", "data_layout_memory_probe"],
         kind: FeatureLaneKind::Standard,
         owns: "collector-backed counters",
     };
 
     assert_eq!(
         lane.command_line(),
-        "cargo test -p moth --quiet --features timers,benchmark_counters -- --format terse"
+        "cargo test -p moth --quiet --features timers,benchmark_counters,data_layout_memory_probe -- --format terse"
     );
 }
 

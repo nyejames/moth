@@ -1,14 +1,13 @@
-//! Thin wrappers that attach accumulated warnings to a failing frontend stage.
+//! Thin wrappers that classify stage failures into the premerge handoff lane.
 //!
-//! WHY: each stage returns its own `CompilerMessages`, but a module's warnings are accumulated
-//!      across stages. Merging them in one place keeps every call site in the module compilation
-//!      service and generated materialisation reading as a named step.
+//! WHY: each deeper stage still returns its legacy `CompilerMessages` vessel, but this module
+//!      classifies it immediately and prepends accumulated warnings into the diagnosed
+//!      `PremergeDiagnosticBatch` without cloning the compiler's whole `StringTable`.
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, merge_stage_messages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeFailure};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
@@ -21,18 +20,24 @@ pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
     warnings: &[CompilerDiagnostic],
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
-) -> Result<HirLoweringResult, CompilerMessages> {
+) -> Result<HirLoweringResult, PremergeFailure> {
     compiler
         .generate_hir(module_ast, function_origin_lookup, module_resources)
-        .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
+        .map_err(|messages| {
+            let mut failure = PremergeFailure::from(messages);
+            failure.prepend_diagnostics(warnings.iter().cloned());
+            failure
+        })
 }
 
 pub(in crate::compiler_frontend::module_compilation) fn check_borrows(
     compiler: &CompilerFrontend<'_>,
     hir_module: &HirModule,
     warnings: &[CompilerDiagnostic],
-) -> Result<BorrowCheckReport, CompilerMessages> {
-    compiler
-        .check_borrows(hir_module)
-        .map_err(|messages| merge_stage_messages(messages, warnings, &compiler.string_table))
+) -> Result<BorrowCheckReport, PremergeFailure> {
+    compiler.check_borrows(hir_module).map_err(|messages| {
+        let mut failure = PremergeFailure::from(messages);
+        failure.prepend_diagnostics(warnings.iter().cloned());
+        failure
+    })
 }

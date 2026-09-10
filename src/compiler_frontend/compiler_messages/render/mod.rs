@@ -43,7 +43,8 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
     InvalidPageMetadataReason, InvalidTemplateDirectiveReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, UnsupportedOperatorCategory,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
+    UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;

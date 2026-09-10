@@ -136,6 +136,21 @@ impl From<CompilerError> for PremergeFailure {
 }
 
 impl PremergeFailure {
+    /// Prepend earlier-stage diagnostics to a diagnosed premerge batch.
+    ///
+    /// Infrastructure failures remain typed and untouched. A mixed failure retains its outer
+    /// infrastructure error while shifting the diagnosed batch's render ranges.
+    pub(crate) fn prepend_diagnostics(
+        &mut self,
+        prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,
+    ) {
+        match self {
+            Self::Diagnosed(batch) => batch.prepend_diagnostics(prior_diagnostics),
+            Self::Infrastructure(_) => {}
+            Self::Mixed { batch, .. } => batch.prepend_diagnostics(prior_diagnostics),
+        }
+    }
+
     /// Convert the premerge lane into the final boundary vessel exactly once.
     ///
     /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries an infrastructure
@@ -173,15 +188,15 @@ impl PremergeFailure {
     }
 }
 
-/// Classify a deeper stage's boundary vessel into the premerge lane.
+/// Transitional classifier for AST/HIR APIs that still return `CompilerMessages`.
 ///
-/// WHAT: routes a `CompilerMessages` failure through the single
+/// WHAT: routes a legacy boundary vessel through the single
 /// [`ModuleDiagnostics`](super::module_diagnostics::ModuleDiagnostics) classifier: user-facing
-/// failures become a move-only diagnosed batch, the outer infrastructure lane (and malformed
-/// sequences) become the typed `CompilerError` lane.
-/// WHY: binding/order/AST/HIR stages still return the legacy vessel; the semantic service
-/// normalizes each one here so `?` carries the classified lane upward without rebuilding a
-/// second vessel per stage. Warning companions of infrastructure failures are discarded by
+/// failures become a move-only diagnosed batch, while infrastructure and malformed sequences
+/// become the typed `CompilerError` lane.
+/// WHY: direct migration of those public AST/HIR methods is outside this stage-handoff slice.
+/// New orchestration wrappers classify immediately and carry `PremergeFailure` upward without
+/// rebuilding a second vessel. Warning companions of infrastructure failures are discarded by
 /// the classifier because the typed lane aborts the owning compilation.
 impl From<super::compiler_errors::CompilerMessages> for PremergeFailure {
     fn from(messages: super::compiler_errors::CompilerMessages) -> Self {

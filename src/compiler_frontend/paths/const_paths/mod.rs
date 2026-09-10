@@ -12,7 +12,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, mint_token};
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span, mint_token};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
 
 mod components;
@@ -55,7 +55,7 @@ pub fn parse_file_path(
 
                 return Err(CompilerDiagnostic::invalid_path(
                     PathKind::OnlyRootSlashSupported,
-                    Some(stream.current_source_span()?),
+                    Some(current_source_span(stream)?),
                 )
                 .into());
             }
@@ -67,7 +67,7 @@ pub fn parse_file_path(
     if parsed_prefix.components.is_empty() {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::Empty,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -75,7 +75,7 @@ pub fn parse_file_path(
     if parsed_prefix.ended_with_separator {
         return Err(CompilerDiagnostic::invalid_path(
             PathKind::TrailingSeparator,
-            Some(stream.current_source_span()?),
+            Some(current_source_span(stream)?),
         )
         .into());
     }
@@ -122,7 +122,7 @@ fn parse_path_prefix(
                 };
                 return Err(CompilerDiagnostic::invalid_path(
                     path_kind,
-                    Some(stream.current_source_span()?),
+                    Some(current_source_span(stream)?),
                 )
                 .into());
             }
@@ -130,7 +130,7 @@ fn parse_path_prefix(
             if matches!(next, '/' | '\\') {
                 return Err(CompilerDiagnostic::invalid_path(
                     PathKind::EmptyComponent,
-                    Some(stream.current_source_span()?),
+                    Some(current_source_span(stream)?),
                 )
                 .into());
             }

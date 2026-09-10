@@ -48,6 +48,11 @@ fn frontend_benchmark_runs_for_simple_file() {
     assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
     assert_eq!(report.error_count, 0);
 
+    assert_eq!(
+        report.retention,
+        Default::default(),
+        "a clean benchmark result should skip frozen render storage entirely"
+    );
     // Stage timings are collected when `timers` is enabled.
     #[cfg(feature = "timers")]
     assert_frontend_stage_rows(&report);

@@ -2,6 +2,7 @@
 name = "moth"
 version = "0.1.12"
 edition = "2024"
+default-run = "moth"
 
 [workspace]
 members = [".", "xtask"]
@@ -19,6 +20,7 @@ resolver = "2"
 timers = []
 detailed_timers = ["timers"]
 benchmark_counters = []
+data_layout_memory_probe = ["timers", "benchmark_counters"]
 show_tokens = []
 show_headers = []
 show_ast = []
@@ -35,6 +37,12 @@ async_blocks = []
 [[bin]]
 name = "moth"
 path = "src/main.rs"
+
+
+[[bin]]
+name = "data_layout_memory_probe"
+path = "src/bin/data_layout_memory_probe.rs"
+required-features = ["data_layout_memory_probe"]
 
 [dependencies]
 rayon = "1.12"

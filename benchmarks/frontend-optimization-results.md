@@ -3510,6 +3510,58 @@ Clippy also ran with installed `x86_64-unknown-linux-gnu` and `x86_64-pc-windows
 | `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
 
 The source-byte and extended-table values are span-census corpus measurements, not retained-heap
-claims. The bounded benchmark runner exposes timing and counter observations rather than aggregate
-retained heap bytes, so no unmeasured memory delta is claimed. The phase now pauses for external
-user review before Phase 2.
+claims. This historical closeout paragraph records the evidence available before the external-review
+correction; the bounded runner then exposed timing and counters but no retained-layout partition.
+The repeatable retained-layout and allocator-proxy evidence below supersedes that limitation.
+
+## Phase 1 Review-Correction Retention Probe
+
+The Phase 1 external-review corrections added a repeatable retained-layout probe rather than
+relying on the earlier single-run timing record. Five independent processes ran each of the same
+three data-layout workloads used by the recovered predecessor evidence:
+
+```text
+cargo run --quiet --locked --package moth --bin data_layout_memory_probe \
+  --features data_layout_memory_probe -- <entry>
+```
+
+The host and toolchain were the same Apple M1 Pro / `aarch64-apple-darwin` / Rust 1.97.1
+environment recorded for the Phase 1 closeout. `total_ms` is the benchmark report's direct elapsed
+time. `live_bytes_delta` and `peak_live_bytes_delta` are aggregate global-allocator deltas from the
+benchmark process; they are repeatable allocation proxies, not owner attribution. The `retained.*`
+columns are exact post-render-boundary layout counts from the returned report.
+The probe was rerun after the package-domain frozen-handle correction. All five runs reproduced
+the retained-layout counts and allocator deltas for each workload; elapsed time is reported as the
+median with the inclusive five-run range.
+
+| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Median live bytes delta | Median peak bytes delta | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Frozen contexts |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | Success | 0 / 0 | 1882.574334 (1862.175625–1949.929875) | 455,591 | 24,090,042 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `warning-heavy.moth` | Success | 0 / 39 | 39.082500 (21.830833–51.667542) | 18,093 | 2,699,354 | 1,200 | 0 | 2 | 39 | 0 | 1 |
+| `diagnosed/` | Diagnosed | 40 / 0 | 80.131417 (68.767375–103.873583) | 23,339 | 2,108,546 | 5,116 | 0 | 45 | 40 | 0 | 1 |
+
+The five-run median and inclusive min–max range for every allocator and retained-layout field are:
+
+| Workload | Live bytes delta | Peak bytes delta | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Frozen contexts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 455,591 (455,591–455,591) | 24,090,042 (24,090,042–24,090,042) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) |
+| `warning-heavy.moth` | 18,093 (18,093–18,093) | 2,699,354 (2,699,354–2,699,354) | 1,200 (1,200–1,200) | 0 (0–0) | 2 (2–2) | 39 (39–39) | 0 (0–0) | 1 (1–1) |
+| `diagnosed/` | 23,339 (23,339–23,339) | 2,108,546 (2,108,546–2,108,546) | 5,116 (5,116–5,116) | 0 (0–0) | 45 (45–45) | 40 (40–40) | 0 (0–0) | 1 (1–1) |
+
+The current peak and after-report allocator proxies are directly comparable with the recovered
+predecessor's same-workload owner-final probe:
+
+| Workload | Predecessor peak bytes | Current peak bytes | Peak delta | Predecessor after-report bytes | Current after-report bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 29,216,701 | 24,090,042 | -17.55% | 455,591 | 455,591 |
+| `warning-heavy.moth` | 3,306,673 | 2,699,354 | -18.37% | 18,093 | 18,093 |
+| `diagnosed/` | 2,579,817 | 2,108,546 | -18.27% | 23,339 | 23,339 |
+
+The current report's layout columns are intentionally separated: source snapshot bytes,
+extended-span rows, source identity slots, diagnostic records, diagnostic label slots and frozen
+context records. `docs` reaches the clean-result fast path and therefore retains no source or
+diagnostic render context after the report; the predecessor owner ledger sampled construction-time
+semantic/render owners and is not a post-boundary snapshot measure. The predecessor's semantic and
+rendered owner rows remain historical context, while the five-run current allocator comparison and
+exact returned-layout counts close the retained-memory evidence gap without claiming a complete
+common/cold heap partition.

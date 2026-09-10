@@ -503,6 +503,10 @@ fn fold_template_semantics(
     module_origin: Option<StableModuleOriginIdentity>,
 ) -> TemplateSemanticOutcome {
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
+    let frozen_identity_handle = module_origin
+        .as_ref()
+        .map(|origin| FrozenIdentityHandle::for_domain(origin.package().clone()))
+        .unwrap_or_else(FrozenIdentityHandle::new);
 
     // The owner shares its database with every AST reader. All of them end before the outcome
     // returns, so the caller can regain exclusive access and install each span table once.
@@ -516,7 +520,7 @@ fn fold_template_semantics(
                 ))),
                 module_resources: Rc::clone(&module_resources),
                 module_origin,
-                frozen_identity_handle: FrozenIdentityHandle::new(),
+                frozen_identity_handle,
             })
         });
         fold_template_ast(

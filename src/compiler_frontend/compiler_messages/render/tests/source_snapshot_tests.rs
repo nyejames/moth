@@ -4,9 +4,11 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
 use crate::compiler_frontend::compiler_messages::render::primary_underline_length;
+use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_with_context;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
+use crate::compiler_frontend::compiler_messages::{DiagnosticLabel, DiagnosticLabelMessage};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
@@ -92,6 +94,113 @@ fn inline_span(source: SourceId, start: u32, length: u32) -> SourceSpan {
         source,
         LocalSpan::exact(start, length, &mut builder).expect("test span should fit inline"),
     )
+}
+
+#[test]
+fn empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "",
+        &mut string_table,
+    );
+    let name = string_table.intern("eof");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 0)));
+
+    {
+        let context = DiagnosticRenderContext::new(&string_table)
+            .with_optional_source_database(Some(&source_database));
+        let position = context
+            .primary_position(&diagnostic)
+            .expect("empty-file EOF should resolve in the mutable source database");
+        assert_eq!(position.source, source_id);
+        assert_eq!(position.path, std::path::PathBuf::from("src/main.moth"));
+        assert_eq!(position.start.line, 0);
+        assert_eq!(position.start.column, 0);
+        assert_eq!(position.end.line, 0);
+        assert_eq!(position.end.column, 0);
+        assert_eq!(position.line, "");
+
+        let invalid_source = CompilerDiagnostic::unknown_value_name(
+            name,
+            Some(SourceSpan::new(
+                SourceId::from_index(99),
+                LocalSpan::source_start(),
+            )),
+        );
+        assert!(
+            context.primary_position(&invalid_source).is_none(),
+            "an unknown source identity must remain unresolved"
+        );
+        let invalid_range =
+            CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 1, 0)));
+        assert!(
+            context.primary_position(&invalid_range).is_none(),
+            "an out-of-range empty-file offset must remain unresolved"
+        );
+    }
+
+    let frozen_identity = FrozenIdentityContext::from_parts(string_table, source_database);
+    let frozen_context = DiagnosticRenderContext::new(frozen_identity.strings())
+        .with_frozen_identity(&frozen_identity);
+    let position = frozen_context
+        .primary_position(&diagnostic)
+        .expect("empty-file EOF should resolve in the frozen source database");
+    assert_eq!(position.source, source_id);
+    assert_eq!(position.path, std::path::PathBuf::from("src/main.moth"));
+    assert_eq!(position.start.line, 0);
+    assert_eq!(position.start.column, 0);
+    assert_eq!(position.end.line, 0);
+    assert_eq!(position.end.column, 0);
+    assert_eq!(position.line, "");
+
+    let invalid_source = CompilerDiagnostic::unknown_value_name(
+        name,
+        Some(SourceSpan::new(
+            SourceId::from_index(99),
+            LocalSpan::source_start(),
+        )),
+    );
+    assert!(
+        frozen_context.primary_position(&invalid_source).is_none(),
+        "an unknown source identity must remain unresolved in the frozen database"
+    );
+    let invalid_range =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 1, 0)));
+    assert!(
+        frozen_context.primary_position(&invalid_range).is_none(),
+        "an out-of-range empty-file offset must remain unresolved in the frozen database"
+    );
+}
+
+#[test]
+fn spanless_message_label_renders_without_a_source_position() {
+    let mut string_table = StringTable::new();
+    let label_text = string_table.intern("message-only label");
+    let diagnostic = CompilerDiagnostic::unreachable_match_arm(None).with_labels(vec![
+        DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::RenderedText(label_text))),
+        DiagnosticLabel::secondary(
+            Some(SourceSpan::new(
+                SourceId::from_index(99),
+                LocalSpan::source_start(),
+            )),
+            Some(DiagnosticLabelMessage::PreviousDeclaration),
+        ),
+    ]);
+
+    let rendered = format_label_messages_with_context(
+        &diagnostic,
+        DiagnosticRenderContext::new(&string_table),
+    );
+
+    assert_eq!(
+        rendered,
+        vec!["info: - message-only label"],
+        "spanless labels render their message while unresolved spans remain omitted"
+    );
 }
 
 #[test]

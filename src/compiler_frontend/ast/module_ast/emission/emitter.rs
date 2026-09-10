@@ -57,7 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -202,6 +202,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
     validated_generic_template_bodies: Vec<AstNode>,
+    generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
 }
 
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
@@ -222,7 +223,25 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_function_instances_by_key: FxHashMap::default(),
             deferred_generic_requests: Vec::new(),
             validated_generic_template_bodies: Vec::new(),
+            generic_call_site_identity_handle: None,
         }
+    }
+
+    pub(in crate::compiler_frontend::ast) fn with_generic_call_site_identity_handle(
+        mut self,
+        handle: FrozenIdentityHandle,
+    ) -> Self {
+        self.generic_call_site_identity_handle = Some(handle);
+        self
+    }
+
+    fn generic_call_site_identity_handle(&self) -> Option<FrozenIdentityHandle> {
+        self.generic_call_site_identity_handle.clone().or_else(|| {
+            self.context
+                .file_value_resolution
+                .as_ref()
+                .map(|services| services.frozen_identity_handle.clone())
+        })
     }
 
     pub(in crate::compiler_frontend::ast) fn emit_generated_request(
@@ -596,13 +615,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .iter()
             .any(|active_key| active_key == &request.key)
         {
-            return Err(self.diagnostic_messages(
-                recursive_generic_function_instantiation(
-                    request.key.function_path.name(),
-                    request.call_span,
-                ),
-                string_table,
-            ));
+            let mut diagnostic = recursive_generic_function_instantiation(
+                request.key.function_path.name(),
+                request.call_span,
+            );
+            if request.call_span.is_some()
+                && let Some(handle) = self.generic_call_site_identity_handle()
+            {
+                diagnostic = diagnostic.with_primary_frozen_identity_handle(handle);
+            }
+            return Err(self.diagnostic_messages(diagnostic, string_table));
         }
 
         // --------------------------
@@ -634,6 +656,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Ok(());
         };
         let mut token_stream = body.tokens().clone();
+        let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
         let Some(mapping) = concrete_argument_mapping(
             template.generic_parameter_list_id,
@@ -712,7 +735,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 services.with_stage0_resolution_facts(Arc::clone(facts)),
             );
         }
-        if let Some(frozen_identity_handle) = body.frozen_identity_handle() {
+        if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
             context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
         }
         context.expected_result_type_ids = signature.success_return_type_ids();
@@ -742,6 +765,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     GenericInstantiationDiagnosticContext {
                         call_span: request.call_span,
                         declaration_span: template.declaration_span,
+                        frozen_identity_handle: frozen_identity_handle.clone(),
+                        call_site_frozen_identity_handle: if request.call_span.is_some() {
+                            self.generic_call_site_identity_handle()
+                        } else {
+                            None
+                        },
                         substitutions: substitution_diagnostics,
                     },
                 );

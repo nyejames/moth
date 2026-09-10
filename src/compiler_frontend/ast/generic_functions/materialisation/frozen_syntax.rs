@@ -25,11 +25,11 @@ use std::sync::Arc;
 ///      the pool into the fresh generated-local table once and remaps every token payload through
 ///      that single pool remap, without running tokenization again.
 /// OWNERSHIP: every materialised token stream carries this donor identity via
-///      `FileTokens::new_frozen(..., donor_file_id, ...)` and the frozen facts owner. The donor
-///      range is never silently remapped onto the requester call-site source, no magic identity
-///      is fabricated, and independent package/cross-module handles stay distinct. A future
-///      `FrozenIdentityContext` remap across compilation databases remains the only sanctioned
-///      rebinding; until that boundary lands, the donor identity is the explicit owner.
+///      `FileTokens::new_frozen(..., donor_file_id, ...)`, the frozen facts owner and the
+///      late-bound `FrozenIdentityHandle`. The final render boundary installs the matching
+///      project/package context before resolving labels; donor ranges are never silently
+///      remapped onto the requester call-site source, and no magic identity or `None` fallback
+///      is fabricated.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     /// Declaration-qualified stream path, such as `file/generic_function`.
@@ -202,10 +202,10 @@ impl StableBodySyntax {
             resolved_file_references,
         )?);
 
-        // Retain the captured donor identity as the explicit materialised owner. The donor range
-        // stays distinct from the requester call-site source; cross-database rebinding waits for
-        // the final `FrozenIdentityContext` migration, which is reported as the remaining
-        // prerequisite and must never be emulated with a magic identity or `None`.
+        // Retain the captured donor identity as the explicit materialised owner. The final
+        // boundary installs its domain-specific frozen context before labels render, so donor
+        // ranges stay distinct from the requester call-site source without any rebinding, magic
+        // identity or `None` fallback.
         Ok(MaterialisedBody {
             file_tokens: FileTokens::new_frozen(
                 declaration_path,
