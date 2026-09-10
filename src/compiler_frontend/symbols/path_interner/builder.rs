@@ -112,7 +112,6 @@ impl PathInternerBuilder {
     }
 
     /// Freeze the append-only table into lookup-only path storage.
-    #[allow(dead_code)] // Slice 1F consumes this at the final identity freeze boundary.
     pub fn freeze(self) -> PathTable {
         self.table
     }

@@ -72,9 +72,8 @@ pub struct ExtendedSpanBuilder {
 /// Frozen extended-span table with no spare capacity.
 #[derive(Debug)]
 pub struct ExtendedSpanTable {
-    /// Read through [`ExtendedSpanTable::resolver`] and [`record_resolver`]; both reach
-    /// production when slice 1D4 installs a table on a loaded record.
-    #[allow(dead_code)]
+    /// Read through [`ExtendedSpanTable::resolver`] or [`record_resolver`] to resolve
+    /// extended entries against the owning source record.
     entries: Box<[ExtendedSpan]>,
 }
 
@@ -126,8 +125,7 @@ pub enum SpanCapacityReason {
 
 /// Failure to join two global spans.
 ///
-/// Returned by [`SourceSpan::join`], whose first caller is the diagnostic migration of slice 1D3.
-#[allow(dead_code)]
+/// Returned by [`SourceSpan::join`] when inputs differ in source identity or capacity is exhausted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanJoinError {
     DifferentSources { left: SourceId, right: SourceId },
@@ -160,8 +158,7 @@ impl SourceSpanDatabase for FrozenIdentityContext {
     }
 }
 
-/// A record's own resolver, available once slice 1D4 installs the source's frozen table.
-#[allow(dead_code)]
+/// A record's own resolver for its installed extended-span table.
 fn record_resolver(
     source: &SourceRecord,
     source_identity: Option<SourceId>,
@@ -235,11 +232,10 @@ impl LocalSpan {
 
 /// The consumer half of a local span.
 ///
-/// WHY: resolving against a `SourceRecord` needs the table slice 1D4 installs there, and
-/// insertion points, emptiness and joins get their first callers in the diagnostic, syntax and
-/// renderer migrations of slices 1D3, 1E and 1F. This module's tests exercise every operation
-/// here; each method below therefore carries its own narrow allowance naming unreached callers
-/// rather than unproven code.
+/// WHY: resolving against a `SourceRecord` needs the table installed there, and insertion points,
+/// emptiness and joins are source-span operations used by diagnostics, syntax and renderers.
+/// Tests exercise every operation here; any remaining allowance names a genuinely deferred
+/// consumer rather than hiding an already-used API.
 impl LocalSpan {
     // The reserved-value test reads the packed logical word without exposing its representation.
     pub(super) fn logical_word(self) -> u32 {
@@ -420,7 +416,6 @@ impl SourceSpan {
     ///
     /// Cross-source joins are rejected rather than coerced. Capacity failures from the local
     /// join are preserved as [`SpanJoinError::Capacity`].
-    #[allow(dead_code)]
     pub fn join(
         self,
         other: Self,
