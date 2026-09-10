@@ -7,9 +7,10 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 review-correction pass is complete and committed after the external-review correction
-> checkpoint below. The retained-memory evidence gap, ownership boundary findings, and feature-lane
-> regression are resolved here.
+> Phase 1 final review-correction pass is complete and committed in `3c9c776a8` after the
+> external-review correction checkpoint below. Related-site ownership, generic re-anchoring,
+> direct premerge failure ownership, structured renderer facts, and source/test-owner cleanup are
+> resolved here.
 > Phase 2 remains paused for external user review.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
@@ -67,28 +68,31 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 review-correction pass complete; Phase 2 remains paused for external user review.
+- Phase: Phase 1 final review-correction pass complete in `3c9c776a8`; Phase 2 remains paused for external user review.
 - Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
   deterministic publication while preserving exact authored spans and typed infrastructure failures.
-- Current code evidence: generic donor labels carry production, package-domain-tagged frozen identity
-  handles; each project/package diagnostic range resolves through its own frozen context;
-  authored extended-span exhaustion is `MOTH-SYNTAX-0036`; clean outcomes skip the frozen render
-  tail.
+- Current code evidence: project and linked-module backend diagnostics carry explicit boundary ownership;
+  domain-less handles stay with the project default range while domained package handles resolve only
+  through exact package rows. Generic re-anchoring preserves a spanless body's primary owner;
+  materialisation invariant failures use direct premerge infrastructure/diagnostic lanes; terminal and
+  HTML renderers consume structured label facts with scalar/UTF-16/display-width separation; source
+  discovery and frontend tests use focused real modules without obsolete test loaders.
 - Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
-  The clean final full gate passed on 2026-09-10 at commit `fc9f449e9`: native featured all-target
-  Clippy, 5,099 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
-  1,325 files, 82 benchmark preflights, three scaling series and timer erasure.
+  The clean final full gate passed on 2026-09-10 for the candidate committed as `3c9c776a8`: native
+  featured all-target Clippy, 5,105 workspace tests, 17 CLI tests, 825 xtask tests, integration
+  1,951/1,951, source audit 1,336 files, docs check, 82 benchmark preflights, three scaling series
+  and timer erasure.
   The five-run retained-layout/allocator probe is recorded in
   `benchmarks/frontend-optimization-results.md`.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
   stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoints
-  `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae` and `fc9f449e9`.
+  `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and `3c9c776a8`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
-`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae` and `fc9f449e9`; the plan
-sequence is committed through the final correction checkpoint.
+`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
+`3c9c776a8`; the plan sequence is committed through the final review-correction checkpoint.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
@@ -1311,6 +1315,38 @@ values. The clean `just validate` gate then passed native featured all-target Cl
 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit (1,325 files), docs, benchmark
 sanity (82 preflights), all three scaling budgets and timer erasure. `cargo fmt --all -- --check` and
 `git diff --check` also pass; the clean gate left no generated changes in the worktree.
+
+### Final review-correction closeout (2026-09-10)
+
+This final bounded pass closes the six external-review corrections without changing the fixed
+common layouts or starting Phase 2:
+
+| Finding | Final correction |
+| --- | --- |
+| Related-site ownership could hijack the default source context. | `ProjectEntry` and linked-module views retain the owning boundary domain. Project backend diagnostics use the domain-less project default only for project modules; package diagnostics use their exact package domain. Empty package rows are retained only for explicitly domained handles and never become default render ranges. |
+| Generic re-anchoring could replace a body primary when no call span existed. | The body remains primary when `call_span` is absent; a body secondary is created only when a real call span exists. Distinct domain-less handles compare by allocation identity rather than `None == None`. |
+| Mixed-domain cold ownership was underspecified. | The canonical layout design now makes the normal report domain authoritative for common primary/secondary spans and requires rare foreign sites to use typed cold ownership resolving through a compact report-owned frozen-context reference. No common record carries an `Arc`, path or context pointer; exact Phase 4 side-store encoding remains deferred. |
+| Generated materialisation used local diagnostic detours and duplicated owner attachment. | Local invariant failures use direct `PremergeFailure::Infrastructure` or `PremergeDiagnosticBatch`; `CompilerDiagnostic` owns source-bearing handle attachment, while stage, emitter and message owners delegate to it. |
+| Dev-server formatting depended on terminal text and display widths conflated Unicode coordinate spaces. | Dev-server consumes structured resolved label facts and escapes/serializes independently. Terminal and HTML format independently; non-tab chunks use string display width while scalar columns, UTF-16 columns and tab stops remain distinct. ZWJ and variation-selector regressions cover caret geometry. |
+| Obsolete test loaders and oversized owners obscured source ownership. | The cfg(test) registered-source loader is deleted; source discovery and compile-project frontend tests are split into focused real sibling modules with no `include!` shortcuts. |
+
+Focused final-correction verification passed:
+
+| Command | Result |
+| --- | --- |
+| `cargo run --quiet -- tests --case cast_generic_builtin_evidence_success` | 2/2 case/backend executions correct, including the expected HTML-Wasm `MOTH-RULE-0064` |
+| `cargo test --quiet --lib with_generic_instantiation_context_without_call_span_retains_body_primary` | pass |
+| `cargo test --quiet --lib generated_materialisation_preserves_exact_request_span_in_recursive_diagnostic` | pass |
+| `cargo test --quiet --lib renderers_measure_a_` | 2 tests pass for ZWJ and variation-selector caret widths |
+| `cargo test --quiet --lib registered_source_database_retains_exact_text_for_multiple_compiled_sources` | pass |
+| `cargo fmt --all -- --check`; `git diff --check` | pass |
+
+The complete `just validate` gate then passed: native featured all-target Clippy; feature-lane
+coverage with zero findings; source audit of 1,336 files; 5,105 workspace tests, 17 CLI tests and
+825 xtask tests; 1,951/1,951 integration cases; docs check with no errors or warnings; all 82
+benchmark preflights; all three scaling budgets; and timer erasure. Quick benchmark sanity reported
+no measurable change for the CLI set and a 2 ms average frontend improvement; the scaling fits
+were within the configured budgets. Phase 2 remains paused for external user review.
 
 ### Review-derived corrections supporting Phase 1 closeout
 
