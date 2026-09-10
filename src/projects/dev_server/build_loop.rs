@@ -419,6 +419,10 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
+                let mut messages = error.into_messages(build_result.string_table.clone());
+                if let Some(source_database) = build_result.source_database.as_ref() {
+                    messages.set_source_database(Arc::clone(source_database));
+                }
                 let warning_messages = match build_result.take_warning_messages() {
                     Ok(warnings) => warnings,
                     Err(error) => {
@@ -439,13 +443,16 @@ fn build_once(
                         };
                     }
                 };
-                let mut messages = error.into_messages(
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                );
-                if let Some(mut warnings) = warning_messages {
-                    warnings.append_messages_preserving_context(messages);
-                    messages = warnings;
+                if let Some(warnings) = warning_messages {
+                    messages.append_messages_preserving_context(warnings);
                 }
+                let messages = match messages.freeze_source_contexts() {
+                    Ok(messages) => messages,
+                    Err(error) => CompilerMessages::from_error(
+                        error,
+                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                    ),
+                };
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,

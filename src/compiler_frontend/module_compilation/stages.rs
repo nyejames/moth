@@ -45,6 +45,9 @@ pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
         .generate_hir(module_ast, function_origin_lookup, module_resources)
         .map_err(|messages| {
             let mut failure = PremergeFailure::from(messages);
+            if let Some(handle) = frozen_identity_handle {
+                failure.set_frozen_identity_handle_if_missing(handle.clone());
+            }
             failure.prepend_diagnostics(
                 warnings.iter().cloned().map(|diagnostic| {
                     attach_owner_to_diagnostic(diagnostic, frozen_identity_handle)

@@ -161,6 +161,12 @@ fn html_build_result_with_warning() -> BuildResult {
     }
 }
 
+fn html_build_result_with_invalid_page_url_style() -> BuildResult {
+    let mut build_result = html_build_result();
+    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    build_result
+}
+
 fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResult {
     let owner = test_build_output_owner();
     BuildResult {
@@ -430,6 +436,34 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
         build_state
             .last_build_messages_summary
             .contains("did not declare a dev entry page")
+    );
+}
+
+#[test]
+fn invalid_site_config_preserves_interned_diagnostic_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_invalid_page_url_style())]);
+
+    let report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    assert!(!report.build_ok);
+
+    let build_state = state
+        .build_state
+        .lock()
+        .expect("build state should not be poisoned");
+    assert!(
+        build_state
+            .last_build_messages_summary
+            .contains("bad_style")
+    );
+    assert!(
+        build_state
+            .last_build_messages_summary
+            .contains("'trailing_slash', 'no_trailing_slash', or 'ignore'")
     );
 }
 
