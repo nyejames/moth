@@ -1195,8 +1195,8 @@ Commands below ran on the Apple M1 Pro
 | `just span-census` | 4,626 files walked; 4,585 tokenized; 286,779 spans; 2,353,104 source bytes |
 | selected `LocalSpan` extended table | 1,992 bytes at the 22/10 split; +268 source bytes versus the historical 2,352,836-byte census, with the same span count |
 | `just bench-data-layout-check` | 2/2 cases; 10 measured iterations; **-5 ms average**, 1 faster, 0 slower |
-| `just bench-ci` | 82/82 preflight; CLI 7/8 and frontend 9/10 quick cases measured; no failures; frontend **-3 ms average**; changed docs workloads excluded |
-| `just bench-scaling` | all 3 series within budget; fitted exponents 0.98, 0.75 and 1.64 |
+| `just bench-ci` | 82/82 preflight; CLI 7/8 and frontend 9/10 quick cases measured; no failures; CLI **-1 ms average** (no measurable change); frontend **-4 ms average**; changed docs workloads excluded |
+| `just bench-scaling` | all 3 series within budget; fitted exponents 0.95, 0.76 and 1.63 |
 | `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
 
 The source-byte and extended-table figures are span-census corpus evidence, not a claim that source
