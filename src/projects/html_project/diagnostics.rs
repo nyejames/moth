@@ -15,12 +15,11 @@ use crate::projects::html_project::resource_output_plan::ResourceDiagnosticSite;
 use std::path::Path;
 
 pub(crate) fn missing_homepage_messages(
-    config_path: &Path,
+    _config_path: &Path,
     entry_root: &Path,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     html_config_messages(
-        config_path,
         |string_table| InvalidConfigReason::MissingHtmlHomepage {
             entry_root: path_id(entry_root, string_table),
         },
@@ -35,7 +34,6 @@ pub(crate) fn duplicate_html_output_path_messages(
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     html_config_messages(
-        duplicate_entry_point,
         |string_table| InvalidConfigReason::DuplicateHtmlOutputPath {
             output_path: path_id(output_path, string_table),
             entry_point: path_id(duplicate_entry_point, string_table),
@@ -121,7 +119,6 @@ pub(crate) fn resource_output_path_reserved_messages(
 }
 
 fn html_config_messages(
-    _location_path: &Path,
     reason: impl FnOnce(&mut StringTable) -> InvalidConfigReason,
     string_table: &mut StringTable,
 ) -> CompilerMessages {

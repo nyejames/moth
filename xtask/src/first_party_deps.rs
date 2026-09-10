@@ -274,19 +274,20 @@ fn scan_first_party_root(
 
         if metadata.is_file() {
             state.visited_file_count += 1;
-            let bytes = match fs::read(path) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    state.findings.push(FirstPartyDepsFinding {
-                        file: relative,
-                        rule: FirstPartyDepsRule::UnreadablePath,
-                        message: format!("unreadable file ({error})"),
-                    });
-                    return Ok(WalkDecision::Continue);
-                }
-            };
 
             if is_javascript_file(path) {
+                let bytes = match fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        state.findings.push(FirstPartyDepsFinding {
+                            file: relative,
+                            rule: FirstPartyDepsRule::UnreadablePath,
+                            message: format!("unreadable file ({error})"),
+                        });
+                        return Ok(WalkDecision::Continue);
+                    }
+                };
+
                 match String::from_utf8(bytes) {
                     Ok(source) => {
                         state.javascript_source_count += 1;
