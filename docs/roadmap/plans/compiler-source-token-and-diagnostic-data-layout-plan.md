@@ -75,19 +75,19 @@ CURRENT_SLICE:
   authored extended-span exhaustion is `MOTH-SYNTAX-0036`; clean outcomes skip the frozen render
   tail.
 - Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
-  The clean final full gate passed on 2026-09-10 at commit `18d8e92cb`: native featured all-target
-  Clippy, 5,097 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
+  The clean final full gate passed on 2026-09-10 at commit `a9f5eaae`: native featured all-target
+  Clippy, 5,098 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
   1,325 files, docs check, 82 benchmark preflights, three scaling series and timer erasure.
   The five-run retained-layout/allocator probe is recorded in
   `benchmarks/frontend-optimization-results.md`.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
   stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoints
-  `d8c182e9b`, `d7286e522`, `687295a80` and `18d8e92cb`.
+  `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb` and `a9f5eaae`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
-`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80` and `18d8e92cb`; the plan and evidence closeout
+`eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb` and `a9f5eaae`; the plan and evidence
 sequence is committed through the final correction checkpoint.
 
 CURRENT_WORKSPACE_STATE:
@@ -1302,15 +1302,15 @@ adds no second interner, scheduler, observer API or ubiquitous per-node owner.
 
 #### Follow-up validation evidence (2026-09-10)
 
-The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522`, `687295a80` and
-`18d8e92cb`.
-Focused suites cover generated ownership, provenance-independent Wasm validation, checked string
-lookup, selected-source loading, terminal/HTML rendering, report aggregation, retention accounting
-and late site-config interned values. The clean `just validate` gate then passed native featured
-all-target Clippy, 5,097 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951,
-source audit (1,325 files), docs, benchmark sanity (82 preflights), all three scaling budgets and
-timer erasure. `cargo fmt --all -- --check` and `git diff --check` also pass; the clean gate left
-no generated changes in the worktree.
+The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`
+and `a9f5eaae`.
+Focused suites cover generated ownership, terminal BuildResult warning handoff, provenance-independent
+Wasm validation, checked string lookup, selected-source loading, terminal/HTML rendering, report
+aggregation, retention accounting and late site-config interned values. The clean `just validate`
+gate then passed native featured all-target Clippy, 5,098 moth tests, 17 CLI tests, 825 xtask tests,
+integration 1,951/1,951, source audit (1,325 files), docs, benchmark sanity (82 preflights), all
+three scaling budgets and timer erasure. `cargo fmt --all -- --check` and `git diff --check` also
+pass; the clean gate left no generated changes in the worktree.
 
 ### Review-derived corrections supporting Phase 1 closeout
 
