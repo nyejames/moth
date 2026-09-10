@@ -419,11 +419,13 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
-                let mut messages = error.into_messages(build_result.string_table.clone());
-                if let Some(source_database) = build_result.source_database.as_ref() {
-                    messages.set_source_database(Arc::clone(source_database));
+                let config_string_table = build_result.string_table.clone();
+                let config_source_database = build_result.source_database.as_ref().map(Arc::clone);
+                let mut messages = error.into_messages(config_string_table);
+                if let Some(source_database) = config_source_database {
+                    messages.set_source_database(source_database);
                 }
-                let warning_messages = match build_result.take_warning_messages() {
+                let warning_messages = match build_result.take_warning_messages_before_freeze() {
                     Ok(warnings) => warnings,
                     Err(error) => {
                         let messages = CompilerMessages::from_error(

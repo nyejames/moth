@@ -1620,11 +1620,13 @@ impl BuildResult {
             .or(self.source_database.as_deref())
     }
 
-    /// Move successful-build warnings into their one final frozen render owner.
+    /// Move successful-build warnings into a mutable report owner without freezing it yet.
     ///
-    /// The output writer consumes the mutable build table first; this method is the terminal
-    /// report publication point. Clean builds release the table and source snapshots immediately.
-    pub(crate) fn take_warning_messages(
+    /// WHAT: transfers warnings, their aggregate string table and all source contexts as one
+    ///       move-only `CompilerMessages` value.
+    /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
+    ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
+    pub(crate) fn take_warning_messages_before_freeze(
         &mut self,
     ) -> Result<Option<CompilerMessages>, CompilerError> {
         if self.warnings.is_empty() {
@@ -1643,7 +1645,19 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
-        messages.freeze_source_contexts().map(Some)
+        Ok(Some(messages))
+    }
+
+    /// Move successful-build warnings into their one final frozen render owner.
+    ///
+    /// The output writer consumes the mutable build table first; this method is the terminal
+    /// report publication point. Clean builds release the table and source snapshots immediately.
+    pub(crate) fn take_warning_messages(
+        &mut self,
+    ) -> Result<Option<CompilerMessages>, CompilerError> {
+        self.take_warning_messages_before_freeze()?
+            .map(|messages| messages.freeze_source_contexts())
+            .transpose()
     }
 }
 
