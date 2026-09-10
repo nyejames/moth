@@ -1606,21 +1606,6 @@ pub struct BuildResult {
 }
 
 impl BuildResult {
-    /// Resolve the source snapshot database that produced one successful warning.
-    ///
-    /// WHAT: returns the first recorded association covering `warning_index`, falling back to the
-    ///       project database.
-    /// WHY: a project source and a source-package source can share one logical path, so a
-    ///      renderer that resolves a package warning against the project database shows a
-    ///      different file's text. First match wins, mirroring `CompilerMessages`.
-    pub(crate) fn warning_source_database(&self, warning_index: usize) -> Option<&SourceDatabase> {
-        self.warning_source_contexts
-            .iter()
-            .find(|source_context| source_context.diagnostic_range.contains(&warning_index))
-            .map(|source_context| source_context.source_database.as_ref())
-            .or(self.source_database.as_deref())
-    }
-
     /// Move successful-build warnings into a mutable report owner without freezing it yet.
     ///
     /// WHAT: transfers warnings, their aggregate string table and all source contexts as one

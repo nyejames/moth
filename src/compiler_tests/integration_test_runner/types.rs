@@ -319,6 +319,41 @@ pub(crate) struct CaseExecutionResult {
     pub failure_kind: Option<FailureKind>,
 }
 
+impl CaseExecutionResult {
+    /// Move a successful build's warnings into the final diagnostic report owner.
+    ///
+    /// Build assertions consume the `BuildResult` first, but terminal integration reporting must
+    /// render the frozen `CompilerMessages` owner so generated donor spans cannot fall back to the
+    /// requester database. A freeze failure is a harness failure, not an absent warning report.
+    pub(crate) fn finalize_build_result_report(&mut self) {
+        if self.messages.is_some() {
+            return;
+        }
+
+        let Some(build_result) = self.build_result.as_mut() else {
+            return;
+        };
+
+        match build_result.take_warning_messages() {
+            Ok(messages) => {
+                self.messages = messages;
+            }
+            Err(error) => {
+                self.passed = false;
+                self.failure_kind = Some(FailureKind::HarnessFailed);
+                self.failure_reason = Some(
+                    "Failed to finalize successful-build diagnostics before integration reporting."
+                        .to_owned(),
+                );
+                self.messages = Some(CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                ));
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct SummaryCounts {
     pub total_tests: usize,
