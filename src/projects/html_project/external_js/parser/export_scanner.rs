@@ -90,23 +90,23 @@ impl<'a> ExportScanner<'a> {
                 self.skip_string_literal();
             } else if self.current_char_opt() == Some('`') {
                 self.skip_template_literal();
-            } else if self.peek_str("export") && self.is_word_boundary_at("export".len()) {
+            } else if self.peek_str("export") && self.is_word_boundary_around("export".len()) {
                 self.read_export_statement();
             } else if self.peek_str("module.exports")
-                && self.is_word_boundary_at("module.exports".len())
+                && self.is_word_boundary_around("module.exports".len())
             {
                 self.emit_diagnostic_at_current(
                     "CommonJS `module.exports` is not supported in Moth JS modules.",
                     JsDiagnosticKind::CommonJsExport,
                 );
                 self.skip_to_statement_end();
-            } else if self.peek_str("exports.") {
+            } else if self.peek_str("exports.") && self.is_word_boundary_around("exports".len()) {
                 self.emit_diagnostic_at_current(
                     "CommonJS `exports.name` is not supported in Moth JS modules.",
                     JsDiagnosticKind::CommonJsExport,
                 );
                 self.skip_to_statement_end();
-            } else if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
+            } else if self.peek_str("import") && self.is_word_boundary_around("import".len()) {
                 if self
                     .source
                     .get(self.pos + "import".len()..)
@@ -116,7 +116,7 @@ impl<'a> ExportScanner<'a> {
                 } else {
                     self.read_import_statement();
                 }
-            } else if self.peek_str("require") && self.is_word_boundary_at("require".len()) {
+            } else if self.peek_str("require") && self.is_word_boundary_around("require".len()) {
                 self.read_require_statement();
             } else if self.current_char_opt() == Some('/')
                 && !self.peek_str("//")
@@ -414,16 +414,14 @@ impl<'a> ExportScanner<'a> {
             return true;
         }
 
-        if !previous.is_alphanumeric() && previous != '_' && previous != '$' {
+        if !is_identifier_continuation(previous) {
             return false;
         }
 
         let word_start = prefix
             .char_indices()
             .rev()
-            .find(|(_, character)| {
-                !character.is_alphanumeric() && *character != '_' && *character != '$'
-            })
+            .find(|(_, character)| !is_identifier_continuation(*character))
             .map(|(index, character)| index + character.len_utf8())
             .unwrap_or(0);
 
@@ -585,7 +583,7 @@ impl<'a> ExportScanner<'a> {
         }
 
         while let Some(ch) = self.current_char_opt() {
-            if ch.is_alphanumeric() || ch == '_' || ch == '$' {
+            if is_identifier_continuation(ch) {
                 name.push(ch);
                 self.advance_char();
             } else {
@@ -722,7 +720,7 @@ impl<'a> ExportScanner<'a> {
                 continue;
             }
 
-            if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
+            if self.peek_str("import") && self.is_word_boundary_around("import".len()) {
                 if self
                     .source
                     .get(self.pos + "import".len()..)
@@ -735,7 +733,7 @@ impl<'a> ExportScanner<'a> {
                 continue;
             }
 
-            if self.peek_str("require") && self.is_word_boundary_at("require".len()) {
+            if self.peek_str("require") && self.is_word_boundary_around("require".len()) {
                 self.read_require_statement();
                 continue;
             }
@@ -862,7 +860,9 @@ impl<'a> ExportScanner<'a> {
                     } else if self.peek_str("/*") {
                         self.skip_block_comment();
                         continue;
-                    } else if self.peek_str("import") && self.is_word_boundary_at("import".len()) {
+                    } else if self.peek_str("import")
+                        && self.is_word_boundary_around("import".len())
+                    {
                         if self
                             .source
                             .get(self.pos + "import".len()..)
@@ -873,7 +873,8 @@ impl<'a> ExportScanner<'a> {
                             self.read_import_statement();
                         }
                         continue;
-                    } else if self.peek_str("require") && self.is_word_boundary_at("require".len())
+                    } else if self.peek_str("require")
+                        && self.is_word_boundary_around("require".len())
                     {
                         self.read_require_statement();
                         continue;
@@ -967,7 +968,16 @@ impl<'a> ExportScanner<'a> {
             return true;
         }
         let next_ch = self.source[next_pos..].chars().next().unwrap_or('\0');
-        !next_ch.is_alphanumeric() && next_ch != '_' && next_ch != '$'
+        !is_identifier_continuation(next_ch)
+    }
+
+    fn is_word_boundary_around(&self, candidate_len: usize) -> bool {
+        let before_boundary = self
+            .source
+            .get(..self.pos)
+            .and_then(|prefix| prefix.chars().next_back())
+            .is_none_or(|ch| !is_identifier_continuation(ch) && ch != '.');
+        before_boundary && self.is_word_boundary_at(candidate_len)
     }
 
     fn current_char(&self) -> char {
@@ -1027,6 +1037,10 @@ impl<'a> ExportScanner<'a> {
             kind,
         });
     }
+}
+
+fn is_identifier_continuation(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ch == '$'
 }
 
 fn strip_js_comments_preserving_strings(source: &str) -> String {
@@ -1101,9 +1115,8 @@ fn find_word(text: &str, word: &str) -> Option<usize> {
         let index = search_start + relative_index;
         let before = text[..index].chars().next_back();
         let after = text[index + word.len()..].chars().next();
-        let before_boundary =
-            before.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_' && ch != '$');
-        let after_boundary = after.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_' && ch != '$');
+        let before_boundary = before.is_none_or(|ch| !is_identifier_continuation(ch));
+        let after_boundary = after.is_none_or(|ch| !is_identifier_continuation(ch));
 
         if before_boundary && after_boundary {
             return Some(index);
@@ -1171,7 +1184,7 @@ fn parse_named_import_names(statement: &str) -> Result<Vec<String>, ()> {
     if after_from
         .chars()
         .next()
-        .is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '$')
+        .is_some_and(is_identifier_continuation)
     {
         return Err(());
     }

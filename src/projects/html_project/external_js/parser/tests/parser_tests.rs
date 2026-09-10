@@ -636,6 +636,18 @@ exports.foo = function() {};
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsExport]);
 }
 
+#[test]
+fn keyword_substrings_and_member_access_are_not_rejected() {
+    let source = r#"
+const reimport = fn;
+object.require("x");
+const myexport = 1;
+someexports.value = 1;
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+}
+
 // ------------------------
 //  Class export rejection
 // ------------------------
