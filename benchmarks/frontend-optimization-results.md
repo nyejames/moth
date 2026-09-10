@@ -3481,3 +3481,34 @@ Scaling fits were 0.98, 0.77 and 1.61, within budget. Timer erasure passed with 
 no-timer binary. These bounded checks establish neither five-run medians nor phase-wide memory
 evidence. Independent exactness, semantic ownership and regression review is clean. The accepted
 checkpoint is the commit containing this subsection.
+
+## Data Layout Migration - Phase 1 Closeout (2026-09-10)
+
+Phase 1 is complete. The implementation checkpoint is `a9f9744de`; representation corrections are
+in `e1f16cb49`, and the cross-target test-import correction is `134aebf63`. The final correction
+review found no blockers.
+
+Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1 / Clippy 0.1.97. Cross-target
+Clippy also ran with installed `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` targets.
+
+| Evidence | Result |
+| --- | --- |
+| `cargo fmt --all`; `git diff --check` | pass |
+| native and cross-target featured all-target Clippy, `-D warnings` | native, Linux and Windows pass |
+| `cargo test --workspace --quiet -- --format terse` | 5,920 passed |
+| `cargo run --quiet -- tests --terse` | 1,951 / 1,951 integration cases correct |
+| `cargo run --quiet -- build docs --release` | 74 output files built successfully |
+| `cargo run --quiet -- check docs --terse` | no errors or warnings |
+| `just feature-lane-check` | 0 findings |
+| `just source-audit` | 1,324 files audited, 0 findings |
+| `just span-census` | 4,626 files walked; 4,585 tokenized; 286,779 spans; 2,353,104 source bytes |
+| selected `LocalSpan` extended table | 1,992 bytes at the 22/10 split; source corpus +268 bytes versus the historical census, with the same span count |
+| `just bench-data-layout-check` | 2/2 cases; 10 iterations; **-5 ms average**, 1 faster, 0 slower |
+| `just bench-ci` | 82/82 preflight; no failures; CLI 7/8 and frontend 9/10 quick cases; frontend **-3 ms average** |
+| `just bench-scaling` | all 3 series within budget; fitted exponents 0.98, 0.75 and 1.64 |
+| `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
+
+The source-byte and extended-table values are span-census corpus measurements, not retained-heap
+claims. The bounded benchmark runner exposes timing and counter observations rather than aggregate
+retained heap bytes, so no unmeasured memory delta is claimed. The phase now pauses for external
+user review before Phase 2.

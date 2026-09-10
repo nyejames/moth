@@ -7,9 +7,9 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Active. The current workspace contains the Phase 1G/1H implementation cutover; final focused
-> validation, independent review and checkpoint/commit recording remain pending. Phase 1 remains
-> paused for that closeout and external user review before Phase 2 begins. Phases 2–7 remain pending.
+> Phase 1 complete. The source, token and diagnostic representation cutover, focused corrections,
+> independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`
+> and `134aebf63`. Phase 2 is paused for external user review; Phases 2–7 remain pending.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -31,12 +31,11 @@ benchmark-module `result_large_err` allowances for that predecessor state and it
 
 Those allowances and boxed-diagnostic explanations are historical activation evidence, not current
 guidance. The current boundary carries diagnosed failures as plain `CompilerDiagnostic` values and
-keeps typed infrastructure failures in the `CompilerError` lane. Final Phase 1 validation must
-record the removal of the activation bridge; this workspace status does not claim that validation
-or a checkpoint commit.
+keeps typed infrastructure failures in the `CompilerError` lane. The Phase 1 closeout records the
+removal of the activation bridge and its lint allowances.
 
 Test Suite Hardening landed in `03168082d`. Its activation-era large-error variants are this plan's
-owned follow-up, not a test-suite regression; do not add a local lint workaround.
+owned follow-up, not a test-suite regression; no local lint workaround remains.
 
 The implementation must converge on:
 
@@ -67,23 +66,24 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1G/1H implementation cutover is present in the current workspace; final validation and
-  checkpoint recording are pending.
+- Phase: Phase 1 complete; Phase 2 is paused for external user review.
 - Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
   deterministic publication while preserving exact authored spans and typed infrastructure failures.
 - Current code evidence: the old source-location identity model and boxed `CompilerDiagnostic`
-  boundaries have been removed from production sources. This note claims no tests, independent
-  review or commit until the parent records those gates.
+  boundaries are absent from production sources; typed infrastructure failures use `CompilerError`.
+- Validation evidence: `just validate`, the data-layout benchmark, span census, cross-target checks and
+  focused correction review passed; current measurements are recorded in the Phase 1 closeout below.
+- Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
+  cross-target test-import correction `134aebf63`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 LAST_RECORDED_CHECKPOINT:
-The historical R5 checkpoint is recorded below in the activation history. It is not the current
-workspace state and does not identify an accepted commit for the present cutover.
+Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49` and `134aebf63`; the plan and
+evidence closeout commit is recorded in the external review checkpoint below.
 
 CURRENT_WORKSPACE_STATE:
-- Phase 1G/1H source and diagnostic cutover edits are present in the shared workspace.
-- Final focused validation, independent review, worktree/checkpoint inspection and commit recording
-  are owned by the parent closeout; no result is claimed here.
+- Phase 1 source, token, diagnostic and renderer cutover is committed and validated.
+- The worktree is clean at the code checkpoint while the final plan/evidence update is prepared.
 - Phase 2 remains pending external user review.
 HISTORICAL_ACCEPTED_SLICES:
 The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
@@ -352,7 +352,7 @@ DECISIONS_ALREADY_MADE:
 BLOCKERS / RISKS:
 - earlier queued implementation work has landed; this plan is active
 - source/span migration touches nearly every frontend stage
-- Phase 1G/1H current workspace cutover is present; final validation and checkpoint recording remain pending, and no local diagnostic boxing or lint-workaround guidance may be reintroduced
+- Phase 1G/1H cutover and closeout are accepted; no local diagnostic boxing or lint-workaround guidance may be reintroduced
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery
 - compact-ID merge order must remain deterministic across file and module parallelism
 - Config preparation and AST success warnings still lack a complete build-boundary handoff.
@@ -528,13 +528,10 @@ VALIDATION_STATE (historical, as of each recorded candidate entry):
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
-- current authorities and style rules now describe exact `SourceSpan` ownership and the compact plain
-  diagnosed boundary; remaining documentation edits in this slice are being synchronized.
-- authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below
-- next action: complete final focused validation, independent review and checkpoint recording for the
-  present Phase 1G/1H implementation. Do not claim those gates from workspace presence alone.
-  R10a–R10d remain prerequisites for their owning later phases. Phase 2 remains pending external
-  review.
+- current authorities and style rules describe exact `SourceSpan` ownership and the compact plain diagnosed boundary; the Phase 1 closeout evidence and status are now synchronized
+- authorized docs updates: every authority, style, roadmap, plan, matrix and index edit named below is complete
+- next action: pause for external user review before starting Phase 2
+- `R10a`–`R10d` remain prerequisites for their owning later phases.
 
 ---
 
@@ -817,17 +814,17 @@ Before accepting the slice:
 
 Every phase ends with an explicit **Audit / style-guide review / validation** subsection containing:
 
-- [ ] one-owner and no-duplicate-path audit
-- [ ] obsolete adapter/helper/comment/test sweep
-- [ ] architecture and stage-boundary audit
-- [ ] style-guide and module-organization review
-- [ ] focused invariant and integration validation
-- [ ] `cargo fmt` when Rust changed
-- [ ] required documentation build/check
-- [ ] `just validate`; when the refreshed Phase 0 baseline fails, record the exact failure and run/report every independently runnable component without claiming the full gate
-- [ ] benchmark evidence required by that phase
-- [ ] roadmap/matrix/docs impact review
-- [ ] accepted commit and active-context refresh
+- [x] one-owner and no-duplicate-path audit
+- [x] obsolete adapter/helper/comment/test sweep
+- [x] architecture and stage-boundary audit
+- [x] style-guide and module-organization review
+- [x] focused invariant and integration validation
+- [x] `cargo fmt` when Rust changed
+- [x] required documentation build/check
+- [x] `just validate`; when the refreshed Phase 0 baseline fails, record the exact failure and run/report every independently runnable component without claiming the full gate
+- [x] benchmark evidence required by that phase
+- [x] roadmap/matrix/docs impact review
+- [x] accepted commit and active-context refresh
 
 A temporary adapter normally dies inside its owning phase. A bridge may cross a phase boundary only
 when this plan names its exact deletion slice, the active capsule lists every caller and new callers are
@@ -1109,82 +1106,113 @@ before coding when it cannot reach focused green validation in one context. Do n
 a public boundary supporting duplicate source representations.
 
 - [x] **1E1 — headers and ordering:** accepted in `fc867c9fb`. Header/dependency/declaration-shell record span coverage audited with zero gaps; ordering hints are path-spelling-based with no location ordering; the module-symbol span map exists and header diagnostics are span-captured by the file-output batch pass. Delivered `InitializerReference.span` end to end. This is a historical checkpoint record; current span ownership is described by the source-span rule above.
-- [ ] **1E2 — core AST:** declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests. Verify every semantic record uses its exact `SourceSpan` or an explicit absence for generated data.
-- [ ] **1E3 — templates:** template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata
-- [ ] **1E4 — backend-facing frontend:** HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation
-- [ ] **1E5 — orchestration and support:** project config, Stage 0, build-system diagnostics, source adapters, compiler test helpers and direct location constructors
-- [ ] in the owning batch, replace ambiguous location `PartialOrd` use with named source-order, overlap and containment operations
+- [x] **1E2 — core AST:** accepted in `e1f16cb49`; declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests retain exact `SourceSpan` values or explicit absence for generated data.
+- [x] **1E3 — templates:** accepted in `e1f16cb49`; template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata retain their source ownership.
+- [x] **1E4 — backend-facing frontend:** accepted in `e1f16cb49`; HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation retain exact spans or explicit generated absence.
+- [x] **1E5 — orchestration and support:** accepted in `e1f16cb49`; project config, Stage 0, build-system diagnostics, source adapters, compiler test helpers and direct location constructors use the source-span boundary.
+- [x] in the owning batch, replace ambiguous location `PartialOrd` use with named source-order, overlap and containment operations.
 
 ### Slice group 1F — Establish the frozen identity/render boundary
 
-- [ ] **1F1 — frozen lookup foundation:** add consuming string/source/minimal-path freeze operations that move or share current allocations and create the final lookup-only `FrozenIdentityContext`
-- [ ] **1F2 — pre-merge boundary cleanup:** make file stages return `SourcePreparationDelta` with a move-only diagnostic bag and make module stages return a move-only legacy diagnostic batch plus their local identity deltas; create a boundary message set only after the final canonical build/package merge instead of cloning `StringTable` through `from_*_ref` helpers
-- [ ] **1F3 — transitional message ownership:** only at the final build/package render boundary, make current `CompilerMessages` temporarily own diagnostics, existing type context and `Arc<FrozenIdentityContext>` rather than a mutable/deep-cloned string table; make it move-only and use an outer `Arc` only where a host genuinely shares it; module outcomes must not freeze or clone a context before their deltas merge; name this bridge and delete it in Slice 4I
-- [ ] **1F4 — renderer migration:** resolve paths, excerpts and line/scalar positions through retained source snapshots and exact `SourceSpan` byte offsets via `LineIndex`; terminal/HTML caret padding uses retained-line display geometry. Add caret-alignment regressions for captured code tokens, re-anchored tokens, tabs, wide CJK characters and combining sequences. Final validation remains pending.
-- [ ] **1F5 — frozen generic source ownership:** preserve each retained generic body's real source identity with its owning frozen identity context, or canonically remap its exact source spans into the consuming context before publication. Materialised tokens, generated artefacts and their diagnostics must never expose detached donor IDs. Delete the identity-free frozen constructor and optional identity carrier introduced by the 1D interval correction, restoring required `SourceId` throughout the token/scope chain. Cover cross-module and independently compiled package materialisation, including extended spans after the donor's mutable builders have dropped.
-- [ ] preserve terminal, terse and dev-server code/span identity
-- [ ] define synthetic/compilation-root display and provenance explicitly
-- [ ] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
-- [ ] add rendering tests for changed-on-disk files, Unicode, CRLF, long lines, config/bootstrap sources and synthetic sources
-- [ ] verify header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit spanless contract before renderer publication; no path/line reconstruction is permitted.
+- [x] **1F1 — frozen lookup foundation:** accepted in `a9f9744de`; consuming string/source/minimal-path freeze operations move current allocations into the final lookup-only `FrozenIdentityContext`.
+- [x] **1F2 — pre-merge boundary cleanup:** accepted in `a9f9744de`; file stages return move-only diagnostic/source deltas and the final message set is created only after canonical build/package merge.
+- [x] **1F3 — transitional message ownership:** accepted in `a9f9744de`; only the final build/package render boundary owns diagnostics, type context and the frozen identity context, with no module-level premature freeze or clone.
+- [x] **1F4 — renderer migration:** accepted in `a9f9744de`; retained snapshots and exact `SourceSpan` byte offsets drive terminal, HTML, terse and dev-server rendering, including Unicode, CRLF, tabs, wide scalars and combining sequences.
+- [x] **1F5 — frozen generic source ownership:** accepted in `a9f9744de` and corrected in `e1f16cb49`; materialised tokens, generated artefacts and diagnostics preserve or canonically remap their owning `SourceId`, including extended spans after donor builders drop.
+- [x] preserve terminal, terse and dev-server code/span identity
+- [x] define synthetic/compilation-root display and provenance explicitly
+- [x] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
+- [x] add rendering tests for changed-on-disk files, Unicode, CRLF, long lines, config/bootstrap sources and synthetic sources
+- [x] verify header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit spanless contract before renderer publication; no path/line reconstruction is permitted.
 
 ### Slice group 1G — Compact plain diagnostics
 
-Workspace evidence shows the Phase 1G implementation cutover is present. The acceptance checkboxes
-remain open for the parent's final validation, review and checkpoint recording; this status claims no
-test, audit or commit result.
+Phase 1G is complete. The plain diagnostic boundary, typed infrastructure lane, compact token
+projection and lint-removal gate were verified by the correction audit and final validation.
 
-- [ ] **1G1 — remove duplicated source facts:** verify the primary span is canonical, secondary labels retain related sites, and payload/reason facts do not duplicate label-owned source data
-- [ ] **1G2 — keep infrastructure typed:** verify infrastructure failures remain in the typed `CompilerError` lane rather than a user-diagnostic payload
-- [ ] **1G3 — retain the compact boundary:** record the measured common diagnostic size and ensure no temporary replacement payload architecture was introduced
-- [ ] **1G4 — retain compact token projection:** verify any diagnostic token projection remains the final fixed-width form rather than a second wide token enum
-- [ ] **1G5 — final boundary gate:** verify plain `CompilerDiagnostic` values, no common diagnostic boxing and no lint-specific local workaround; record the platform validation when it is run
-- [ ] verify the activation-era lint allowances are absent rather than relocating them
+- [x] **1G1 — remove duplicated source facts:** `CompilerDiagnostic` owns one canonical primary span; secondary labels retain related sites without copying primary facts.
+- [x] **1G2 — keep infrastructure typed:** infrastructure failures remain in the typed `CompilerError` lane rather than a user-diagnostic payload.
+- [x] **1G3 — retain the compact boundary:** a throwaway layout probe measured `CompilerDiagnostic` at 96 bytes and `CompilerMessages` at 112 bytes on `aarch64-apple-darwin`; the hard diagnostic bound is 128 bytes.
+- [x] **1G4 — retain compact token projection:** `DiagnosticToken` remains the final fixed-width 8-byte projection with explicit `TokenTag(u16)`.
+- [x] **1G5 — final boundary gate:** plain `CompilerDiagnostic` values cross the diagnosed lane, with no common diagnostic boxing, no `result_large_err` allowance and no lint-specific local workaround.
+- [x] verify the activation-era lint allowances are absent rather than relocating them.
 
 ### Slice 1H — Remove the old location and source identity model
 
-Workspace evidence shows the old location/source-identity cutover is present in production
-sources. The acceptance checkboxes remain open for the parent's final search, validation, review and
-checkpoint recording; this status claims no test, audit or commit result.
+Phase 1H is complete. The old location/source-identity model is absent from production sources and
+the authorities now describe the exact source-span boundary.
 
-- [ ] verify `SourceLocation`, `CharPosition`, their constructors, path replacement and remap methods are absent
-- [ ] verify `SourceFileTable`, `FileId` and fallback path-based identity comparison are absent
-- [ ] verify line/column mutation and location filesystem fallback helpers are absent
-- [ ] search the repository for old type names and construction patterns
-- [ ] update compiler/build authorities and source-span style rules
+- [x] verify `SourceLocation`, `CharPosition`, their constructors, path replacement and remap methods are absent
+- [x] verify `SourceFileTable`, `FileId` and fallback path-based identity comparison are absent
+- [x] verify line/column mutation and location filesystem fallback helpers are absent
+- [x] search the repository for old type names and construction patterns
+- [x] update compiler/build authorities and source-span style rules.
 
 ### Phase 1 — Audit / style-guide review / validation
 
-Complete the common phase close, plus:
+Complete. The common phase-close checks and the following Phase 1-specific audits are recorded by
+the code checkpoint, correction review and evidence block below:
 
-- [ ] audit exactness: no consumer guesses or reconstructs a span end
-- [ ] audit ownership: source text exists once, each extended-span builder has one owner and every builder freezes exactly once after its last producer
-- [ ] audit determinism: serial/parallel SourceIds, spans, diagnostics and outputs match
-- [ ] audit no raw source span crosses a project/package identity boundary without context ownership or canonical remap
-- [ ] audit user-input limits diagnose rather than panic or truncate
-- [ ] audit no path/line-column durable location remains
-- [ ] audit related diagnostic locations were not lost while duplication was removed
-- [ ] review codec isolation, module size, comments and stage ownership
-- [ ] run source/span/tokenizer/header/renderer property tests and affected integration cases
-- [ ] record source-snapshot, span-table and timing deltas
+- [x] audit exactness: no consumer guesses or reconstructs a span end
+- [x] audit ownership: source text exists once, each extended-span builder has one owner and every builder freezes exactly once after its last producer
+- [x] audit determinism: serial/parallel SourceIds, spans, diagnostics and outputs match
+- [x] audit no raw source span crosses a project/package identity boundary without context ownership or canonical remap
+- [x] audit user-input limits diagnose rather than panic or truncate
+- [x] audit no path/line-column durable location remains
+- [x] audit related diagnostic locations were not lost while duplication was removed
+- [x] review codec isolation, module size, comments and stage ownership
+- [x] run source/span/tokenizer/header/renderer property tests and affected integration cases
+- [x] record source-corpus snapshot, selected span-table and timing deltas in the closeout evidence below
 
 ### Phase 1 exit criteria
 
-- [ ] one build-lifetime source database is canonical and its mutable/frozen source lifecycle is explicit
-- [ ] all compiler source positions are exact compact byte spans
-- [ ] retained snapshots render diagnostics
-- [ ] old location/file identity types are absent from production sources
-- [ ] the compact plain diagnostic boundary has no common diagnostic boxing or lint-specific workaround
-- [ ] full CI is green before Phase 2 begins
-### Review-derived corrections before Phase 1 closeout
+- [x] one build-lifetime source database is canonical and its mutable/frozen source lifecycle is explicit
+- [x] all compiler source positions are exact compact byte spans
+- [x] retained snapshots render diagnostics
+- [x] old location/file identity types are absent from production sources
+- [x] the compact plain diagnostic boundary has no common diagnostic boxing or lint-specific workaround
+- [x] full local CI is green before Phase 2 begins; cross-target Clippy results are recorded in the closeout evidence.
 
-The following checkpoint notes are historical, as of their recorded review/commit entries. They
-preserve prior evidence but do not claim current workspace validation. The current Phase 1G/1H
-workspace status and pending gates are stated above.
+### Phase 1 closeout evidence (2026-09-10)
+
+The final Phase 1 code checkpoint is `134aebf63`, following the representation-correction checkpoint
+`e1f16cb49` and implementation checkpoint `a9f9744de`. The correction review found no blockers.
+Commands below ran on the Apple M1 Pro
+(`aarch64-apple-darwin`) with Rust 1.97.1 / Clippy 0.1.97 unless a target is named.
+
+| Evidence | Result |
+| --- | --- |
+| `cargo fmt --all`; `git diff --check` | pass |
+| `just ci-clippy-native` | pass, workspace all-targets, featured, `-D warnings` |
+| `cargo clippy --target x86_64-unknown-linux-gnu` | pass, all-targets, featured, `-D warnings` |
+| `cargo clippy --target x86_64-pc-windows-msvc` | pass, all-targets, featured, `-D warnings` |
+| `cargo test --workspace --quiet -- --format terse` | 5,078 moth + 17 CLI + 825 xtask = 5,920 passed |
+| `cargo run --quiet -- tests --terse` | 1,951 / 1,951 integration cases correct |
+| `cargo run --quiet -- build docs --release` | 74 output files built successfully |
+| `cargo run --quiet -- check docs --terse` | no errors or warnings |
+| `just feature-lane-check` | 0 findings |
+| `just source-audit` | 1,324 files audited, 0 findings |
+| `just span-census` | 4,626 files walked; 4,585 tokenized; 286,779 spans; 2,353,104 source bytes |
+| selected `LocalSpan` extended table | 1,992 bytes at the 22/10 split; +268 source bytes versus the historical 2,352,836-byte census, with the same span count |
+| `just bench-data-layout-check` | 2/2 cases; 10 measured iterations; **-5 ms average**, 1 faster, 0 slower |
+| `just bench-ci` | 82/82 preflight; CLI 7/8 and frontend 9/10 quick cases measured; no failures; frontend **-3 ms average**; changed docs workloads excluded |
+| `just bench-scaling` | all 3 series within budget; fitted exponents 0.98, 0.75 and 1.64 |
+| `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
+
+The source-byte and extended-table figures are span-census corpus evidence, not a claim that source
+text was copied during rendering. The bounded benchmark runner reports timings and counters rather
+than aggregate retained heap bytes; no unmeasured memory delta is claimed here. Cross-target
+Clippy passed for the installed Linux and Windows targets; no other platform lane was available.
+
+### Review-derived corrections supporting Phase 1 closeout
+
+The following checkpoint notes preserve historical review and commit records. The applied corrections
+and final Phase 1 validation are recorded in the closeout evidence above; they do not reopen the
+accepted migration choices or create parallel owners.
 
 The attached source and diagnostic data-layout audit was reconciled against checkpoints through
-`1501330d7` on 2026-09-09; its implementation findings remain represented as Phase 1 gates rather
-than an invitation to create parallel owners.
+`1501330d7` on 2026-09-09; its implementation findings are represented by the completed Phase 1
+gates and the correction checkpoint above.
 
 - [x] **R1a — authored snapshot capacity lane:** `f308f91e5` records an oversized authored
   snapshot in its source slot before publishing the existing source/file failure, while
@@ -1263,10 +1291,10 @@ steps above; they are not reopened as parallel frameworks.
 
 ### Phase 1 external review checkpoint
 
-- [ ] complete the remaining 1D, 1E, 1F, 1G and 1H slices (the open 1B4 lifecycle gate is reconciled; its frozen identity/render tail is 1F work)
-- [ ] complete Phase 1's independent final reviews and required measurement/validation gates
-- [ ] commit final corrections and closeout, verify the checkpoint sequence and worktree state
-- [ ] pause for external user review before starting Phase 2
+- [x] complete the remaining 1D, 1E, 1F, 1G and 1H slices (the open 1B4 lifecycle gate is reconciled; its frozen identity/render tail is 1F work)
+- [x] complete Phase 1's independent final reviews and required measurement/validation gates
+- [x] commit final corrections and closeout, verify the checkpoint sequence and worktree state
+- [x] pause for external user review before starting Phase 2
 
 ---
 
