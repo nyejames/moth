@@ -646,6 +646,20 @@ fn multiline_star_export_from_is_classified_as_module_loading() {
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
 }
 
+#[test]
+fn namespace_star_export_from_is_classified_as_module_loading() {
+    let source = "export * as ns from \"./helper.js\";\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
+#[test]
+fn multiline_namespace_star_export_from_is_classified_as_module_loading() {
+    let source = "export * as ns\nfrom \"./helper.js\";\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
 // ------------------------
 //  CommonJS rejection
 // ------------------------

@@ -54,13 +54,11 @@ impl HtmlEntryPathPlan {
     /// while single-file builds do not have that contract.
     pub(crate) fn require_homepage_if_directory_build(
         &self,
-        config: &Config,
         has_directory_homepage: bool,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         if self.is_directory_build && !has_directory_homepage {
             return Err(missing_homepage_error(
-                config,
                 self.resolved_entry_root.as_deref(),
                 string_table,
             ));
@@ -98,11 +96,10 @@ fn resolve_canonical_entry_root(
 }
 
 fn missing_homepage_error(
-    config: &Config,
     resolved_entry_root: Option<&Path>,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     let entry_root = resolved_entry_root.unwrap_or_else(|| Path::new("."));
 
-    missing_homepage_messages(&config.entry_dir, entry_root, string_table)
+    missing_homepage_messages(entry_root, string_table)
 }

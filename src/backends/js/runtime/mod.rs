@@ -11,7 +11,7 @@
 //! infrastructure rather than first-party package implementations. They intentionally stay out of
 //! the first-party package inventory; new package-facing JS must not be added here without an
 //! inventory source.
-
+//!
 //! The top-level [`JsEmitter::emit_runtime_prelude`] only owns:
 //! - helper emission order
 //! - high-level comments about why these groups exist
@@ -26,7 +26,6 @@ mod casts;
 mod choices;
 mod cloning;
 mod collections;
-
 mod errors;
 mod maps;
 mod numeric;

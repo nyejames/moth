@@ -15,7 +15,6 @@ use crate::projects::html_project::resource_output_plan::ResourceDiagnosticSite;
 use std::path::Path;
 
 pub(crate) fn missing_homepage_messages(
-    _config_path: &Path,
     entry_root: &Path,
     string_table: &mut StringTable,
 ) -> CompilerMessages {

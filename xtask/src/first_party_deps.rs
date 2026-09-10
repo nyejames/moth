@@ -17,11 +17,11 @@
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
 
-use crate::report_file::{write_report_atomically, ReportRunIdentity};
-use crate::source_tree::{relative_display_path, walk_source_tree, workspace_root, WalkDecision};
+use crate::report_file::{ReportRunIdentity, write_report_atomically};
+use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
 use moth::first_party_js::{
-    inventoried_javascript_sources, javascript_import_findings,
-    FirstPartyJavascriptImportFindingKind,
+    FirstPartyJavascriptImportFindingKind, inventoried_javascript_sources,
+    javascript_import_findings,
 };
 use serde::Serialize;
 use std::fmt;

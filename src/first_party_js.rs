@@ -135,8 +135,8 @@ pub fn javascript_import_findings(source: &str) -> Vec<FirstPartyJavascriptImpor
 #[cfg(test)]
 mod tests {
     use super::{
-        inventoried_javascript_sources, javascript_import_findings,
-        FirstPartyJavascriptImportFindingKind,
+        FirstPartyJavascriptImportFindingKind, inventoried_javascript_sources,
+        javascript_import_findings,
     };
 
     #[test]

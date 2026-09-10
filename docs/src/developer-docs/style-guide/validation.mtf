@@ -342,8 +342,8 @@ The first-party package promise has one focused owner:
 It walks only these first-party implementation roots: `packages/`,
 `src/builder_surface/core_packages/`, `src/backends/js/package_bindings/` and
 `src/projects/html_project/binding_packages/`. It also inspects the compiler-owned JavaScript
-inventory from `moth::first_party_js`: Core helper bodies, inline lowering templates and every
-module registered in `RuntimeModuleRegistry`.
+inventory from `moth::first_party_js`: Core helper bodies, `@core/collections` runtime helpers,
+inline lowering templates and every module registered in `RuntimeModuleRegistry`.
 
 The only allowed JavaScript module specifier is an exact compiler-owned runtime module registered
 by `RuntimeModuleRegistry`. Dynamic `import()`, `require()`, relative, absolute, URL and data
@@ -353,8 +353,9 @@ Invalid named imports or unsupported import forms from a registered runtime modu
 as a distinct runtime-import rule, not as an unapproved third-party module specifier.
 
 This audit does not walk generated `runtime_glue`, user-owned or future dependency packages,
-documentation, test fixtures, benchmarks or repository-root manifests. Missing roots and unreadable
-paths fail closed rather than being treated as clean.
+documentation, test fixtures, benchmarks or repository-root manifests. Missing roots,
+unrepresentable paths, non-file/non-directory entries and unreadable JavaScript sources fail
+closed rather than being treated as clean.
 
 ### Feature lanes
 

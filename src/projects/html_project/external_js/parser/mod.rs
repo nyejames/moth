@@ -22,13 +22,13 @@ mod signature_parser;
 #[cfg(test)]
 mod tests;
 
-use comment_extractor::{extract_annotations, AnnotationKind, ExtractedAnnotation};
-use export_scanner::{scan_exports, JsExport};
+use comment_extractor::{AnnotationKind, ExtractedAnnotation, extract_annotations};
+use export_scanner::{JsExport, scan_exports};
 use parsed_js_module::{
     JsDiagnosticKind, JsParserDiagnostic, ParsedJsFunction, ParsedJsModule, ParsedOpaqueType,
     ParsedRuntimeImport,
 };
-use signature_parser::{parse_signature, SignatureParseInput};
+use signature_parser::{SignatureParseInput, parse_signature};
 
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 use std::collections::{BTreeMap, BTreeSet};

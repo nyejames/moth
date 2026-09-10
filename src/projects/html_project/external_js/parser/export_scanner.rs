@@ -13,7 +13,7 @@
 //! Rejected forms:
 //! - `export default ...`
 //! - `export { name }` (local export-list syntax)
-//! - `export { name } from "..."` / `export * from "..."` (re-exports)
+//! - `export { name } from "..."` / `export * from "..."` / `export * as ns from "..."` (re-exports)
 //! - `export class ...`
 //! - `module.exports = ...` (CommonJS)
 //! - `exports.name = ...` (CommonJS)
@@ -301,14 +301,27 @@ impl<'a> ExportScanner<'a> {
     /// Looks for a `from "..."` clause after an export list or star, including across newlines.
     ///
     /// Automatic semicolon insertion would otherwise end the export statement before a following
-    /// `from` specifier. The cursor and any interpolation diagnostics are restored so the later
-    /// statement skip remains the sole consumer of the remaining source.
+    /// `from` specifier. A star re-export may also bind a namespace with `as <ident>` before
+    /// `from`. The cursor and any interpolation diagnostics are restored so the later statement
+    /// skip remains the sole consumer of the remaining source.
     fn has_from_module_specifier_ahead(&mut self) -> bool {
         let original_pos = self.pos;
         let original_diagnostic_count = self.diagnostics.len();
         let original_runtime_import_count = self.runtime_imports.len();
 
         self.skip_whitespace_and_comments();
+        if self.peek_str("as") && self.is_word_boundary_around("as".len()) {
+            self.advance_chars("as".len());
+            self.skip_whitespace_and_comments();
+            if self.parse_identifier().is_none() {
+                self.pos = original_pos;
+                self.diagnostics.truncate(original_diagnostic_count);
+                self.runtime_imports.truncate(original_runtime_import_count);
+                return false;
+            }
+            self.skip_whitespace_and_comments();
+        }
+
         let found = if self.peek_str("from") && self.is_word_boundary_around("from".len()) {
             self.advance_chars("from".len());
             self.skip_whitespace_and_comments();

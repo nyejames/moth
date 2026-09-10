@@ -210,12 +210,16 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
         panic!("expected a resource output path collision reason");
     };
     assert_eq!(string_table.resolve(*output_path), "shared/logo.svg");
-    assert!(string_table
-        .resolve(*existing_origin)
-        .contains("name 'one'"));
-    assert!(string_table
-        .resolve(*conflicting_origin)
-        .contains("name 'two'"));
+    assert!(
+        string_table
+            .resolve(*existing_origin)
+            .contains("name 'one'")
+    );
+    assert!(
+        string_table
+            .resolve(*conflicting_origin)
+            .contains("name 'two'")
+    );
 }
 
 #[test]
@@ -263,12 +267,16 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert!(string_table
-        .resolve(*existing_origin)
-        .contains("role 'normal'"));
-    assert!(string_table
-        .resolve(*conflicting_origin)
-        .contains("role 'support'"));
+    assert!(
+        string_table
+            .resolve(*existing_origin)
+            .contains("role 'normal'")
+    );
+    assert!(
+        string_table
+            .resolve(*conflicting_origin)
+            .contains("role 'support'")
+    );
 }
 
 #[test]
@@ -318,18 +326,26 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert!(string_table
-        .resolve(*existing_origin)
-        .contains("package origin 'builder'"));
-    assert!(string_table
-        .resolve(*conflicting_origin)
-        .contains("package origin 'dependency'"));
-    assert!(string_table
-        .resolve(*existing_origin)
-        .contains("name 'shared'"));
-    assert!(string_table
-        .resolve(*conflicting_origin)
-        .contains("name 'shared'"));
+    assert!(
+        string_table
+            .resolve(*existing_origin)
+            .contains("package origin 'builder'")
+    );
+    assert!(
+        string_table
+            .resolve(*conflicting_origin)
+            .contains("package origin 'dependency'")
+    );
+    assert!(
+        string_table
+            .resolve(*existing_origin)
+            .contains("name 'shared'")
+    );
+    assert!(
+        string_table
+            .resolve(*conflicting_origin)
+            .contains("name 'shared'")
+    );
 }
 
 #[test]
@@ -401,9 +417,11 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
         glue_path.to_str().unwrap()
     );
     assert_eq!(string_table.resolve(*artefact_kind), "JavaScript");
-    assert!(string_table
-        .resolve(*origin)
-        .contains("module-0123456789abcdef.js"));
+    assert!(
+        string_table
+            .resolve(*origin)
+            .contains("module-0123456789abcdef.js")
+    );
 }
 #[test]
 fn resource_collision_render_keeps_project_primary_and_package_secondary_domains() {

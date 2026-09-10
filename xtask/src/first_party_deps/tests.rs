@@ -4,13 +4,13 @@
 //! benchmarks are deliberately created beside them in one test to prove they are outside scope.
 
 use super::{
-    audit_first_party_deps, audit_javascript_source, started_report, FirstPartyDepsRule,
-    FIRST_PARTY_DEPS_SCHEMA_VERSION,
+    FIRST_PARTY_DEPS_SCHEMA_VERSION, FirstPartyDepsRule, audit_first_party_deps,
+    audit_javascript_source, started_report,
 };
 use crate::report_file::ReportRunIdentity;
 use std::fs;
 use std::path::Path;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 fn fixture_workspace() -> TempDir {
     let workspace = tempdir().expect("temp dir");
@@ -175,9 +175,11 @@ const npm = import('some-npm');
             .any(|finding| finding.message.contains("import()")),
         "dynamic import must be rejected: {findings:?}"
     );
-    assert!(findings
-        .iter()
-        .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport));
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport)
+    );
 }
 
 #[test]
@@ -247,12 +249,13 @@ fn detects_side_effect_and_re_export_import_forms() {
 import "lodash-side-effect";
 export { value } from 'lodash-reexport';
 export * from "lodash-star";
+export * as ns from "lodash-namespace";
 "#;
     let findings = audit_javascript_source("fixture.mjs", source);
 
     assert_eq!(
         findings.len(),
-        3,
+        4,
         "all static import forms should be reported: {findings:?}"
     );
     assert!(
@@ -273,9 +276,24 @@ fn newline_split_export_from_is_an_unapproved_module_import() {
         2,
         "newline-split export-from forms are still module loading: {findings:?}"
     );
-    assert!(findings
-        .iter()
-        .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport));
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport)
+    );
+}
+
+#[test]
+fn namespace_star_export_from_is_an_unapproved_module_import() {
+    let source = "export * as ns from \"lodash-namespace\";\n";
+    let findings = audit_javascript_source("fixture.mjs", source);
+
+    assert_eq!(
+        findings.len(),
+        1,
+        "namespace star re-export is still module loading: {findings:?}"
+    );
+    assert_eq!(findings[0].rule, FirstPartyDepsRule::UnapprovedModuleImport);
 }
 
 #[test]
@@ -291,12 +309,16 @@ import { "feature-name" as feature } from "lodash-named";
         2,
         "clause names must not hide the module: {findings:?}"
     );
-    assert!(findings
-        .iter()
-        .any(|finding| finding.message.contains("lodash-from")));
-    assert!(findings
-        .iter()
-        .any(|finding| finding.message.contains("lodash-named")));
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("lodash-from"))
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.message.contains("lodash-named"))
+    );
 }
 
 #[test]
@@ -482,7 +504,7 @@ fn missing_first_party_root_fails_closed() {
 fn started_report_is_incomplete_until_the_walk_finishes() {
     let report = started_report(ReportRunIdentity::started("first-party-deps", None));
 
-    assert_eq!(FIRST_PARTY_DEPS_SCHEMA_VERSION, 3);
+    assert_eq!(report.schema_version, FIRST_PARTY_DEPS_SCHEMA_VERSION);
     assert!(!report.run.completed);
     assert_eq!(report.visited_file_count, 0);
     assert_eq!(report.javascript_source_count, 0);

@@ -10,7 +10,7 @@
 //! create output files. The later emission phase consumes [`PlannedResourceOutput`] records.
 
 use crate::build_system::build::ProjectEntry;
-use crate::build_system::output::{output_path_identity, OutputPathIdentity};
+use crate::build_system::output::{OutputPathIdentity, output_path_identity};
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
