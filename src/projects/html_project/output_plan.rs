@@ -8,7 +8,6 @@
 //! lives in the respective `js_path` and `wasm/artifacts` modules.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::{Path, PathBuf};
 
 /// A resolved output plan for one HTML route.
@@ -72,19 +71,17 @@ pub(crate) fn plan_wasm_output_from_logical_html_path(
 pub(crate) fn derive_logical_html_path(
     entry_point: &Path,
     entry_root: Option<&Path>,
-    string_table: &mut StringTable,
 ) -> Result<PathBuf, CompilerError> {
     if let Some(entry_root) = entry_root {
-        return derive_logical_html_path_from_entry_root(entry_point, entry_root, string_table);
+        return derive_logical_html_path_from_entry_root(entry_point, entry_root);
     }
 
-    derive_single_file_logical_html_path(entry_point, string_table)
+    derive_single_file_logical_html_path(entry_point)
 }
 
 fn derive_logical_html_path_from_entry_root(
     entry_point: &Path,
     entry_root: &Path,
-    string_table: &mut StringTable,
 ) -> Result<PathBuf, CompilerError> {
     // Route derivation is deterministic: discovery order never affects output paths.
     let relative_entry = entry_point.strip_prefix(entry_root).map_err(|_| {
@@ -95,7 +92,6 @@ fn derive_logical_html_path_from_entry_root(
                 entry_point.display(),
                 entry_root.display(),
             ),
-            string_table,
         )
     })?;
     let parent = relative_entry.parent().unwrap_or_else(|| Path::new(""));
@@ -117,17 +113,13 @@ fn derive_logical_html_path_from_entry_root(
 /// WHY: the stem is filesystem-authored, so an empty or non-UTF-8 stem is a File
 ///      infrastructure error. It must never collapse to a generic `main` fallback, which
 ///      would alias distinct source identities to one route.
-fn derive_single_file_logical_html_path(
-    entry_point: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerError> {
+fn derive_single_file_logical_html_path(entry_point: &Path) -> Result<PathBuf, CompilerError> {
     let raw_stem = entry_point.file_stem().ok_or_else(|| {
         CompilerError::file_error(
             entry_point,
             format!(
                 "HTML single-file entry {entry_point:?} has no file stem; Moth routes need a non-empty UTF-8 stem."
             ),
-            string_table,
         )
     })?;
 
@@ -136,7 +128,6 @@ fn derive_single_file_logical_html_path(
             entry_point,
             "HTML single-file entry stem is not valid UTF-8; Moth routes require UTF-8 stems."
                 .to_string(),
-            string_table,
         )
     })?;
 
@@ -145,7 +136,6 @@ fn derive_single_file_logical_html_path(
             entry_point,
             "HTML single-file entry has an empty stem; Moth routes require a non-empty UTF-8 stem."
                 .to_string(),
-            string_table,
         ));
     }
 
@@ -159,7 +149,6 @@ fn derive_single_file_logical_html_path(
         return Err(CompilerError::file_error(
             entry_point,
             "HTML single-file entry stem is empty after stripping the cosmetic '@' prefix; Moth routes require a non-empty route name.".to_string(),
-            string_table,
         ));
     }
 

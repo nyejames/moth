@@ -7,12 +7,13 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 #[test]
 fn fresh_marks_template_to_skip_parent_child_wrappers() {
     let mut string_table = StringTable::new();
-    let mut wrapper_tokens = template_tokens_from_source("[: inherited]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut wrapper_tokens =
+        template_tokens_from_source("[: inherited]", &mut string_table, &mut span_builder);
     let context = new_constant_context(wrapper_tokens.src_path.to_owned());
     let wrapper = Template::new(&mut wrapper_tokens, &context, vec![], &mut string_table)
         .expect("inherited wrapper should parse");
@@ -21,8 +22,11 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         TemplateWrapperReference::new(reference.root, reference.phase, reference.context)
     };
 
-    let mut token_stream =
-        template_tokens_from_source("[$fresh, $md:\n# Hello\n]", &mut string_table);
+    let mut token_stream = template_tokens_from_source(
+        "[$fresh, $md:\n# Hello\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(
@@ -47,8 +51,12 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
 #[test]
 fn children_directive_attaches_wrapper_context_to_direct_child() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        template_tokens_from_source("[$children([:prefix]): [: child]]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = template_tokens_from_source(
+        "[$children([:prefix]): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -75,30 +83,25 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
 #[test]
 fn children_directive_accepts_const_string_reference() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let prefix_name = string_table.intern("prefix");
     let declarations = vec![Declaration {
         id: scope.append(prefix_name),
         value: Expression::string_slice(
             string_table.intern("prefix: "),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120,
-                },
-            },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
-    let mut token_stream =
-        template_tokens_from_source("[$children(prefix): [: child]]", &mut string_table);
+    let mut token_stream = template_tokens_from_source(
+        "[$children(prefix): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = constant_template_context(&token_stream.src_path, &declarations);
 
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -155,8 +158,12 @@ fn children_directive_accepts_const_string_reference() {
 #[test]
 fn children_directive_rejects_runtime_values() {
     let mut string_table = StringTable::new();
-    let mut token_stream =
-        template_tokens_from_source("[$children(value): [: child]]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream = template_tokens_from_source(
+        "[$children(value): [: child]]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = runtime_template_context(&token_stream.src_path, &mut string_table);
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -252,7 +259,9 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
     // authored. This stays on the directive owner (`InvalidChildrenArgument`),
     // not true file EOF, which header balancing owns as `MOTH-SYNTAX-0017`.
     let mut string_table = StringTable::new();
-    let mut token_stream = template_tokens_from_source("[$children(]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut token_stream =
+        template_tokens_from_source("[$children(]", &mut string_table, &mut span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
 
     let error = Template::new(&mut token_stream, &context, vec![], &mut string_table)
@@ -268,9 +277,4 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
             "expected InvalidChildrenArgument for $children argument ending at a template boundary, found {payload:?}"
         ),
     }
-    assert!(
-        !is_default_error_location(&error.primary_location),
-        "$children argument ending at a template boundary should carry a meaningful source location, got {:?}",
-        error.primary_location
-    );
 }

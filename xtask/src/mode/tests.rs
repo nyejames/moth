@@ -82,6 +82,20 @@ fn parse_args_bench_frontend_check() {
 }
 
 #[test]
+fn parse_args_bench_data_layout_modes() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["bench-data-layout"]))),
+        BenchmarkMode::BenchDataLayout
+    );
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&[
+            "bench-data-layout-check"
+        ]))),
+        BenchmarkMode::BenchDataLayoutCheck
+    );
+}
+
+#[test]
 fn parse_args_single_mode_extra_args_rejected() {
     let error = unwrap_error(BenchmarkMode::parse_args(&args(&["bench", "extra"])));
     assert!(error.contains("does not accept additional arguments"));
@@ -102,7 +116,8 @@ fn parse_args_unknown_mode_rejected() {
 #[test]
 fn top_level_usage_lists_bench_ci() {
     assert!(TOP_LEVEL_USAGE.contains("bench-ci"));
-    assert!(TOP_LEVEL_USAGE.contains("quick subset without recording"));
+    assert!(TOP_LEVEL_USAGE.contains("bench-data-layout"));
+    assert!(TOP_LEVEL_USAGE.contains("bench-data-layout-check"));
 }
 
 // ----------------------------
@@ -272,8 +287,21 @@ fn parse_args_honesty_audit_rejects_anything_else() {
 }
 
 #[test]
+fn parse_args_span_census() {
+    assert_eq!(
+        unwrap_mode(BenchmarkMode::parse_args(&args(&["span-census"]))),
+        BenchmarkMode::SpanCensus
+    );
+}
+
+#[test]
 fn top_level_usage_lists_every_audit_mode() {
-    for mode in ["honesty-audit", "source-audit", "feature-lane-check"] {
+    for mode in [
+        "honesty-audit",
+        "source-audit",
+        "feature-lane-check",
+        "span-census",
+    ] {
         assert!(
             TOP_LEVEL_USAGE.contains(mode),
             "usage does not mention '{mode}', so nobody running `xtask` learns it exists"

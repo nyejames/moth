@@ -8,8 +8,8 @@
 //!       selection trees.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
@@ -38,14 +38,14 @@ impl PathSyntaxId {
     }
 }
 
-/// One authored path row: the complete path spelling and its source location.
+/// One authored path row: the complete path spelling and its exact source span.
 ///
-/// Path syntax owns no dependency selections. The root is the full authored path; the
-/// location is the token span that introduced it.
+/// Path syntax owns no dependency selections. The root is the full authored path; the span carries
+/// the source identity that owns the token bytes.
 #[derive(Clone, Debug)]
 pub struct PathSyntax {
     pub root: InternedPath,
-    pub location: SourceLocation,
+    pub span: SourceSpan,
 }
 
 /// Dense file-local store of authored path rows.
@@ -99,17 +99,15 @@ impl PathSyntaxTable {
 
     /// Read one path row and prove it belongs to the token currently being consumed.
     ///
-    /// WHAT: rejects absent, out-of-range and same-index handles that index a different
-    ///       file-owned table or a row whose location is not the consumed token.
-    /// WHY: `PathSyntaxId` is a dense table-local index. Bounds checking cannot detect a
-    ///      valid index from file A used against a non-empty table for file B.
+    /// The token span carries its source identity explicitly, so a same-index handle from another
+    /// file-owned table cannot pass this check even when byte offsets happen to match.
     pub(crate) fn try_path_for_token(
         &self,
         path_id: PathSyntaxId,
-        token_location: &SourceLocation,
+        token_span: SourceSpan,
     ) -> Result<&PathSyntax, CompilerError> {
         let row = self.try_path(path_id)?;
-        if row.location != *token_location {
+        if row.span != token_span {
             return Err(CompilerError::compiler_error(
                 "path syntax row does not belong to the consumed path token",
             ));
@@ -118,16 +116,13 @@ impl PathSyntaxTable {
     }
 
     /// Append one authored path row and return its handle.
-    pub fn push(&mut self, root: InternedPath, location: SourceLocation) -> PathSyntaxId {
-        self.paths.push(PathSyntax { root, location });
+    pub fn push(&mut self, root: InternedPath, span: SourceSpan) -> PathSyntaxId {
+        self.paths.push(PathSyntax { root, span });
         add_frontend_counter(FrontendCounter::PathSyntaxRowCount, 1);
         PathSyntaxId::from_index(self.paths.len() - 1)
     }
 
     /// Remap every interned string in this table once.
-    ///
-    /// The file-owned table is the single path-token remap owner; path tokens
-    /// themselves carry only handles and are not walked again.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.try_remap_string_ids(&mut |id| {
             Ok::<StringId, std::convert::Infallible>(remap.get(id))
@@ -135,86 +130,80 @@ impl PathSyntaxTable {
         .expect("ordinary string-ID remapping is infallible");
     }
 
-    /// Remap every string-bearing field through the table's one exhaustive walker.
-    ///
-    /// WHAT: covers path roots and locations in place.
-    /// WHY: normal source merging and frozen generic materialisation must use the same owner so
-    ///      a future path payload cannot bypass one remap lane.
+    /// Remap every interned path component. Source spans contain no interned strings.
     pub(crate) fn try_remap_string_ids<E>(
         &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
     ) -> Result<(), E> {
         for path in &mut self.paths {
             path.root.try_remap_string_ids(map)?;
-            path.location.try_remap_string_ids(map)?;
         }
         Ok(())
     }
 
-    /// Rebind every table location scope to a module logical path once.
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+    /// Rebind every path row to the finalized source identity without changing its local range.
+    pub fn rebind_source_identity(&mut self, source: SourceId) {
         for path in &mut self.paths {
-            path.location.scope = logical_path.clone();
+            path.span = SourceSpan::new(source, path.span.local());
         }
     }
 
     /// Validate the dense table independently of any consuming token stream.
-    ///
-    /// This is intentionally an internal invariant boundary. Malformed handles indicate
-    /// compiler-retained corruption, not source syntax a user can author.
     pub(crate) fn validate_structure(&self) -> Result<(), CompilerError> {
-        for path in &self.paths {
-            validate_path_location(&path.location, &path.location.scope, "path row")?;
-        }
         Ok(())
     }
 
-    /// Validate file-owned locations after final source identity is known.
+    /// Validate file-owned spans after final source identity is known.
     pub(crate) fn validate_file_owned_locations(
         &self,
-        expected_source: &InternedPath,
+        expected_source: SourceId,
     ) -> Result<(), CompilerError> {
         self.validate_structure()?;
         for path in &self.paths {
-            validate_path_location(&path.location, expected_source, "path row")?;
+            if path.span.source() != expected_source {
+                return Err(CompilerError::compiler_error(
+                    "path row span does not use the prepared file's source identity",
+                ));
+            }
         }
         Ok(())
     }
 
     /// Validate every path handle carried by one retained token slice.
-    ///
-    /// WHAT: checks the table topology before resolving each non-expanded `TokenKind::Path`
-    ///       payload through its dense file-local handle.
-    /// WHY: prepared-file freezing and persistent generic materialisation both retain token
-    ///      slices independently of their construction owner. Keeping this check beside the
-    ///      canonical table prevents a stale handle from reaching a later panic-only lookup.
     pub(crate) fn validate_token_handles(&self, tokens: &[Token]) -> Result<(), CompilerError> {
         self.validate_structure()?;
         for token in tokens {
             if let TokenKind::Path(path_id) = token.kind {
-                self.try_path_for_token(path_id, &token.location)?;
+                let row = self.try_path(path_id)?;
+                if row.span.local() != token.span {
+                    return Err(CompilerError::compiler_error(
+                        "path syntax row does not belong to the consumed path token",
+                    ));
+                }
             }
         }
         Ok(())
     }
 
     /// Validate one retained token slice against its owning source identity.
-    ///
-    /// WHAT: combines dense-path handle validation with source-scope and span checks for every
-    ///       token in a retained slice.
-    /// WHY: prepared headers and persistent generic bodies retain token slices independently of
-    ///      the tokenizer. They must not be able to pair a valid path handle with a stale source
-    ///      scope and reach a later parser through internally inconsistent retained state.
     pub(crate) fn validate_file_tokens(
         &self,
         tokens: &[Token],
-        expected_source: &InternedPath,
+        expected_source: SourceId,
         role: &str,
     ) -> Result<(), CompilerError> {
         self.validate_token_handles(tokens)?;
 
         for token in tokens {
-            validate_path_location(&token.location, expected_source, role)?;
+            if let TokenKind::Path(path_id) = token.kind {
+                let span = SourceSpan::new(expected_source, token.span);
+                let row = self.try_path_for_token(path_id, span)?;
+                if row.span.source() != expected_source {
+                    return Err(CompilerError::compiler_error(format!(
+                        "{role} path span does not use the prepared file's source identity"
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -280,31 +269,8 @@ impl PathSyntaxTable {
         let source_path = source.try_path(id)?;
         self.paths.push(PathSyntax {
             root: source_path.root.clone(),
-            location: source_path.location.clone(),
+            span: source_path.span,
         });
         Ok(PathSyntaxId::from_index(self.paths.len() - 1))
     }
-}
-
-fn validate_path_location(
-    location: &SourceLocation,
-    expected_source: &InternedPath,
-    role: &str,
-) -> Result<(), CompilerError> {
-    if &location.scope != expected_source {
-        return Err(CompilerError::compiler_error(format!(
-            "{role} location does not use the prepared file's source identity"
-        )));
-    }
-    let start = (
-        location.start_pos.line_number,
-        location.start_pos.char_column,
-    );
-    let end = (location.end_pos.line_number, location.end_pos.char_column);
-    if start > end {
-        return Err(CompilerError::compiler_error(format!(
-            "{role} location has an inverted source span"
-        )));
-    }
-    Ok(())
 }

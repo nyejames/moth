@@ -23,9 +23,9 @@ use crate::compiler_frontend::hir::reactivity::{
     HirReactiveSource, HirReactiveTemplate, ReactiveSourceId, ReactiveTemplateId,
 };
 use crate::compiler_frontend::hir::statements::HirStatement;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -35,10 +35,6 @@ const EMPTY_HIR_LOCATIONS: [HirLocation; 0] = [];
 // -------------------------
 //  ID & Metadata Types
 // -------------------------
-
-/// Stable identifier for an interned source location.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct SourceLocationId(pub u32);
 
 /// Defines the origin of a local variable, helping diagnostics distinguish between
 /// user-defined variables and compiler-generated temporaries.
@@ -59,9 +55,8 @@ pub(crate) enum HirLocalOriginKind {
 pub(crate) struct HirLocalOrigin {
     pub kind: HirLocalOriginKind,
 
-    /// If this is a compiler temporary, this may point to the call site or expression that
-    /// triggered its creation.
-    pub call_location: Option<SourceLocationId>,
+    /// Exact source span of the call/expression that triggered a compiler temporary.
+    pub call_span: Option<SourceSpan>,
 
     /// If this is a function argument, its 0-based index.
     pub argument_index: Option<usize>,
@@ -151,56 +146,27 @@ impl From<HirValueId> for HirLocation {
     }
 }
 
-/// A simplified, hashable version of `SourceLocation` used for interning.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct SourceLocationKey {
-    scope: InternedPath,
-    start_line: i32,
-    start_column: i32,
-    end_line: i32,
-    end_column: i32,
-}
-
-impl From<&SourceLocation> for SourceLocationKey {
-    fn from(value: &SourceLocation) -> Self {
-        Self {
-            scope: value.scope.clone(),
-            start_line: value.start_pos.line_number,
-            start_column: value.start_pos.char_column,
-            end_line: value.end_pos.line_number,
-            end_column: value.end_pos.char_column,
-        }
-    }
-}
-
 // -------------------------
 //  HIR Side Table
 // -------------------------
 
 /// Side-table for reversible AST <-> HIR source mapping plus human-readable names for HIR IDs.
 ///
-/// Design goals:
-/// - O(1) average lookups for all forward/backward mappings.
-/// - Location interning to avoid repeated `SourceLocation` cloning.
-/// - Zero string formatting work during mapping writes.
+/// Source mapping stores exact `SourceSpan` values directly. HIR IDs are process-local semantic
+/// keys; no line/column or path-derived location representation is retained here.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HirSideTable {
-    /// Interned source locations.
-    source_locations: Vec<SourceLocation>,
+    /// Maps an AST span to one or more HIR locations that were lowered from it.
+    ast_to_hir: FxHashMap<SourceSpan, Vec<HirLocation>>,
 
-    /// Index for O(1) location interning.
-    source_location_index: FxHashMap<SourceLocationKey, SourceLocationId>,
+    /// Maps a HIR location back to the primary AST span it was lowered from.
+    hir_to_ast: FxHashMap<HirLocation, SourceSpan>,
 
-    /// Maps an AST location to one or more HIR locations that were lowered from it.
-    ast_to_hir: FxHashMap<SourceLocationId, Vec<HirLocation>>,
+    /// Maps a HIR location to the exact source span used for diagnostics.
+    hir_to_source: FxHashMap<HirLocation, SourceSpan>,
 
-    /// Maps a HIR location back to the primary AST location it was lowered from.
-    hir_to_ast: FxHashMap<HirLocation, SourceLocationId>,
-
-    /// Maps a HIR location to the source location that should be used for diagnostics.
-    /// This may differ from `hir_to_ast` for compiler-generated code that should point to a
-    /// specific expression or statement.
-    hir_to_source: FxHashMap<HirLocation, SourceLocationId>,
+    /// Exact spans for authored block terminators. Generated terminators have no entry.
+    terminator_spans: FxHashMap<BlockId, SourceSpan>,
 
     // -------------------------------------------------------------------------
     //  Name side-tables. Store canonical path identity.
@@ -232,15 +198,13 @@ impl HirSideTable {
     //  Table Management
     // -------------------------
 
-    /// Clears all stored mappings. Used primarily in tests to ensure a clean state.
     #[cfg(test)]
     pub(crate) fn clear(&mut self) {
-        self.source_locations.clear();
-        self.source_location_index.clear();
         self.ast_to_hir.clear();
         self.hir_to_ast.clear();
         self.hir_to_source.clear();
         self.local_names.clear();
+        self.terminator_spans.clear();
         self.local_origins.clear();
         self.function_names.clear();
         self.struct_names.clear();
@@ -257,23 +221,8 @@ impl HirSideTable {
         self.reactive_template_by_value.clear();
     }
 
-    /// Remaps all `StringId`s within the side-table using the provided remap table.
-    /// This is necessary during incremental compilation or when merging string tables.
+    /// Remaps all `StringId`s within name and reactive metadata.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        // Remap all stored source locations.
-        for location in &mut self.source_locations {
-            location.remap_string_ids(remap);
-        }
-
-        // Rebuild the index because SourceLocationKey contains InternedPath, which may have changed.
-        self.source_location_index.clear();
-        for (i, location) in self.source_locations.iter().enumerate() {
-            let key = SourceLocationKey::from(location);
-            self.source_location_index
-                .insert(key, SourceLocationId(i as u32));
-        }
-
-        // Remap all name side-tables.
         for path in self.local_names.values_mut() {
             path.remap_string_ids(remap);
         }
@@ -318,131 +267,93 @@ impl HirSideTable {
     }
 
     // -------------------------
-    //  Location Interning
-    // -------------------------
-
-    /// Interns a `SourceLocation` and returns a stable `SourceLocationId`.
-    /// If the location has already been interned, its existing ID is returned.
-    #[inline]
-    pub(crate) fn intern_source_location(&mut self, location: &SourceLocation) -> SourceLocationId {
-        let key = SourceLocationKey::from(location);
-
-        if let Some(existing_id) = self.source_location_index.get(&key) {
-            return *existing_id;
-        }
-
-        let new_id = SourceLocationId(self.source_locations.len() as u32);
-        self.source_locations.push(location.clone());
-        self.source_location_index.insert(key, new_id);
-
-        new_id
-    }
-
-    /// Returns the `SourceLocation` associated with the given ID, if it exists.
-    #[inline]
-    pub(crate) fn source_location(&self, id: SourceLocationId) -> Option<&SourceLocation> {
-        self.source_locations.get(id.0 as usize)
-    }
-
-    /// Returns the `SourceLocationId` for the given `SourceLocation` if it has been interned.
-    #[cfg(test)]
-    #[inline]
-    pub(crate) fn source_id_for_location(
-        &self,
-        location: &SourceLocation,
-    ) -> Option<SourceLocationId> {
-        let key = SourceLocationKey::from(location);
-        self.source_location_index.get(&key).copied()
-    }
-
-    // -------------------------
     //  Structural Mappings
     // -------------------------
 
-    /// Registers a reversible mapping between an AST location and a HIR location.
+    /// Registers a reversible mapping between an AST span and a HIR location.
     #[inline]
     pub(crate) fn map_ast_to_hir(
         &mut self,
-        ast_location: &SourceLocation,
+        ast_span: Option<SourceSpan>,
         hir_location: HirLocation,
     ) {
-        let ast_id = self.intern_source_location(ast_location);
+        let Some(ast_span) = ast_span else {
+            return;
+        };
 
-        // Forward mapping: one AST location can map to multiple HIR nodes.
-        let entry = self.ast_to_hir.entry(ast_id).or_default();
+        let entry = self.ast_to_hir.entry(ast_span).or_default();
         if !entry.contains(&hir_location) {
             entry.push(hir_location);
         }
 
-        // Backward mapping: each HIR node has one primary AST source.
-        self.hir_to_ast.insert(hir_location, ast_id);
+        self.hir_to_ast.insert(hir_location, ast_span);
     }
 
-    /// Registers a diagnostic source location for a HIR location.
+    /// Registers an exact source span for a HIR location when one exists.
     #[inline]
-    pub(crate) fn map_hir_source_location(
+    pub(crate) fn map_hir_source_span(
         &mut self,
         hir_location: HirLocation,
-        hir_source: &SourceLocation,
+        hir_source: Option<SourceSpan>,
     ) {
-        let source_id = self.intern_source_location(hir_source);
-        self.hir_to_source.insert(hir_location, source_id);
+        if let Some(span) = hir_source {
+            self.hir_to_source.insert(hir_location, span);
+        }
     }
 
-    /// Helper to map a statement's AST and HIR locations.
-    pub(crate) fn map_statement(
-        &mut self,
-        ast_location: &SourceLocation,
-        statement: &HirStatement,
-    ) {
+    /// Helper to map a statement's AST and HIR spans.
+    pub(crate) fn map_statement(&mut self, ast_span: Option<SourceSpan>, statement: &HirStatement) {
         let hir_location = HirLocation::Statement(statement.id);
 
-        self.map_ast_to_hir(ast_location, hir_location);
-        self.map_hir_source_location(hir_location, &statement.location);
+        self.map_ast_to_hir(ast_span, hir_location);
+        self.map_hir_source_span(hir_location, statement.span);
     }
 
-    /// Helper to map a value's AST and HIR locations.
+    /// Helper to map a value's AST and HIR spans.
     pub(crate) fn map_value(
         &mut self,
-        ast_location: &SourceLocation,
+        ast_span: Option<SourceSpan>,
         value_id: HirValueId,
-        source_location: &SourceLocation,
+        source_span: Option<SourceSpan>,
     ) {
         let hir_location = HirLocation::Value(value_id);
 
-        self.map_ast_to_hir(ast_location, hir_location);
-        self.map_hir_source_location(hir_location, source_location);
+        self.map_ast_to_hir(ast_span, hir_location);
+        self.map_hir_source_span(hir_location, source_span);
     }
 
-    /// Helper to map a function's AST and HIR locations.
-    pub(crate) fn map_function(&mut self, ast_location: &SourceLocation, function: &HirFunction) {
+    /// Helper to map a function's AST and HIR spans.
+    pub(crate) fn map_function(&mut self, ast_span: Option<SourceSpan>, function: &HirFunction) {
         let hir_location = HirLocation::Function(function.id);
 
-        self.map_ast_to_hir(ast_location, hir_location);
-        self.map_hir_source_location(hir_location, ast_location);
+        self.map_ast_to_hir(ast_span, hir_location);
+        self.map_hir_source_span(hir_location, ast_span);
     }
 
-    /// Helper to map a block's AST and HIR locations.
-    pub(crate) fn map_block(&mut self, ast_location: &SourceLocation, block: &HirBlock) {
+    /// Helper to map a block's AST and HIR spans.
+    pub(crate) fn map_block(&mut self, ast_span: Option<SourceSpan>, block: &HirBlock) {
         let hir_location = HirLocation::Block(block.id);
 
-        self.map_ast_to_hir(ast_location, hir_location);
-        self.map_hir_source_location(hir_location, ast_location);
+        self.map_ast_to_hir(ast_span, hir_location);
+        self.map_hir_source_span(hir_location, ast_span);
     }
 
-    /// Helper to map a block terminator's AST and HIR locations.
-    pub(crate) fn map_terminator(&mut self, ast_location: &SourceLocation, block_id: BlockId) {
+    /// Helper to map a block terminator's AST and HIR spans.
+    pub(crate) fn map_terminator(&mut self, ast_span: Option<SourceSpan>, block_id: BlockId) {
         let hir_location = HirLocation::Terminator(block_id);
 
-        self.map_ast_to_hir(ast_location, hir_location);
-        self.map_hir_source_location(hir_location, ast_location);
+        self.map_ast_to_hir(ast_span, hir_location);
+        self.map_hir_source_span(hir_location, ast_span);
     }
 
-    /// Registers the source location for a local variable if provided.
+    /// Stores the exact authored span for a block terminator.
+    pub(crate) fn map_terminator_span(&mut self, block_id: BlockId, span: SourceSpan) {
+        self.terminator_spans.insert(block_id, span);
+    }
+
+    /// Registers the exact source span for a local variable if provided.
     pub(crate) fn map_local_source(&mut self, local: &HirLocal) {
-        if let Some(location) = &local.source_info {
-            self.map_hir_source_location(HirLocation::Local(local.id), location);
-        }
+        self.map_hir_source_span(HirLocation::Local(local.id), local.span);
     }
 
     // -------------------------
@@ -460,16 +371,14 @@ impl HirSideTable {
         &mut self,
         local_id: LocalId,
         kind: HirLocalOriginKind,
-        call_location: Option<&SourceLocation>,
+        call_span: Option<SourceSpan>,
         argument_index: Option<usize>,
     ) {
-        let call_location = call_location.map(|location| self.intern_source_location(location));
-
         self.local_origins.insert(
             local_id,
             HirLocalOrigin {
                 kind,
-                call_location,
+                call_span,
                 argument_index,
             },
         );
@@ -581,67 +490,43 @@ impl HirSideTable {
     //  Metadata Lookups
     // -------------------------
 
-    /// Returns the diagnostic source location for the given value, if available.
+    /// Returns the diagnostic source span for the given value, if available.
     #[inline]
-    pub(crate) fn value_source_location(&self, value_id: HirValueId) -> Option<&SourceLocation> {
-        self.hir_source_location_for_hir(HirLocation::Value(value_id))
+    pub(crate) fn value_source_span(&self, value_id: HirValueId) -> Option<SourceSpan> {
+        self.hir_source_span_for_hir(HirLocation::Value(value_id))
     }
 
-    /// Returns the original AST source location for the given value, if available.
+    /// Returns the original AST source span for the given value, if available.
     #[inline]
-    pub(crate) fn value_ast_location(&self, value_id: HirValueId) -> Option<&SourceLocation> {
-        self.ast_location_for_hir(HirLocation::Value(value_id))
+    pub(crate) fn value_ast_span(&self, value_id: HirValueId) -> Option<SourceSpan> {
+        self.ast_span_for_hir(HirLocation::Value(value_id))
     }
 
-    /// Returns all HIR locations associated with the given AST location.
+    /// Returns all HIR locations associated with the given AST span.
     #[cfg(test)]
-    pub(crate) fn hir_locations_for_ast(&self, ast_location: &SourceLocation) -> &[HirLocation] {
-        let Some(ast_id) = self.source_id_for_location(ast_location) else {
-            return &EMPTY_HIR_LOCATIONS;
-        };
-
+    pub(crate) fn hir_locations_for_ast(&self, ast_span: SourceSpan) -> &[HirLocation] {
         self.ast_to_hir
-            .get(&ast_id)
+            .get(&ast_span)
             .map(Vec::as_slice)
             .unwrap_or(&EMPTY_HIR_LOCATIONS)
     }
 
-    /// Returns the AST `SourceLocationId` for the given HIR location.
+    /// Returns the original AST source span for the given HIR location.
     #[inline]
-    pub(crate) fn ast_source_id_for_hir(
-        &self,
-        hir_location: HirLocation,
-    ) -> Option<SourceLocationId> {
+    pub(crate) fn ast_span_for_hir(&self, hir_location: HirLocation) -> Option<SourceSpan> {
         self.hir_to_ast.get(&hir_location).copied()
     }
 
-    /// Returns the original AST `SourceLocation` for the given HIR location.
+    /// Returns the diagnostic source span for the given HIR location.
     #[inline]
-    pub(crate) fn ast_location_for_hir(
-        &self,
-        hir_location: HirLocation,
-    ) -> Option<&SourceLocation> {
-        let source_id = self.ast_source_id_for_hir(hir_location)?;
-        self.source_location(source_id)
-    }
-
-    /// Returns the diagnostic `SourceLocationId` for the given HIR location.
-    #[inline]
-    pub(crate) fn hir_source_id_for_hir(
-        &self,
-        hir_location: HirLocation,
-    ) -> Option<SourceLocationId> {
+    pub(crate) fn hir_source_span_for_hir(&self, hir_location: HirLocation) -> Option<SourceSpan> {
         self.hir_to_source.get(&hir_location).copied()
     }
 
-    /// Returns the diagnostic `SourceLocation` for the given HIR location.
+    /// Returns the exact authored span for a block terminator, if one was recorded.
     #[inline]
-    pub(crate) fn hir_source_location_for_hir(
-        &self,
-        hir_location: HirLocation,
-    ) -> Option<&SourceLocation> {
-        let source_id = self.hir_source_id_for_hir(hir_location)?;
-        self.source_location(source_id)
+    pub(crate) fn terminator_span(&self, block_id: BlockId) -> Option<&SourceSpan> {
+        self.terminator_spans.get(&block_id)
     }
 
     /// Returns the interned path for a local variable.

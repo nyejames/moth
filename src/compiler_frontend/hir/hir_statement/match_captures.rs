@@ -23,8 +23,8 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{ChoiceId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
 
@@ -40,7 +40,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         arm: &MatchArm,
         scrutinee_ast: &Expression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Vec<LocalId>, CompilerError> {
         match &arm.pattern {
             MatchPattern::ChoiceVariant {
@@ -52,18 +52,15 @@ impl<'a> HirBuilder<'a> {
                     return Ok(Vec::new());
                 }
 
-                let _choice_id = self.choice_id_for_scrutinee_type(
-                    nominal_path,
-                    scrutinee_ast.type_id,
-                    location,
-                )?;
-                let region = self.current_region_or_error(location)?;
+                let _choice_id =
+                    self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.type_id, span)?;
+                let region = self.current_region_or_error(span)?;
 
                 let mut local_ids = Vec::with_capacity(captures.len());
                 for capture in captures {
-                    let field_ty = self.lower_type_id(capture.type_id, &capture.location)?;
+                    let field_ty = self.lower_type_id(capture.type_id, &capture.span)?;
                     let local_id = self.allocate_local_id();
-                    let block_id = self.current_block_id_or_error(&capture.location)?;
+                    let block_id = self.current_block_id_or_error(&capture.span)?;
 
                     self.register_local_in_block(
                         block_id,
@@ -72,9 +69,9 @@ impl<'a> HirBuilder<'a> {
                             ty: field_ty,
                             mutable: false,
                             region,
-                            source_info: Some(capture.location.clone()),
+                            span: capture.binding_span,
                         },
-                        &capture.location,
+                        &capture.span,
                     )?;
 
                     self.locals_by_name
@@ -86,17 +83,18 @@ impl<'a> HirBuilder<'a> {
 
                 Ok(local_ids)
             }
-
             MatchPattern::OptionPresentCapture {
                 binding_path,
                 inner_type_id,
-                binding_location,
+                span: pattern_span,
+                binding_span,
                 ..
             } => {
-                let ty = self.lower_type_id(*inner_type_id, binding_location)?;
-                let region = self.current_region_or_error(binding_location)?;
+                let binding_fallback_span = (*binding_span).or(*pattern_span);
+                let ty = self.lower_type_id(*inner_type_id, &binding_fallback_span)?;
+                let region = self.current_region_or_error(&binding_fallback_span)?;
                 let local_id = self.allocate_local_id();
-                let block_id = self.current_block_id_or_error(binding_location)?;
+                let block_id = self.current_block_id_or_error(&binding_fallback_span)?;
 
                 self.register_local_in_block(
                     block_id,
@@ -105,9 +103,9 @@ impl<'a> HirBuilder<'a> {
                         ty,
                         mutable: false,
                         region,
-                        source_info: Some(binding_location.clone()),
+                        span: *binding_span,
                     },
-                    binding_location,
+                    &binding_fallback_span,
                 )?;
 
                 self.locals_by_name.insert(binding_path.clone(), local_id);
@@ -129,9 +127,9 @@ impl<'a> HirBuilder<'a> {
         capture_locals: &[LocalId],
         scrutinee_ast: &Expression,
         scrutinee_hir: &HirExpression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let context = self.match_capture_context(arm, scrutinee_ast, scrutinee_hir, location)?;
+        let context = self.match_capture_context(arm, scrutinee_ast, scrutinee_hir, span)?;
         let substitutions =
             self.build_guard_capture_substitutions(arm, capture_locals, &context)?;
 
@@ -149,12 +147,12 @@ impl<'a> HirBuilder<'a> {
         capture_locals: &[LocalId],
         scrutinee_hir: &HirExpression,
         scrutinee_ast: &Expression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         match &arm.pattern {
             MatchPattern::ChoiceVariant { tag, captures, .. } => {
                 let context =
-                    self.match_capture_context(arm, scrutinee_ast, scrutinee_hir, location)?;
+                    self.match_capture_context(arm, scrutinee_ast, scrutinee_hir, span)?;
 
                 if captures.is_empty() {
                     return Ok(());
@@ -167,21 +165,25 @@ impl<'a> HirBuilder<'a> {
                 );
 
                 for (capture, &local_id) in captures.iter().zip(capture_locals.iter()) {
-                    let field_ty = self.lower_type_id(capture.type_id, &capture.location)?;
+                    let field_ty = self.lower_type_id(capture.type_id, &capture.span)?;
                     let payload_get = self.make_capture_payload_get(
                         &context,
                         *tag,
                         capture.field_index,
                         field_ty,
-                        &capture.location,
+                        &capture.span,
                     );
 
-                    self.emit_statement_kind(
+                    // Authored capture materialization: each arm-entry assignment
+                    // carries the capture's binding span, falling back to the
+                    // field span when the binding is identity-free.
+                    self.emit_statement_kind_with_span(
                         HirStatementKind::Assign {
                             target: HirPlace::Local(local_id),
                             value: payload_get,
                         },
-                        &capture.location,
+                        &capture.span,
+                        capture.binding_span.or(capture.span),
                     )?;
                 }
 
@@ -190,17 +192,19 @@ impl<'a> HirBuilder<'a> {
 
             MatchPattern::OptionPresentCapture {
                 inner_type_id,
-                binding_location,
+                span: pattern_span,
+                binding_span,
                 ..
             } => {
                 if capture_locals.is_empty() {
                     return Ok(());
                 }
                 let local_id = capture_locals[0];
-                let field_ty = self.lower_type_id(*inner_type_id, binding_location)?;
-                let region = self.current_region_or_error(binding_location)?;
+                let binding_fallback_span = (*binding_span).or(*pattern_span);
+                let field_ty = self.lower_type_id(*inner_type_id, &binding_fallback_span)?;
+                let region = self.current_region_or_error(&binding_fallback_span)?;
                 let payload_get = self.make_expression(
-                    binding_location,
+                    &binding_fallback_span,
                     HirExpressionKind::VariantPayloadGet {
                         carrier: HirVariantCarrier::Option,
                         source: Box::new(scrutinee_hir.clone()),
@@ -212,12 +216,14 @@ impl<'a> HirBuilder<'a> {
                     ValueKind::RValue,
                     region,
                 );
-                self.emit_statement_kind(
+                // Authored option capture materialization carries the binding span.
+                self.emit_statement_kind_with_span(
                     HirStatementKind::Assign {
                         target: HirPlace::Local(local_id),
                         value: payload_get,
                     },
-                    binding_location,
+                    &binding_fallback_span,
+                    *binding_span,
                 )?;
                 Ok(())
             }
@@ -242,18 +248,18 @@ impl<'a> HirBuilder<'a> {
         arm: &MatchArm,
         scrutinee_ast: &Expression,
         scrutinee_hir: &HirExpression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<MatchCaptureLoweringContext, CompilerError> {
         let MatchPattern::ChoiceVariant { nominal_path, .. } = &arm.pattern else {
             return_hir_transformation_error!(
                 "Match capture context requires a choice-variant pattern",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
         let choice_id =
-            self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.type_id, location)?;
-        let parent_region = self.current_region_or_error(location)?;
+            self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.type_id, span)?;
+        let parent_region = self.current_region_or_error(span)?;
 
         Ok(MatchCaptureLoweringContext {
             scrutinee_hir: scrutinee_hir.clone(),
@@ -284,13 +290,13 @@ impl<'a> HirBuilder<'a> {
 
         let mut substitutions = FxHashMap::default();
         for (capture, &local_id) in captures.iter().zip(capture_locals.iter()) {
-            let field_ty = self.lower_type_id(capture.type_id, &capture.location)?;
+            let field_ty = self.lower_type_id(capture.type_id, &capture.span)?;
             let payload_get = self.make_capture_payload_get(
                 context,
                 *tag,
                 capture.field_index,
                 field_ty,
-                &capture.location,
+                &capture.span,
             );
             substitutions.insert(local_id, payload_get);
         }
@@ -304,10 +310,10 @@ impl<'a> HirBuilder<'a> {
         variant_index: usize,
         field_index: usize,
         field_ty: TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> HirExpression {
         self.make_expression(
-            location,
+            span,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Choice {
                     choice_id: context.choice_id,
@@ -326,7 +332,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         nominal_path: &InternedPath,
         scrutinee_type_id: TypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<ChoiceId, CompilerError> {
         if self
             .type_environment
@@ -335,7 +341,7 @@ impl<'a> HirBuilder<'a> {
         {
             return_hir_transformation_error!(
                 "Choice pattern capture used with non-choice scrutinee type",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         }
 
@@ -348,13 +354,10 @@ impl<'a> HirBuilder<'a> {
         };
 
         match generic_key {
-            Some(key) => self.resolve_or_register_generic_choice(
-                &key,
-                nominal_path,
-                scrutinee_type_id,
-                location,
-            ),
-            None => self.resolve_choice_id(nominal_path, location),
+            Some(key) => {
+                self.resolve_or_register_generic_choice(&key, nominal_path, scrutinee_type_id, span)
+            }
+            None => self.resolve_choice_id(nominal_path, span),
         }
     }
 }

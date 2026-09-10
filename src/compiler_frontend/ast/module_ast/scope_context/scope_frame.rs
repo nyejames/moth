@@ -24,7 +24,7 @@ use crate::compiler_frontend::instrumentation::add_ast_counter;
 use crate::compiler_frontend::instrumentation::frontend_counters::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Stable ID for a scope frame inside a `ScopeArena`.
 ///
@@ -131,7 +131,7 @@ impl ScopeArena {
         &self,
         frame_id: ScopeFrameId,
         name: &StringId,
-    ) -> Option<(Rc<Declaration>, SourceLocation)> {
+    ) -> Option<(Rc<Declaration>, Option<SourceSpan>)> {
         let mut current_id = Some(frame_id);
         let mut steps: usize = 0;
 
@@ -141,10 +141,7 @@ impl ScopeArena {
                 add_ast_counter(AstCounter::ScopeFrameLookupAncestorSteps, steps);
                 return indices.last().map(|index| {
                     let entry = &frame.local_declarations[*index as usize];
-                    (
-                        Rc::clone(&entry.declaration),
-                        entry.binding_location.clone(),
-                    )
+                    (Rc::clone(&entry.declaration), entry.binding_span)
                 });
             }
 
@@ -222,16 +219,15 @@ impl Default for ScopeArena {
 #[path = "scope_frame_tests.rs"]
 mod scope_frame_tests;
 
-/// A body-local declaration paired with its authored binding-name source location.
+/// A body-local declaration paired with its authored binding-name source span.
 ///
-/// WHAT: stores the declaration alongside the location where the binding name was
-///       authored, which differs from `Declaration::value::location` (the initializer).
-/// WHY: immutable assignment diagnostics add a secondary label at the original
-///      binding declaration, not at the initializer expression.
+/// WHAT: stores the declaration alongside the exact span where the binding name was authored.
+/// WHY: immutable assignment diagnostics add a secondary label at the original binding
+///      declaration, not at the initializer expression. Synthetic declarations use `None`.
 #[derive(Clone)]
 pub(crate) struct LocalDeclaration {
     pub(crate) declaration: Rc<Declaration>,
-    pub(crate) binding_location: SourceLocation,
+    pub(crate) binding_span: Option<SourceSpan>,
 }
 
 /// One layer of local declarations in the AST scope hierarchy.
@@ -325,7 +321,7 @@ impl ScopeFrame {
     ///       records insertion for instrumentation.
     /// WHY: callers must ensure they are mutating the correct frame; this method does
     ///      not walk the parent chain because additions always belong to the current scope.
-    pub(crate) fn add_var(&mut self, declaration: Declaration, binding_location: SourceLocation) {
+    pub(crate) fn add_var(&mut self, declaration: Declaration, binding_span: Option<SourceSpan>) {
         if let Some(name) = declaration.id.name() {
             let index = self.local_declarations.len() as u32;
             self.local_declarations_by_name
@@ -335,7 +331,7 @@ impl ScopeFrame {
         }
         self.local_declarations.push(LocalDeclaration {
             declaration: Rc::new(declaration),
-            binding_location,
+            binding_span,
         });
     }
 
@@ -346,14 +342,14 @@ impl ScopeFrame {
     pub(crate) fn add_compile_time_var(
         &mut self,
         declaration: Declaration,
-        binding_location: SourceLocation,
+        binding_span: Option<SourceSpan>,
     ) {
         let declarations = self
             .explicit_compile_time_constant_declarations
             .get_or_insert_with(Default::default);
         Rc::make_mut(declarations).insert(declaration.id.clone());
 
-        self.add_var(declaration, binding_location);
+        self.add_var(declaration, binding_span);
     }
 
     /// Replace the declarations in this frame.
@@ -364,12 +360,9 @@ impl ScopeFrame {
         self.local_declarations_by_name = build_local_declarations_index(&declarations);
         self.local_declarations = declarations
             .into_iter()
-            .map(|declaration| {
-                let binding_location = declaration.value.location.clone();
-                LocalDeclaration {
-                    declaration: Rc::new(declaration),
-                    binding_location,
-                }
+            .map(|declaration| LocalDeclaration {
+                binding_span: declaration.binding_span,
+                declaration: Rc::new(declaration),
             })
             .collect();
     }

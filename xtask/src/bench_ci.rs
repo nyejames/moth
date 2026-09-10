@@ -50,13 +50,14 @@ pub(crate) fn run_bench_ci() -> Result<(), String> {
     let thread_count = effective_thread_count()?;
     let policy = bench_ci_policy()?;
 
+    let standard_cases: Vec<BenchmarkCase> = prepared.manifest.standard_cases().cloned().collect();
     println!(
-        "Preflighting all {} benchmark cases before quick selection...",
-        prepared.manifest.cases.len()
+        "Preflighting all {} standard benchmark cases before quick selection...",
+        standard_cases.len()
     );
 
     let result = run_bench_ci_pipeline(
-        &prepared.manifest.cases,
+        &standard_cases,
         policy,
         |cases| {
             let executions = preflight_cases(&context, cases)

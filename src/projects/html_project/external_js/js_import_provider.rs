@@ -14,7 +14,6 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -73,7 +72,6 @@ impl ExternalImportProvider for JsExternalImportProvider {
                             "Failed to read JS import '{}': {error}",
                             request.canonical_source_path.display()
                         ),
-                        context.string_table,
                     ),
                     context.string_table.clone(),
                 ));
@@ -94,7 +92,6 @@ impl ExternalImportProvider for JsExternalImportProvider {
                         format!(
                             "JS import source path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                         ),
-                        context.string_table,
                     ),
                     context.string_table,
                 ));
@@ -147,7 +144,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
             StablePackageIdentity::binding(PackageOrigin::ProjectLocal, &package_path),
             &request.logical_source_path,
             request.canonical_source_path,
-            request.source_location,
+            request.source_span,
         )
         .map_err(|error| CompilerMessages::from_error(error, context.string_table.clone()))?;
 
@@ -193,12 +190,10 @@ fn reject_receiver_methods_in_project_local_js(
             receiver_method.moth_name
         );
         let message_id = string_table.intern(&message);
-        let location = js_parser_source_location(path.clone(), &receiver_method.annotation_span);
-
         diagnostics.push(CompilerDiagnostic::invalid_external_module(
             path.clone(),
             message_id,
-            location,
+            None,
         ));
     }
 
@@ -219,35 +214,12 @@ fn convert_js_parser_diagnostics(
 
     for parser_diagnostic in parser_diagnostics {
         let message_id = string_table.intern(&parser_diagnostic.message);
-        let location = js_parser_source_location(path.clone(), &parser_diagnostic.span);
-
         diagnostics.push(CompilerDiagnostic::invalid_external_module(
             path.clone(),
             message_id,
-            location,
+            None,
         ));
     }
 
     diagnostics
-}
-
-fn js_parser_source_location(
-    path: InternedPath,
-    span: &crate::projects::html_project::external_js::parser::parsed_js_module::JsSourceSpan,
-) -> SourceLocation {
-    let start = CharPosition {
-        line_number: span.line as i32,
-        char_column: span.column as i32,
-    };
-    let end_column = if span.byte_end > span.byte_start {
-        span.column.saturating_add(span.byte_end - span.byte_start)
-    } else {
-        span.column.saturating_add(1)
-    };
-    let end = CharPosition {
-        line_number: span.line as i32,
-        char_column: end_column as i32,
-    };
-
-    SourceLocation::new(path, start, end)
 }

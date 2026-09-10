@@ -13,14 +13,15 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, SyntaxDiagnosticKind,
+    DiagnosticKind, DiagnosticPayload, DiagnosticToken, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -40,18 +41,15 @@ fn test_scope(string_table: &mut StringTable) -> (InternedPath, ScopeContext) {
     (scope, context)
 }
 
-fn numeric_token(value: &str, scope: &InternedPath, string_table: &mut StringTable) -> Token {
+fn numeric_token(value: &str, _scope: &InternedPath, string_table: &mut StringTable) -> Token {
     Token::new(
         TokenKind::NumericLiteral(NumericLiteralToken::test_new(value, string_table)),
-        SourceLocation::new(scope.clone(), Default::default(), Default::default()),
+        LocalSpan::source_start(),
     )
 }
 
-fn token(kind: TokenKind, scope: &InternedPath) -> Token {
-    Token::new(
-        kind,
-        SourceLocation::new(scope.clone(), Default::default(), Default::default()),
-    )
+fn token(kind: TokenKind, _scope: &InternedPath) -> Token {
+    Token::new(kind, LocalSpan::source_start())
 }
 
 fn create_expression_until_for_test(
@@ -79,10 +77,6 @@ fn create_expression_until_for_test(
     create_expression_until(input, stop_tokens)
 }
 
-fn typed_diagnostic_from_error(error: ExpressionParseError) -> CompilerDiagnostic {
-    CompilerDiagnostic::from(error)
-}
-
 #[test]
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
@@ -92,7 +86,7 @@ fn bounded_expression_empty_at_delimiter_errors() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -105,7 +99,9 @@ fn bounded_expression_empty_at_delimiter_errors() {
     )
     .expect_err("empty expression should error");
 
-    let diagnostic = typed_diagnostic_from_error(error);
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}");
+    };
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
@@ -113,9 +109,8 @@ fn bounded_expression_empty_at_delimiter_errors() {
     assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Comma
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from(TokenKind::Comma)
     ));
 }
 
@@ -129,7 +124,7 @@ fn bounded_expression_parses_simple_literal() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -165,7 +160,7 @@ fn bounded_expression_nested_parentheses() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -202,7 +197,7 @@ fn bounded_expression_nested_curly_braces() {
         token(TokenKind::Comma, &scope),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope.clone(), tokens);
+    let mut stream = FileTokens::new(scope.clone(), SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let expression = create_expression_until_for_test(
@@ -232,7 +227,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         numeric_token("2", &scope, &mut string_table),
         token(TokenKind::Eof, &scope),
     ];
-    let mut stream = FileTokens::new(scope, tokens);
+    let mut stream = FileTokens::new(scope, SourceId::COMPILATION_ROOT, tokens);
     let mut data_type = ExpectedType::Infer;
 
     let error = create_expression_until_for_test(
@@ -245,7 +240,9 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     )
     .expect_err("missing delimiter should error");
 
-    let diagnostic = typed_diagnostic_from_error(error);
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}");
+    };
     assert_eq!(
         diagnostic.kind,
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedToken)
@@ -253,8 +250,7 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Eof
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from(TokenKind::Eof)
     ));
 }

@@ -78,7 +78,7 @@ fn write_project_outputs_inner(
         options.output_plan.project_root(),
         options.output_plan.entry_root(),
         output_owner,
-        options.output_plan.setting_location(),
+        options.output_plan.setting_span(),
         &project.cleanup_policy,
         string_table,
     )?;

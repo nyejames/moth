@@ -1,7 +1,6 @@
 //! Tests for the JS-only HTML rendering path.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -106,38 +105,38 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
     let text_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Text(String::from("<head>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Text(String::from("</html>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Text(String::from("<main>body")),
         },
     ];
     let piece_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "<head>",
             ))]),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "</html>",
             ))]),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
-            location: SourceLocation::default(),
+            span: None,
             value: OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text(String::from("<main>")),
                 OwnedFoldedStringPiece::Text(String::from("body")),
@@ -176,7 +175,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
     let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
     plan.plan_origin(
         origin.clone(),
-        Default::default(),
+        None,
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -185,7 +184,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
-        location: SourceLocation::default(),
+        span: None,
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
             OwnedFoldedStringPiece::Resource(origin),
@@ -207,7 +206,7 @@ fn render_entry_fragments_renders_site_root_piece_at_builder_boundary() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/moth");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
-        location: SourceLocation::default(),
+        span: None,
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
             OwnedFoldedStringPiece::SiteRoot,

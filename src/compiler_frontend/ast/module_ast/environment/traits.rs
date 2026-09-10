@@ -35,8 +35,8 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -95,6 +95,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<TraitEnvironment, CompilerMessages> {
         self.project_imported_trait_declarations(&mut trait_environment, string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
+        let mut source_order_by_trait_id = FxHashMap::default();
 
         for &declaration_id in &declaration_lanes.traits {
             let header = declaration_lanes
@@ -115,6 +116,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &trait_environment,
                 string_table,
             )?;
+            let definition_id = definition.id;
 
             if let Some(existing_id) = trait_environment.insert(definition) {
                 let Some(existing_definition) = trait_environment.get(existing_id) else {
@@ -124,12 +126,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 return Err(self.diagnostic_messages(
                     CompilerDiagnostic::duplicate_declaration(
                         declaration.name,
-                        Some(existing_definition.declaration_location.clone()),
-                        declaration.name_location.clone(),
+                        existing_definition.declaration_span,
+                        source_span(header, declaration.name_span),
                     ),
                     string_table,
                 ));
             }
+
+            source_order_by_trait_id.insert(definition_id, declaration.source_order);
         }
 
         self.validate_trait_conformance_references(
@@ -138,7 +142,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )?;
 
-        self.resolve_trait_incompatibilities(sorted_headers, &mut trait_environment, string_table)?;
+        self.resolve_trait_incompatibilities(
+            sorted_headers,
+            &source_order_by_trait_id,
+            &mut trait_environment,
+            string_table,
+        )?;
 
         Ok(trait_environment)
     }
@@ -305,17 +314,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 ));
             };
 
-            // Source-File/Location are recorded as default for compiler-owned
-            // builtin evidence because the source row is internal metadata,
-            // not a user-declared conformance.
+            // Builtin evidence is compiler-owned metadata, not a user declaration.
             let declaration = TraitEvidenceDefinition {
                 id: crate::compiler_frontend::traits::ids::TraitEvidenceId(0),
                 kind: TraitEvidenceKind::Builtin,
                 target_type_id: source_type_id,
                 trait_id,
                 source_file: crate::compiler_frontend::symbols::interned_path::InternedPath::new(),
-                declaration_location:
-                    crate::compiler_frontend::tokenizer::tokens::SourceLocation::default(),
+                declaration_span: None,
                 requirements: Vec::new(),
             };
             trait_evidence_environment.insert_builtin(declaration);
@@ -334,10 +340,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         let this_name = trait_this_name(string_table);
         let this_parameters =
-            trait_this_parameter_list(this_name, declaration.name_location.clone());
-        let registered_this = self
-            .type_environment
-            .register_generic_parameter_list(&this_parameters, &FxHashMap::default());
+            trait_this_parameter_list(this_name, source_span(header, declaration.name_span));
+        let registered_this = self.type_environment.register_generic_parameter_list(
+            this_parameters
+                .parameters
+                .iter()
+                .map(|parameter| (parameter.id, parameter.name)),
+            &FxHashMap::default(),
+        );
         let Some(this_canonical_id) = registered_this
             .canonical_by_local
             .get(&TypeParameterId(0))
@@ -357,27 +367,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let generic_parameter_scope = self.generic_parameter_scope(
             &this_parameters,
             Some(&registered_this.canonical_by_local),
+            Some(header.tokens.file_id),
             &visibility,
             string_table,
         )?;
 
         let mut requirements = Vec::with_capacity(declaration.requirements.len());
-        let mut requirement_locations_by_name = FxHashMap::default();
+        let mut requirement_spans_by_name = FxHashMap::default();
         let mut next_requirement_id = trait_environment.next_requirement_id();
 
         for requirement in &declaration.requirements {
-            if let Some(first_location) = requirement_locations_by_name
-                .insert(requirement.name, requirement.name_location.clone())
+            if let Some(first_span) = requirement_spans_by_name
+                .insert(requirement.name, source_span(header, requirement.span))
             {
-                return Err(self.diagnostic_messages(
-                    CompilerDiagnostic::duplicate_trait_requirement(
-                        declaration.name,
-                        requirement.name,
-                        first_location,
-                        requirement.name_location.clone(),
-                    ),
-                    string_table,
-                ));
+                let diagnostic = CompilerDiagnostic::duplicate_trait_requirement(
+                    declaration.name,
+                    requirement.name,
+                    first_span,
+                    source_span(header, requirement.span),
+                );
+                return Err(self.diagnostic_messages(diagnostic, string_table));
             }
 
             let resolved_requirement = self.resolve_trait_requirement(
@@ -413,7 +422,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             source_file: header.source_file.clone(),
             this_type,
             requirements,
-            declaration_location: declaration.name_location.clone(),
+            declaration_span: source_span(header, declaration.name_span),
             visibility: TraitVisibility::Source {
                 exported: header.export_mode.is_public(),
             },
@@ -436,7 +445,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         } = input;
 
         let visibility = self.header_visibility(header, string_table)?;
-
+        let requirement_span = source_span(header, requirement.span);
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
         let unresolved_signature = self.unresolved_trait_requirement_signature(
@@ -447,8 +456,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         )?;
 
-        let mut type_resolution_context =
-            self.type_resolution_context_for(&visibility, generic_parameter_scope);
+        let mut type_resolution_context = self.type_resolution_context_for(
+            &visibility,
+            header.tokens.file_id,
+            generic_parameter_scope,
+        );
         let resolved_signature = resolve_function_signature(
             &header.tokens.src_path,
             &unresolved_signature,
@@ -456,14 +468,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut type_resolution_context,
             string_table,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         let Some(first_parameter) = resolved_signature.signature.parameters.first() else {
             return Err(self.diagnostic_messages(
                 CompilerDiagnostic::unsupported_trait_feature(
                     declaration.name,
                     string_table.intern("missing This receiver"),
-                    requirement.location.clone(),
+                    requirement_span,
                 ),
                 string_table,
             ));
@@ -487,7 +499,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 parameter.id.clone(),
                 parameter.value.value_mode.clone(),
                 parameter.value.type_id,
-                parameter.value.location.clone(),
+                parameter.value.span,
             ));
         }
 
@@ -498,7 +510,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     CompilerDiagnostic::unsupported_trait_feature(
                         declaration.name,
                         string_table.intern("unresolved requirement return"),
-                        requirement.location.clone(),
+                        requirement_span,
                     ),
                     string_table,
                 ));
@@ -507,18 +519,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             returns.push(ResolvedTraitReturn {
                 type_id,
                 channel: return_slot.channel,
-                location: requirement.location.clone(),
+                span: requirement_span,
             });
         }
 
         Ok(ResolvedTraitRequirement {
             id: requirement_id,
             name: requirement.name,
-            name_location: requirement.name_location.clone(),
             receiver,
             parameters,
             returns,
-            location: requirement.location.clone(),
+            span: requirement_span,
         })
     }
 
@@ -559,7 +570,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 CompilerDiagnostic::unsupported_trait_feature(
                     declaration.name,
                     string_table.intern("marker requirement"),
-                    declaration.name_location.clone(),
+                    source_span(header, declaration.name_span),
                 ),
                 string_table,
             ));
@@ -582,12 +593,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let visibility = self.header_visibility(header, string_table)?;
 
             for trait_ref in &conformance.traits {
-                self.resolve_visible_trait_reference(
-                    trait_ref,
+                self.resolve_visible_trait_name(
+                    trait_ref.name,
+                    source_span(header, trait_ref.span),
                     &visibility,
                     trait_environment,
                     string_table,
-                )?;
+                )
+                .map_err(|mut messages| {
+                    if let Some(diagnostic) = messages.diagnostics.first_mut() {
+                        diagnostic.primary_span = source_span(header, trait_ref.span);
+                    }
+                    messages
+                })?;
             }
         }
 
@@ -597,6 +615,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn resolve_trait_incompatibilities(
         &self,
         sorted_headers: &[Header],
+        source_order_by_trait_id: &FxHashMap<TraitId, usize>,
         trait_environment: &mut TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -607,27 +626,60 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             };
 
-            let relation_source_file = header.source_file.clone();
             let visibility = self.header_visibility(header, string_table)?;
 
             let subject_id = self.resolve_trait_incompatibility_reference(
+                header,
                 &incompatibility.subject,
                 &incompatibility.subject,
-                &relation_source_file,
                 &visibility,
                 trait_environment,
                 string_table,
             )?;
+            if trait_reference_is_forward(
+                header,
+                subject_id,
+                incompatibility.source_order,
+                source_order_by_trait_id,
+                trait_environment,
+            ) {
+                return Err(self.diagnostic_messages(
+                    CompilerDiagnostic::invalid_trait_incompatibility(
+                        incompatibility.subject.name,
+                        Some(incompatibility.subject.name),
+                        InvalidTraitIncompatibilityReason::UnknownTrait,
+                        source_span(header, incompatibility.subject.span),
+                    ),
+                    string_table,
+                ));
+            }
 
             for incompatible_trait in &incompatibility.incompatible_traits {
                 let incompatible_id = self.resolve_trait_incompatibility_reference(
+                    header,
                     &incompatibility.subject,
                     incompatible_trait,
-                    &relation_source_file,
                     &visibility,
                     trait_environment,
                     string_table,
                 )?;
+                if trait_reference_is_forward(
+                    header,
+                    incompatible_id,
+                    incompatibility.source_order,
+                    source_order_by_trait_id,
+                    trait_environment,
+                ) {
+                    return Err(self.diagnostic_messages(
+                        CompilerDiagnostic::invalid_trait_incompatibility(
+                            incompatibility.subject.name,
+                            Some(incompatible_trait.name),
+                            InvalidTraitIncompatibilityReason::UnknownTrait,
+                            source_span(header, incompatible_trait.span),
+                        ),
+                        string_table,
+                    ));
+                }
 
                 if subject_id == incompatible_id {
                     return Err(self.diagnostic_messages(
@@ -635,7 +687,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             incompatibility.subject.name,
                             Some(incompatible_trait.name),
                             InvalidTraitIncompatibilityReason::SelfIncompatible,
-                            incompatible_trait.location.clone(),
+                            source_span(header, incompatible_trait.span),
                         ),
                         string_table,
                     ));
@@ -653,7 +705,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             incompatibility.subject.name,
                             Some(incompatible_trait.name),
                             InvalidTraitIncompatibilityReason::DuplicateRelation,
-                            incompatible_trait.location.clone(),
+                            source_span(header, incompatible_trait.span),
                         ),
                         string_table,
                     ));
@@ -679,9 +731,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     fn resolve_trait_incompatibility_reference(
         &self,
+        header: &Header,
         subject: &TraitReferenceSyntax,
         trait_ref: &TraitReferenceSyntax,
-        relation_source_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
         visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
@@ -698,56 +750,35 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     subject.name,
                     Some(trait_ref.name),
                     InvalidTraitIncompatibilityReason::UnknownTrait,
-                    trait_ref.location.clone(),
+                    source_span(header, trait_ref.span),
                 ),
                 string_table,
             ));
         };
-
-        let Some(definition) = trait_environment.get(trait_id) else {
-            return Ok(trait_id);
-        };
-
-        // Same-file relations are source-order metadata: a trait must be declared
-        // before it can participate in an authored `must not` relation. Imported and
-        // core traits are already visible through different mechanisms, so only
-        // same-file source definitions need this local ordering check.
-        if definition.source_file == *relation_source_file
-            && location_starts_after(&definition.declaration_location, &trait_ref.location)
-        {
-            return Err(self.diagnostic_messages(
-                CompilerDiagnostic::invalid_trait_incompatibility(
-                    subject.name,
-                    Some(trait_ref.name),
-                    InvalidTraitIncompatibilityReason::UnknownTrait,
-                    trait_ref.location.clone(),
-                ),
-                string_table,
-            ));
-        }
 
         Ok(trait_id)
     }
 
-    pub(in crate::compiler_frontend::ast) fn resolve_visible_trait_reference(
+    pub(in crate::compiler_frontend::ast) fn resolve_visible_trait_name(
         &self,
-        trait_ref: &TraitReferenceSyntax,
-        visibility: &crate::compiler_frontend::headers::binding_environment::FileVisibility,
+        name: StringId,
+        span: Option<SourceSpan>,
+        visibility: &FileVisibility,
         trait_environment: &TraitEnvironment,
         string_table: &mut StringTable,
     ) -> Result<TraitId, CompilerMessages> {
-        if let Some(path) = visibility.visible_trait_names.get(&trait_ref.name)
+        if let Some(path) = visibility.visible_trait_names.get(&name)
             && let Some(id) = trait_environment.id_for_path(path)
         {
             return Ok(id);
         }
 
-        if let Some(id) = trait_environment.core_trait_id_for_name(trait_ref.name, string_table) {
+        if let Some(id) = trait_environment.core_trait_id_for_name(name, string_table) {
             return Ok(id);
         }
 
         Err(self.diagnostic_messages(
-            CompilerDiagnostic::unknown_trait_name(trait_ref.name, trait_ref.location.clone()),
+            CompilerDiagnostic::unknown_trait_name(name, span),
             string_table,
         ))
     }
@@ -766,7 +797,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     trait_name,
                     parameter.type_id,
                     public_root_file,
-                    parameter.location.clone(),
+                    parameter.span,
                     trait_environment,
                     string_table,
                 )?;
@@ -777,7 +808,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     trait_name,
                     return_slot.type_id,
                     public_root_file,
-                    return_slot.location.clone(),
+                    return_slot.span,
                     trait_environment,
                     string_table,
                 )?;
@@ -792,9 +823,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         trait_name: StringId,
         type_id: TypeId,
         public_root_file: &crate::compiler_frontend::symbols::interned_path::InternedPath,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
-        string_table: &StringTable,
+        string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let mut visited_types = FxHashSet::default();
         if self.public_type_id_is_nameable(
@@ -807,27 +838,40 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Err(self.diagnostic_messages(
-            CompilerDiagnostic::trait_private_surface_leak(trait_name, type_id, location),
+            CompilerDiagnostic::trait_private_surface_leak(trait_name, type_id, span),
             string_table,
         ))
     }
 }
+fn trait_reference_is_forward(
+    header: &Header,
+    trait_id: TraitId,
+    relation_source_order: usize,
+    source_order_by_trait_id: &FxHashMap<TraitId, usize>,
+    trait_environment: &TraitEnvironment,
+) -> bool {
+    let Some(definition) = trait_environment.get(trait_id) else {
+        return false;
+    };
 
-fn location_starts_after(left: &SourceLocation, right: &SourceLocation) -> bool {
-    left.start_pos.line_number > right.start_pos.line_number
-        || (left.start_pos.line_number == right.start_pos.line_number
-            && left.start_pos.char_column > right.start_pos.char_column)
+    definition.source_file == header.source_file
+        && source_order_by_trait_id
+            .get(&trait_id)
+            .is_some_and(|order| *order > relation_source_order)
+}
+fn source_span(_header: &Header, span: SourceSpan) -> Option<SourceSpan> {
+    Some(span)
 }
 
 fn trait_this_parameter_list(
     this_name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> GenericParameterList {
     GenericParameterList {
         parameters: vec![GenericParameter {
             id: TypeParameterId(0),
             name: this_name,
-            location,
+            span,
             trait_bounds: Vec::new(),
         }],
     }
@@ -870,52 +914,44 @@ fn return_slot_with_trait_this(
                 &return_slot.value.type_annotation,
                 this_name,
             ),
-            location: return_slot.value.location.clone(),
+            span: return_slot.value.span,
         },
         channel: return_slot.channel,
-        location: return_slot.location.clone(),
     }
 }
 
 fn parsed_type_with_trait_this(parsed_type: &ParsedTypeRef, this_name: StringId) -> ParsedTypeRef {
     match parsed_type {
-        ParsedTypeRef::This { location } => ParsedTypeRef::Named {
+        ParsedTypeRef::This { span } => ParsedTypeRef::Named {
             name: this_name,
-            location: location.clone(),
+            span: *span,
         },
 
         ParsedTypeRef::Applied {
             base,
             arguments,
-            location,
+            span,
         } => ParsedTypeRef::Applied {
             base: Box::new(parsed_type_with_trait_this(base, this_name)),
             arguments: arguments
                 .iter()
                 .map(|argument| parsed_type_with_trait_this(argument, this_name))
                 .collect(),
-            location: location.clone(),
+            span: *span,
         },
-
         ParsedTypeRef::Collection {
             element,
-            location,
+            span,
             fixed_capacity,
         } => ParsedTypeRef::Collection {
             element: Box::new(parsed_type_with_trait_this(element, this_name)),
-            location: location.clone(),
+            span: *span,
             fixed_capacity: fixed_capacity.clone(),
         },
 
-        ParsedTypeRef::Optional { inner, location } => ParsedTypeRef::Optional {
+        ParsedTypeRef::Optional { inner, span } => ParsedTypeRef::Optional {
             inner: Box::new(parsed_type_with_trait_this(inner, this_name)),
-            location: location.clone(),
-        },
-
-        ParsedTypeRef::Result { ok, err, location } => ParsedTypeRef::Result {
-            ok: Box::new(parsed_type_with_trait_this(ok, this_name)),
-            err: Box::new(parsed_type_with_trait_this(err, this_name)),
-            location: location.clone(),
+            span: *span,
         },
 
         _ => parsed_type.clone(),

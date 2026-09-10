@@ -3,12 +3,12 @@
 //! WHAT: defines the immutable analysis records produced while validating HIR borrows.
 //! WHY: transfer and diagnostics need a shared vocabulary for states, facts, and summaries.
 
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::FxHashMap;
 
@@ -58,14 +58,8 @@ pub(crate) struct BorrowAnalysis {
 }
 
 impl BorrowAnalysis {
-    /// Remap every source location retained beside HIR-keyed facts.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for invalidations in self.reactive_invalidations.values_mut() {
-            for invalidation in invalidations {
-                invalidation.location.remap_string_ids(remap);
-            }
-        }
-    }
+    /// Borrow facts contain only HIR IDs and exact spans owned by their source context.
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {}
 
     #[cfg(any(test, feature = "show_borrow_checker"))]
     pub(crate) fn total_state_snapshots(&self) -> usize {
@@ -173,7 +167,7 @@ pub(crate) struct ReactiveInvalidationFact {
     pub statement_id: HirNodeId,
     pub source: ReactiveSourceId,
     pub kind: ReactiveInvalidationKind,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

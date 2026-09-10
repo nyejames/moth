@@ -50,11 +50,12 @@ pub(crate) fn parse_return_statement(
     {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ReturnOutsideFunction,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
+    let return_span = Some(token_stream.current_span());
     let is_error_return = token_stream.current_token_kind() == &TokenKind::ReturnBang;
     token_stream.advance();
 
@@ -66,7 +67,7 @@ pub(crate) fn parse_return_statement(
         let Some(expected_error_type_id) = context.expected_error_type else {
             return Err(CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::ReturnBangOutsideErrorFunction,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         };
@@ -74,7 +75,7 @@ pub(crate) fn parse_return_statement(
         if is_return_terminator(token_stream.current_token_kind()) {
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::MissingReturnBangValue,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -100,7 +101,7 @@ pub(crate) fn parse_return_statement(
 
         ast.push(AstNode {
             kind: NodeKind::ReturnError(returned_error),
-            location: token_stream.current_location(),
+            span: return_span,
             scope: context.scope.clone(),
         });
 
@@ -110,7 +111,7 @@ pub(crate) fn parse_return_statement(
     if token_stream.current_token_kind() == &TokenKind::Bang {
         return Err(CompilerDiagnostic::unexpected_token(
             TokenKind::Bang,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -134,20 +135,20 @@ pub(crate) fn parse_return_statement(
             Some(Err(error)) => return Err(error),
             None => {
                 // Token was `if` but parsing failed at a deeper level.
-                // The helper has already advanced past `if` and reported its
-                // own diagnostic, so we should not fall through to normal
-                // return parsing which would produce a secondary error.
+                // The helper has already advanced past `if` and reported
+                // its own diagnostic, so we should not fall through to
+                // normal return parsing which would produce a secondary error.
                 return Err(CompilerDiagnostic::invalid_control_flow_statement(
                     InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
         };
 
         // For single-result returns, apply a final coercion guard to preserve
-        // existing behavior (e.g. Int -> Float). For multi-result, the value-block
-        // parser already validated and coerced each slot.
+        // existing behavior (e.g. Int -> Float). For multi-result, the
+        // value-block parser already validated and coerced each slot.
         let return_expr = if context.expected_result_type_ids.len() == 1 {
             let expected_type_id = context.expected_result_type_ids[0];
 
@@ -164,7 +165,7 @@ pub(crate) fn parse_return_statement(
 
         ast.push(AstNode {
             kind: NodeKind::Return(vec![return_expr]),
-            location: token_stream.current_location(),
+            span: return_span,
             scope: context.scope.clone(),
         });
 
@@ -181,7 +182,7 @@ pub(crate) fn parse_return_statement(
         } else {
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::ReturnValuesWithBareSignature,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -190,7 +191,7 @@ pub(crate) fn parse_return_statement(
             let expected_count = context.expected_result_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count },
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -208,7 +209,7 @@ pub(crate) fn parse_return_statement(
             let expected_count = context.expected_result_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::TooManyReturnValues { expected_count },
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -235,7 +236,7 @@ pub(crate) fn parse_return_statement(
 
     ast.push(AstNode {
         kind: NodeKind::Return(returned_values),
-        location: token_stream.current_location(),
+        span: return_span,
         scope: context.scope.clone(),
     });
 

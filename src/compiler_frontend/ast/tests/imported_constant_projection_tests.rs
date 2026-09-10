@@ -43,9 +43,9 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -124,11 +124,9 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
     fn intern_resource_origin(
         &mut self,
         origin: &StableResourceOriginId,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<ResourceId, CompilerError> {
-        Ok(self
-            .module_resources
-            .intern_origin(origin.clone(), location.clone()))
+        Ok(self.module_resources.intern_origin(origin.clone(), span))
     }
 
     fn intern_canonical_type(
@@ -203,9 +201,9 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     let mut producer_resources = ModuleResourceTable::new();
 
     // Keep the producer handle nonzero so the empty consumer table must mint a different local ID.
-    producer_resources.intern_origin(producer_offset_origin, SourceLocation::default());
-    let producer_resource_id = producer_resources
-        .intern_origin(producer_resource_origin.clone(), SourceLocation::default());
+    producer_resources.intern_origin(producer_offset_origin, None);
+    let producer_resource_id =
+        producer_resources.intern_origin(producer_resource_origin.clone(), None);
     let prefix = producer_string_table.intern("assets/");
     let constant_path = InternedPath::from_single_str("logo", &mut producer_string_table);
     let producer_pieces = vec![
@@ -215,7 +213,8 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     ];
     let module_constant = Declaration {
         id: constant_path.clone(),
-        value: Expression::structural_string(producer_pieces, SourceLocation::default()),
+        value: Expression::structural_string(producer_pieces, None),
+        binding_span: None,
         config_qualifier: None,
     };
     let const_values =
@@ -293,7 +292,7 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
         &constant.folded_value,
         consumer_string_type_id,
         &mut consumer_string_table,
-        &SourceLocation::default(),
+        None,
     )
     .expect("consumer import projection should materialise structural string pieces");
     let ExpressionKind::StructuralString {
@@ -329,12 +328,13 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
 
     let nested_count = Declaration {
         id: InternedPath::from_single_str("count", &mut producer_string_table),
-        value: Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(7, None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let nested_record = Expression::anonymous_const_record(
         vec![nested_count],
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         producer_marker,
     );
@@ -342,17 +342,20 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     let producer_fields = vec![
         Declaration {
             id: InternedPath::from_single_str("year", &mut producer_string_table),
-            value: Expression::int(2026, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("enabled", &mut producer_string_table),
-            value: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            value: Expression::bool(true, None, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: InternedPath::from_single_str("nested", &mut producer_string_table),
             value: nested_record,
+            binding_span: None,
             config_qualifier: None,
         },
     ];
@@ -361,10 +364,11 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         id: constant_path.clone(),
         value: Expression::anonymous_const_record(
             producer_fields,
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             producer_marker,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let const_values =
@@ -455,7 +459,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         &constant.folded_value,
         consumer_marker,
         &mut consumer_string_table,
-        &SourceLocation::default(),
+        None,
     )
     .expect("consumer import projection should materialise an anonymous const record");
 
@@ -529,12 +533,12 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
                 FieldDefinition {
                     name: title_path,
                     type_id: builtin_type_ids::STRING,
-                    location: SourceLocation::default(),
+                    span: None,
                 },
                 FieldDefinition {
                     name: year_path,
                     type_id: builtin_type_ids::INT,
-                    location: SourceLocation::default(),
+                    span: None,
                 },
             ]),
             generic_parameters: None,
@@ -563,7 +567,7 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
         &folded,
         struct_type_id,
         &mut consumer_string_table,
-        &SourceLocation::default(),
+        None,
     )
     .expect("named struct record should keep the struct instance import path");
 
@@ -598,11 +602,8 @@ fn metadata_record(
 fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
     Declaration {
         id: path.clone(),
-        value: Expression::no_value(
-            SourceLocation::default(),
-            data_type,
-            ValueMode::ImmutableOwned,
-        ),
+        value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }

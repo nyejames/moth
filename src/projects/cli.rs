@@ -17,10 +17,10 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigValueLocation, BuildInputName, PrimitiveBuildValue,
+    BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
-use crate::compiler_frontend::display_messages::{print_compiler_messages, print_formatted_error};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
 };
@@ -76,8 +76,13 @@ fn parse_command_input_argument(
     let name = BuildInputName::new(name_text).map_err(|_| {
         format!("Invalid --input name '{name_text}': input names must be lower_snake_case.")
     })?;
-    let value = PrimitiveBuildValue::from_command_text(value_text)
-        .map_err(|error| format!("Invalid value for --input '{name_text}': {error}."))?;
+    let value =
+        PrimitiveBuildValue::from_command_text(value_text).map_err(|error| match error {
+            BuildInputValueError::Infrastructure(error) => {
+                format!("Failed to process --input '{name_text}': {}.", error.msg)
+            }
+            error => format!("Invalid value for --input '{name_text}': {error}."),
+        })?;
 
     let entry = BuildConfigInputEntry::new(
         name,
@@ -273,8 +278,7 @@ enum BuildCommandOutcome {
     },
     WriteError(CompilerMessages),
     OutputPlanError {
-        error: CompilerError,
-        string_table: crate::compiler_frontend::symbols::string_interning::StringTable,
+        messages: CompilerMessages,
     },
     BuildError {
         messages: CompilerMessages,
@@ -362,13 +366,16 @@ fn build_command_outcome(
                 Ok(write_summary) => {
                     let output_file_count = write_summary.emitted_count();
                     let warning_count = build_result.warnings.len();
-                    let warnings = if build_result.warnings.is_empty() {
-                        None
-                    } else {
-                        Some(CompilerMessages::from_diagnostics(
-                            build_result.warnings,
-                            build_result.string_table,
-                        ))
+                    let warnings = match build_result.take_warning_messages() {
+                        Ok(warnings) => warnings,
+                        Err(error) => {
+                            return BuildCommandOutcome::OutputPlanError {
+                                messages: CompilerMessages::from_error(
+                                    error,
+                                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                                ),
+                            };
+                        }
                     };
                     BuildCommandOutcome::Success {
                         output_file_count,
@@ -376,15 +383,33 @@ fn build_command_outcome(
                         warnings,
                     }
                 }
-                Err(BuildOutputStageError::Write(mut messages)) => {
-                    messages.extend_diagnostics(build_result.warnings);
+                Err(BuildOutputStageError::Write(messages)) => {
+                    let messages = match build_result.take_output_failure_messages(messages) {
+                        Ok(messages) => messages,
+                        Err(error) => {
+                            return BuildCommandOutcome::OutputPlanError {
+                                messages: CompilerMessages::from_error(
+                                    error,
+                                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                                ),
+                            };
+                        }
+                    };
                     BuildCommandOutcome::WriteError(messages)
                 }
                 Err(BuildOutputStageError::OutputPlan(error)) => {
-                    BuildCommandOutcome::OutputPlanError {
+                    let messages = CompilerMessages::from_error(
                         error,
-                        string_table: build_result.string_table,
-                    }
+                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                    );
+                    let messages = match build_result.take_output_failure_messages(messages) {
+                        Ok(messages) => messages,
+                        Err(error) => CompilerMessages::from_error(
+                            error,
+                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                        ),
+                    };
+                    BuildCommandOutcome::OutputPlanError { messages }
                 }
             }
         }
@@ -423,11 +448,8 @@ fn render_build_outcome(
             print_compiler_messages(messages);
             (CommandStatus::Failure, None)
         }
-        BuildCommandOutcome::OutputPlanError {
-            error,
-            string_table,
-        } => {
-            print_formatted_error(error, &string_table);
+        BuildCommandOutcome::OutputPlanError { messages } => {
+            print_compiler_messages(messages);
             (CommandStatus::Failure, None)
         }
         BuildCommandOutcome::BuildError {
@@ -493,10 +515,7 @@ fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan
         output_root,
         project_root: Some(project_root),
         owner: build_result.output_owner,
-        setting_location: SourceLocation::from_path(
-            &build_result.config.entry_dir,
-            &mut build_result.string_table,
-        ),
+        setting_span: None,
     }))
 }
 
@@ -1056,10 +1075,15 @@ fn build_warnings_messages(build_result: &BuildResult) -> Option<CompilerMessage
         return None;
     }
 
-    Some(CompilerMessages::from_diagnostics(
+    let mut messages = CompilerMessages::from_diagnostics(
         build_result.warnings.clone(),
         build_result.string_table.clone(),
-    ))
+    );
+    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
+    if let Some(source_database) = build_result.source_database.as_ref() {
+        messages.set_source_database(source_database.clone());
+    }
+    Some(messages)
 }
 
 #[cfg(test)]

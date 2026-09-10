@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Analyses a body into independent fallthrough, produce and terminate facts.
 ///
@@ -42,13 +42,13 @@ pub fn analyze_branch_exits(body: &[AstNode]) -> BranchExitSummary {
 pub fn validate_value_match_completeness(
     arms: &[MatchArm],
     default: Option<&[AstNode]>,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let mut combined: Option<BranchExitSummary> = None;
 
     for arm in arms {
         let arm_exits = analyze_branch_exits(&arm.body);
-        reject_fallthrough(arm_exits, location)?;
+        reject_fallthrough(arm_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(arm_exits),
             None => arm_exits,
@@ -57,7 +57,7 @@ pub fn validate_value_match_completeness(
 
     if let Some(default_body) = default {
         let default_exits = analyze_branch_exits(default_body);
-        reject_fallthrough(default_exits, location)?;
+        reject_fallthrough(default_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(default_exits),
             None => default_exits,
@@ -65,13 +65,13 @@ pub fn validate_value_match_completeness(
     }
 
     let Some(combined) = combined else {
-        return Err(no_producing_path(location));
+        return Err(no_producing_path(span));
     };
 
     if combined.produces_value {
         Ok(())
     } else {
-        Err(no_producing_path(location))
+        Err(no_producing_path(span))
     }
 }
 
@@ -237,26 +237,26 @@ fn visit_statement_then_values_mut<E>(
 pub(crate) fn validate_closed_branch_pair(
     then_exits: BranchExitSummary,
     else_exits: BranchExitSummary,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    reject_fallthrough(then_exits, location)?;
-    reject_fallthrough(else_exits, location)?;
+    reject_fallthrough(then_exits, span)?;
+    reject_fallthrough(else_exits, span)?;
 
     if then_exits.produces_value || else_exits.produces_value {
         Ok(())
     } else {
-        Err(no_producing_path(location))
+        Err(no_producing_path(span))
     }
 }
 
 fn reject_fallthrough(
     exits: BranchExitSummary,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     if exits.can_fall_through {
         Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
-            location.clone(),
+            span,
         )
         .into())
     } else {
@@ -264,10 +264,10 @@ fn reject_fallthrough(
     }
 }
 
-fn no_producing_path(location: &SourceLocation) -> ExpressionParseError {
+fn no_producing_path(span: Option<SourceSpan>) -> ExpressionParseError {
     CompilerDiagnostic::invalid_control_flow_statement(
         InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-        location.clone(),
+        span,
     )
     .into()
 }

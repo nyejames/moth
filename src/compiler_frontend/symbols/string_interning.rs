@@ -38,6 +38,58 @@ impl std::fmt::Display for StringId {
         write!(f, "StringId({})", self.0)
     }
 }
+/// Render-only lookup over interned strings.
+///
+/// WHAT: exposes checked and infallible lookup without interning access.
+/// WHY: frozen contexts must serve the same renderers as the mutable table without a second
+///      implementation or a copied string store.
+pub(crate) trait StringTableResolver {
+    /// Resolve an interned string ID back to its string content.
+    fn resolve(&self, id: StringId) -> &str;
+
+    /// Resolve an interned string ID when it belongs to this identity table.
+    #[allow(dead_code)] // Retained for deferred checked lookups across identity tables.
+    fn try_resolve(&self, id: StringId) -> Option<&str>;
+}
+
+impl StringTableResolver for StringTable {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        StringTable::try_resolve(self, id)
+            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        StringTable::try_resolve(self, id)
+    }
+}
+impl StringTableResolver for Box<StringTable> {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        self.as_ref()
+            .try_resolve(id)
+            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        self.as_ref().try_resolve(id)
+    }
+}
+
+impl StringTableResolver for FrozenStringTable {
+    #[inline]
+    fn resolve(&self, id: StringId) -> &str {
+        FrozenStringTable::try_resolve(self, id)
+            .unwrap_or_else(|| panic!("StringTableResolver received invalid {id}"))
+    }
+
+    #[inline]
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        FrozenStringTable::try_resolve(self, id)
+    }
+}
 
 /// Mapping from StringIds in one table to StringIds in another after a merge.
 #[derive(Debug, Clone)]
@@ -131,9 +183,10 @@ impl StringTableBase {
         self.strings.len()
     }
 
-    fn resolve(&self, id: StringId) -> &str {
-        // SAFETY: forked StringIds below base_len are issued by this base snapshot.
-        unsafe { self.strings.get_unchecked(id.0 as usize).as_ref() }
+    fn try_resolve(&self, id: StringId) -> Option<&str> {
+        self.strings
+            .get(id.0 as usize)
+            .map(|string| string.as_ref())
     }
 }
 
@@ -170,6 +223,50 @@ impl StringTableFork {
 
     pub fn into_parts(self) -> (StringTable, usize) {
         (self.string_table, self.base_len)
+    }
+}
+
+/// Immutable interned strings for lookup after identity construction freezes.
+///
+/// WHAT: retains the dense string storage and stable [`StringId`] indexes while dropping the
+///       reverse map required only during interning.
+/// WHY: final lookup contexts must move the existing string allocations into immutable storage
+///      without keeping a mutable interner or allocating a second copy of every string.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FrozenStringTable {
+    strings: Box<[Box<str>]>,
+}
+
+impl FrozenStringTable {
+    /// Return the number of strings in this frozen table.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.strings.len()
+    }
+    /// Resolve an interned string ID back to its string content.
+    ///
+    /// # Panics
+    /// Panics when the ID was not issued by this table.
+    #[inline]
+    pub fn resolve(&self, id: StringId) -> &str {
+        self.try_resolve(id)
+            .unwrap_or_else(|| panic!("FrozenStringTable::resolve received invalid {id}"))
+    }
+
+    /// Resolve an interned string ID, or `None` when the handle is not in this table.
+    #[inline]
+    pub fn try_resolve(&self, id: StringId) -> Option<&str> {
+        self.strings
+            .get(id.0 as usize)
+            .map(|string| string.as_ref())
+    }
+
+    /// Iterate over all frozen strings with their stable IDs.
+    pub fn iter(&self) -> impl Iterator<Item = (StringId, &str)> + use<'_> {
+        self.strings
+            .iter()
+            .enumerate()
+            .map(|(index, string)| (StringId(index as u32), string.as_ref()))
     }
 }
 
@@ -346,39 +443,30 @@ impl StringTable {
     ///
     /// Time complexity: O(1)
     ///
-    /// # Safety
-    /// This uses unchecked indexing for maximum performance.
-    /// StringIds are only created by this StringTable, so indices are guaranteed valid.
+    /// # Panics
+    /// Panics when the ID was not issued by this table.
     #[inline]
     pub fn resolve(&self, id: StringId) -> &str {
-        let index = id.0 as usize;
-        if let Some(base) = &self.base
-            && index < base.len()
-        {
-            return base.resolve(id);
-        }
-
-        let local_index = index - self.base_len();
-
-        // SAFETY: StringIds are only created by this StringTable and are guaranteed
-        // to be valid indices into either the shared base or the local suffix.
-        unsafe { self.strings.get_unchecked(local_index).as_ref() }
+        self.try_resolve(id)
+            .unwrap_or_else(|| panic!("StringTable::resolve received invalid {id}"))
     }
 
     /// Resolve an interned string ID, or `None` when the handle is not in this table.
     ///
     /// WHAT: gives retained-state validators a fallible lookup for interned extensions and
     ///       other handles that may have been remapped incorrectly.
-    /// WHY: `resolve` is only safe for IDs issued by this table. Malformed retained state
-    ///      must become `CompilerError`, not an unchecked index.
+    /// WHY: malformed retained state must become `CompilerError`, not an unchecked index.
     #[inline]
     pub fn try_resolve(&self, id: StringId) -> Option<&str> {
         let index = id.0 as usize;
-        if index >= self.len() {
-            return None;
+        let base_len = self.base_len();
+        if index < base_len {
+            return self.base.as_ref()?.try_resolve(id);
         }
 
-        Some(self.resolve(id))
+        self.strings
+            .get(index - base_len)
+            .map(|string| string.as_ref())
     }
 
     /// Efficiently intern a String by taking ownership, avoiding an extra allocation
@@ -425,6 +513,24 @@ impl StringTable {
     #[inline]
     pub fn len(&self) -> usize {
         self.base_len() + self.strings.len()
+    }
+
+    /// Consume a merged root table into immutable lookup storage.
+    ///
+    /// Module-local forks retain an inherited base and therefore cannot be frozen without
+    /// flattening or copying that base. Merge all fork deltas into the build-owned root table
+    /// first; this operation then moves the existing string allocations and drops both reverse
+    /// lookup maps.
+    pub fn freeze(self) -> FrozenStringTable {
+        assert!(
+            self.base.is_none(),
+            "StringTable::freeze requires a merged root table"
+        );
+        debug_assert_eq!(self.next_id as usize, self.strings.len());
+
+        FrozenStringTable {
+            strings: self.strings.into_boxed_slice(),
+        }
     }
 
     /// Iterate over all interned strings with their IDs.

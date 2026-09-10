@@ -7,9 +7,10 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticOperator, DiagnosticPayload, TypeMismatchContext,
+    DiagnosticOperator, DiagnosticPayload, InvalidAssignmentTargetReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -18,6 +19,32 @@ use crate::compiler_frontend::tests::parse_support::{
 #[test]
 fn rejects_assignment_value_type_mismatch_with_specific_details() {
     assert_assignment_type_mismatch("value ~= 1\nvalue = true\n");
+}
+
+#[test]
+fn immutable_assignment_retains_exact_operator_span() {
+    let source = "-- π\nvalue = 100\nvalue = 200\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidAssignmentTarget {
+            reason: InvalidAssignmentTargetReason::ImmutableBinding,
+            ..
+        }
+    ));
+
+    let operator_start = source
+        .rfind('=')
+        .expect("the reassignment operator should be present");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let operator_span = LocalSpan::exact(operator_start as u32, 1, &mut span_builder)
+        .expect("the assignment operator should fit the local span table");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operator_span))
+    );
+    assert_eq!(diagnostic.labels.len(), 1);
 }
 
 #[test]

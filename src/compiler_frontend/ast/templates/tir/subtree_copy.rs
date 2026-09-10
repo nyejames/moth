@@ -86,7 +86,7 @@ fn copy_tir_node_with_active_slot_plan(
         ))
     })?;
 
-    let location = source_node.location.clone();
+    let span = source_node.span;
 
     match source_node.kind {
         TemplateIrNodeKind::Text {
@@ -102,7 +102,7 @@ fn copy_tir_node_with_active_slot_plan(
                     byte_len,
                     origin,
                 },
-                location,
+                span,
             ));
             if let Some(subscription) = store.node_reactive_subscription(source_node_id)?.cloned() {
                 store.set_node_reactive_subscription(node_id, subscription)?;
@@ -129,7 +129,7 @@ fn copy_tir_node_with_active_slot_plan(
                     reactive_subscription,
                     site_id: copied_site_id,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -145,7 +145,7 @@ fn copy_tir_node_with_active_slot_plan(
                     })?;
 
                 return Ok(convert_runtime_slot_site(
-                    plan_id, site_id, store, copy_state, &location,
+                    plan_id, site_id, store, copy_state, span,
                 ));
             }
 
@@ -156,10 +156,9 @@ fn copy_tir_node_with_active_slot_plan(
                 .slot_occurrences
                 .insert(source_occurrence_id, copied_occurrence_id);
             placeholder.occurrence_id = copied_occurrence_id;
-            placeholder.location = location.clone();
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Slot { placeholder },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -169,7 +168,7 @@ fn copy_tir_node_with_active_slot_plan(
 
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::RuntimeSlotSite { plan, site },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -178,7 +177,7 @@ fn copy_tir_node_with_active_slot_plan(
             copy_state.record_runtime_slot_contribution_source();
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -209,7 +208,7 @@ fn copy_tir_node_with_active_slot_plan(
                     reference,
                     occurrence_id: copied_occurrence_id,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -228,7 +227,7 @@ fn copy_tir_node_with_active_slot_plan(
                 TemplateIrNodeKind::InsertContribution {
                     template: new_child_id,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -253,12 +252,16 @@ fn copy_tir_node_with_active_slot_plan(
                 TemplateIrNodeKind::Sequence {
                     children: new_children,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches,
+            fallback,
+            else_marker,
+        } => {
             copy_state.record_control_flow();
             copy_state.enter_depth();
             let new_branches = branches
@@ -279,7 +282,7 @@ fn copy_tir_node_with_active_slot_plan(
                     Ok(TemplateIrBranch::new(
                         branch.selector,
                         new_body,
-                        branch.location,
+                        branch.span,
                         copied_selector_site_id,
                     ))
                 })
@@ -301,8 +304,9 @@ fn copy_tir_node_with_active_slot_plan(
                 TemplateIrNodeKind::BranchChain {
                     branches: new_branches,
                     fallback: new_fallback,
+                    else_marker,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -344,7 +348,7 @@ fn copy_tir_node_with_active_slot_plan(
                     body: new_body,
                     aggregate_wrapper: new_aggregate_wrapper,
                 },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -354,7 +358,7 @@ fn copy_tir_node_with_active_slot_plan(
 
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::LoopControl { kind },
-                location,
+                span,
             ));
             Ok(node_id)
         }
@@ -362,7 +366,7 @@ fn copy_tir_node_with_active_slot_plan(
         TemplateIrNodeKind::AggregateOutput => {
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::AggregateOutput,
-                location,
+                span,
             ));
             Ok(node_id)
         }

@@ -24,8 +24,8 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashSet;
 
@@ -34,7 +34,7 @@ use rustc_hash::FxHashSet;
 /// WHAT: either a user-facing diagnostic for an unsupported selected operation, or an
 /// infrastructure error if supplied compiler metadata is inconsistent.
 pub enum BackendFeatureValidationError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -56,7 +56,7 @@ pub struct BackendFeatureValidationInput<'a> {
 ///       operations, and generic runtime values are legal HIR, but only the JS backend lowers them
 ///       for Alpha. HTML-Wasm must reject reachable unsupported operations; unused functions stay
 ///       type checked but do not block the experimental Wasm build path.
-/// WHY: fail early with a structured Rule error at the source location instead of a vague
+/// WHY: fail early with a structured Rule error carrying the source span instead of a vague
 ///      backend-internal lowering failure.
 pub fn validate_hir_backend_feature_support(
     input: BackendFeatureValidationInput<'_>,
@@ -134,13 +134,13 @@ fn validate_runtime_assertion_messages(
         return Ok(());
     };
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        CompilerDiagnostic::unsupported_backend_feature(
-            string_table.intern(target.as_str()),
-            UnsupportedBackendFeatureReason::RuntimeAssertionMessages,
-            message.location.clone(),
-        ),
-    )))
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        string_table.intern(target.as_str()),
+        UnsupportedBackendFeatureReason::RuntimeAssertionMessages,
+        message.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 fn validate_wasm_cross_module_calls(
@@ -179,20 +179,20 @@ fn validate_wasm_cross_module_calls(
         BackendTarget::Wasm => "Wasm",
         BackendTarget::Js => "JavaScript",
     });
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        CompilerDiagnostic::unsupported_backend_feature(
-            backend_name,
-            UnsupportedBackendFeatureReason::CrossModuleCalls,
-            statement.location.clone(),
-        ),
-    )))
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        backend_name,
+        UnsupportedBackendFeatureReason::CrossModuleCalls,
+        statement.span,
+    );
+
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable unsupported hashmap operation for the Wasm target.
 ///
 /// WHAT: hashmap literals and operations are valid HIR, but Wasm lowering does not yet
 /// support them.
-/// WHY: reject early with a structured diagnostic at the source location instead of a
+/// WHY: reject early with a structured diagnostic carrying the source span instead of a
 /// backend-internal lowering failure.
 fn validate_wasm_maps(
     map_uses: &[ReachableMapUse],
@@ -213,19 +213,17 @@ fn validate_wasm_maps(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         reason,
-        map_use.location.clone(),
+        map_use.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable reactive runtime feature for the Wasm target.
 ///
 /// WHAT: reactive template values with runtime dependencies are valid HIR, but HTML-Wasm does
 ///       not yet have a reactive runtime design.
-/// WHY: reject early with a structured diagnostic at the source location instead of a
+/// WHY: reject early with a structured diagnostic carrying the source span instead of a
 ///      backend-internal lowering failure. Unreachable helper functions containing reactive
 ///      templates remain valid typed HIR and do not block the build.
 fn validate_wasm_reactive_features(
@@ -240,19 +238,17 @@ fn validate_wasm_reactive_features(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::ReactiveTemplateRuntime,
-        reactive_template.location.clone(),
+        reactive_template.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable runtime cast for the Wasm target.
 ///
 /// WHAT: compiler-owned builtin runtime casts are valid HIR, but HTML-Wasm does not yet lower
 ///       them.
-/// WHY: reject early with a structured diagnostic at the cast source location instead of a
+/// WHY: reject early with a structured diagnostic carrying the source span instead of a
 ///      backend-internal lowering failure.
 fn validate_wasm_runtime_casts(
     runtime_casts: &[ReachableRuntimeCastUse],
@@ -266,12 +262,10 @@ fn validate_wasm_runtime_casts(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::RuntimeCasts,
-        runtime_cast.location.clone(),
+        runtime_cast.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable checked numeric operation for the Wasm target.
@@ -292,12 +286,10 @@ fn validate_wasm_checked_numeric_ops(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::CheckedNumericOperations,
-        numeric_op.location.clone(),
+        numeric_op.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable Float formatting or validation statement for the Wasm target.
@@ -328,19 +320,17 @@ fn validate_wasm_float_statements(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         reason,
-        float_statement.location.clone(),
+        float_statement.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Reports the first reachable generic runtime value for the Wasm target.
 ///
 /// WHAT: generic nominal instances such as `Box of String` are valid HIR, but HTML-Wasm does not
 ///       yet have a generic runtime representation.
-/// WHY: reject early with a structured diagnostic at the source location instead of a
+/// WHY: reject early with a structured diagnostic carrying the source span instead of a
 ///      backend-internal lowering failure.
 fn validate_wasm_generic_runtime_values(
     hir: &HirModule,
@@ -360,8 +350,8 @@ fn validate_wasm_generic_runtime_values(
         )));
     };
 
-    let Some(location) =
-        first_generic_runtime_module_location(hir, type_environment, reachable_blocks)
+    let Some(occurrence) =
+        first_generic_runtime_module_occurrence(hir, type_environment, reachable_blocks)
     else {
         return Ok(());
     };
@@ -369,12 +359,20 @@ fn validate_wasm_generic_runtime_values(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::GenericRuntimeValues,
-        location,
+        occurrence.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// A reachable unsupported generic value, with optional source provenance.
+///
+/// WHAT: keeps semantic detection separate from diagnostic placement so a spanless value still
+///       produces the unsupported-feature diagnostic.
+/// WHY: generated or synthetic HIR may legitimately omit source spans.
+#[derive(Clone, Copy, Debug)]
+struct GenericRuntimeValueOccurrence {
+    span: Option<SourceSpan>,
 }
 
 /// Finds the first reachable expression whose type is a generic instance.
@@ -382,105 +380,98 @@ fn validate_wasm_generic_runtime_values(
 /// WHAT: scans only reachable blocks so dead helper bodies do not fail backend validation.
 /// WHY: generic runtime value detection needs the module TypeEnvironment, which is not available
 ///      in backend-neutral HIR reachability collection.
-fn first_generic_runtime_module_location(
+fn first_generic_runtime_module_occurrence(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     reachable_blocks: &FxHashSet<BlockId>,
-) -> Option<SourceLocation> {
+) -> Option<GenericRuntimeValueOccurrence> {
     for block in &module.blocks {
         if !reachable_blocks.contains(&block.id) {
             continue;
         }
 
         for statement in &block.statements {
-            if let Some(location) =
-                first_generic_runtime_statement_location(statement, module, type_environment)
+            if let Some(occurrence) =
+                first_generic_runtime_statement_occurrence(statement, type_environment)
             {
-                return Some(location);
+                return Some(occurrence);
             }
         }
 
-        if let Some(location) =
-            first_generic_runtime_terminator_location(&block.terminator, module, type_environment)
+        if let Some(occurrence) =
+            first_generic_runtime_terminator_occurrence(&block.terminator, type_environment)
         {
-            return Some(location);
+            return Some(occurrence);
         }
     }
 
     None
 }
 
-fn first_generic_runtime_statement_location(
+fn first_generic_runtime_statement_occurrence(
     statement: &HirStatement,
-    module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<GenericRuntimeValueOccurrence> {
     match &statement.kind {
         HirStatementKind::Assign { value, .. }
         | HirStatementKind::Expr(value)
         | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            first_generic_runtime_expression_location(value, module, type_environment)
+            first_generic_runtime_expression_occurrence(value, type_environment)
         }
-        HirStatementKind::Call { args, .. } => args.iter().find_map(|arg| {
-            first_generic_runtime_expression_location(arg, module, type_environment)
-        }),
+        HirStatementKind::Call { args, .. } => args
+            .iter()
+            .find_map(|arg| first_generic_runtime_expression_occurrence(arg, type_environment)),
         HirStatementKind::CastOp { source, .. } => {
-            first_generic_runtime_expression_location(source, module, type_environment)
+            first_generic_runtime_expression_occurrence(source, type_environment)
         }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            first_generic_runtime_expression_location(source, module, type_environment)
+            first_generic_runtime_expression_occurrence(source, type_environment)
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            first_generic_runtime_expression_location(receiver, module, type_environment).or_else(
-                || {
-                    args.iter().find_map(|arg| {
-                        first_generic_runtime_expression_location(arg, module, type_environment)
-                    })
-                },
-            )
+            first_generic_runtime_expression_occurrence(receiver, type_environment).or_else(|| {
+                args.iter().find_map(|arg| {
+                    first_generic_runtime_expression_occurrence(arg, type_environment)
+                })
+            })
         }
         HirStatementKind::NumericOp { operands, .. } => match operands {
             HirNumericOperands::Unary { operand } => {
-                first_generic_runtime_expression_location(operand, module, type_environment)
+                first_generic_runtime_expression_occurrence(operand, type_environment)
             }
             HirNumericOperands::Binary { left, right } => {
-                first_generic_runtime_expression_location(left, module, type_environment).or_else(
-                    || first_generic_runtime_expression_location(right, module, type_environment),
-                )
+                first_generic_runtime_expression_occurrence(left, type_environment).or_else(|| {
+                    first_generic_runtime_expression_occurrence(right, type_environment)
+                })
             }
         },
         HirStatementKind::Drop(_) => None,
     }
 }
 
-fn first_generic_runtime_terminator_location(
+fn first_generic_runtime_terminator_occurrence(
     terminator: &HirTerminator,
-    module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<GenericRuntimeValueOccurrence> {
     match terminator {
         HirTerminator::If { condition, .. } => {
-            first_generic_runtime_expression_location(condition, module, type_environment)
+            first_generic_runtime_expression_occurrence(condition, type_environment)
         }
         HirTerminator::FallibleBranch { result, .. }
         | HirTerminator::Return(result)
         | HirTerminator::ReturnSuccess(result)
         | HirTerminator::ReturnError(result) => {
-            first_generic_runtime_expression_location(result, module, type_environment)
+            first_generic_runtime_expression_occurrence(result, type_environment)
         }
-        HirTerminator::Match { scrutinee, arms } => first_generic_runtime_expression_location(
-            scrutinee,
-            module,
-            type_environment,
-        )
-        .or_else(|| {
-            arms.iter().find_map(|arm| {
-                arm.guard.as_ref().and_then(|guard| {
-                    first_generic_runtime_expression_location(guard, module, type_environment)
+        HirTerminator::Match { scrutinee, arms } => {
+            first_generic_runtime_expression_occurrence(scrutinee, type_environment).or_else(|| {
+                arms.iter().find_map(|arm| {
+                    arm.guard.as_ref().and_then(|guard| {
+                        first_generic_runtime_expression_occurrence(guard, type_environment)
+                    })
                 })
             })
-        }),
+        }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. }
@@ -490,29 +481,23 @@ fn first_generic_runtime_terminator_location(
     }
 }
 
-fn first_generic_runtime_expression_location(
+fn first_generic_runtime_expression_occurrence(
     expression: &HirExpression,
-    module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceLocation> {
+) -> Option<GenericRuntimeValueOccurrence> {
     if matches!(
         type_environment.get(expression.ty),
         Some(TypeDefinition::GenericInstance(_))
     ) {
-        return Some(
-            module
-                .side_table
-                .value_source_location(expression.id)
-                .cloned()
-                .unwrap_or_default(),
-        );
+        return Some(GenericRuntimeValueOccurrence {
+            span: expression.span,
+        });
     }
 
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            first_generic_runtime_expression_location(left, module, type_environment).or_else(
-                || first_generic_runtime_expression_location(right, module, type_environment),
-            )
+            first_generic_runtime_expression_occurrence(left, type_environment)
+                .or_else(|| first_generic_runtime_expression_occurrence(right, type_environment))
         }
         HirExpressionKind::UnaryOp { operand, .. }
         | HirExpressionKind::TupleGet { tuple: operand, .. }
@@ -523,34 +508,27 @@ fn first_generic_runtime_expression_location(
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
-        } => first_generic_runtime_expression_location(operand, module, type_environment),
+        } => first_generic_runtime_expression_occurrence(operand, type_environment),
         HirExpressionKind::StructConstruct { fields, .. } => {
             fields.iter().find_map(|(_, value)| {
-                first_generic_runtime_expression_location(value, module, type_environment)
+                first_generic_runtime_expression_occurrence(value, type_environment)
             })
         }
         HirExpressionKind::Collection(items)
-        | HirExpressionKind::TupleConstruct { elements: items } => items.iter().find_map(|item| {
-            first_generic_runtime_expression_location(item, module, type_environment)
-        }),
+        | HirExpressionKind::TupleConstruct { elements: items } => items
+            .iter()
+            .find_map(|item| first_generic_runtime_expression_occurrence(item, type_environment)),
         HirExpressionKind::MapLiteral(entries) => entries.iter().find_map(|entry| {
-            first_generic_runtime_expression_location(&entry.key, module, type_environment).or_else(
-                || {
-                    first_generic_runtime_expression_location(
-                        &entry.value,
-                        module,
-                        type_environment,
-                    )
-                },
+            first_generic_runtime_expression_occurrence(&entry.key, type_environment).or_else(
+                || first_generic_runtime_expression_occurrence(&entry.value, type_environment),
             )
         }),
         HirExpressionKind::Range { start, end } => {
-            first_generic_runtime_expression_location(start, module, type_environment).or_else(
-                || first_generic_runtime_expression_location(end, module, type_environment),
-            )
+            first_generic_runtime_expression_occurrence(start, type_environment)
+                .or_else(|| first_generic_runtime_expression_occurrence(end, type_environment))
         }
         HirExpressionKind::VariantConstruct { fields, .. } => fields.iter().find_map(|field| {
-            first_generic_runtime_expression_location(&field.value, module, type_environment)
+            first_generic_runtime_expression_occurrence(&field.value, type_environment)
         }),
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
@@ -589,12 +567,10 @@ fn validate_js_reactive_sinks(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::ReactiveExternalCallSink,
-        rejected_sink.location.clone(),
+        rejected_sink.span,
     );
 
-    Err(BackendFeatureValidationError::Diagnostic(Box::new(
-        diagnostic,
-    )))
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
 /// Returns true when the template consumed by `sink` has at least one runtime subscription.

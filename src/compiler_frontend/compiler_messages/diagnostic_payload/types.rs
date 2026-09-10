@@ -23,6 +23,14 @@ pub enum NameNamespace {
     TemplateSlot,
     ConfigKey,
 }
+/// Which compact source-span table rejected an authored range.
+///
+/// The source identity remains on the diagnostic's primary span; this fact records the
+/// exhausted source-owned capacity without allocating another extended row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceSpanCapacityResource {
+    ExtendedSpanTable,
+}
 
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
 ///
@@ -666,8 +674,8 @@ pub enum InvalidTypeAnnotationReason {
     AsNotValidHere,
     UnexpectedColon,
     ReactiveAccessNotAllowed,
-    InvalidTokenAfterName { token: TokenKind },
-    ExpectedTypeAnnotation { found: TokenKind },
+    InvalidTokenAfterName { token: DiagnosticToken },
+    ExpectedTypeAnnotation { found: DiagnosticToken },
     DuplicateOptional,
     NestedOptional,
 }
@@ -753,7 +761,7 @@ pub enum InvalidGenericParameterReason {
     EmptyParameterList,
     BoundsMustUseIs,
     ListMustStayWithHeader,
-    InvalidToken { found: TokenKind },
+    InvalidToken { found: DiagnosticToken },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -872,7 +880,7 @@ pub enum InvalidSignatureMemberReason {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InvalidFunctionSignatureReason {
-    MissingArrowOrColon { found: TokenKind },
+    MissingArrowOrColon { found: DiagnosticToken },
     UnexpectedEndAfterParameters,
     MissingReturnType,
     MissingTraitRequirementReturnType,
@@ -881,7 +889,7 @@ pub enum InvalidFunctionSignatureReason {
     UnexpectedEndInReturns,
     MissingColonAfterReturns,
     UnexpectedArrowInReturns,
-    MissingCommaOrColon { found: TokenKind },
+    MissingCommaOrColon { found: DiagnosticToken },
     VoidNotAllowed,
     MultipleErrorReturnSlots,
     ErrorSlotNotLast,
@@ -1897,8 +1905,6 @@ pub enum InvalidGenericInstantiationReason {
         parameter_name: StringId,
         existing_type_id: TypeId,
         replacement_type_id: TypeId,
-        current_evidence_location: SourceLocation,
-        previous_evidence_location: Option<SourceLocation>,
     },
     MissingTraitEvidence {
         parameter_name: StringId,

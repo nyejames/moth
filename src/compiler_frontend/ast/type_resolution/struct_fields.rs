@@ -19,6 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
@@ -31,18 +32,12 @@ use std::sync::Arc;
 use super::resolve_named_signature_type;
 
 pub(crate) enum StructFieldResolutionError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for StructFieldResolutionError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        StructFieldResolutionError::Diagnostic(Box::new(diagnostic))
-    }
-}
-
-impl From<Box<CompilerDiagnostic>> for StructFieldResolutionError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
         StructFieldResolutionError::Diagnostic(diagnostic)
     }
 }
@@ -100,6 +95,7 @@ pub(crate) fn resolve_struct_field_types(
     let mut resolved_fields =
         resolve_struct_field_type_shells(fields, type_resolution_context, string_table)?;
     resolve_struct_field_defaults(
+        struct_path,
         &mut resolved_fields,
         type_resolution_context,
         template_ir_store,
@@ -167,13 +163,12 @@ fn resolve_struct_field_type_shells(
     // WHY: Struct fields must enter AST/HIR in fully resolved nominal form so later
     // phases do not carry unresolved `NamedType` placeholders.
     let mut resolved_fields = Vec::with_capacity(fields.len());
-
     for field in fields {
         let mut resolved_field = field.to_owned();
 
         resolved_field.value.diagnostic_type = resolve_named_signature_type(
             &field.value.diagnostic_type,
-            &field.value.location,
+            field.value.span,
             type_resolution_context,
             string_table,
         )?;
@@ -183,7 +178,7 @@ fn resolve_struct_field_type_shells(
         resolved_field.value.type_id = resolve_diagnostic_type_to_type_id_checked(
             &resolved_field.value.diagnostic_type,
             type_environment,
-            &resolved_field.value.location,
+            resolved_field.value.span,
         )?;
 
         resolved_fields.push(resolved_field);
@@ -198,17 +193,23 @@ fn resolve_struct_field_type_shells(
 /// WHY: constructor shells need only field types, so keeping default classification here avoids
 ///      lending the TIR store through an earlier type-only pass that cannot consume it.
 fn resolve_struct_field_defaults(
+    struct_path: &InternedPath,
     resolved_fields: &mut [Declaration],
     type_resolution_context: &mut TypeResolutionContext<'_>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<(), StructFieldResolutionError> {
+    let scope = FieldDefaultScope {
+        declaration_table: type_resolution_context.declaration_table,
+        visible_declaration_ids: type_resolution_context.visible_declaration_ids,
+        declaring_file_id: type_resolution_context.declaring_file_id,
+        scope: struct_path.to_owned(),
+    };
     for resolved_field in resolved_fields {
         let type_environment = &mut *type_resolution_context.type_environment;
         resolved_field.value = inline_visible_constant_references(
             &resolved_field.value,
-            type_resolution_context.declaration_table,
-            type_resolution_context.visible_declaration_ids,
+            &scope,
             type_environment,
             template_ir_store,
             string_table,
@@ -227,7 +228,7 @@ fn resolve_struct_field_defaults(
             && !default_value_is_constant
         {
             return Err(CompilerDiagnostic::invalid_struct_default_value(
-                resolved_field.value.location.clone(),
+                resolved_field.value.span,
             )
             .into());
         }
@@ -240,28 +241,21 @@ fn resolve_struct_field_defaults(
 //  Constant inlining for field defaults
 // ----------------------------------
 
-fn inline_visible_constant_references(
-    expression: &Expression,
-    declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
-    type_environment: &mut TypeEnvironment,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    string_table: &mut StringTable,
-) -> Result<Expression, StructFieldResolutionError> {
-    inline_visible_constant_references_impl(
-        expression,
-        declaration_table,
-        visible_declaration_ids,
-        type_environment,
-        template_ir_store,
-        string_table,
-    )
+/// The declaration surface one field default resolves against.
+///
+/// WHAT: the visible declarations a reference may name, plus the identity of the file that
+/// WHY: inlining recurses through every nested expression shape, so these three facts travel
+///      together to the evaluation scope at the bottom rather than through each hop by hand.
+struct FieldDefaultScope<'a> {
+    declaration_table: &'a Rc<TopLevelDeclarationTable>,
+    visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
+    declaring_file_id: SourceId,
+    scope: InternedPath,
 }
 
-fn inline_visible_constant_references_impl(
+fn inline_visible_constant_references(
     expression: &Expression,
-    declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
+    scope: &FieldDefaultScope<'_>,
     type_environment: &mut TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
@@ -271,15 +265,15 @@ fn inline_visible_constant_references_impl(
         ExpressionKind::Reference(path) => {
             let inlinable_declaration = visible_compile_time_constant_reference(
                 path,
-                declaration_table,
-                visible_declaration_ids,
+                scope.declaration_table,
+                scope.visible_declaration_ids,
                 template_ir_store,
             )?;
 
             Ok(inlinable_declaration
                 .map(|declaration| {
                     let mut resolved = declaration.value.to_owned();
-                    resolved.location = expression.location.clone();
+                    resolved.span = expression.span;
                     resolved
                 })
                 .unwrap_or_else(|| expression.to_owned()))
@@ -292,8 +286,7 @@ fn inline_visible_constant_references_impl(
             for item in &rpn.items {
                 rewritten_items.push(inline_visible_constant_references_in_rpn_item(
                     item,
-                    declaration_table,
-                    visible_declaration_ids,
+                    scope,
                     type_environment,
                     template_ir_store,
                     string_table,
@@ -301,20 +294,21 @@ fn inline_visible_constant_references_impl(
             }
 
             let mut current_type = ExpectedType::Known(expression.type_id);
-
             let mut evaluation_context = ScopeContext::new(
                 ContextKind::ConstantHeader,
-                expression.location.scope.to_owned(),
-                Rc::clone(declaration_table),
+                scope.scope.to_owned(),
+                Rc::clone(scope.declaration_table),
                 Arc::new(ExternalPackageRegistry::new()),
                 Vec::new(),
                 0,
                 Rc::clone(template_ir_store),
-            );
+            )
+            .with_declaring_file_id(scope.declaring_file_id);
 
             // The visibility set arrives as the same handle the scope stores, so entering the
             // field-default evaluation shares it instead of copying every visible path.
-            evaluation_context.visible_declaration_ids = visible_declaration_ids.map(Arc::clone);
+            evaluation_context.visible_declaration_ids =
+                scope.visible_declaration_ids.map(Arc::clone);
 
             let mut compatibility_cache = TypeCompatibilityCache::new();
             let mut type_interner =
@@ -331,7 +325,7 @@ fn inline_visible_constant_references_impl(
                 CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable,
                     None,
-                    expression.location.clone(),
+                    expression.span,
                 )
             })
             .map_err(StructFieldResolutionError::from)
@@ -342,10 +336,9 @@ fn inline_visible_constant_references_impl(
             let mut resolved_elements = Vec::with_capacity(elements.len());
 
             for element in elements {
-                resolved_elements.push(inline_visible_constant_references_impl(
+                resolved_elements.push(inline_visible_constant_references(
                     element,
-                    declaration_table,
-                    visible_declaration_ids,
+                    scope,
                     type_environment,
                     template_ir_store,
                     string_table,
@@ -365,14 +358,14 @@ fn inline_visible_constant_references_impl(
             for field in fields {
                 resolved_fields.push(Declaration {
                     id: field.id.to_owned(),
-                    value: inline_visible_constant_references_impl(
+                    value: inline_visible_constant_references(
                         &field.value,
-                        declaration_table,
-                        visible_declaration_ids,
+                        scope,
                         type_environment,
                         template_ir_store,
                         string_table,
                     )?,
+                    binding_span: field.binding_span,
                     config_qualifier: None,
                 });
             }
@@ -389,16 +382,14 @@ fn inline_visible_constant_references_impl(
             ExpressionKind::Range(
                 Box::new(inline_visible_constant_references(
                     start,
-                    declaration_table,
-                    visible_declaration_ids,
+                    scope,
                     type_environment,
                     template_ir_store,
                     string_table,
                 )?),
                 Box::new(inline_visible_constant_references(
                     end,
-                    declaration_table,
-                    visible_declaration_ids,
+                    scope,
                     type_environment,
                     template_ir_store,
                     string_table,
@@ -415,8 +406,7 @@ fn inline_visible_constant_references_impl(
                     variant: *variant,
                     value: Box::new(inline_visible_constant_references(
                         value,
-                        declaration_table,
-                        visible_declaration_ids,
+                        scope,
                         type_environment,
                         template_ir_store,
                         string_table,
@@ -431,8 +421,7 @@ fn inline_visible_constant_references_impl(
             ExpressionKind::Coerced {
                 value: Box::new(inline_visible_constant_references(
                     value,
-                    declaration_table,
-                    visible_declaration_ids,
+                    scope,
                     type_environment,
                     template_ir_store,
                     string_table,
@@ -499,7 +488,7 @@ fn expression_is_compile_time_constant_from_effective_tir(
 fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -> Expression {
     let mut rewritten = Expression::new(
         kind,
-        expression.location.clone(),
+        expression.span,
         expression.type_id,
         expression.diagnostic_type.to_owned(),
         expression.value_mode.to_owned(),
@@ -517,18 +506,16 @@ fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -
 
 fn inline_visible_constant_references_in_rpn_item(
     item: &ExpressionRpnItem,
-    declaration_table: &Rc<TopLevelDeclarationTable>,
-    visible_declaration_ids: Option<&Arc<FxHashSet<InternedPath>>>,
+    scope: &FieldDefaultScope<'_>,
     type_environment: &mut TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<ExpressionRpnItem, StructFieldResolutionError> {
     match item {
         ExpressionRpnItem::Operand(expression) => Ok(ExpressionRpnItem::Operand(
-            inline_visible_constant_references_impl(
+            inline_visible_constant_references(
                 expression,
-                declaration_table,
-                visible_declaration_ids,
+                scope,
                 type_environment,
                 template_ir_store,
                 string_table,

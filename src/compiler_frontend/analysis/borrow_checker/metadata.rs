@@ -101,7 +101,7 @@ impl<'a> BorrowChecker<'a> {
                         "Borrow checker found duplicate local function id '{}' while building public call summaries",
                         function.id
                     ),
-                    self.diagnostics.function_error_location(function.id),
+                    self.diagnostics.function_error_span(function.id),
                 ));
             }
 
@@ -117,7 +117,7 @@ impl<'a> BorrowChecker<'a> {
                             position,
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.function_error_location(function.id),
+                        self.diagnostics.function_error_span(function.id),
                     ));
                 }
 
@@ -128,7 +128,7 @@ impl<'a> BorrowChecker<'a> {
                             self.diagnostics.local_name(*param),
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.function_error_location(function.id),
+                        self.diagnostics.function_error_span(function.id),
                     ));
                 };
 
@@ -141,7 +141,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker found parameter local '{}' owned by more than one function",
                             self.diagnostics.local_name(*param)
                         ),
-                        self.diagnostics.function_error_location(function.id),
+                        self.diagnostics.function_error_span(function.id),
                     ));
                 }
 
@@ -153,7 +153,7 @@ impl<'a> BorrowChecker<'a> {
                                     "Borrow checker could not resolve reactive source metadata for parameter local '{}'",
                                     self.diagnostics.local_name(*param)
                                 ),
-                                self.diagnostics.function_error_location(function.id),
+                                self.diagnostics.function_error_span(function.id),
                             ));
                         };
 
@@ -165,7 +165,7 @@ impl<'a> BorrowChecker<'a> {
                                         self.diagnostics.local_name(*param),
                                         self.diagnostics.function_name(function.id)
                                     ),
-                                    source.location.clone(),
+                                    source.span,
                                 ));
                             }
                             HirReactiveSourceKind::Parameter => PublicCallParameterAccess::Reactive,
@@ -176,7 +176,7 @@ impl<'a> BorrowChecker<'a> {
                                         self.diagnostics.local_name(*param),
                                         self.diagnostics.function_name(function.id)
                                     ),
-                                    source.location.clone(),
+                                    source.span,
                                 ));
                             }
                         }
@@ -228,7 +228,7 @@ impl<'a> BorrowChecker<'a> {
                     "Reactive parameter source metadata points at local '{}' that is not a function parameter",
                     self.diagnostics.local_name(source.local_id)
                 ),
-                source.location.clone(),
+                source.span,
             ));
         }
 
@@ -243,7 +243,7 @@ impl<'a> BorrowChecker<'a> {
                     self.public_call_summaries.len(),
                     self.module.functions.len()
                 ),
-                self.diagnostics.module_error_location(),
+                self.diagnostics.module_error_span(),
             ));
         }
 
@@ -262,7 +262,7 @@ impl<'a> BorrowChecker<'a> {
                         "Borrow checker is missing the public call summary for recursive function '{}'",
                         self.diagnostics.function_name(*function_id)
                     ),
-                    self.diagnostics.function_error_location(*function_id),
+                    self.diagnostics.function_error_span(*function_id),
                 ));
             };
             // A recursive return-summary cycle has no finite body summary to project through.
@@ -300,7 +300,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker is missing the public call summary for function '{}'",
                             self.diagnostics.function_name(*function_id)
                         ),
-                        self.diagnostics.function_error_location(*function_id),
+                        self.diagnostics.function_error_span(*function_id),
                     ));
                 };
 
@@ -317,7 +317,7 @@ impl<'a> BorrowChecker<'a> {
 
         Err(self.diagnostics.internal_error(
             "Borrow checker could not stabilize local return-alias summaries",
-            self.diagnostics.module_error_location(),
+            self.diagnostics.module_error_span(),
         ))
     }
 
@@ -367,7 +367,7 @@ impl<'a> BorrowChecker<'a> {
                             "Reactive template metadata references unknown source {:?}",
                             dependency.source
                         ),
-                        dependency.location.clone(),
+                        dependency.span,
                     ));
                 };
 
@@ -397,7 +397,7 @@ impl<'a> BorrowChecker<'a> {
                     "Reactive template metadata references local '{}' that is not a function parameter",
                     self.diagnostics.local_name(parameter_local)
                 ),
-                self.diagnostics.module_error_location(),
+                self.diagnostics.module_error_span(),
             ));
         };
 
@@ -407,7 +407,7 @@ impl<'a> BorrowChecker<'a> {
                     "Borrow checker is missing the public call summary for function '{}'",
                     self.diagnostics.function_name(*function_id)
                 ),
-                self.diagnostics.function_error_location(*function_id),
+                self.diagnostics.function_error_span(*function_id),
             ));
         };
 
@@ -418,7 +418,7 @@ impl<'a> BorrowChecker<'a> {
                     position,
                     self.diagnostics.function_name(*function_id)
                 ),
-                self.diagnostics.function_error_location(*function_id),
+                self.diagnostics.function_error_span(*function_id),
             ));
         };
         parameter.reactive_effect = parameter.reactive_effect.with_subscription();
@@ -449,7 +449,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker is missing statement facts while finalizing public call summary for function '{}'",
                             self.diagnostics.function_name(function.id)
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
 
@@ -479,7 +479,7 @@ impl<'a> BorrowChecker<'a> {
                                         argument_index,
                                         self.diagnostics.function_name(function.id)
                                     ),
-                                    self.diagnostics.statement_error_location(statement),
+                                    self.diagnostics.statement_error_span(statement),
                                 ));
                             };
                             for root in &argument_fact.roots {
@@ -497,7 +497,7 @@ impl<'a> BorrowChecker<'a> {
                                     "Borrow checker is missing map receiver value facts while finalizing public call summary for function '{}'",
                                     self.diagnostics.function_name(function.id)
                                 ),
-                                self.diagnostics.statement_error_location(statement),
+                                self.diagnostics.statement_error_span(statement),
                             ));
                         };
                         for root in &receiver_fact.roots {
@@ -521,7 +521,7 @@ impl<'a> BorrowChecker<'a> {
                                 "Borrow checker reactive invalidation references unknown source {:?}",
                                 invalidation.source
                             ),
-                            invalidation.location.clone(),
+                            invalidation.span,
                         ));
                     };
                     if let Some(position) = parameter_positions.get(&source.local_id) {
@@ -537,7 +537,7 @@ impl<'a> BorrowChecker<'a> {
                     "Borrow checker is missing the public call summary for function '{}'",
                     self.diagnostics.function_name(function.id)
                 ),
-                self.diagnostics.function_error_location(function.id),
+                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -571,7 +571,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker is missing the public call summary for function '{}'",
                             self.diagnostics.function_name(*function_id)
                         ),
-                        self.diagnostics.function_error_location(*function_id),
+                        self.diagnostics.function_error_span(*function_id),
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -581,7 +581,7 @@ impl<'a> BorrowChecker<'a> {
                             argument_index,
                             self.diagnostics.function_name(*function_id)
                         ),
-                        self.diagnostics.function_error_location(*function_id),
+                        self.diagnostics.function_error_span(*function_id),
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -592,7 +592,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the provider call summary for imported function {origin:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -600,7 +600,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing imported call summary for {origin:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -611,7 +611,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the call summary for module-private function {identity:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -619,7 +619,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing module-private call summary for {identity:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -630,7 +630,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the call summary for generated function {identity:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -638,7 +638,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing generated call summary for {identity:?}"
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -653,7 +653,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while finalizing public call summary",
                             function_id.name()
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 let Some(parameter) = definition.parameters.get(argument_index) else {
@@ -662,7 +662,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker found out-of-range argument {} while finalizing host call summary for '{}'",
                             argument_index, definition.name
                         ),
-                        self.diagnostics.statement_error_location(statement),
+                        self.diagnostics.statement_error_span(statement),
                     ));
                 };
                 Ok(parameter.access_kind == ExternalAccessKind::Mutable)
@@ -1106,7 +1106,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while classifying a return",
                             function_id.name()
                         ),
-                        self.diagnostics.function_error_location(function.id),
+                        self.diagnostics.function_error_span(function.id),
                     ));
                 };
 
@@ -1178,7 +1178,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while classifying a success payload",
                             function_id.name()
                         ),
-                        self.diagnostics.function_error_location(function.id),
+                        self.diagnostics.function_error_span(function.id),
                     ));
                 };
 
@@ -1215,7 +1215,7 @@ impl<'a> BorrowChecker<'a> {
                     "Borrow checker is missing the public call summary for function '{}' while classifying a forwarded return",
                     self.diagnostics.function_name(callee_id)
                 ),
-                self.diagnostics.function_error_location(function.id),
+                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -1249,7 +1249,7 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the provider call summary for imported function {origin:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_location(function.id),
+                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -1280,7 +1280,7 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the call summary for generated function {identity:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_location(function.id),
+                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -1311,7 +1311,7 @@ impl<'a> BorrowChecker<'a> {
                 format!(
                     "Borrow checker is missing the call summary for module-private function {identity:?} while classifying a forwarded return"
                 ),
-                self.diagnostics.function_error_location(function.id),
+                self.diagnostics.function_error_span(function.id),
             ));
         };
 
@@ -1387,7 +1387,7 @@ impl<'a> BorrowChecker<'a> {
                         arg_index,
                         args.len()
                     ),
-                    self.diagnostics.function_error_location(function.id),
+                    self.diagnostics.function_error_span(function.id),
                 ));
             };
 
@@ -1458,7 +1458,7 @@ impl<'a> BorrowChecker<'a> {
                     "Borrow checker could not resolve local function '{}' while classifying a call result",
                     self.diagnostics.function_name(function_id)
                 ),
-                self.diagnostics.function_error_location(function_id),
+                self.diagnostics.function_error_span(function_id),
             ));
         };
 
@@ -1497,7 +1497,7 @@ impl<'a> BorrowChecker<'a> {
                         self.diagnostics.function_name(function.id),
                         self.diagnostics.local_name(*param)
                     ),
-                    self.diagnostics.function_error_location(function.id),
+                    self.diagnostics.function_error_span(function.id),
                 ));
             }
         }
@@ -1760,24 +1760,23 @@ impl<'a> BorrowChecker<'a> {
             }
 
             let Some(parent) = self.region_parent_by_id.get(&region).copied() else {
-                let location = self
+                let span = self
                     .module
                     .side_table
-                    .hir_source_location_for_hir(HirLocation::Block(block_id))
+                    .hir_source_span_for_hir(HirLocation::Block(block_id))
                     .or_else(|| {
                         self.module
                             .side_table
-                            .ast_location_for_hir(HirLocation::Block(block_id))
+                            .ast_span_for_hir(HirLocation::Block(block_id))
                     })
-                    .cloned()
-                    .unwrap_or_else(|| self.diagnostics.function_error_location(function_id));
+                    .or_else(|| self.diagnostics.function_error_span(function_id));
 
                 return Err(self.diagnostics.internal_error(
                     format!(
                         "Borrow checker could not resolve region '{}' while analyzing block '{}'",
                         region.0, block_id
                     ),
-                    location.clone(),
+                    span,
                 ));
             };
 

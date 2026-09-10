@@ -21,17 +21,18 @@ mod non_utf8_filesystem_identity {
     use std::path::PathBuf;
 
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 filesystem name should be a File infrastructure error"
         );
         assert!(
-            message.contains("Non-UTF-8"),
-            "error message should mention non-UTF-8: {message}"
+            error.msg.contains("Non-UTF-8"),
+            "error message should mention non-UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -54,7 +55,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -67,6 +68,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 file name should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -90,7 +92,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -103,6 +105,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 folder name should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -128,7 +131,7 @@ mod non_utf8_filesystem_identity {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -141,6 +144,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -164,7 +168,7 @@ mod non_utf8_filesystem_identity {
         );
 
         let mut string_table = StringTable::new();
-        let messages = super::source_package_discovery::build_source_package_boundary_indexes(
+        let failure = super::source_package_discovery::build_source_package_boundary_indexes(
             &source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
             &crate::builder_surface::external_import_providers::registry::
@@ -172,6 +176,7 @@ mod non_utf8_filesystem_identity {
             &mut string_table,
         )
         .expect_err("non-UTF-8 name in package boundary traversal should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages);
     }
@@ -212,19 +217,19 @@ mod non_utf8_single_file_identity {
     use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 single-file input should be a File infrastructure error"
         );
         assert!(
-            message.contains("UTF-8"),
-            "error message should mention UTF-8: {message}"
+            error.msg.contains("UTF-8"),
+            "error message should mention UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -297,19 +302,19 @@ mod non_utf8_windows_single_file_identity {
     use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "unpaired-wide single-file input should be a File infrastructure error"
         );
         assert!(
-            message.contains("UTF-8"),
-            "error message should mention UTF-8: {message}"
+            error.msg.contains("UTF-8"),
+            "error message should mention UTF-8: {}",
+            error.msg,
         );
     }
 
@@ -358,8 +363,10 @@ mod source_package_boundary_indexes_tests {
     fn build_indexes(
         source_packages: &SourcePackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
-    {
+    ) -> Result<
+        super::source_package_discovery::SourcePackageBoundaryIndexes,
+        crate::compiler_frontend::compiler_messages::PremergeFailure,
+    > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -406,8 +413,9 @@ mod source_package_boundary_indexes_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("project source-package prefix must remain reserved");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::ProjectGlobalsNameReserved)
@@ -477,16 +485,17 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &nonexistent);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("nonexistent root should fail canonicalization");
-
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let messages = failure.into_messages(&string_table);
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
-        assert_eq!(*error_type, ErrorType::File);
+        assert_eq!(error.error_type, ErrorType::File);
         assert!(
-            message.contains("canonicalize"),
-            "error message should mention canonicalization: {message}"
+            error.msg.contains("canonicalize"),
+            "error message should mention canonicalization: {}",
+            error.msg,
         );
     }
 
@@ -501,8 +510,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("package root without a normal module root should fail boundary indexing");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
@@ -521,8 +531,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("a support root cannot replace the package normal module root");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::SourcePackageMissingRoot { .. })
@@ -542,8 +553,9 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("one directory cannot contain hash and support roots");
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(reason, InvalidConfigReason::MultipleModuleRootFiles { .. })
@@ -565,9 +577,10 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table).expect_err(
+        let failure = build_indexes(&source_packages, &mut string_table).expect_err(
             "package root with multiple normal module roots should fail boundary indexing",
         );
+        let messages = failure.into_messages(&string_table);
 
         assert_invalid_config_reason(&messages, |reason| {
             matches!(
@@ -597,13 +610,13 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("unreadable package root should fail boundary indexing");
-
-        let (error_type, _message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let messages = failure.into_messages(&string_table);
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
-        assert_eq!(*error_type, ErrorType::File);
+        assert_eq!(error.error_type, ErrorType::File);
 
         // Restore permissions so cleanup can remove the directory.
         fs::set_permissions(&package_root, fs::Permissions::from_mode(0o755))
@@ -698,7 +711,7 @@ mod source_package_boundary_indexes_tests {
             .next()
             .expect("package root module should exist");
         let provider_record = index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .map(|source_id| index.source(*source_id))
             .find(|record| {
@@ -733,25 +746,28 @@ mod non_utf8_package_boundary_candidate_tests {
     use std::path::PathBuf;
 
     fn assert_non_utf8_file_error(messages: &CompilerMessages) {
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "non-UTF-8 package boundary candidate should be a File infrastructure error"
         );
         assert!(
-            message.contains("Non-UTF-8"),
-            "error message should mention non-UTF-8: {message}"
+            error.msg.contains("Non-UTF-8"),
+            "error message should mention non-UTF-8: {}",
+            error.msg,
         );
     }
 
     fn build_indexes(
         source_packages: &SourcePackageRegistry,
         string_table: &mut StringTable,
-    ) -> Result<super::source_package_discovery::SourcePackageBoundaryIndexes, CompilerMessages>
-    {
+    ) -> Result<
+        super::source_package_discovery::SourcePackageBoundaryIndexes,
+        crate::compiler_frontend::compiler_messages::PremergeFailure,
+    > {
         super::source_package_discovery::build_source_package_boundary_indexes(
             source_packages,
             &crate::builder_surface::SourceFileKindRegistry::default(),
@@ -786,8 +802,9 @@ mod non_utf8_package_boundary_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("non-UTF-8 candidate should fail boundary indexing");
+        let messages = failure.into_messages(&string_table);
 
         assert_non_utf8_file_error(&messages);
         drop(root);
@@ -807,8 +824,9 @@ mod non_utf8_package_boundary_candidate_tests {
         );
 
         let mut string_table = StringTable::new();
-        let messages = build_indexes(&source_packages, &mut string_table)
+        let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("valid root plus invalid candidate should still fail");
+        let messages = failure.into_messages(&string_table);
 
         assert_non_utf8_file_error(&messages);
         drop(root);
@@ -1188,7 +1206,7 @@ mod module_identity_tests {
         let missing_project_root = root.join("does_not_exist");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &missing_project_root,
@@ -1201,6 +1219,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("missing project root should surface a file error, not a missing facade");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
     }
@@ -1228,7 +1247,7 @@ mod module_identity_tests {
             .expect("should drop read permission");
 
         let mut string_table = StringTable::new();
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1241,6 +1260,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("unreadable project root should surface a file error, not a missing facade");
+        let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
 
@@ -1248,21 +1268,21 @@ mod module_identity_tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755))
             .expect("should restore permissions");
     }
-
     fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
         use crate::compiler_frontend::compiler_errors::ErrorType;
 
-        let (error_type, message, _location) = messages
-            .first_infrastructure_error_for_tests()
+        let error = messages
+            .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
-            *error_type,
+            error.error_type,
             ErrorType::File,
             "project root read failure should be a File infrastructure error"
         );
         assert!(
-            message.contains(expected_text),
-            "error message should mention {expected_text:?}: {message}"
+            error.msg.contains(expected_text),
+            "error message should mention {expected_text:?}: {}",
+            error.msg,
         );
     }
 
@@ -1311,7 +1331,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1324,6 +1344,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple normal module roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
@@ -1345,7 +1366,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1358,6 +1379,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("mixed normal and support roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
@@ -1379,7 +1401,7 @@ mod module_identity_tests {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let messages = super::source_tree_index::SourceTreeIndex::discover(
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -1392,6 +1414,7 @@ mod module_identity_tests {
             &mut string_table,
         )
         .expect_err("multiple support roots should be rejected");
+        let messages = failure.into_messages(&string_table);
 
         assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
@@ -1824,7 +1847,7 @@ mod owned_source_inventory_tests {
 
     fn owned_relative_paths(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<String> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .map(|source_id| owned_relative_path(index, *source_id))
             .collect()
@@ -1833,12 +1856,12 @@ mod owned_source_inventory_tests {
     /// Resolve one owned source's portable module-relative path through the central index.
     fn owned_relative_path(
         index: &SourceTreeIndex,
-        source_id: super::source_tree_index::SourceId,
+        source_index: super::source_tree_index::SourceRecordIndex,
     ) -> String {
-        match index.source(source_id).logical_identity() {
+        match index.source(source_index).logical_identity() {
             SourceLogicalIdentity::Owned(identity) => identity.relative_source_path().to_owned(),
             other => {
-                panic!("owned source {source_id:?} has a non-owned logical identity: {other:?}")
+                panic!("owned source {source_index:?} has a non-owned logical identity: {other:?}")
             }
         }
     }
@@ -1846,7 +1869,7 @@ mod owned_source_inventory_tests {
     /// Resolve the source kinds for one module's owned source IDs through the central index.
     fn owned_kinds(index: &SourceTreeIndex, module_id: ModuleId) -> Vec<SourceFileKind> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .filter_map(
                 |source_id| match index.source(*source_id).classification() {
@@ -1864,7 +1887,7 @@ mod owned_source_inventory_tests {
         relative_path: &str,
     ) -> Option<&'a super::source_tree_index::SourceRecord> {
         index
-            .owned_source_ids(module_id)
+            .owned_source_indices(module_id)
             .iter()
             .find_map(|source_id| {
                 let record = index.source(*source_id);
@@ -1880,7 +1903,7 @@ mod owned_source_inventory_tests {
     /// Resolve the portable entry-root-relative logical paths for the unrooted source IDs.
     fn unrooted_logical_paths(index: &SourceTreeIndex) -> Vec<String> {
         index
-            .unrooted_source_ids()
+            .unrooted_source_indices()
             .iter()
             .map(
                 |source_id| match index.source(*source_id).logical_identity() {
@@ -2063,14 +2086,14 @@ mod owned_source_inventory_tests {
             "recognized source kinds remain indexed while unknown extensions stay excluded"
         );
         let unsupported_paths = index
-            .owned_source_ids(entry_id)
+            .owned_source_indices(entry_id)
             .iter()
             .filter(|source_id| !index.source(**source_id).supported())
             .map(|source_id| owned_relative_path(&index, *source_id))
             .collect::<Vec<_>>();
         assert_eq!(unsupported_paths, vec!["content.md", "page.mtf"]);
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "excluded files are not unrooted facts"
         );
     }
@@ -2132,7 +2155,7 @@ mod owned_source_inventory_tests {
             .find(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
             .expect("project package facade should exist");
 
-        let facade_ids = index.owned_source_ids(facade_id);
+        let facade_ids = index.owned_source_indices(facade_id);
         assert_eq!(
             facade_ids.len(),
             1,
@@ -2169,7 +2192,7 @@ mod owned_source_inventory_tests {
             0,
             "unrooted candidates must not be assigned to a module"
         );
-        let unrooted = index.unrooted_source_ids();
+        let unrooted = index.unrooted_source_indices();
         assert_eq!(
             unrooted.len(),
             2,
@@ -2267,7 +2290,7 @@ mod owned_source_inventory_tests {
             "an arbitrary registered unknown extension must not enter owned source sets"
         );
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "an excluded unknown registered extension is not an unrooted fact"
         );
     }
@@ -2304,14 +2327,14 @@ mod owned_source_inventory_tests {
             "recognized source identity is independent of active builder support"
         );
         let page_source_id = index
-            .owned_source_ids(entry_id)
+            .owned_source_indices(entry_id)
             .iter()
             .copied()
             .find(|source_id| owned_relative_path(&index, *source_id) == "page.mtf")
             .expect("recognized Moth template should have a source ID");
         assert!(!index.source(page_source_id).supported());
         assert!(
-            index.unrooted_source_ids().is_empty(),
+            index.unrooted_source_indices().is_empty(),
             "an excluded mismatched mapping is not an unrooted fact"
         );
     }
@@ -2387,7 +2410,7 @@ mod owned_source_inventory_tests {
             })
             .expect("entry root normal module should exist");
 
-        let facade_ids = index.owned_source_ids(facade_id);
+        let facade_ids = index.owned_source_indices(facade_id);
         assert_eq!(
             facade_ids.len(),
             1,
@@ -2453,19 +2476,24 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn source_ids_equal_their_contiguous_table_index() {
+    fn source_row_handles_address_their_own_record() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         build_nested_module_tree(&root);
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
 
-        let sources = index.sources();
-        for (position, record) in sources.iter().enumerate() {
+        // Every Stage 0 consumer keys parallel ownership and reachability data by this handle and
+        // then reads the record back through `source`. A handle that drifted from its row would
+        // silently return a different file's metadata rather than fail.
+        for record in index.sources() {
+            let handle = index
+                .source_index_for_canonical_path(record.canonical_path())
+                .expect("every classified source must be reachable by its canonical path");
             assert_eq!(
-                record.id().index(),
-                position,
-                "each SourceId must equal its contiguous table index"
+                index.source(handle).canonical_path(),
+                record.canonical_path(),
+                "a row handle must address the record it was resolved from"
             );
         }
     }
@@ -2482,14 +2510,14 @@ mod owned_source_inventory_tests {
         for module_id in index.module_identities().module_ids() {
             referenced_ids.extend(
                 index
-                    .owned_source_ids(module_id)
+                    .owned_source_indices(module_id)
                     .iter()
                     .map(|source_id| source_id.index()),
             );
         }
         referenced_ids.extend(
             index
-                .unrooted_source_ids()
+                .unrooted_source_indices()
                 .iter()
                 .map(|source_id| source_id.index()),
         );
@@ -2525,7 +2553,7 @@ mod owned_source_inventory_tests {
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
 
         for module_id in index.module_identities().module_ids() {
-            for source_id in index.owned_source_ids(module_id) {
+            for source_id in index.owned_source_indices(module_id) {
                 let record = index.source(*source_id);
                 assert_eq!(
                     record.ownership(),
@@ -2552,11 +2580,11 @@ mod owned_source_inventory_tests {
             &html_source_file_kinds(),
         );
         assert_eq!(
-            unrooted_index.unrooted_source_ids().len(),
+            unrooted_index.unrooted_source_indices().len(),
             1,
             "the focused unrooted tree must exercise one unrooted record"
         );
-        for source_id in unrooted_index.unrooted_source_ids() {
+        for source_id in unrooted_index.unrooted_source_indices() {
             let record = unrooted_index.source(*source_id);
             assert_eq!(
                 record.ownership(),
@@ -2773,38 +2801,29 @@ mod owned_source_inventory_tests {
             "nested-module provider files are owned by the nested module"
         );
 
-        // The logical-path lookup map resolves both provider targets by entry-root-relative path.
-        let helper_id = index
-            .source_id_for_entry_root_relative_logical_path("helper.js")
-            .expect("helper.js logical path resolves to a SourceId");
-        assert_eq!(
-            index.source(helper_id).canonical_path(),
-            helper_record.canonical_path()
-        );
-        let util_id = index
-            .source_id_for_entry_root_relative_logical_path("feature/util.js")
-            .expect("feature/util.js logical path resolves to a SourceId");
-        assert_eq!(
-            index.source(util_id).canonical_path(),
-            util_record.canonical_path()
-        );
+        let helper_index = index
+            .source_index_for_canonical_path(helper_record.canonical_path())
+            .expect("helper canonical path resolves to a source row");
+        let util_index = index
+            .source_index_for_canonical_path(util_record.canonical_path())
+            .expect("util canonical path resolves to a source row");
 
         // The canonical-path lookup map resolves a consumer to its owning record.
         let page_canonical = page_record.canonical_path();
-        let page_lookup_id = index
-            .source_id_for_canonical_path(page_canonical)
-            .expect("page canonical path resolves to a SourceId");
+        let page_lookup_index = index
+            .source_index_for_canonical_path(page_canonical)
+            .expect("page canonical path resolves to a source row");
         assert_eq!(
-            index.source(page_lookup_id).ownership(),
+            index.source(page_lookup_index).ownership(),
             SourceOwnership::Owned(entry_id)
         );
 
-        // SourceIds are assigned in deterministic portable logical identity order. The root
-        // module precedes the child module, so helper.js precedes feature/util.js regardless of
-        // traversal or creation order.
+        // Source rows follow deterministic portable logical identity order. The root module
+        // precedes the child module, so helper.js precedes feature/util.js regardless of traversal
+        // or creation order.
         assert!(
-            helper_id.index() < util_id.index(),
-            "provider SourceIds must follow deterministic logical identity order"
+            helper_index.index() < util_index.index(),
+            "provider source rows must follow deterministic logical identity order"
         );
     }
 
@@ -2947,7 +2966,7 @@ mod project_module_graph_tests {
             // The graph node carries no source records: owned source data lives in the central
             // index. Verify the index's owned source IDs for this module all resolve to records
             // owned by this module, proving the graph delegates ownership to the index.
-            for source_id in index.owned_source_ids(table_id) {
+            for source_id in index.owned_source_indices(table_id) {
                 let record = index.source(*source_id);
                 assert_eq!(
                     record.ownership(),

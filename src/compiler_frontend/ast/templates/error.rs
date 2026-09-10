@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
 #[derive(Debug)]
 pub(crate) enum TemplateError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -20,7 +20,7 @@ impl TemplateError {
     /// infrastructure failure into the user-facing lane.
     pub(crate) fn map_diagnostic(
         self,
-        map: impl FnOnce(Box<CompilerDiagnostic>) -> Box<CompilerDiagnostic>,
+        map: impl FnOnce(CompilerDiagnostic) -> CompilerDiagnostic,
     ) -> Self {
         match self {
             TemplateError::Diagnostic(diagnostic) => TemplateError::Diagnostic(map(diagnostic)),
@@ -31,12 +31,6 @@ impl TemplateError {
 
 impl From<CompilerDiagnostic> for TemplateError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        TemplateError::Diagnostic(Box::new(diagnostic))
-    }
-}
-
-impl From<Box<CompilerDiagnostic>> for TemplateError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
         TemplateError::Diagnostic(diagnostic)
     }
 }

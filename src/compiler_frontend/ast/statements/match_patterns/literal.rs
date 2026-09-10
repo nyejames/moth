@@ -15,8 +15,9 @@ use crate::compiler_frontend::numeric_text::parse::{materialize_f64, materialize
 use crate::compiler_frontend::numeric_text::token::{
     NumericLiteralKind, NumericLiteralSign, NumericLiteralToken,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -24,14 +25,11 @@ use super::diagnostics::reject_deferred_pattern_lead_token;
 use super::relational::parse_relational_pattern;
 use super::types::MatchPattern;
 
-/// Boxed diagnostic result for the literal pattern family.
+/// Result for the literal pattern family.
 ///
-/// WHAT: every function in this module returns errors as `Box<CompilerDiagnostic>`.
-/// WHY: `CompilerDiagnostic` is large enough to trigger `clippy::result_large_err`;
-/// boxing the error variant keeps the success path cheap and matches the
-/// already-boxed `MatchHeaderResult` convention used by the surrounding match
-/// statement parsers.
-type LiteralPatternResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Literal parsing returns plain `CompilerDiagnostic` values on the diagnosed
+/// lane; the surrounding parser boundary owns any infrastructure failure.
+type LiteralPatternResult<T> = Result<T, CompilerDiagnostic>;
 
 /// Materialize a `NumericLiteralToken` into an `Expression` with an explicit sign and location.
 ///
@@ -44,30 +42,18 @@ type LiteralPatternResult<T> = Result<T, Box<CompilerDiagnostic>>;
 fn materialize_numeric_literal(
     token: &NumericLiteralToken,
     sign: NumericLiteralSign,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> LiteralPatternResult<Expression> {
     if token.kind == NumericLiteralKind::WholeNumber {
         let value_i32 = materialize_i32_with_sign(token, sign, string_table).map_err(|reason| {
-            Box::new(CompilerDiagnostic::invalid_number_literal(
-                token.source_text,
-                reason,
-                location.clone(),
-            ))
+            CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
         })?;
 
-        Ok(Expression::int(
-            value_i32,
-            location,
-            ValueMode::ImmutableOwned,
-        ))
+        Ok(Expression::int(value_i32, span, ValueMode::ImmutableOwned))
     } else {
         let value = materialize_f64(token, string_table).map_err(|reason| {
-            Box::new(CompilerDiagnostic::invalid_number_literal(
-                token.source_text,
-                reason,
-                location.clone(),
-            ))
+            CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
         })?;
 
         // Negate the float when the sign is negative; the normalised text is unsigned
@@ -79,7 +65,7 @@ fn materialize_numeric_literal(
 
         Ok(Expression::float(
             float_value,
-            location,
+            span,
             ValueMode::ImmutableOwned,
         ))
     }
@@ -128,44 +114,43 @@ pub(super) fn parse_literal_pattern(
     type_environment: &TypeEnvironment,
 ) -> LiteralPatternResult<Expression> {
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
-        return Err(Box::new(diagnostic));
+        return Err(diagnostic);
     }
 
     let pattern = match token_stream.current_token_kind() {
         // Numeric literal — use the shared materialization helper.
         TokenKind::NumericLiteral(token) => {
-            let location = token_stream.current_location();
+            let span = Some(token_stream.current_span());
             let token = token.to_owned();
 
-            let expression =
-                materialize_numeric_literal(&token, token.sign, location, string_table)?;
+            let expression = materialize_numeric_literal(&token, token.sign, span, string_table)?;
             token_stream.advance();
             expression
         }
 
         // Bool, char, and string literals.
         TokenKind::BoolLiteral(value) => {
-            let location = token_stream.current_location();
-            let expression = Expression::bool(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(token_stream.current_span());
+            let expression = Expression::bool(*value, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
         TokenKind::CharLiteral(value) => {
-            let location = token_stream.current_location();
-            let expression = Expression::char(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(token_stream.current_span());
+            let expression = Expression::char(*value, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
         TokenKind::StringSliceLiteral(value) => {
-            let location = token_stream.current_location();
-            let expression = Expression::string_slice(*value, location, ValueMode::ImmutableOwned);
+            let span = Some(token_stream.current_span());
+            let expression = Expression::string_slice(*value, span, ValueMode::ImmutableOwned);
             token_stream.advance();
             expression
         }
 
         // Negative numeric literal — consume the leading `-` then materialize via the helper.
         TokenKind::Negative => {
-            let minus_sign_location = token_stream.current_location();
+            let minus_sign_span = Some(token_stream.current_span());
             token_stream.advance();
 
             match token_stream.current_token_kind() {
@@ -174,39 +159,39 @@ pub(super) fn parse_literal_pattern(
                     let expression = materialize_numeric_literal(
                         &token,
                         NumericLiteralSign::Negative,
-                        minus_sign_location,
+                        minus_sign_span,
                         string_table,
                     )?;
                     token_stream.advance();
                     expression
                 }
                 _ => {
-                    return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+                    return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::NegativeLiteralNotNumeric,
                         None,
                         None,
-                        token_stream.current_location(),
-                    )));
+                        Some(token_stream.current_span()),
+                    ));
                 }
             }
         }
 
         // Patterns that are never valid as literal matches.
         TokenKind::NoneLiteral => {
-            return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+            return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::NonePatternRequiresOptionalScrutinee,
                 None,
                 None,
-                token_stream.current_location(),
-            )));
+                Some(token_stream.current_span()),
+            ));
         }
         _ => {
-            return Err(Box::new(CompilerDiagnostic::invalid_match_pattern(
+            return Err(CompilerDiagnostic::invalid_match_pattern(
                 InvalidMatchPatternReason::LiteralTypeUnsupported,
                 None,
                 None,
-                token_stream.current_location(),
-            )));
+                Some(token_stream.current_span()),
+            ));
         }
     };
 
@@ -217,12 +202,12 @@ pub(super) fn parse_literal_pattern(
     // Reject literal patterns whose type is incompatible with the scrutinee type
     // at parse time so the user gets a source-located error immediately.
     if !is_type_compatible(subject_type_id, pattern.type_id, type_environment) {
-        return Err(Box::new(CompilerDiagnostic::type_mismatch(
+        return Err(CompilerDiagnostic::type_mismatch(
             subject_type_id,
             pattern.type_id,
             TypeMismatchContext::MatchPattern,
-            pattern.location.clone(),
-        )));
+            pattern.span,
+        ));
     }
 
     Ok(pattern)

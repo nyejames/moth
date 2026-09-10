@@ -20,8 +20,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::{
     ExternalConstantId, ExternalConstantValue, ExternalFunctionId,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Input bundle for external namespace function member parsing.
@@ -32,7 +33,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(super) struct ExternalNamespaceFunctionMemberInput<'a, 'env> {
     pub(super) function_id: ExternalFunctionId,
     pub(super) member_name: StringId,
-    pub(super) member_location: SourceLocation,
+    pub(super) member_span: Option<SourceSpan>,
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
@@ -53,7 +54,7 @@ pub(super) fn parse_external_namespace_function_member(
     let ExternalNamespaceFunctionMemberInput {
         function_id,
         member_name,
-        member_location,
+        member_span,
         token_stream,
         context,
         type_interner,
@@ -67,14 +68,14 @@ pub(super) fn parse_external_namespace_function_member(
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
             Some(member_name),
-            member_location,
+            member_span,
         )
         .into());
     }
 
     // Namespace function members must be followed by an argument list.
     if token_stream.peek_next_token() != Some(&TokenKind::OpenParenthesis) {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into());
+        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
     }
 
     // Verify the external function metadata is still registered.
@@ -82,9 +83,8 @@ pub(super) fn parse_external_namespace_function_member(
         .external_package_registry
         .get_function_by_id(function_id)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into());
+        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
     };
-
     // Advance from the member name to the opening parenthesis so the shared
     // external call parser sees the expected token stream position.
     token_stream.advance();
@@ -96,7 +96,7 @@ pub(super) fn parse_external_namespace_function_member(
             token_stream,
             external_function_id: function_id,
             external_function,
-            call_location: member_location.clone(),
+            call_span: member_span,
             context,
             value_required: true,
             allow_boundary_catch: allow_boundary_catch
@@ -128,7 +128,7 @@ pub(super) fn parse_external_namespace_function_member(
 pub(super) struct ExternalNamespaceConstantMemberInput<'a, 'env> {
     pub(super) constant_id: ExternalConstantId,
     pub(super) member_name: StringId,
-    pub(super) member_location: SourceLocation,
+    pub(super) member_span: Option<SourceSpan>,
     pub(super) token_stream: &'a mut FileTokens,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
@@ -139,17 +139,17 @@ pub(super) struct ExternalNamespaceConstantMemberInput<'a, 'env> {
 
 /// Parse an external package constant accessed through a namespace record.
 ///
-/// WHAT: locates the constant metadata, validates constant-context restrictions,
+/// WHAT: locates the external constant metadata, validates constant-context restrictions,
 /// and pushes the resulting expression node.
-/// WHY: external namespace constants are reached through namespace.member syntax
-/// and need the same constant-context scalar restriction as bare external constants.
+/// WHY: external namespace constants are reached through namespace.member syntax and need the same
+/// constant-context scalar restriction as bare external constants.
 pub(super) fn parse_external_namespace_constant_member(
     input: ExternalNamespaceConstantMemberInput<'_, '_>,
 ) -> Result<(), ExpressionParseError> {
     let ExternalNamespaceConstantMemberInput {
         constant_id,
         member_name,
-        member_location,
+        member_span,
         token_stream,
         context,
         type_interner,
@@ -157,13 +157,12 @@ pub(super) fn parse_external_namespace_constant_member(
         allow_boundary_catch,
         string_table,
     } = input;
-
     // Verify the external constant metadata is still registered.
     let Some(constant_definition) = context
         .external_package_registry
         .get_constant_by_id(constant_id)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into());
+        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
     };
 
     // Advance past the member name token so the caller resumes at the next token.
@@ -174,7 +173,7 @@ pub(super) fn parse_external_namespace_constant_member(
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
             Some(member_name),
-            member_location,
+            member_span,
         )
         .into());
     }
@@ -183,18 +182,13 @@ pub(super) fn parse_external_namespace_constant_member(
     let value_mode = ValueMode::ImmutableOwned;
 
     let constant_expression = match constant_definition.value {
-        ExternalConstantValue::Float(value) => {
-            Expression::float(value, member_location, value_mode)
-        }
-
-        ExternalConstantValue::Int(value) => Expression::int(value, member_location, value_mode),
-
+        ExternalConstantValue::Float(value) => Expression::float(value, member_span, value_mode),
+        ExternalConstantValue::Int(value) => Expression::int(value, member_span, value_mode),
         ExternalConstantValue::StringSlice(value) => {
             let string_id = string_table.intern(value);
-            Expression::string_slice(string_id, member_location, value_mode)
+            Expression::string_slice(string_id, member_span, value_mode)
         }
-
-        ExternalConstantValue::Bool(value) => Expression::bool(value, member_location, value_mode),
+        ExternalConstantValue::Bool(value) => Expression::bool(value, member_span, value_mode),
     };
 
     push_expression_operand(

@@ -13,7 +13,7 @@ use crate::build_system::build::ProjectEntry;
 use crate::build_system::output::{OutputPathIdentity, output_path_identity};
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::compiler_frontend::module_compilation::Module;
@@ -21,6 +21,7 @@ use crate::compiler_frontend::paths::resource_identity::{
     StableResourceOriginId, StableResourceOwnerId,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::html_project::diagnostics::{
     resource_output_path_collision_messages, resource_output_path_reserved_messages,
@@ -60,7 +61,7 @@ impl ResourceUrlContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlannedResourceUse {
     pub(crate) context: ResourceUrlContext,
-    pub(crate) authored_location: SourceLocation,
+    pub(crate) authored_span: Option<SourceSpan>,
 }
 
 /// The lane through which one output record observes a resource URL use.
@@ -82,20 +83,21 @@ pub(crate) enum ResourceUseKind {
 pub(crate) struct PlannedResourceOutput {
     pub(crate) origin: StableResourceOriginId,
     pub(crate) output_path: PathBuf,
-    pub(crate) first_authored_location: SourceLocation,
+    /// Exact span of the first authored owner when the record carries source-owned provenance.
+    pub(crate) first_authored_span: Option<SourceSpan>,
     pub(crate) uses: Vec<PlannedResourceUse>,
     has_executable_use: bool,
 }
 
-/// Authored locations for one origin, with intern-table fallback last.
+/// Authored spans for one origin, with an intern-table fallback last.
 ///
 /// `executable` holds HIR-reachable uses. `metadata` holds compile-time fragment and
 /// page-metadata uses, which are output-live but not HIR-reachable.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct OriginAuthoredLocations {
-    pub executable: Vec<SourceLocation>,
-    pub metadata: Vec<SourceLocation>,
-    pub fallback: Option<SourceLocation>,
+pub(crate) struct OriginAuthoredSpans {
+    pub executable: Vec<Option<SourceSpan>>,
+    pub metadata: Vec<Option<SourceSpan>>,
+    pub fallback: Option<SourceSpan>,
 }
 
 /// One page-observed URL use claimed while planning an origin.
@@ -144,14 +146,9 @@ impl HtmlResourceOutputPlan {
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         self.reserve_builder_output_path(page_output_path, "HTML page", string_table)?;
 
-        let locations = first_authored_locations(entry)
+        let spans = first_authored_spans(entry)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        self.plan_union(
-            entry.resource_union,
-            &locations,
-            context.clone(),
-            string_table,
-        )?;
+        self.plan_union(entry.resource_union, &spans, context.clone(), string_table)?;
         self.plan_page_metadata_uses(&page_metadata_plan.resource_uses, context, string_table)
     }
 
@@ -174,7 +171,7 @@ impl HtmlResourceOutputPlan {
                 output_path,
                 &display_origin(&record.origin),
                 artefact_kind,
-                &record.first_authored_location,
+                record.first_authored_span,
                 string_table,
             ));
         }
@@ -187,11 +184,11 @@ impl HtmlResourceOutputPlan {
     }
 
     /// Add one origin and one explicit context, primarily for focused planner tests and future
-    /// builders whose link-plan owner already has the first authored location.
+    /// builders whose link-plan owner already has the first authored span.
     pub(crate) fn plan_origin(
         &mut self,
         origin: StableResourceOriginId,
-        first_authored_location: SourceLocation,
+        first_authored_span: Option<SourceSpan>,
         context: ResourceUrlContext,
         string_table: &mut StringTable,
         use_kind: ResourceUseKind,
@@ -206,7 +203,7 @@ impl HtmlResourceOutputPlan {
         self.plan_one_origin(
             origin,
             output_path,
-            first_authored_location,
+            first_authored_span,
             Some(observed_use),
             string_table,
         )
@@ -221,7 +218,7 @@ impl HtmlResourceOutputPlan {
         for resource_use in resource_uses {
             self.plan_origin(
                 resource_use.origin.clone(),
-                resource_use.authored_location.clone(),
+                resource_use.authored_span,
                 context.clone(),
                 string_table,
                 ResourceUseKind::Metadata,
@@ -238,20 +235,14 @@ impl HtmlResourceOutputPlan {
     pub(crate) fn plan_provider_runtime_asset(
         &mut self,
         origin: StableResourceOriginId,
-        first_authored_location: SourceLocation,
+        source_span: Option<SourceSpan>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let output_path = self
             .output_path_for_origin(&origin)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-        self.plan_one_origin(
-            origin,
-            output_path,
-            first_authored_location,
-            None,
-            string_table,
-        )
+        self.plan_one_origin(origin, output_path, source_span, None, string_table)
     }
 
     /// Look up one planned record directly by its stable resource origin.
@@ -272,14 +263,14 @@ impl HtmlResourceOutputPlan {
     fn plan_union(
         &mut self,
         union: &ResourceOriginUnion,
-        locations: &HashMap<StableResourceOriginId, OriginAuthoredLocations>,
+        spans: &HashMap<StableResourceOriginId, OriginAuthoredSpans>,
         context: ResourceUrlContext,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         for origin in union.iter() {
-            let Some(authored_locations) = locations.get(origin) else {
+            let Some(authored_spans) = spans.get(origin) else {
                 let error = CompilerError::compiler_error(format!(
-                    "HTML resource origin {origin:?} has no first authored location in its linked module resource tables"
+                    "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
                 ));
                 return Err(CompilerMessages::from_error_ref(error, string_table));
             };
@@ -288,11 +279,11 @@ impl HtmlResourceOutputPlan {
                 .output_path_for_origin(origin)
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-            for authored_location in &authored_locations.executable {
+            for authored_span in &authored_spans.executable {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    authored_location.clone(),
+                    *authored_span,
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Executable,
@@ -301,11 +292,11 @@ impl HtmlResourceOutputPlan {
                 )?;
             }
 
-            for authored_location in &authored_locations.metadata {
+            for authored_span in &authored_spans.metadata {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    authored_location.clone(),
+                    *authored_span,
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Metadata,
@@ -314,18 +305,18 @@ impl HtmlResourceOutputPlan {
                 )?;
             }
 
-            if authored_locations.executable.is_empty() && authored_locations.metadata.is_empty() {
-                if let Some(fallback) = &authored_locations.fallback {
+            if authored_spans.executable.is_empty() && authored_spans.metadata.is_empty() {
+                if let Some(fallback_span) = authored_spans.fallback {
                     self.plan_one_origin(
                         origin.clone(),
                         output_path,
-                        fallback.clone(),
+                        Some(fallback_span),
                         None,
                         string_table,
                     )?;
                 } else {
                     let error = CompilerError::compiler_error(format!(
-                        "HTML resource origin {origin:?} has no first authored location in its linked module resource tables"
+                        "HTML resource origin {origin:?} has no authored span in its linked module resource tables"
                     ));
                     return Err(CompilerMessages::from_error_ref(error, string_table));
                 }
@@ -339,7 +330,7 @@ impl HtmlResourceOutputPlan {
         &mut self,
         origin: StableResourceOriginId,
         output_path: PathBuf,
-        first_authored_location: SourceLocation,
+        first_authored_span: Option<SourceSpan>,
         observed_use: Option<ObservedResourceUse>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -351,9 +342,9 @@ impl HtmlResourceOutputPlan {
                 return Err(resource_output_path_collision_messages(
                     &output_path,
                     &display_origin(&record.origin),
-                    &record.first_authored_location,
+                    record.first_authored_span,
                     &display_origin(&origin),
-                    &first_authored_location,
+                    first_authored_span,
                     string_table,
                 ));
             }
@@ -362,20 +353,20 @@ impl HtmlResourceOutputPlan {
                 match observed_use.kind {
                     ResourceUseKind::Executable => {
                         if !record.has_executable_use {
-                            record.first_authored_location = first_authored_location.clone();
+                            record.first_authored_span = first_authored_span;
                             record.has_executable_use = true;
                         }
                     }
                     ResourceUseKind::Metadata => {
                         if !record.has_executable_use && record.uses.is_empty() {
-                            record.first_authored_location = first_authored_location.clone();
+                            record.first_authored_span = first_authored_span;
                         }
                     }
                 }
 
                 let use_record = PlannedResourceUse {
                     context: observed_use.context.clone(),
-                    authored_location: first_authored_location,
+                    authored_span: first_authored_span,
                 };
                 if !record.uses.contains(&use_record) {
                     record.uses.push(use_record);
@@ -390,7 +381,7 @@ impl HtmlResourceOutputPlan {
                 &output_path,
                 &display_origin(&origin),
                 &artefact_kind,
-                &first_authored_location,
+                first_authored_span,
                 string_table,
             ));
         }
@@ -403,7 +394,7 @@ impl HtmlResourceOutputPlan {
             .map(|observed_use| {
                 vec![PlannedResourceUse {
                     context: observed_use.context,
-                    authored_location: first_authored_location.clone(),
+                    authored_span: first_authored_span,
                 }]
             })
             .unwrap_or_default();
@@ -411,7 +402,7 @@ impl HtmlResourceOutputPlan {
         self.records.push(PlannedResourceOutput {
             origin,
             output_path,
-            first_authored_location,
+            first_authored_span,
             uses,
             has_executable_use,
         });
@@ -451,10 +442,10 @@ impl HtmlResourceOutputPlan {
     }
 }
 
-fn first_authored_locations(
+fn first_authored_spans(
     entry: &ProjectEntry<'_>,
-) -> Result<HashMap<StableResourceOriginId, OriginAuthoredLocations>, CompilerError> {
-    let mut locations = HashMap::new();
+) -> Result<HashMap<StableResourceOriginId, OriginAuthoredSpans>, CompilerError> {
+    let mut spans = HashMap::new();
     let mut module_views = Vec::with_capacity(1 + entry.linked_modules.len());
     module_views.push((entry.module, entry.reachability));
     module_views.extend(
@@ -465,29 +456,29 @@ fn first_authored_locations(
     );
 
     for (module, reachability) in &module_views {
-        record_reachable_resource_locations(&mut locations, module, reachability)?;
+        record_reachable_resource_spans(&mut spans, module, reachability)?;
     }
 
     // Only the selected entry root contributes compile-time fragments to its entry union.
-    record_const_fragment_resource_locations(&mut locations, entry.module);
+    record_const_fragment_resource_spans(&mut spans, entry.module);
 
     for (module, _) in module_views {
         for resource in module.executable.resource_table.origins() {
-            locations
+            spans
                 .entry(resource.origin.clone())
-                .or_insert_with(|| OriginAuthoredLocations {
+                .or_insert_with(|| OriginAuthoredSpans {
                     executable: Vec::new(),
                     metadata: Vec::new(),
-                    fallback: Some(resource.first_authored_location.clone()),
+                    fallback: resource.first_authored_span,
                 });
         }
     }
 
-    Ok(locations)
+    Ok(spans)
 }
 
-fn record_reachable_resource_locations(
-    locations: &mut HashMap<StableResourceOriginId, OriginAuthoredLocations>,
+fn record_reachable_resource_spans(
+    spans: &mut HashMap<StableResourceOriginId, OriginAuthoredSpans>,
     module: &Module,
     reachability: &HirReachability,
 ) -> Result<(), CompilerError> {
@@ -496,18 +487,18 @@ fn record_reachable_resource_locations(
             .executable
             .resource_table
             .try_origin(resource_use.resource_id)?;
-        locations
+        spans
             .entry(resource.origin.clone())
             .or_default()
             .executable
-            .push(resource_use.location.clone());
+            .push(resource_use.span);
     }
 
     Ok(())
 }
 
-fn record_const_fragment_resource_locations(
-    locations: &mut HashMap<StableResourceOriginId, OriginAuthoredLocations>,
+fn record_const_fragment_resource_spans(
+    spans: &mut HashMap<StableResourceOriginId, OriginAuthoredSpans>,
     module: &Module,
 ) {
     for fragment in &module.metadata.const_top_level_fragments {
@@ -517,11 +508,11 @@ fn record_const_fragment_resource_locations(
 
         for piece in pieces {
             if let OwnedFoldedStringPiece::Resource(origin) = piece {
-                locations
+                spans
                     .entry(origin.clone())
                     .or_default()
                     .metadata
-                    .push(fragment.location.clone());
+                    .push(fragment.span);
             }
         }
     }

@@ -28,7 +28,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
@@ -39,7 +38,8 @@ use std::path::Path;
 fn text_declaration(path: &str, text: StringId, string_table: &mut StringTable) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
-        value: Expression::string_slice(text, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::string_slice(text, None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -56,7 +56,7 @@ fn resource_id(table: &mut ModuleResourceTable, relative: &str) -> ResourceId {
 
     table.intern_origin(
         StableResourceOriginId::module_owned(module, logical_path),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -67,7 +67,8 @@ fn structural_string_declaration(
 ) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
-        value: Expression::structural_string(pieces, SourceLocation::default()),
+        value: Expression::structural_string(pieces, None),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -79,11 +80,12 @@ fn template_declaration(path: &str, string_table: &mut StringTable) -> Declarati
             phase: TemplateTirPhase::Finalized,
             context: TemplateViewContext::default(),
         },
-        location: SourceLocation::default(),
+        span: None,
     };
     Declaration {
         id: InternedPath::from_single_str(path, string_table),
         value: Expression::template(template, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -329,7 +331,7 @@ fn the_text_only_accessor_refuses_pieces() {
 //  Record fields
 // ------------------------------------
 
-/// Builds one record-typed declaration whose fields carry the given authored locations.
+/// Builds one record-typed declaration whose fields carry the given authored spans.
 fn record_declaration(
     path: &str,
     fields: Vec<Declaration>,
@@ -340,35 +342,40 @@ fn record_declaration(
         value: Expression::struct_instance(
             InternedPath::from_single_str("Record", string_table),
             fields,
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             true,
             None,
             TypeEnvironment::default().builtins().none,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
 
-fn int_field(name: &str, location: SourceLocation, string_table: &mut StringTable) -> Declaration {
+fn int_field(
+    name: &str,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    string_table: &mut StringTable,
+) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(name, string_table),
-        value: Expression::int(7, location, ValueMode::ImmutableOwned),
+        value: Expression::int(7, span, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     }
 }
 
 #[test]
-fn record_fields_keep_authored_order_and_locations() {
+fn record_fields_keep_authored_order() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::default();
-    let alpha_location = SourceLocation::default();
 
     let declaration = record_declaration(
         "meta",
         vec![
-            int_field("alpha", alpha_location.clone(), &mut string_table),
-            int_field("beta", SourceLocation::default(), &mut string_table),
+            int_field("alpha", None, &mut string_table),
+            int_field("beta", None, &mut string_table),
         ],
         &mut string_table,
     );
@@ -383,11 +390,8 @@ fn record_fields_keep_authored_order_and_locations() {
         panic!("expected a stored record payload");
     };
 
-    // Authored field order survives the store, and each field's location is the location of
-    // its field expression.
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].name.name(), Some(string_table.intern("alpha")));
-    assert_eq!(fields[0].location, alpha_location);
     assert_eq!(fields[1].name.name(), Some(string_table.intern("beta")));
 }
 
@@ -399,8 +403,8 @@ fn duplicate_record_field_name_is_a_construction_error() {
     let declaration = record_declaration(
         "meta",
         vec![
-            int_field("name", SourceLocation::default(), &mut string_table),
-            int_field("name", SourceLocation::default(), &mut string_table),
+            int_field("name", None, &mut string_table),
+            int_field("name", None, &mut string_table),
         ],
         &mut string_table,
     );
@@ -425,11 +429,7 @@ fn const_record_aliases_share_the_target_root() {
 
     let target = record_declaration(
         "meta",
-        vec![int_field(
-            "alpha",
-            SourceLocation::default(),
-            &mut string_table,
-        )],
+        vec![int_field("alpha", None, &mut string_table)],
         &mut string_table,
     );
     let alias_declaration = Declaration {
@@ -438,10 +438,11 @@ fn const_record_aliases_share_the_target_root() {
             meta.clone(),
             DataType::Inferred,
             type_environment.anonymous_const_record_type(),
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
             ConstRecordState::ConstRecord,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 

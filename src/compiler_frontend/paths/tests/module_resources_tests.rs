@@ -1,7 +1,7 @@
 //! Unit tests for the module-local resource origin table.
 //!
 //! These protect the interning invariants: repeated names share one origin record, the first
-//! authored location wins, distinct origins get distinct handles, and a handle the table never
+//! authored span wins, distinct origins get distinct handles, and a handle the table never
 //! issued is a fallible read rather than a silent index.
 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -11,9 +11,8 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use std::path::Path;
 
 fn origin(relative: &str) -> StableResourceOriginId {
@@ -29,57 +28,48 @@ fn origin(relative: &str) -> StableResourceOriginId {
     StableResourceOriginId::module_owned(module, logical_path)
 }
 
-fn location(strings: &mut StringTable, file: &str, line_number: i32) -> SourceLocation {
-    SourceLocation::new(
-        InternedPath::from_single_str(file, strings),
-        CharPosition {
-            line_number,
-            char_column: 1,
-        },
-        CharPosition {
-            line_number,
-            char_column: 20,
-        },
+fn span(offset: u32) -> SourceSpan {
+    let mut extended = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(offset, 1, &mut extended).expect("test span should fit"),
     )
 }
 
 #[test]
 fn repeating_one_origin_interns_a_single_record() {
-    let mut strings = StringTable::new();
     let mut table = ModuleResourceTable::new();
 
-    let first = table.intern_origin(origin("logo.svg"), location(&mut strings, "@page.moth", 3));
-    let second = table.intern_origin(origin("logo.svg"), location(&mut strings, "header.moth", 9));
+    let first = table.intern_origin(origin("logo.svg"), Some(span(30)));
+    let second = table.intern_origin(origin("logo.svg"), Some(span(90)));
 
     assert_eq!(first, second);
     assert_eq!(table.origins().len(), 1);
 }
 
 #[test]
-fn the_first_authored_location_owns_the_origin_record() {
-    let mut strings = StringTable::new();
+fn the_first_authored_span_owns_the_origin_record() {
     let mut table = ModuleResourceTable::new();
 
-    let first_authored = location(&mut strings, "@page.moth", 3);
-    let resource = table.intern_origin(origin("logo.svg"), first_authored.clone());
-    table.intern_origin(origin("logo.svg"), location(&mut strings, "header.moth", 9));
+    let first_authored = span(30);
+    let resource = table.intern_origin(origin("logo.svg"), Some(first_authored));
+    table.intern_origin(origin("logo.svg"), Some(span(90)));
 
     let record = table
         .try_origin(resource)
         .expect("origin should be in range");
 
-    assert_eq!(record.first_authored_location, first_authored);
+    assert_eq!(record.first_authored_span, Some(first_authored));
 }
 
 #[test]
-fn resource_origin_locations_remap_with_the_owning_string_table() {
-    let mut local_strings = StringTable::new();
+fn resource_origin_spans_are_stable_through_string_remapping() {
     let mut table = ModuleResourceTable::new();
-    let resource = table.intern_origin(
-        origin("logo.svg"),
-        location(&mut local_strings, "@page.moth", 3),
-    );
+    let first_authored = span(30);
+    let resource = table.intern_origin(origin("logo.svg"), Some(first_authored));
 
+    let mut local_strings = StringTable::new();
+    local_strings.intern("unused");
     let mut merged_strings = StringTable::new();
     merged_strings.intern("prefix");
     let remap = merged_strings.merge_from(&local_strings);
@@ -91,20 +81,17 @@ fn resource_origin_locations_remap_with_the_owning_string_table() {
         table
             .try_origin(resource)
             .expect("resource should remain readable after remapping")
-            .first_authored_location
-            .scope
-            .name_str(&merged_strings),
-        Some("@page.moth")
+            .first_authored_span,
+        Some(first_authored)
     );
 }
 
 #[test]
 fn distinct_origins_get_distinct_dense_handles() {
-    let mut strings = StringTable::new();
     let mut table = ModuleResourceTable::new();
 
-    let logo = table.intern_origin(origin("logo.svg"), location(&mut strings, "@page.moth", 3));
-    let mark = table.intern_origin(origin("mark.svg"), location(&mut strings, "@page.moth", 4));
+    let logo = table.intern_origin(origin("logo.svg"), Some(span(30)));
+    let mark = table.intern_origin(origin("mark.svg"), Some(span(40)));
 
     assert_ne!(logo, mark);
     assert_eq!(table.origins().len(), 2);
@@ -115,11 +102,8 @@ fn distinct_origins_get_distinct_dense_handles() {
 /// architectural invariant of how the handle is passed around, not a runtime check.
 #[test]
 fn an_out_of_range_resource_handle_is_rejected() {
-    let mut strings = StringTable::new();
-
     let mut donor = ModuleResourceTable::new();
-    let past_the_end =
-        donor.intern_origin(origin("logo.svg"), location(&mut strings, "@page.moth", 3));
+    let past_the_end = donor.intern_origin(origin("logo.svg"), Some(span(30)));
 
     let empty = ModuleResourceTable::new();
 

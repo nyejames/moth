@@ -19,7 +19,6 @@ use crate::compiler_frontend::datatypes::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -178,11 +177,12 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             id: struct_a_field_b,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
+                None,
                 builtin_type_ids::NONE,
                 DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );
@@ -192,11 +192,12 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             id: struct_b_field_a,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
+                None,
                 builtin_type_ids::NONE,
                 DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );
@@ -225,11 +226,12 @@ fn non_recursive_runtime_structs_are_allowed() {
             id: field_ax,
             value: Expression::new(
                 ExpressionKind::NoValue,
-                SourceLocation::default(),
+                None,
                 builtin_type_ids::INT,
                 DataType::Int,
                 ValueMode::ImmutableOwned,
             ),
+            binding_span: None,
             config_qualifier: None,
         }],
     );

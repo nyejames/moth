@@ -73,7 +73,6 @@ fn choice_variant_construction_emits_tagged_carrier() {
                 target: HirPlace::Local(LocalId(0)),
                 value: choice_construct(1, 2, types.choice_unit, RegionId(0)),
             },
-            1,
         )],
         terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
     };
@@ -128,7 +127,6 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
                     target: HirPlace::Local(LocalId(0)),
                     value: choice_construct(1, 0, types.choice_unit, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -254,7 +252,6 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
                     target: HirPlace::Local(LocalId(0)),
                     value: choice_construct(1, 1, types.choice_unit, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
@@ -363,7 +360,6 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     target: HirPlace::Local(LocalId(0)),
                     value: int_expression(1, 5, types.int, RegionId(0)),
                 },
-                1,
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(

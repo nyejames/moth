@@ -7,9 +7,9 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     GenericBaseType, GenericInstantiationKey, TypeIdentityKey,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 // --------------------------
@@ -19,18 +19,18 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) fn validate_no_recursive_generic_type(
     declaration_path: &InternedPath,
     data_type: &DataType,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     _string_table: &StringTable,
 ) -> TypeResolutionResult<()> {
     if !generic_type_references_nominal_path(data_type, declaration_path) {
         return Ok(());
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_declaration(
+    Err(CompilerDiagnostic::invalid_declaration(
         InvalidDeclarationReason::RecursiveGenericType,
         declaration_path.name(),
-        location.to_owned(),
-    )))
+        span,
+    ))
 }
 
 fn generic_type_references_nominal_path(
@@ -202,18 +202,16 @@ pub(crate) fn validate_no_recursive_runtime_structs(
                 .map(|path| path.to_string(string_table))
                 .collect::<Vec<_>>()
                 .join(" -> ");
-
-            let cycle_location = struct_fields_by_path
+            let cycle_span = struct_fields_by_path
                 .get(current)
                 .and_then(|fields| fields.first())
-                .map(|field| field.value.location.clone())
-                .unwrap_or_default();
+                .and_then(|field| field.value.span);
 
-            return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+            return Err(CompilerDiagnostic::invalid_declaration(
                 InvalidDeclarationReason::RecursiveRuntimeStruct { cycle },
                 None,
-                cycle_location,
-            )));
+                cycle_span,
+            ));
         }
 
         visiting.push(current.to_owned());

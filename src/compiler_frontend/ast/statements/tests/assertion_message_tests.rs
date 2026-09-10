@@ -5,7 +5,7 @@
 //! WHY: message evaluation happens on the terminal failure edge, so each expression owner must
 //!      preserve the same no-escape rule without token rescanning.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     EnclosingExitEffect, assert_message_escape_diagnostic, classify_assertion_message_effect,
 };
@@ -33,44 +33,34 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_node, node, test_source_location,
 };
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn propagated_expression(line: i32) -> Expression {
-    let location = SourceLocation {
-        start_pos: crate::compiler_frontend::tokenizer::tokens::CharPosition {
-            line_number: line,
-            char_column: 3,
-        },
-        end_pos: crate::compiler_frontend::tokenizer::tokens::CharPosition {
-            line_number: line,
-            char_column: 4,
-        },
-        ..SourceLocation::default()
-    };
+fn propagated_expression(_line: i32) -> Expression {
+    let span: Option<SourceSpan> = None;
     Expression::option_propagation_with_type_id(
-        Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+        Expression::bool(true, span, ValueMode::ImmutableOwned),
         builtin_type_ids::BOOL,
         DataType::Bool,
-        location,
+        span,
     )
 }
 
 fn handoff_expression(handoff: OwnedRuntimeTemplateHandoff) -> Expression {
     Expression::new(
         ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
-        SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
     )
 }
 
-fn assert_escape_location(message: Expression) -> SourceLocation {
+fn assert_escape_span(message: Expression) -> Option<SourceSpan> {
     let diagnostic = assert_message_escape_diagnostic(&message, &TemplateIrStore::new())
         .expect("assertion-message traversal should not fail")
         .expect("message should reject escaping control flow");
@@ -80,7 +70,7 @@ fn assert_escape_location(message: Expression) -> SourceLocation {
             reason: InvalidFallibleHandlingReason::AssertionMessageCannotEscape,
         }
     ));
-    diagnostic.primary_location
+    diagnostic.primary_span
 }
 
 #[test]
@@ -108,51 +98,59 @@ check || -> String:
 
 #[test]
 fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
-    let dynamic_location = propagated_expression(10).location;
+    let dynamic_span = propagated_expression(10).span;
     let dynamic = handoff_expression(OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(propagated_expression(10)),
             reactive_subscription: None,
+            span: None,
         }),
-        location: SourceLocation::default(),
+        span: None,
     });
-    assert_eq!(assert_escape_location(dynamic), dynamic_location);
+    assert_eq!(assert_escape_span(dynamic), dynamic_span);
 
-    let selector_location = propagated_expression(11).location;
+    let selector_span = propagated_expression(11).span;
     let selector = handoff_expression(OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
             branches: vec![OwnedRuntimeTemplateBranch {
                 selector: TemplateBranchSelector::Bool(propagated_expression(11)),
-                body: OwnedRuntimeTemplateNode::Sequence { children: vec![] },
-                location: SourceLocation::default(),
+                body: OwnedRuntimeTemplateNode::Sequence {
+                    children: vec![],
+                    span: None,
+                },
+                span: None,
             }],
             fallback: None,
-            location: SourceLocation::default(),
+            else_marker: None,
+            span: None,
         }),
-        location: SourceLocation::default(),
+        span: None,
     });
-    assert_eq!(assert_escape_location(selector), selector_location);
+    assert_eq!(assert_escape_span(selector), selector_span);
 
-    let header_location = propagated_expression(12).location;
+    let header_span = propagated_expression(12).span;
     let header = handoff_expression(OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Loop {
             header: TemplateLoopHeader::Conditional {
                 condition: Box::new(propagated_expression(12)),
             },
-            body: Box::new(OwnedRuntimeTemplateNode::Sequence { children: vec![] }),
+            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                children: vec![],
+                span: None,
+            }),
             aggregate_wrapper: None,
-            location: SourceLocation::default(),
+            span: None,
         }),
-        location: SourceLocation::default(),
+        span: None,
     });
-    assert_eq!(assert_escape_location(header), header_location);
+    assert_eq!(assert_escape_span(header), header_span);
 }
 
 #[test]
 fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
     let mut store = TemplateIrStore::new();
     let site_id = store.next_expression_site_id();
-    let location = propagated_expression(20).location;
+    let span = propagated_expression(20).span;
     let node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(propagated_expression(20)),
@@ -160,14 +158,14 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
             reactive_subscription: None,
             site_id,
         },
-        location.clone(),
+        span,
     ));
     let root = store.push_template(TemplateIr::new(
         node,
         Style::default(),
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
-        location.clone(),
+        span,
     ));
     let template = Template {
         tir_reference: TemplateTirReference {
@@ -175,11 +173,11 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location: location.clone(),
+        span,
     };
     let message = Expression::new(
         ExpressionKind::Template(Box::new(template)),
-        location.clone(),
+        span,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -188,11 +186,11 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
     let diagnostic = assert_message_escape_diagnostic(&message, &store)
         .expect("raw TIR traversal should not fail")
         .expect("raw TIR dynamic expressions must reject propagation");
-    assert_eq!(diagnostic.primary_location, location);
+    assert_eq!(diagnostic.primary_span, span);
 }
 
 #[test]
-fn fallible_call_keeps_call_mapping_location_separate_from_postfix_effect_location() {
+fn fallible_call_keeps_call_mapping_span_separate_from_postfix_effect_span() {
     let source = r#"
 may_fail || -> String, Error!:
     return! Error("boom")
@@ -213,60 +211,52 @@ check || -> String, Error!:
         })
         .expect("expected the fallible value declaration");
 
-    let propagation_location = declaration
+    let propagation_span = declaration
         .value
-        .propagation_location()
-        .expect("parsed postfix propagation must retain its authored location");
-    assert_eq!(
-        propagation_location.start_pos.line_number,
-        declaration.value.location.start_pos.line_number
-    );
-    assert!(
-        propagation_location.start_pos.char_column
-            > declaration.value.location.start_pos.char_column,
-        "the postfix marker must be after the ordinary call location"
-    );
+        .propagation_span()
+        .expect("parsed postfix propagation must retain its authored span");
+    assert_ne!(Some(propagation_span), declaration.value.span);
 
     assert_eq!(
         classify_assertion_message_effect(&declaration.value, &TemplateIrStore::new())
             .expect("effect classification should succeed"),
-        Some(EnclosingExitEffect::ErrorPropagation(
-            propagation_location.clone(),
-        ))
+        Some(EnclosingExitEffect::ErrorPropagation(Some(
+            propagation_span
+        )))
     );
 }
 
 #[test]
 fn effect_classifier_respects_function_and_loop_control_boundaries() {
-    let location = test_source_location(30);
+    let span = test_source_location(30);
     let nested_function = function_node(
         Default::default(),
         FunctionSignature::default(),
-        vec![node(NodeKind::Return(vec![]), location.clone())],
-        location.clone(),
+        vec![node(NodeKind::Return(vec![]), span)],
+        span,
     );
     let loop_with_local_break = node(
         NodeKind::WhileLoop(
-            Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
-            vec![node(NodeKind::Break, location.clone())],
+            Expression::bool(true, span, ValueMode::ImmutableOwned),
+            vec![node(NodeKind::Break, span)],
         ),
-        location.clone(),
+        span,
     );
     let message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
+                condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
                 then_body: vec![nested_function, loop_with_local_break],
                 else_body: vec![],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: Default::default(),
+                else_scope: Default::default(),
+                span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
             })),
         },
-        location.clone(),
-        crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
+        span,
+        builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
     );
@@ -280,17 +270,17 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let outer_break_message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
-                then_body: vec![node(NodeKind::Break, location.clone())],
+                condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
+                then_body: vec![node(NodeKind::Break, span)],
                 else_body: vec![],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: Default::default(),
+                else_scope: Default::default(),
+                span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
             })),
         },
-        location.clone(),
+        span,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -303,17 +293,17 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let outer_continue_message = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
-                then_body: vec![node(NodeKind::Continue, location.clone())],
+                condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
+                then_body: vec![node(NodeKind::Continue, span)],
                 else_body: vec![],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: Default::default(),
+                else_scope: Default::default(),
+                span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
             })),
         },
-        location.clone(),
+        span,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -327,29 +317,25 @@ fn effect_classifier_respects_function_and_loop_control_boundaries() {
     let enclosing_return = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: Expression::bool(true, location.clone(), ValueMode::ImmutableOwned),
-                then_body: vec![AstNode {
-                    kind: NodeKind::Return(vec![]),
-                    location: location.clone(),
-                    scope: Default::default(),
-                }],
+                condition: Expression::bool(true, span, ValueMode::ImmutableOwned),
+                then_body: vec![node(NodeKind::Return(vec![]), span)],
                 else_body: vec![],
-                then_scope: location.scope.clone(),
-                else_scope: location.scope.clone(),
-                location: location.clone(),
+                then_scope: Default::default(),
+                else_scope: Default::default(),
+                span,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![],
             })),
         },
-        location.clone(),
-        crate::compiler_frontend::datatypes::builtin_type_ids::STRING,
+        span,
+        builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
     );
     assert_eq!(
         classify_assertion_message_effect(&enclosing_return, &TemplateIrStore::new())
             .expect("enclosing return classification should succeed"),
-        Some(EnclosingExitEffect::FunctionReturn(location))
+        Some(EnclosingExitEffect::FunctionReturn(span))
     );
 }
 

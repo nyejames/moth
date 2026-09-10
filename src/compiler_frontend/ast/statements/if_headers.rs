@@ -95,14 +95,19 @@ impl IfHeaderClassification {
         let Some(delimiter_index) = self.delimiter_index else {
             return false;
         };
-        let Some(token) = token_stream.tokens.get(token_index) else {
+        if token_index >= token_stream.tokens.len() || delimiter_index >= token_stream.tokens.len()
+        {
             return false;
-        };
-        let Some(delimiter) = token_stream.tokens.get(delimiter_index) else {
-            return false;
-        };
+        }
 
-        token.location.start_pos.line_number == delimiter.location.start_pos.line_number
+        let (start, end) = if token_index <= delimiter_index {
+            (token_index, delimiter_index)
+        } else {
+            (delimiter_index, token_index)
+        };
+        token_stream.tokens[start..=end]
+            .iter()
+            .all(|token| token.kind != TokenKind::Newline)
     }
 
     /// Returns true when `|` is the raw next token after `is`.
@@ -124,9 +129,8 @@ impl IfHeaderClassification {
 
 /// Stage-local result for `if` header parsing and option-present capture helpers.
 ///
-/// WHY: `CompilerDiagnostic` is large enough that returning it directly inside a
-/// `Result` triggers `clippy::result_large_err`. Boxing at this boundary keeps the
-/// four `if`-header owner functions uniform without changing diagnostic semantics.
+/// `ExpressionParseError` keeps diagnosed failures as plain `CompilerDiagnostic`
+/// values and infrastructure failures on their typed outer lane.
 type IfHeaderResult<T> = Result<T, ExpressionParseError>;
 
 /// Parse the header after `if`, leaving the stream at the colon or body marker.
@@ -156,7 +160,7 @@ pub(crate) fn parse_if_header(
     if if_condition_is_missing(token_stream) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -371,7 +375,7 @@ fn parse_option_present_capture_if_header(
             InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
             None,
             None,
-            scrutinee.location.clone(),
+            scrutinee.span,
         )
         .into());
     };
@@ -380,9 +384,9 @@ fn parse_option_present_capture_if_header(
         parse_option_pattern(token_stream, inner_type_id, string_table, type_environment)?;
     let MatchPattern::OptionPresentCapture {
         name,
-        binding_location,
+        binding_span,
         inner_type_id: capture_inner_type_id,
-        location: pattern_location,
+        span: pattern_span,
         ..
     } = &pattern
     else {
@@ -390,17 +394,16 @@ fn parse_option_present_capture_if_header(
             InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
             None,
             None,
-            pattern.location().clone(),
+            pattern.span(),
         )
         .into());
     };
-
     let (then_context, pattern) = build_option_present_capture_scope_and_pattern(
         context,
         *name,
-        binding_location,
+        *binding_span,
         *capture_inner_type_id,
-        pattern_location,
+        *pattern_span,
         type_interner,
         string_table,
     )?;

@@ -24,9 +24,9 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -59,7 +59,7 @@ pub struct ResolvedCastExpression {
     pub(crate) requires_optional_wrap_after_cast: bool,
     pub(crate) evidence: ResolvedCastEvidence,
     pub(crate) handling: CastHandling,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -126,7 +126,7 @@ pub enum ExpressionKind {
         method_path: InternedPath,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Compiler-owned collection builtin call (`get`, `set`, `push`, `remove`, `length`).
@@ -135,7 +135,7 @@ pub enum ExpressionKind {
         op: CollectionBuiltinOp,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// Compiler-owned map builtin call (`get`, `contains`, `set`, `remove`, `clear`, `length`).
@@ -145,7 +145,7 @@ pub enum ExpressionKind {
         receiver_requires_mutable: bool,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     /// User function call with explicit `!` or `catch` handling.
@@ -157,13 +157,8 @@ pub enum ExpressionKind {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
-        /// Authored postfix `!` location, kept separate from the call expression location.
-        ///
-        /// WHAT: preserves the source site of propagation while `Expression::location`
-        ///       remains the call location used by ordinary call lowering and side tables.
-        /// WHY: one source location cannot faithfully identify both the call and its
-        ///      control-flow effect.
-        propagation_location: Option<SourceLocation>,
+        /// Authored postfix `!` span, kept separate from the call expression span.
+        propagation_span: Option<SourceSpan>,
     },
 
     /// External fallible function call with explicit handling.
@@ -176,8 +171,8 @@ pub enum ExpressionKind {
         result_type_ids: Vec<TypeId>,
         error_type_id: TypeId,
         handling: FallibleExpressionHandling,
-        /// Authored postfix `!` location, kept separate from the host-call location.
-        propagation_location: Option<SourceLocation>,
+        /// Authored postfix `!` span, kept separate from the host-call span.
+        propagation_span: Option<SourceSpan>,
     },
 
     /// Explicit `cast` / `cast!` expression resolved at an explicit typed boundary.
@@ -199,8 +194,8 @@ pub enum ExpressionKind {
     HandledFallibleExpression {
         value: Box<Expression>,
         handling: FallibleExpressionHandling,
-        /// Authored postfix `!` location, kept separate from the wrapped value location.
-        propagation_location: Option<SourceLocation>,
+        /// Authored postfix `!` span, kept separate from the wrapped value span.
+        propagation_span: Option<SourceSpan>,
     },
 
     /// Postfix option propagation (`expr?`).

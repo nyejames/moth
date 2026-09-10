@@ -46,9 +46,7 @@
 //! narrower because imported-module-root headers belong to another module's component.
 
 use super::SourceProviderDependencySet;
-use super::model::{
-    PublicBindingExport, PublicDiagnosticLocation, PublicExportDiagnosticProvenance,
-};
+use super::model::{PublicBindingExport, PublicExportDiagnosticProvenance};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{
@@ -59,11 +57,10 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
 };
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -179,7 +176,7 @@ impl DirectExportSeed {
 /// WHAT: projects the sorted declaration shells and header-built public export metadata into free
 ///       export bindings and the public nominal-type origin index. The active root's owning
 ///       stable module origin is resolved from the per-file `SourceModuleOriginTable` using the
-///       retained active root `FileId`, not from a loose module-origin argument. It reads no
+///       retained active root `SourceId`, not from a loose module-origin argument. It reads no
 ///       source text, tokens, HIR, AST or backend output. The caller retains the seed
 ///       only on overall semantic success; a diagnosed module exposes no seed.
 /// WHY: the semantic compilation boundary already holds the bound, sorted declaration shells and
@@ -189,7 +186,7 @@ impl DirectExportSeed {
 ///      of trusting a single loose argument.
 pub(in crate::compiler_frontend) fn build_direct_export_seed(
     source_module_origins: &SourceModuleOriginTable,
-    active_root_file_id: FileId,
+    active_root_file_id: SourceId,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -348,7 +345,7 @@ fn collect_binding_exports<'a>(
 ///      guess.
 fn resolve_active_module_origin(
     source_module_origins: &SourceModuleOriginTable,
-    active_root_file_id: FileId,
+    active_root_file_id: SourceId,
     sorted_headers: &[Header],
 ) -> Result<StableModuleOriginIdentity, CompilerError> {
     let active_origin = source_module_origins
@@ -356,7 +353,7 @@ fn resolve_active_module_origin(
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "defined public export-origin construction: the active root (file id {}) has no owning module origin in the source module origin table",
-                active_root_file_id.0
+                active_root_file_id.index()
             ))
         })?
         .clone();
@@ -366,22 +363,14 @@ fn resolve_active_module_origin(
             continue;
         }
 
-        // Preparation sets `file_id` on every prepared Moth file's tokens, so a
-        // directly-defined public header without one is an internal invariant violation, not a
-        // path-resolution fallback case.
-        let file_id = header.tokens.file_id.ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a directly-defined public header has no retained file identity (logical path: {:?})",
-                header.source_file
-            ))
-        })?;
+        let file_id = header.tokens.file_id;
 
         let header_origin = source_module_origins
             .origin_for(file_id)?
             .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "defined public export-origin construction: a directly-defined public header's source file (file id {}) has no owning module origin",
-                file_id.0
+                file_id.index()
             ))
         })?;
 
@@ -462,7 +451,7 @@ fn index_public_nominal_type_origins(
 /// WHAT: maps canonical declaration paths to stable [`OriginTypeId`] values for every
 ///       `Struct`/`Choice` declaration whose canonical source path is targeted by at least one
 ///       retained module-root or source-package public export entry, deriving each origin from
-///       the header's retained [`FileId`] through the [`SourceModuleOriginTable`]. This mirrors
+///       the header's retained [`SourceId`] through the [`SourceModuleOriginTable`]. This mirrors
 ///       the AST `source_path_is_public_from_root_file` nameability owner: a nominal is public/
 ///       nameable when a retained public export entry targets its source path. That single rule
 ///       covers directly-defined active-root public nominal roots, imported project-graph public
@@ -473,10 +462,11 @@ fn index_public_nominal_type_origins(
 ///       active module origin; imported project-graph nominals resolve to their defining provider
 ///       module origin, so a directly-defined public signature or field that references an
 ///       imported public nominal projects to `SourceNominal(provider_origin)` rather than the
-///       active module origin. A source-package header whose `FileId` table entry is `None` (no
-///       project-module owner) is deliberately absent from the index: its nominals are not
-///       project-graph-owned and must not receive a fabricated origin, and a projected public type
-///       that requires one fails through the total nominal resolver with a precise `CompilerError`.
+///       active module origin. Source-package headers outside the project-module graph are
+///       deliberately absent from the index because their nominals are not project-graph-owned,
+///       and a projected public type that requires one fails through the total nominal resolver
+///       with a precise `CompilerError`.
+///
 /// WHY: the directly-defined active-root index kept on the seed for receiver-surface
 ///      finalization excludes imported and alias-target nominals by design, because imported and
 ///      alias-target receiver surfaces belong to their defining module and must not enter this
@@ -488,7 +478,7 @@ fn index_public_nominal_type_origins(
 ///      single authority. It is transient: it exists only to feed the projection and is not
 ///      retained on the seed.
 ///
-/// Rejects a missing `FileId`, an out-of-range table lookup, a duplicate canonical nominal path,
+/// Rejects an out-of-range table lookup, a duplicate canonical nominal path,
 /// a category inconsistency or a conflicting origin explicitly. It never silently overwrites an
 /// existing entry.
 pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
@@ -520,19 +510,8 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
             _ => continue,
         };
 
-        // Preparation assigns a retained FileId to every prepared file's tokens, so a public
-        // export-targeted header without one is an internal invariant violation rather than an
-        // intentional exclusion.
-        let Some(file_id) = header.tokens.file_id else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a public export-targeted nominal type header has no retained FileId (path: {:?})",
-                header.tokens.src_path
-            )));
-        };
+        let file_id = header.tokens.file_id;
 
-        // A source-package file outside the project module graph has an explicit None owning
-        // origin. It is deliberately absent from the index; a projected public type that requires
-        // its nominal fails through the total nominal resolver with a precise CompilerError.
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
         };
@@ -556,18 +535,17 @@ pub(in crate::compiler_frontend) fn build_public_source_nominal_origin_index(
 /// WHAT: maps each directly-defined, imported project-graph or public-alias-target trait
 ///       declaration's canonical path to a stable `OriginTraitId`, so a bound that references an
 ///       imported or alias-target project-graph trait resolves to that trait's defining provider
-///       module origin rather than the active module origin. A source-package header whose
-///       `FileId` table entry is `None` (no project-module owner) is deliberately absent from the
-///       index: its trait is not project-graph-owned and must not receive a fabricated origin,
-///       and a projected public bound that requires one fails through the total bound resolver
-///       with a precise `CompilerError`.
+///       module origin rather than the active module origin. Source-package headers outside the
+///       project-module graph are deliberately absent from the index because their traits are not
+///       project-graph-owned, and a projected public bound that requires one fails through the
+///       total bound resolver with a precise `CompilerError`.
 ///
 /// Reuses the shared [`PublicExportTarget::is_source_path`] authority via
 /// [`any_retained_public_export_targets_source_path`] so trait origin indexing and nominal
 /// origin indexing cannot drift on what a public export targets. It never uses display/path
 /// identity fallback.
 ///
-/// Rejects a missing `FileId`, an out-of-range table lookup, a duplicate canonical trait path
+/// Rejects an out-of-range table lookup, a duplicate canonical trait path
 /// or a conflicting origin explicitly. It never silently overwrites an existing entry.
 pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
     source_module_origins: &SourceModuleOriginTable,
@@ -589,12 +567,7 @@ pub(in crate::compiler_frontend) fn build_public_source_trait_origin_index(
             )));
         };
 
-        let Some(file_id) = header.tokens.file_id else {
-            return Err(CompilerError::compiler_error(format!(
-                "defined public export-origin construction: a public export-targeted trait header has no retained FileId (path: {:?})",
-                header.tokens.src_path
-            )));
-        };
+        let file_id = header.tokens.file_id;
 
         let Some(module_origin) = source_module_origins.origin_for(file_id)? else {
             continue;
@@ -735,7 +708,7 @@ fn collect_free_export_bindings(
         ));
         export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
             public_name,
-            location: portable_source_location(&header.name_location, string_table),
+            span: header.name_span,
         });
     }
 
@@ -755,12 +728,10 @@ fn collect_free_export_bindings(
         if seen_public_names.insert(reexport.binding.public_name().to_owned()) {
             let public_name = reexport.binding.public_name().to_owned();
             export_bindings.push(reexport.binding);
-            if let Some(location) = reexport.provenance {
-                export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
-                    public_name,
-                    location,
-                });
-            }
+            export_diagnostic_provenance.push(PublicExportDiagnosticProvenance {
+                public_name,
+                span: reexport.provenance,
+            });
         }
     }
 
@@ -774,24 +745,6 @@ fn collect_free_export_bindings(
 
     export_diagnostic_provenance.sort_by(|left, right| left.public_name.cmp(&right.public_name));
     Ok((export_bindings, export_diagnostic_provenance))
-}
-
-pub(crate) fn portable_source_location(
-    location: &SourceLocation,
-    string_table: &StringTable,
-) -> PublicDiagnosticLocation {
-    PublicDiagnosticLocation {
-        scope_components: location
-            .scope
-            .as_components()
-            .iter()
-            .map(|component| string_table.resolve(*component).to_owned())
-            .collect(),
-        start_line: location.start_pos.line_number,
-        start_column: location.start_pos.char_column,
-        end_line: location.end_pos.line_number,
-        end_column: location.end_pos.char_column,
-    }
 }
 
 /// Collect re-export bindings from `module_root_public_exports` and
@@ -865,7 +818,7 @@ struct ReexportBindingContext<'a> {
 
 struct ReexportBinding {
     binding: ExportBinding,
-    provenance: Option<PublicDiagnosticLocation>,
+    provenance: Option<SourceSpan>,
 }
 
 fn resolve_active_root_source<'a>(
@@ -964,9 +917,7 @@ fn collect_one_reexport_binding<'a>(
                 export_name,
                 provider_origin,
             ),
-            provenance: view
-                .export_diagnostic_provenance(selected_name_text)
-                .cloned(),
+            provenance: view.export_diagnostic_provenance(selected_name_text),
         });
         return Ok(());
     }
@@ -993,12 +944,7 @@ fn collect_one_reexport_binding<'a>(
     // is not sufficient here because the retained header set also contains ordinary private files
     // from imported provider modules. Provider declarations remain references to provider
     // interfaces; they must never become consumer-owned direct bindings.
-    let file_id = header.tokens.file_id.ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "re-export binding construction: a re-export target declaration has no retained file identity (path: {:?})",
-            target_path
-        ))
-    })?;
+    let file_id = header.tokens.file_id;
     let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
         return Ok(());
     };
@@ -1016,14 +962,11 @@ fn collect_one_reexport_binding<'a>(
 
     // Determine the declaration category from the header kind and build the origin.
     let origin = reexport_declaration_origin(header, context.module_origin, name)?;
-
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
+
     bindings.push(ReexportBinding {
         binding: ExportBinding::new(context.module_origin.clone(), export_name, origin),
-        provenance: Some(portable_source_location(
-            &header.name_location,
-            context.string_table,
-        )),
+        provenance: header.name_span,
     });
 
     Ok(())

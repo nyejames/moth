@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::templates::template::{
     ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
@@ -20,8 +20,8 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReferen
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 pub(crate) struct TemplateIrBuilder<'store> {
     pub(crate) store: &'store mut TemplateIrStore,
@@ -38,7 +38,7 @@ impl<'store> TemplateIrBuilder<'store> {
         byte_len: usize,
         origin: TemplateSegmentOrigin,
         reactive_subscription: Option<ReactiveSubscription>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let node_id = self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Text {
@@ -46,7 +46,7 @@ impl<'store> TemplateIrBuilder<'store> {
                 byte_len,
                 origin,
             },
-            location,
+            span,
         ));
 
         if let Some(subscription) = reactive_subscription {
@@ -63,26 +63,26 @@ impl<'store> TemplateIrBuilder<'store> {
         text: StringId,
         byte_len: usize,
         origin: TemplateSegmentOrigin,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
-        self.push_text_node_with_subscription(text, byte_len, origin, None, location)
+        self.push_text_node_with_subscription(text, byte_len, origin, None, span)
     }
 
     pub(crate) fn push_sequence_node(
         &mut self,
         children: Vec<TemplateIrNodeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children },
-            location,
+            span,
         ))
     }
 
     pub(crate) fn push_child_template_node_with_reference(
         &mut self,
         reference: TemplateTirChildReference,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let occurrence_id = self.store.next_child_template_occurrence_id();
         self.store.push_node(TemplateIrNode::new(
@@ -90,21 +90,21 @@ impl<'store> TemplateIrBuilder<'store> {
                 reference,
                 occurrence_id,
             },
-            location,
+            span,
         ))
     }
 
     pub(crate) fn push_child_template_node(
         &mut self,
         template: TemplateIrId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let reference = TemplateTirChildReference::new(
             template,
             TemplateTirPhase::Parsed,
             TemplateViewContext::default(),
         );
-        self.push_child_template_node_with_reference(reference, location)
+        self.push_child_template_node_with_reference(reference, span)
     }
 
     pub(crate) fn push_dynamic_expression_node(
@@ -112,7 +112,7 @@ impl<'store> TemplateIrBuilder<'store> {
         expression: Expression,
         origin: TemplateSegmentOrigin,
         reactive_subscription: Option<ReactiveSubscription>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let site_id = self.store.next_expression_site_id();
         self.store.push_node(TemplateIrNode::new(
@@ -122,39 +122,40 @@ impl<'store> TemplateIrBuilder<'store> {
                 reactive_subscription,
                 site_id,
             },
-            location,
+            span,
         ))
     }
 
     pub(crate) fn push_tir_slot_placeholder_node(
         &mut self,
         placeholder: TirSlotPlaceholder,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
-        let location = placeholder.location.clone();
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Slot { placeholder },
-            location,
+            span,
         ))
     }
 
     pub(crate) fn push_slot_node(
         &mut self,
         key: SlotKey,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let occurrence_id = self.store.next_slot_occurrence_id();
-        let placeholder = TirSlotPlaceholder::new(key, occurrence_id, location);
-        self.push_tir_slot_placeholder_node(placeholder)
+        let placeholder =
+            TirSlotPlaceholder::with_wrapper_sets(key, occurrence_id, None, None, false);
+        self.push_tir_slot_placeholder_node(placeholder, span)
     }
 
     pub(crate) fn push_insert_contribution_node(
         &mut self,
         template: TemplateIrId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::InsertContribution { template },
-            location,
+            span,
         ))
     }
 
@@ -162,11 +163,16 @@ impl<'store> TemplateIrBuilder<'store> {
         &mut self,
         branches: Vec<TemplateIrBranch>,
         fallback: Option<TemplateIrNodeId>,
-        location: SourceLocation,
+        else_marker: Option<TemplateElseMarker>,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::BranchChain { branches, fallback },
-            location,
+            TemplateIrNodeKind::BranchChain {
+                branches,
+                fallback,
+                else_marker,
+            },
+            span,
         ))
     }
 
@@ -175,7 +181,7 @@ impl<'store> TemplateIrBuilder<'store> {
         header: TemplateLoopHeader,
         body: TemplateIrNodeId,
         aggregate_wrapper: Option<TemplateIrNodeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let header_sites = self.store.allocate_loop_header_expression_sites(&header);
         self.store.push_node(TemplateIrNode::new(
@@ -185,18 +191,18 @@ impl<'store> TemplateIrBuilder<'store> {
                 body,
                 aggregate_wrapper,
             },
-            location,
+            span,
         ))
     }
 
     pub(crate) fn push_loop_control_node(
         &mut self,
         kind: TemplateLoopControlKind,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::LoopControl { kind },
-            location,
+            span,
         ))
     }
 
@@ -206,9 +212,9 @@ impl<'store> TemplateIrBuilder<'store> {
         style: Style,
         kind: TemplateType,
         summary: TemplateIrSummary,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> TemplateIrId {
         self.store
-            .push_template(TemplateIr::new(root, style, kind, summary, location))
+            .push_template(TemplateIr::new(root, style, kind, summary, span))
     }
 }

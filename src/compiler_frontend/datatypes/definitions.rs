@@ -5,9 +5,9 @@
 //!      cloned into every expression node.
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::ids::{
     BuiltinTypeKey, GenericInstanceKey, GenericParameterId, GenericParameterListId, NominalTypeId,
@@ -71,7 +71,10 @@ pub struct ChoiceTypeDefinition {
 pub struct FieldDefinition {
     pub name: InternedPath,
     pub type_id: TypeId,
-    pub location: SourceLocation,
+    /// Exact authored field/member span, when the owning source identity is available.
+    ///
+    /// Imported, materialized, and synthetic fields intentionally leave this unset.
+    pub span: Option<SourceSpan>,
 }
 
 /// Variant inside a choice definition.
@@ -80,7 +83,10 @@ pub struct ChoiceVariantDefinition {
     pub name: StringId,
     pub tag: usize,
     pub payload: ChoiceVariantPayloadDefinition,
-    pub location: SourceLocation,
+    /// Exact authored variant-name span, when the owning source identity is available.
+    ///
+    /// Imported, materialized, and synthetic variants intentionally leave this unset.
+    pub span: Option<SourceSpan>,
 }
 
 /// Payload shape of a choice variant.

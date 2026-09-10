@@ -136,7 +136,8 @@ A canonical module compilation receives:
 - graph-resolved provider identities and dependency-ordered provider interfaces
 - the namespace and capability surface selected for the project or package build
 - resolved build-configuration values and synthetic compile-time interfaces visible to the module
-- deterministic source identities and a diagnostic identity context
+- final lane source identities and a diagnostic identity context; a module input therefore
+  carries no provisional identity
 
 Source preparation and provider binding are deliberately separate.
 
@@ -300,7 +301,7 @@ Diagnostics are durable compiler data rather than a final formatting step.
 - `CompilerError` owns impossible compiler states, transformation failures, filesystem failures and tooling or backend infrastructure failures.
 - `DiagnosticBag` owns stage-local accumulation.
 - `CompilerMessages` is used at build and rendering boundaries.
-- Diagnostic payloads carry structured reasons, source locations, symbols and semantic identities rather than pre-rendered prose.
+- Diagnostic payloads carry structured reasons, exact `SourceSpan` values, symbols and semantic identities rather than pre-rendered prose.
 - Deferred-feature diagnostics remain distinct from outside-design-scope diagnostics.
 
 Type diagnostics carry semantic type identities plus context. Rendering resolves user-facing names through `DiagnosticRenderContext` and the relevant local type environment.
@@ -311,11 +312,15 @@ Every user-facing diagnostic has a stable code and descriptor independent of its
 
 One project or package compilation boundary owns a diagnostic identity context from bootstrap through final rendering.
 
-- `SourceLocation` stores interned path and scope identity rather than owned display paths.
+- `SourceSpan` stores a final `SourceId` and exact local byte range; source display paths are resolved through the attached context.
 - Parallel workers may return deterministic string-table deltas.
 - File deltas merge in original source order.
 - Module deltas merge in canonical module order.
 - Diagnostics and warnings never merge in worker-completion order.
+- Source identities are final before every downstream consumer: inventory lanes register them
+  upfront and private discovery lanes rebind once at their finalize barrier
+  (`docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
+  finalization`).
 - Tokens, headers, visibility records, type-rendering contexts and artefacts are remapped before a later consumer uses them.
 - A success or failure result that outlives the active compilation call carries the merged `StringTable` or an equivalent self-contained render context.
 
@@ -753,13 +758,37 @@ A recognised source kind unsupported by the active builder is rejected with a ty
 
 The direct Moth template compiler service uses the same tokenizer, synthetic-header preparation, local declaration ordering and AST folding owners as integrated `.mtf` dependencies. It extracts the folded `content` constant and stops before HIR generation, borrow validation, target validation, backend lowering and output writing.
 
-This service is a narrow compiler entry point, not a second Moth template parser or compiler mode. The compiler owns the whole stage sequence behind it. Project tooling supplies the source and receives the folded `content` result and warnings; it does not prepare, bind, order or fold the template itself.
+This service is a narrow compiler entry point, not a second Moth template parser or compiler mode.
+For a standalone source, it owns preparation through folding. For a Stage 0 file-value bundle, it
+consumes the retained entry and content-source preparations without tokenizing or preparing them
+again. Stage 0 asks the compiler to prepare each selected source once while discovering the content
+closure, as in the general prepared-source orchestration contract.
+
+Project tooling receives folded `content` and warnings. It never implements preparation semantics,
+binds symbols, orders declarations or folds templates itself.
+
+The bundle transfers its source database and live source-local span builders into the service.
+The service retains those builders through folding and extraction, then installs their tables
+under exclusive ownership after all AST readers have ended. Folded results and diagnosed service
+outcomes retain the source context needed by their resource facts and warnings.
+
+If bundle discovery diagnoses a source before folding can begin, its owning preparation boundary
+retains the known snapshots and builders and finalizes them there. The request owner preserves each
+document's source context with its warnings, including when a later document fails. Recursive
+discovery normalizes provisional source identities once before publishing success or diagnosis,
+under `docs/compiler-data-layout-design.md` > `Source identity and database > Private discovery
+finalization`. Standalone sources receive final IDs upfront.
 
 #### Project config compilation service
 
 Build-system config bootstrap is the other sanctioned short compiler path. The compiler owns one named service that runs tokenization, synthetic-free declaration-shell preparation, interface binding for the single authored config source, local declaration ordering and AST semantic checking, then stops at folded AST values.
 
 It produces no HIR, borrow facts, link facts or public interface. Config-specific diagnostics, authored key locations and the folded value boundary are preserved by the service. Config schema and application policy stay build-owned; the build system supplies the source and consumes folded values, and does not compose the stages itself.
+
+The config outcome also returns the original live source-local span builder, including on diagnosed
+paths. The build owner keeps it through config application and output validation, then installs its
+frozen table under exclusive source-database ownership. Semantic compilation alone is too early to
+freeze a config source whose build-owned validation can still produce spans.
 
 Both services stop earlier than canonical module compilation. Neither exists so that build or project code may reach raw stage functions.
 

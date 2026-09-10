@@ -5,19 +5,15 @@
 //! WHY: per-file frontend preparation depends on token outputs being safe to merge before
 //! module-wide header parsing and dependency sorting consume them.
 
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
-fn make_location(scope: InternedPath) -> SourceLocation {
-    SourceLocation::new(scope, CharPosition::default(), CharPosition::default())
-}
-
-fn make_token(kind: TokenKind, scope: InternedPath) -> Token {
-    Token::new(kind, make_location(scope))
+fn make_token(kind: TokenKind, _scope: InternedPath) -> Token {
+    Token::new(kind, LocalSpan::source_start())
 }
 
 #[test]
@@ -76,14 +72,13 @@ fn path_syntax_rows_remap_all_fields() {
     let mut local_table = StringTable::new();
     let mut global_table = StringTable::new();
 
-    let scope = InternedPath::from_single_str("test.moth", &mut local_table);
     let mut path_syntax = PathSyntaxTable::new();
     let id = path_syntax.push(
         InternedPath::from_components(vec![
             local_table.intern("components"),
             local_table.intern("Button"),
         ]),
-        make_location(scope),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
 
     let _alpha_global = global_table.intern("alpha");
@@ -101,14 +96,7 @@ fn path_syntax_rows_remap_all_fields() {
         .collect();
     assert_eq!(path_strings, vec!["components", "Button"]);
 
-    let path_scope_strings: Vec<&str> = path
-        .location
-        .scope
-        .as_components()
-        .iter()
-        .map(|id| global_table.resolve(*id))
-        .collect();
-    assert_eq!(path_scope_strings, vec!["test.moth"]);
+    assert_eq!(path.span.source(), SourceId::COMPILATION_ROOT);
 }
 
 #[test]
@@ -132,7 +120,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
     let canonical_path = std::path::PathBuf::from("/absolute/local.moth");
     let mut file_tokens = FileTokens::new_with_identity(
         src_path_local.clone(),
-        None,
+        SourceId::COMPILATION_ROOT,
         Some(canonical_path.clone()),
         tokens,
         PathSyntaxTable::new(),
@@ -167,14 +155,7 @@ fn file_tokens_remaps_src_path_and_tokens_preserves_canonical_os_path() {
         "token symbol should resolve correctly after remap"
     );
 
-    let first_location_strings: Vec<&str> = first_token
-        .location
-        .scope
-        .as_components()
-        .iter()
-        .map(|id| global_table.resolve(*id))
-        .collect();
-    assert_eq!(first_location_strings, vec!["local.moth"]);
+    assert_eq!(first_token.span, LocalSpan::source_start());
 
     let second_token = file_tokens
         .tokens
@@ -197,14 +178,14 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
     let mut path_syntax = PathSyntaxTable::new();
     let ui_button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
-        make_location(token_scope_local.clone()),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let utils_helper = path_syntax.push(
         InternedPath::from_components(vec![
             local_table.intern("utils"),
             local_table.intern("helper"),
         ]),
-        make_location(token_scope_local.clone()),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
 
     let tokens = vec![
@@ -212,8 +193,13 @@ fn file_tokens_with_path_tokens_leave_table_remapping_to_the_prepared_file_owner
         make_token(TokenKind::Path(utils_helper), token_scope_local),
     ];
 
-    let mut file_tokens =
-        FileTokens::new_with_identity(src_path_local, None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        src_path_local,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     let remap = global_table.merge_from(&local_table);
 
@@ -258,11 +244,16 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
     let mut path_syntax = PathSyntaxTable::new();
     let button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
-        make_location(source_path.clone()),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let tokens = vec![make_token(TokenKind::Path(button), source_path.clone())];
-    let mut file_tokens =
-        FileTokens::new_with_identity(source_path, None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        source_path,
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
     global_table.intern("preexisting");
     let remap = global_table.merge_from(&local_table);
@@ -285,7 +276,7 @@ fn file_tokens_preparing_remap_updates_owned_path_table() {
 }
 
 #[test]
-fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
+fn rebind_source_identity_updates_source_spans_without_changing_paths() {
     let mut table = StringTable::new();
 
     let original_scope = InternedPath::from_single_str("stage0_absolute.moth", &mut table);
@@ -294,7 +285,7 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     let mut path_syntax = PathSyntaxTable::new();
     let helper_util = path_syntax.push(
         InternedPath::from_components(vec![table.intern("helper"), table.intern("util")]),
-        make_location(original_scope.clone()),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let tokens = vec![
         make_token(
@@ -305,36 +296,35 @@ fn rebind_source_identity_updates_scopes_without_changing_spans_or_paths() {
     ];
 
     let canonical = std::path::PathBuf::from("/canonical/logical.moth");
-    let mut file_tokens =
-        FileTokens::new_with_identity(original_scope.clone(), None, None, tokens, path_syntax);
+    let mut file_tokens = FileTokens::new_with_identity(
+        original_scope.clone(),
+        SourceId::COMPILATION_ROOT,
+        None,
+        tokens,
+        path_syntax,
+    );
 
-    let file_id = crate::compiler_frontend::symbols::identity::FileId(7);
+    let file_id = SourceId::from_index(7);
     file_tokens
-        .rebind_source_identity(
-            logical_scope.clone(),
-            Some(file_id),
-            Some(canonical.clone()),
-        )
+        .rebind_source_identity(logical_scope.clone(), file_id, Some(canonical.clone()))
         .expect("the sole mutable source table should accept final identity rebinding");
 
     // Top-level identity fields are rebound.
     assert_eq!(file_tokens.src_path, logical_scope);
-    assert_eq!(file_tokens.file_id, Some(file_id));
+    assert_eq!(file_tokens.file_id, file_id);
     assert_eq!(file_tokens.canonical_os_path, Some(canonical));
 
-    // Every token location scope is rebound, spans are untouched.
+    // Every token keeps its local span while the enclosing stream supplies the final source ID.
     for token in &file_tokens.tokens {
-        assert_eq!(token.location.scope, logical_scope);
-        assert_eq!(token.location.start_pos, CharPosition::default());
-        assert_eq!(token.location.end_pos, CharPosition::default());
+        assert_eq!(token.span, LocalSpan::source_start());
     }
 
-    // Path table locations are rebound but the root payload is unchanged.
+    // Path table spans are rebound but the root payload is unchanged.
     let path = file_tokens
         .path_syntax
         .try_path(helper_util)
         .expect("valid path handle");
-    assert_eq!(path.location.scope, logical_scope);
+    assert_eq!(path.span.source(), file_id);
     let path_strings: Vec<&str> = path
         .root
         .as_components()
@@ -352,7 +342,7 @@ fn token_kind_path_handle_is_a_remap_no_op_while_table_rows_remap() {
     let mut path_syntax = PathSyntaxTable::new();
     let button = path_syntax.push(
         InternedPath::from_components(vec![local_table.intern("ui"), local_table.intern("Button")]),
-        make_location(InternedPath::from_single_str("test.moth", &mut local_table)),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let mut kind = TokenKind::Path(button);
     let handle_before = match &kind {
@@ -390,7 +380,7 @@ fn path_table_root_components_keep_their_allocation_under_remap() {
             local_table.intern("components"),
             local_table.intern("Button"),
         ]),
-        make_location(InternedPath::from_single_str("test.moth", &mut local_table)),
+        SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
     );
     let components_ptr = path_syntax
         .try_path(button)

@@ -34,7 +34,6 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[test]
 fn boracle_provenance_copy_keeps_source_and_result_origins_independent() {
@@ -503,7 +502,7 @@ fn boracle_origin_and_loan_last_use_queries_stop_at_exact_events() {
         .iter()
         .find(|result| {
             result.subject == LastUseSubject::Origin(ValueOriginId::new(0))
-                && result.location == LastUseLocation::after_event(EventId::new(1), PointId::new(2))
+                && result.span == LastUseLocation::after_event(EventId::new(1), PointId::new(2))
         })
         .expect("origin query after copy event should be present");
     assert_eq!(origin_after_copy.status, FutureUseStatus::MustBeUsed);
@@ -513,7 +512,7 @@ fn boracle_origin_and_loan_last_use_queries_stop_at_exact_events() {
         .iter()
         .find(|result| {
             result.subject == LastUseSubject::Origin(ValueOriginId::new(0))
-                && result.location == LastUseLocation::after_event(EventId::new(2), PointId::new(3))
+                && result.span == LastUseLocation::after_event(EventId::new(2), PointId::new(3))
         })
         .expect("origin query after final read should be present");
     assert_eq!(origin_after_read.status, FutureUseStatus::NoFutureUse);
@@ -525,7 +524,7 @@ fn boracle_origin_and_loan_last_use_queries_stop_at_exact_events() {
         .iter()
         .find(|result| {
             result.subject == LastUseSubject::Loan(LoanId::new(0))
-                && result.location == LastUseLocation::after_event(EventId::new(0), PointId::new(1))
+                && result.span == LastUseLocation::after_event(EventId::new(0), PointId::new(1))
         })
         .expect("loan query after issue should be present");
     assert_eq!(loan_after_issue.status, FutureUseStatus::MustBeUsed);
@@ -878,7 +877,7 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
                         target: HirPlace::Local(source),
                         value: hir_int_expression(0, 1, region),
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
                 HirStatement {
                     id: crate::compiler_frontend::hir::ids::HirNodeId(1),
@@ -900,9 +899,10 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
                                 SharedSubsetKind::Alias => ValueKind::Place,
                             },
                             region,
+                            span: None,
                         },
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
             ],
             terminator: HirTerminator::Return(HirExpression {
@@ -911,6 +911,7 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
                 region,
+                span: None,
             }),
         }],
         regions: vec![HirRegion::lexical(region, None)],
@@ -2775,6 +2776,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let projected = HirExpression {
         id: HirValueId(3),
@@ -2785,12 +2787,14 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
                 region,
+                span: None,
             }),
             index: 0,
         },
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![HirBlock {
@@ -2804,7 +2808,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
                         target: HirPlace::Local(source),
                         value: tuple,
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
                 HirStatement {
                     id: crate::compiler_frontend::hir::ids::HirNodeId(1),
@@ -2812,7 +2816,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
                         target: HirPlace::Local(result),
                         value: projected,
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
             ],
             terminator: HirTerminator::Return(HirExpression {
@@ -2820,7 +2824,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
                 kind: HirExpressionKind::Load(HirPlace::Local(result)),
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
-                region,
+                span: None,
             }),
         }],
         regions: vec![HirRegion::lexical(region, None)],
@@ -2848,6 +2852,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let tuple_two = HirExpression {
         id: HirValueId(2),
@@ -2857,6 +2862,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let projected = HirExpression {
         id: HirValueId(4),
@@ -2867,12 +2873,14 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
                 region,
+                span: None,
             }),
             index: 0,
         },
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     };
     let module = HirModule {
         blocks: vec![HirBlock {
@@ -2886,7 +2894,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                         target: HirPlace::Local(source),
                         value: tuple_one,
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
                 HirStatement {
                     id: crate::compiler_frontend::hir::ids::HirNodeId(1),
@@ -2894,7 +2902,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                         target: HirPlace::Local(source),
                         value: tuple_two,
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
                 HirStatement {
                     id: crate::compiler_frontend::hir::ids::HirNodeId(2),
@@ -2902,7 +2910,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                         target: HirPlace::Local(result),
                         value: projected,
                     },
-                    location: SourceLocation::default(),
+                    span: None,
                 },
             ],
             terminator: HirTerminator::Return(HirExpression {
@@ -2911,6 +2919,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
                 region,
+                span: None,
             }),
         }],
         regions: vec![HirRegion::lexical(region, None)],
@@ -2932,7 +2941,7 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
         ty: builtin_type_ids::INT,
         mutable: true,
         region,
-        source_info: None,
+        span: None,
     }
 }
 
@@ -2943,6 +2952,7 @@ fn hir_int_expression(id: u32, value: i32, region: RegionId) -> HirExpression {
         ty: builtin_type_ids::INT,
         value_kind: ValueKind::RValue,
         region,
+        span: None,
     }
 }
 

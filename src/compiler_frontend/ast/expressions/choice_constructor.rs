@@ -35,6 +35,8 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -99,27 +101,30 @@ pub(super) fn parse_choice_construct(
     token_stream.advance();
     token_stream.skip_newlines();
 
-    let variant_location = token_stream.current_location();
+    let variant_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let variant_name = match token_stream.current_token_kind() {
         TokenKind::Symbol(name) => *name,
 
         TokenKind::Must | TokenKind::TraitThis => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
                 "Expression Parsing",
                 "choice variant expression parsing",
             )?;
 
             return Err(
-                reserved_trait_keyword_error(keyword, token_stream.current_location()).into(),
+                reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into(),
             );
         }
 
         found => {
             return Err(CompilerDiagnostic::unexpected_token(
                 found.clone(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -136,7 +141,7 @@ pub(super) fn parse_choice_construct(
             choice_declaration.id.name(),
             Some(variant_name),
             available_variant_ids,
-            variant_location,
+            variant_span,
         )
         .into());
     };
@@ -144,7 +149,7 @@ pub(super) fn parse_choice_construct(
     let variant = &variant_definitions[variant_index];
     let has_parens = token_stream.peek_next_token() == Some(&TokenKind::OpenParenthesis);
     let mut parsed_payload_arguments = None;
-    let mut constructor_location = variant_location.clone();
+    let mut constructor_span = variant_span;
 
     // Pre-parse call arguments for record variants so generic inference can
     // inspect the raw argument expressions before type instantiation. Field
@@ -155,7 +160,7 @@ pub(super) fn parse_choice_construct(
         && has_parens
     {
         token_stream.advance(); // past variant name to '('
-        constructor_location = token_stream.current_location();
+        constructor_span = Some(token_stream.current_span());
 
         let payload_field_views = ConstructorField::from_choice_payload_fields(fields);
         let field_expectations = expectations_from_constructor_fields(&payload_field_views);
@@ -173,17 +178,17 @@ pub(super) fn parse_choice_construct(
         )?);
     }
 
-    let generic_declaration_metadata = context
+    let generic_declaration_kind = context
         .generic_declarations_by_path
         .as_ref()
         .and_then(|declarations| declarations.get(&nominal_path))
-        .filter(|metadata| !metadata.parameters.is_empty());
+        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
 
     // ---------------------------
     //  Resolve generic parameters
     // ---------------------------
     let (instantiated_variant_defs, choice_type_id, generic_instance_key) =
-        if let Some(metadata) = generic_declaration_metadata {
+        if generic_declaration_kind.is_some() {
             let constructor_fields = match &variant.payload {
                 ChoiceVariantPayloadDefinition::Record { fields } => {
                     Some(ConstructorField::from_choice_payload_fields(fields))
@@ -194,31 +199,27 @@ pub(super) fn parse_choice_construct(
                 GenericNominalConstructorInput {
                     nominal_path: &nominal_path,
                     display_name: &choice_name_str,
-                    metadata,
                     template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
                     constructor_fields: constructor_fields.as_deref(),
                     raw_args: parsed_payload_arguments.as_deref(),
-                    location: constructor_location.clone(),
+                    span: constructor_span,
                 },
                 context,
                 type_interner,
                 string_table,
             )?;
 
-            let instantiated_variant_defs: Vec<ChoiceVariantDefinition> =
-                if let Some(instance_type_id) = inference.instance_type_id {
-                    let type_env = type_interner.environment();
-                    type_env
-                        .variants_for(instance_type_id)
-                        .map(|defs| defs.to_vec())
-                        .unwrap_or_else(|| variant_definitions.clone())
-                } else {
-                    variant_definitions.clone()
-                };
+            let instantiated_variant_defs: Vec<ChoiceVariantDefinition> = {
+                let type_env = type_interner.environment();
+                type_env
+                    .variants_for(inference.instance_type_id)
+                    .map(|defs| defs.to_vec())
+                    .unwrap_or_else(|| variant_definitions.clone())
+            };
 
             (
                 instantiated_variant_defs,
-                inference.instance_type_id.unwrap_or(type_id),
+                inference.instance_type_id,
                 inference.instance_key,
             )
         } else {
@@ -243,7 +244,7 @@ pub(super) fn parse_choice_construct(
                         choice_declaration.id.name(),
                         Some(variant_name),
                         vec![],
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 }
@@ -253,7 +254,7 @@ pub(super) fn parse_choice_construct(
                     choice_declaration.id.name(),
                     Some(variant_name),
                     vec![],
-                    variant_location,
+                    variant_span,
                 )
                 .into());
             }
@@ -270,7 +271,7 @@ pub(super) fn parse_choice_construct(
                 fields: vec![],
                 diagnostic_type,
                 type_id: choice_type_id,
-                location: variant_location,
+                span: variant_span,
                 value_mode: ValueMode::ImmutableOwned,
             });
             Ok(choice_expr)
@@ -284,7 +285,7 @@ pub(super) fn parse_choice_construct(
                     choice_declaration.id.name(),
                     Some(variant_name),
                     vec![],
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -309,7 +310,7 @@ pub(super) fn parse_choice_construct(
                 )),
                 raw_args,
                 &expectations,
-                constructor_location.clone(),
+                constructor_span,
                 CallArgumentResolutionContext {
                     string_table,
                     type_environment: type_check_context.type_environment,
@@ -360,7 +361,7 @@ pub(super) fn parse_choice_construct(
                         return Err(CompilerDiagnostic::compile_time_evaluation_error(
                             CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                             Some(field_name),
-                            value.location,
+                            value.span,
                         )
                         .into());
                     }
@@ -373,6 +374,7 @@ pub(super) fn parse_choice_construct(
                 choice_fields.push(Declaration {
                     id: field.name.clone(),
                     value,
+                    binding_span: None,
                     config_qualifier: None,
                 });
             }
@@ -397,7 +399,7 @@ pub(super) fn parse_choice_construct(
                 fields: choice_fields,
                 diagnostic_type,
                 type_id: choice_type_id,
-                location: variant_location,
+                span: variant_span,
                 value_mode,
             });
             Ok(choice_expr)
@@ -430,7 +432,7 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                         .map(|field| FieldDefinition {
                             name: field.id.clone(),
                             type_id: field.value.type_id,
-                            location: field.value.location.clone(),
+                            span: field.value.span,
                         })
                         .collect();
 
@@ -439,7 +441,7 @@ fn choice_variant_shells_to_definitions(shells: &[ChoiceVariant]) -> Vec<ChoiceV
                     }
                 }
             },
-            location: variant.location.clone(),
+            span: variant.span,
         })
         .collect()
 }

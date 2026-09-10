@@ -408,12 +408,12 @@ pub(super) fn parse_member_name_typed(
         TokenKind::Must | TokenKind::TraitThis => {
             let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                 token_stream.current_token_kind(),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
                 "AST Construction",
                 "postfix/member parsing",
             )?;
 
-            Err(reserved_trait_keyword_error(keyword, token_stream.current_location()).into())
+            Err(reserved_trait_keyword_error(keyword, Some(token_stream.current_span())).into())
         }
 
         _ => Err(CompilerDiagnostic::invalid_field_access(
@@ -421,7 +421,7 @@ pub(super) fn parse_member_name_typed(
             None,
             None,
             Vec::new(),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()),
     }
@@ -440,7 +440,7 @@ pub(super) fn parse_field_member_access_typed(
         receiver_node,
         receiver_type_id,
         member_name,
-        member_location,
+        member_span,
         scope_context,
         ..
     } = context;
@@ -476,13 +476,13 @@ pub(super) fn parse_field_member_access_typed(
             Some(member_name),
             Some(receiver_type_id),
             Vec::new(),
-            member_location,
+            member_span,
         )
         .into());
     }
 
     let result_expression = if let Some(mut inlined_expression) = field.const_inline_value {
-        inlined_expression.location = member_location.clone();
+        inlined_expression.span = member_span;
         inlined_expression
     } else {
         increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
@@ -504,7 +504,7 @@ pub(super) fn parse_field_member_access_typed(
                 base: Box::new(base_expression),
                 field: field.field_name,
             },
-            member_location.clone(),
+            member_span,
             field.type_id,
             field.diagnostic_type,
             field.value_mode,
@@ -516,6 +516,6 @@ pub(super) fn parse_field_member_access_typed(
     Ok(Some(AstNode {
         kind: NodeKind::ExpressionStatement(result_expression),
         scope: scope_context.scope.to_owned(),
-        location: member_location,
+        span: member_span,
     }))
 }

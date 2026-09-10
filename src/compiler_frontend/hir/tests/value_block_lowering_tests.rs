@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_source_location,
+    function_node, make_test_variable, node,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
@@ -70,55 +70,35 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let result_name = super::symbol("result", &mut string_table);
 
     let arm_a = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(
-            1,
-            test_source_location(3),
-            ValueMode::ImmutableOwned,
-        )),
+        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(
-                    10,
-                    test_source_location(3),
-                    ValueMode::ImmutableOwned,
-                )],
-                location: test_source_location(3),
+                expressions: vec![Expression::int(10, None, ValueMode::ImmutableOwned)],
+                span: None,
             }),
-            test_source_location(3),
+            None,
         )],
     };
 
     let arm_b = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(
-            2,
-            test_source_location(4),
-            ValueMode::ImmutableOwned,
-        )),
+        pattern: MatchPattern::Literal(Expression::int(2, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(
-                    20,
-                    test_source_location(4),
-                    ValueMode::ImmutableOwned,
-                )],
-                location: test_source_location(4),
+                expressions: vec![Expression::int(20, None, ValueMode::ImmutableOwned)],
+                span: None,
             }),
-            test_source_location(4),
+            None,
         )],
     };
 
     let default_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![Expression::int(
-                0,
-                test_source_location(5),
-                ValueMode::ImmutableOwned,
-            )],
-            location: test_source_location(5),
+            expressions: vec![Expression::int(0, None, ValueMode::ImmutableOwned)],
+            span: None,
         }),
-        test_source_location(5),
+        None,
     )];
 
     let value_match_expr = Expression::new(
@@ -127,17 +107,17 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
                 scrutinee: inferred_type_reference_expr(
                     x.clone(),
                     builtin_type_ids::INT,
-                    test_source_location(2),
+                    None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![arm_a, arm_b],
                 default: Some(default_body),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
-                location: test_source_location(2),
+                span: None,
                 result_type_ids: vec![builtin_type_ids::INT],
             })),
         },
-        test_source_location(2),
+        None,
         builtin_type_ids::INT,
         DataType::Inferred,
         ValueMode::ImmutableOwned,
@@ -146,19 +126,14 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(
-                x,
-                builtin_type_ids::INT,
-                false,
-                test_source_location(1),
-            )],
+            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
             returns: vec![],
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(result_name, value_match_expr)),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -223,16 +198,12 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
         },
         vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )],
-                location: test_source_location(2),
+                expressions: vec![Expression::int(1, None, ValueMode::ImmutableOwned)],
+                span: None,
             }),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let err = lower_ast(
@@ -241,12 +212,13 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     )
     .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 
-    let (error_type, message, _location) = err
-        .first_infrastructure_error_for_tests()
+    let error = err
+        .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
-    assert_eq!(error_type, &ErrorType::HirTransformation);
+    assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(
-        message.contains("active value block target"),
-        "unexpected error message: {message}"
+        error.msg.contains("active value block target"),
+        "unexpected error message: {}",
+        error.msg,
     );
 }

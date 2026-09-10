@@ -28,7 +28,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 fn lower_relational_pattern_op(op: RelationalPatternOp) -> HirRelationalPatternOp {
@@ -48,32 +48,32 @@ struct CfgMatchGuardLowering<'a> {
     guard_block: BlockId,
     arm_body_block: BlockId,
     next_dispatch: BlockId,
-    location: &'a SourceLocation,
+    span: &'a Option<SourceSpan>,
 }
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_lexical_scope(
         &mut self,
         body: &[AstNode],
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let entry_block = self.current_block_id_or_error(location)?;
-        let parent_region = self.current_region_or_error(location)?;
+        let entry_block = self.current_block_id_or_error(span)?;
+        let parent_region = self.current_region_or_error(span)?;
         let body_region = self.create_child_region(parent_region);
-        let body_block = self.create_block(body_region, location, "lexical-scope")?;
+        let body_block = self.create_block(body_region, span, "lexical-scope")?;
 
-        self.emit_jump_to(entry_block, body_block, location, "lexical-scope.enter")?;
-        self.set_current_block(body_block, location)?;
+        self.emit_jump_to(entry_block, body_block, span, "lexical-scope.enter")?;
+        self.set_current_block(body_block, span)?;
         self.lower_statement_sequence(body)?;
 
-        let body_tail_block = self.current_block_id_or_error(location)?;
-        if self.block_has_explicit_terminator(body_tail_block, location)? {
-            return self.set_current_block(body_tail_block, location);
+        let body_tail_block = self.current_block_id_or_error(span)?;
+        if self.block_has_explicit_terminator(body_tail_block, span)? {
+            return self.set_current_block(body_tail_block, span);
         }
 
-        let after_block = self.create_block(parent_region, location, "lexical-scope.after")?;
-        self.emit_jump_to(body_tail_block, after_block, location, "lexical-scope.exit")?;
-        self.set_current_block(after_block, location)
+        let after_block = self.create_block(parent_region, span, "lexical-scope.after")?;
+        self.emit_jump_to(body_tail_block, after_block, span, "lexical-scope.exit")?;
+        self.set_current_block(after_block, span)
     }
 
     pub(super) fn lower_if_statement(
@@ -81,19 +81,21 @@ impl<'a> HirBuilder<'a> {
         condition: &Expression,
         then_body: &[AstNode],
         else_body: Option<&[AstNode]>,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         if matches!(condition.kind, ExpressionKind::Bool(_)) {
             increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
             return_hir_transformation_error!(
                 "Stage 4 passed a statically decided Bool `if` to HIR",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         }
 
         self.lower_if_with_body_emitters(
             condition,
-            location,
+            span,
+            authored_span,
             |builder| builder.lower_statement_sequence(then_body),
             |builder| {
                 if let Some(else_nodes) = else_body {
@@ -114,29 +116,31 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_if_with_body_emitters(
         &mut self,
         condition: &Expression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
         emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
         emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
         increment_frontend_counter(FrontendCounter::HirRuntimeIfNodes);
 
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
-        let condition_block = self.current_block_id_or_error(location)?;
+        let condition_block = self.current_block_id_or_error(span)?;
 
-        let parent_region = self.current_region_or_error(location)?;
+        let parent_region = self.current_region_or_error(span)?;
         let then_region = self.create_child_region(parent_region);
         let else_region = self.create_child_region(parent_region);
-        let then_block = self.create_block(then_region, location, "if-then")?;
-        let else_block = self.create_block(else_region, location, "if-else")?;
+        let then_block = self.create_block(then_region, span, "if-then")?;
+        let else_block = self.create_block(else_region, span, "if-else")?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             condition_block,
             HirTerminator::If {
                 condition: condition_value,
                 then_block,
                 else_block,
             },
-            location,
+            span,
+            authored_span,
         )?;
 
         self.log_control_flow_edge(condition_block, then_block, "if.true");
@@ -144,19 +148,19 @@ impl<'a> HirBuilder<'a> {
 
         let mut terminated_anchor: Option<BlockId> = None;
 
-        self.set_current_block(then_block, location)?;
+        self.set_current_block(then_block, span)?;
         emit_then(self)?;
-        let then_tail_block = self.current_block_id_or_error(location)?;
-        let then_terminated = self.block_has_explicit_terminator(then_tail_block, location)?;
+        let then_tail_block = self.current_block_id_or_error(span)?;
+        let then_terminated = self.block_has_explicit_terminator(then_tail_block, span)?;
         if then_terminated {
             terminated_anchor = Some(then_tail_block);
         }
 
-        self.set_current_block(else_block, location)?;
+        self.set_current_block(else_block, span)?;
         emit_else(self)?;
 
-        let else_tail_block = self.current_block_id_or_error(location)?;
-        let else_terminated = self.block_has_explicit_terminator(else_tail_block, location)?;
+        let else_tail_block = self.current_block_id_or_error(span)?;
+        let else_terminated = self.block_has_explicit_terminator(else_tail_block, span)?;
         if else_terminated && terminated_anchor.is_none() {
             terminated_anchor = Some(else_tail_block);
         }
@@ -169,40 +173,43 @@ impl<'a> HirBuilder<'a> {
                 then_block
             };
 
-            return self.set_current_block(anchor_block, location);
+            return self.set_current_block(anchor_block, span);
         }
 
-        let merge_block = self.create_block(parent_region, location, "if-merge")?;
+        let merge_block = self.create_block(parent_region, span, "if-merge")?;
         if !then_terminated {
-            self.emit_jump_to(then_tail_block, merge_block, location, "if.then.merge")?;
+            self.emit_jump_to(then_tail_block, merge_block, span, "if.then.merge")?;
         }
         if !else_terminated {
-            self.emit_jump_to(else_tail_block, merge_block, location, "if.else.merge")?;
+            self.emit_jump_to(else_tail_block, merge_block, span, "if.else.merge")?;
         }
 
-        self.set_current_block(merge_block, location)
+        self.set_current_block(merge_block, span)
     }
 
     pub(super) fn lower_break_statement(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.emit_break_to_current_loop(location)
+        self.emit_break_to_current_loop(span, authored_span)
     }
 
     pub(crate) fn emit_break_to_current_loop(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let current_block = self.current_block_id_or_error(location)?;
-        let targets = self.current_loop_targets_or_error("break", location)?;
+        let current_block = self.current_block_id_or_error(span)?;
+        let targets = self.current_loop_targets_or_error("break", span)?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Break {
                 target: targets.break_target,
             },
-            location,
+            span,
+            authored_span,
         )?;
 
         self.log_control_flow_edge(current_block, targets.break_target, "loop.break");
@@ -211,24 +218,27 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_continue_statement(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.emit_continue_to_current_loop(location)
+        self.emit_continue_to_current_loop(span, authored_span)
     }
 
     pub(crate) fn emit_continue_to_current_loop(
         &mut self,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let current_block = self.current_block_id_or_error(location)?;
-        let targets = self.current_loop_targets_or_error("continue", location)?;
+        let current_block = self.current_block_id_or_error(span)?;
+        let targets = self.current_loop_targets_or_error("continue", span)?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Continue {
                 target: targets.continue_target,
             },
-            location,
+            span,
+            authored_span,
         )?;
 
         self.log_control_flow_edge(current_block, targets.continue_target, "loop.continue");
@@ -239,9 +249,10 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         condition: &Expression,
         body: &[AstNode],
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.lower_while_statement_impl(condition, body, location)
+        self.lower_while_statement_impl(condition, body, span, authored_span)
     }
 
     /// Lower an AST match statement into explicit CFG blocks and a `Match` terminator.
@@ -258,9 +269,10 @@ impl<'a> HirBuilder<'a> {
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.validate_match_exhaustiveness_contract(exhaustiveness, default, location)?;
+        self.validate_match_exhaustiveness_contract(exhaustiveness, default, span)?;
 
         if self.match_guards_need_current_block_lowering(arms) {
             return self.lower_match_statement_with_cfg_guards(
@@ -268,7 +280,8 @@ impl<'a> HirBuilder<'a> {
                 arms,
                 default,
                 exhaustiveness,
-                location,
+                span,
+                authored_span,
             );
         }
 
@@ -277,7 +290,8 @@ impl<'a> HirBuilder<'a> {
             arms,
             default,
             exhaustiveness,
-            location,
+            span,
+            authored_span,
         )
     }
 
@@ -285,19 +299,19 @@ impl<'a> HirBuilder<'a> {
         &self,
         exhaustiveness: MatchExhaustiveness,
         default: Option<&[AstNode]>,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         match exhaustiveness {
             MatchExhaustiveness::HasDefault if default.is_none() => {
                 return_hir_transformation_error!(
                     "Match marked as having a default arm but no default body was provided",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
             MatchExhaustiveness::ExhaustiveChoice if default.is_some() => {
                 return_hir_transformation_error!(
                     "Match marked as exhaustive choice but also provided a default arm",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
             _ => {}
@@ -320,23 +334,24 @@ impl<'a> HirBuilder<'a> {
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
-        let current_block = self.current_block_id_or_error(location)?;
+        let current_block = self.current_block_id_or_error(span)?;
 
-        let parent_region = self.current_region_or_error(location)?;
+        let parent_region = self.current_region_or_error(span)?;
         let mut arm_blocks = Vec::with_capacity(arms.len());
         for _ in arms {
             let arm_region = self.create_child_region(parent_region);
-            arm_blocks.push(self.create_block(arm_region, location, "match-arm")?);
+            arm_blocks.push(self.create_block(arm_region, span, "match-arm")?);
         }
 
         // AST owns exhaustiveness validation; HIR only lowers the contract it receives.
         let default_block = match exhaustiveness {
             MatchExhaustiveness::HasDefault => {
                 let default_region = self.create_child_region(parent_region);
-                Some(self.create_block(default_region, location, "match-default")?)
+                Some(self.create_block(default_region, span, "match-default")?)
             }
             MatchExhaustiveness::ExhaustiveChoice => None,
         };
@@ -351,8 +366,8 @@ impl<'a> HirBuilder<'a> {
         let mut hir_arms = Vec::with_capacity(arms.len() + 1);
         for (index, arm) in arms.iter().enumerate() {
             let arm_block = arm_blocks[index];
-            self.set_current_block(arm_block, location)?;
-            let locals = self.register_match_arm_capture_locals(arm, scrutinee, location)?;
+            self.set_current_block(arm_block, span)?;
+            let locals = self.register_match_arm_capture_locals(arm, scrutinee, span)?;
             arm_capture_locals.push(locals);
 
             let lowered_pattern = self.lower_match_pattern(&arm.pattern, scrutinee.type_id)?;
@@ -361,7 +376,7 @@ impl<'a> HirBuilder<'a> {
                 &arm_capture_locals[index],
                 scrutinee,
                 &scrutinee_value,
-                location,
+                span,
             )?;
 
             hir_arms.push(HirMatchArm {
@@ -381,13 +396,14 @@ impl<'a> HirBuilder<'a> {
 
         let scrutinee_for_captures = scrutinee_value.clone();
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::Match {
                 scrutinee: scrutinee_value,
                 arms: hir_arms,
             },
-            location,
+            span,
+            authored_span,
         )?;
 
         let mut terminated_anchor: Option<BlockId> = None;
@@ -395,27 +411,27 @@ impl<'a> HirBuilder<'a> {
         // Emit capture extraction assignments at the start of each arm block, then lower the body.
         for (index, arm) in arms.iter().enumerate() {
             let arm_block = arm_blocks[index];
-            self.set_current_block(arm_block, location)?;
+            self.set_current_block(arm_block, span)?;
 
             self.lower_match_arm_body(
                 arm,
                 &arm_capture_locals[index],
                 &scrutinee_for_captures,
                 scrutinee,
-                location,
+                span,
                 true,
             )?;
 
-            let arm_tail_block = self.current_block_id_or_error(location)?;
-            let arm_terminated = self.block_has_explicit_terminator(arm_tail_block, location)?;
+            let arm_tail_block = self.current_block_id_or_error(span)?;
+            let arm_terminated = self.block_has_explicit_terminator(arm_tail_block, span)?;
             if arm_terminated {
                 if terminated_anchor.is_none() {
                     terminated_anchor = Some(arm_tail_block);
                 }
             } else {
                 let merge_target =
-                    self.ensure_match_merge_block(parent_region, location, &mut merge_block)?;
-                self.emit_jump_to(arm_tail_block, merge_target, location, "match.arm.merge")?;
+                    self.ensure_match_merge_block(parent_region, span, &mut merge_block)?;
+                self.emit_jump_to(arm_tail_block, merge_target, span, "match.arm.merge")?;
             }
         }
 
@@ -423,12 +439,12 @@ impl<'a> HirBuilder<'a> {
             default_block,
             default,
             parent_region,
-            location,
+            span,
             &mut merge_block,
             &mut terminated_anchor,
         )?;
 
-        self.finish_match_lowering(merge_block, terminated_anchor, location, "Match lowering")
+        self.finish_match_lowering(merge_block, terminated_anchor, span, "Match lowering")
     }
 
     /// Lower a match whose guards need active CFG mutation before arm selection completes.
@@ -446,21 +462,22 @@ impl<'a> HirBuilder<'a> {
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
-        let mut dispatch_block = self.current_block_id_or_error(location)?;
-        let parent_region = self.current_region_or_error(location)?;
+        let mut dispatch_block = self.current_block_id_or_error(span)?;
+        let parent_region = self.current_region_or_error(span)?;
 
         let default_block = match exhaustiveness {
             MatchExhaustiveness::HasDefault => {
                 let default_region = self.create_child_region(parent_region);
-                Some(self.create_block(default_region, location, "match-default")?)
+                Some(self.create_block(default_region, span, "match-default")?)
             }
             MatchExhaustiveness::ExhaustiveChoice => None,
         };
         let no_match_block = if default_block.is_none() {
-            Some(self.create_block(parent_region, location, "match-no-match")?)
+            Some(self.create_block(parent_region, span, "match-no-match")?)
         } else {
             None
         };
@@ -470,13 +487,13 @@ impl<'a> HirBuilder<'a> {
 
         for (index, arm) in arms.iter().enumerate() {
             let arm_region = self.create_child_region(parent_region);
-            let arm_body_block = self.create_block(arm_region, location, "match-arm")?;
+            let arm_body_block = self.create_block(arm_region, span, "match-arm")?;
             let guard_needs_cfg = arm
                 .guard
                 .as_ref()
                 .is_some_and(|guard| self.expression_needs_current_block_lowering(guard));
             let guard_block = if guard_needs_cfg {
-                Some(self.create_block(arm_region, location, "match-guard")?)
+                Some(self.create_block(arm_region, span, "match-guard")?)
             } else {
                 None
             };
@@ -487,13 +504,12 @@ impl<'a> HirBuilder<'a> {
                 parent_region,
                 default_block,
                 no_match_block,
-                location,
+                span,
             )?;
 
             let capture_registration_block = guard_block.unwrap_or(arm_body_block);
-            self.set_current_block(capture_registration_block, location)?;
-            let capture_locals =
-                self.register_match_arm_capture_locals(arm, scrutinee, location)?;
+            self.set_current_block(capture_registration_block, span)?;
+            let capture_locals = self.register_match_arm_capture_locals(arm, scrutinee, span)?;
             let pattern = self.lower_match_pattern(&arm.pattern, scrutinee.type_id)?;
             let inline_guard = if guard_needs_cfg {
                 None
@@ -503,11 +519,11 @@ impl<'a> HirBuilder<'a> {
                     &capture_locals,
                     scrutinee,
                     &scrutinee_value,
-                    location,
+                    span,
                 )?
             };
 
-            self.emit_terminator(
+            self.emit_terminator_with_span(
                 dispatch_block,
                 HirTerminator::Match {
                     scrutinee: scrutinee_value.clone(),
@@ -524,7 +540,8 @@ impl<'a> HirBuilder<'a> {
                         },
                     ],
                 },
-                location,
+                span,
+                authored_span,
             )?;
 
             if let Some(guard_block_id) = guard_block {
@@ -536,30 +553,30 @@ impl<'a> HirBuilder<'a> {
                     guard_block: guard_block_id,
                     arm_body_block,
                     next_dispatch,
-                    location,
+                    span,
                 })?;
             }
 
-            self.set_current_block(arm_body_block, location)?;
+            self.set_current_block(arm_body_block, span)?;
             self.lower_match_arm_body(
                 arm,
                 &capture_locals,
                 &scrutinee_value,
                 scrutinee,
-                location,
+                span,
                 !guard_needs_cfg,
             )?;
 
-            let arm_tail_block = self.current_block_id_or_error(location)?;
-            let arm_terminated = self.block_has_explicit_terminator(arm_tail_block, location)?;
+            let arm_tail_block = self.current_block_id_or_error(span)?;
+            let arm_terminated = self.block_has_explicit_terminator(arm_tail_block, span)?;
             if arm_terminated {
                 if terminated_anchor.is_none() {
                     terminated_anchor = Some(arm_tail_block);
                 }
             } else {
                 let merge_target =
-                    self.ensure_match_merge_block(parent_region, location, &mut merge_block)?;
-                self.emit_jump_to(arm_tail_block, merge_target, location, "match.arm.merge")?;
+                    self.ensure_match_merge_block(parent_region, span, &mut merge_block)?;
+                self.emit_jump_to(arm_tail_block, merge_target, span, "match.arm.merge")?;
             }
 
             dispatch_block = next_dispatch;
@@ -569,28 +586,23 @@ impl<'a> HirBuilder<'a> {
             default_block,
             default,
             parent_region,
-            location,
+            span,
             &mut merge_block,
             &mut terminated_anchor,
         )?;
 
         if let Some(no_match_block_id) = no_match_block {
-            self.set_current_block(no_match_block_id, location)?;
+            self.set_current_block(no_match_block_id, span)?;
             self.emit_terminator(
                 no_match_block_id,
                 HirTerminator::RuntimeFailure {
                     message: "No match arm selected".to_owned(),
                 },
-                location,
+                span,
             )?;
         }
 
-        self.finish_match_lowering(
-            merge_block,
-            terminated_anchor,
-            location,
-            "CFG match lowering",
-        )
+        self.finish_match_lowering(merge_block, terminated_anchor, span, "CFG match lowering")
     }
 
     fn next_match_dispatch_block(
@@ -600,10 +612,10 @@ impl<'a> HirBuilder<'a> {
         parent_region: RegionId,
         default_block: Option<BlockId>,
         no_match_block: Option<BlockId>,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<BlockId, CompilerError> {
         if index + 1 < arm_count {
-            return self.create_block(parent_region, location, "match-next");
+            return self.create_block(parent_region, span, "match-next");
         }
 
         if let Some(default_block_id) = default_block {
@@ -616,7 +628,7 @@ impl<'a> HirBuilder<'a> {
 
         return_hir_transformation_error!(
             "Match dispatch had no next arm, default arm, or fallback runtime-failure block",
-            self.hir_error_location(location)
+            self.hir_error_location(span)
         )
     }
 
@@ -625,7 +637,7 @@ impl<'a> HirBuilder<'a> {
         default_block: Option<BlockId>,
         default: Option<&[AstNode]>,
         parent_region: RegionId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         merge_block: &mut Option<BlockId>,
         terminated_anchor: &mut Option<BlockId>,
     ) -> Result<(), CompilerError> {
@@ -633,12 +645,11 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         };
 
-        self.set_current_block(default_block_id, location)?;
+        self.set_current_block(default_block_id, span)?;
         self.lower_statement_sequence(default_body)?;
 
-        let default_tail_block = self.current_block_id_or_error(location)?;
-        let default_terminated =
-            self.block_has_explicit_terminator(default_tail_block, location)?;
+        let default_tail_block = self.current_block_id_or_error(span)?;
+        let default_terminated = self.block_has_explicit_terminator(default_tail_block, span)?;
         if default_terminated {
             if terminated_anchor.is_none() {
                 *terminated_anchor = Some(default_tail_block);
@@ -647,11 +658,11 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
-        let merge_target = self.ensure_match_merge_block(parent_region, location, merge_block)?;
+        let merge_target = self.ensure_match_merge_block(parent_region, span, merge_block)?;
         self.emit_jump_to(
             default_tail_block,
             merge_target,
-            location,
+            span,
             "match.default.merge",
         )
     }
@@ -660,20 +671,20 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         merge_block: Option<BlockId>,
         terminated_anchor: Option<BlockId>,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         context: &str,
     ) -> Result<(), CompilerError> {
         if let Some(merge_block_id) = merge_block {
-            return self.set_current_block(merge_block_id, location);
+            return self.set_current_block(merge_block_id, span);
         }
 
         if let Some(anchor_block) = terminated_anchor {
-            return self.set_current_block(anchor_block, location);
+            return self.set_current_block(anchor_block, span);
         }
 
         return_hir_transformation_error!(
             format!("{context} produced no merge block and no terminated anchor block"),
-            self.hir_error_location(location)
+            self.hir_error_location(span)
         )
     }
 
@@ -689,10 +700,10 @@ impl<'a> HirBuilder<'a> {
             guard_block,
             arm_body_block,
             next_dispatch,
-            location,
+            span,
         } = context;
 
-        self.set_current_block(guard_block, location)?;
+        self.set_current_block(guard_block, span)?;
 
         self.with_arm_capture_bindings(arm, capture_locals, |builder| {
             builder.emit_match_arm_capture_assignments(
@@ -700,29 +711,29 @@ impl<'a> HirBuilder<'a> {
                 capture_locals,
                 scrutinee_hir,
                 scrutinee_ast,
-                location,
+                span,
             )?;
 
             let Some(guard) = &arm.guard else {
                 return_hir_transformation_error!(
                     "CFG match guard lowering reached an arm without a guard",
-                    builder.hir_error_location(location)
+                    builder.hir_error_location(span)
                 );
             };
 
             let guard_value = builder.lower_match_guard_value_to_current_block(guard)?;
-            let guard_tail_block = builder.current_block_id_or_error(location)?;
-            builder.emit_terminator(
+            let guard_tail_block = builder.current_block_id_or_error(span)?;
+            // Authored guard branch carries the guard expression span.
+            builder.emit_terminator_with_span(
                 guard_tail_block,
                 HirTerminator::If {
                     condition: guard_value,
                     then_block: arm_body_block,
                     else_block: next_dispatch,
                 },
-                location,
+                span,
+                guard.span,
             )?;
-
-            builder.log_control_flow_edge(guard_tail_block, arm_body_block, "match.guard.true");
             builder.log_control_flow_edge(guard_tail_block, next_dispatch, "match.guard.false");
             Ok(())
         })
@@ -734,7 +745,7 @@ impl<'a> HirBuilder<'a> {
         capture_locals: &[LocalId],
         scrutinee_hir: &HirExpression,
         scrutinee_ast: &Expression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         emit_capture_assignments: bool,
     ) -> Result<(), CompilerError> {
         self.with_arm_capture_bindings(arm, capture_locals, |builder| {
@@ -744,7 +755,7 @@ impl<'a> HirBuilder<'a> {
                     capture_locals,
                     scrutinee_hir,
                     scrutinee_ast,
-                    location,
+                    span,
                 )?;
             }
 
@@ -758,7 +769,7 @@ impl<'a> HirBuilder<'a> {
         capture_locals: &[LocalId],
         scrutinee_ast: &Expression,
         scrutinee_hir: &HirExpression,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Option<HirExpression>, CompilerError> {
         let Some(guard) = &arm.guard else {
             return Ok(None);
@@ -773,7 +784,7 @@ impl<'a> HirBuilder<'a> {
                     capture_locals,
                     scrutinee_ast,
                     scrutinee_hir,
-                    location,
+                    span,
                 )?));
             }
         } else if matches!(arm.pattern, MatchPattern::OptionPresentCapture { .. })
@@ -782,16 +793,17 @@ impl<'a> HirBuilder<'a> {
             let capture_local = capture_locals[0];
             let MatchPattern::OptionPresentCapture {
                 inner_type_id,
-                binding_location,
+                binding_span: authored_binding_span,
                 ..
             } = &arm.pattern
             else {
                 unreachable!("checked above")
             };
-            let field_ty = self.lower_type_id(*inner_type_id, binding_location)?;
-            let region = self.current_region_or_error(binding_location)?;
+            let binding_span = (*authored_binding_span).or(*span);
+            let field_ty = self.lower_type_id(*inner_type_id, &binding_span)?;
+            let region = self.current_region_or_error(&binding_span)?;
             let payload_get = self.make_expression(
-                binding_location,
+                &binding_span,
                 HirExpressionKind::VariantPayloadGet {
                     carrier: HirVariantCarrier::Option,
                     source: Box::new(scrutinee_hir.clone()),
@@ -828,14 +840,14 @@ impl<'a> HirBuilder<'a> {
         if !lowered_pattern.prelude.is_empty() {
             return_hir_transformation_error!(
                 "Match arm pattern lowering produced side-effect statements; only literal patterns are supported",
-                self.hir_error_location(&condition.location)
+                self.hir_error_location(&condition.span)
             );
         }
 
         if lowered_pattern.value.value_kind != ValueKind::Const {
             return_hir_transformation_error!(
                 "Match arm patterns must be compile-time literals",
-                self.hir_error_location(&condition.location)
+                self.hir_error_location(&condition.span)
             );
         }
 
@@ -849,7 +861,7 @@ impl<'a> HirBuilder<'a> {
         ) {
             return_hir_transformation_error!(
                 "Match arm patterns currently support only literal int/float/bool/char/string values",
-                self.hir_error_location(&condition.location)
+                self.hir_error_location(&condition.span)
             );
         }
 
@@ -900,11 +912,11 @@ impl<'a> HirBuilder<'a> {
             MatchPattern::ChoiceVariant {
                 nominal_path,
                 tag,
-                location,
+                span,
                 ..
             } => {
                 let choice_id =
-                    self.choice_id_for_scrutinee_type(nominal_path, scrutinee_type_id, location)?;
+                    self.choice_id_for_scrutinee_type(nominal_path, scrutinee_type_id, span)?;
                 Ok(HirPattern::ChoiceVariant {
                     choice_id,
                     variant_index: *tag,
@@ -922,14 +934,14 @@ impl<'a> HirBuilder<'a> {
         if !lowered_guard.prelude.is_empty() {
             return_hir_transformation_error!(
                 "Match arm guard lowering produced side-effect statements; guards must stay pure boolean expressions",
-                self.hir_error_location(&guard.location)
+                self.hir_error_location(&guard.span)
             );
         }
 
         if lowered_guard.value.ty != self.type_environment.builtins().bool {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
-                self.hir_error_location(&guard.location)
+                self.hir_error_location(&guard.span)
             );
         }
 
@@ -950,7 +962,7 @@ impl<'a> HirBuilder<'a> {
         if guard_value.ty != self.type_environment.builtins().bool {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
-                self.hir_error_location(&guard.location)
+                self.hir_error_location(&guard.span)
             );
         }
 
@@ -961,14 +973,14 @@ impl<'a> HirBuilder<'a> {
     fn ensure_match_merge_block(
         &mut self,
         region: crate::compiler_frontend::hir::ids::RegionId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         merge_block: &mut Option<BlockId>,
     ) -> Result<BlockId, CompilerError> {
         if let Some(existing) = *merge_block {
             return Ok(existing);
         }
 
-        let created = self.create_block(region, location, "match-merge")?;
+        let created = self.create_block(region, span, "match-merge")?;
         *merge_block = Some(created);
         Ok(created)
     }
@@ -985,7 +997,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn create_block(
         &mut self,
         region: crate::compiler_frontend::hir::ids::RegionId,
-        source_location: &SourceLocation,
+        source_span: &Option<SourceSpan>,
         label: &str,
     ) -> Result<BlockId, CompilerError> {
         let block = HirBlock {
@@ -996,8 +1008,8 @@ impl<'a> HirBuilder<'a> {
             terminator: HirTerminator::Uninitialized,
         };
 
-        self.side_table.map_block(source_location, &block);
-        self.log_block_created(block.id, label, source_location);
+        self.side_table.map_block(source_span.to_owned(), &block);
+        self.log_block_created(block.id, label, source_span);
 
         let id = block.id;
         self.push_block(block);
@@ -1017,7 +1029,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn discard_unreachable_empty_block(
         &mut self,
         block_id: BlockId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<bool, CompilerError> {
         if self.block_has_incoming_terminator_edge(block_id) {
             return Ok(false);
@@ -1026,7 +1038,7 @@ impl<'a> HirBuilder<'a> {
         let Some(index) = self.block_index_by_id.get(&block_id).copied() else {
             return_hir_transformation_error!(
                 format!("Cannot discard unknown HIR block {block_id}."),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
@@ -1059,19 +1071,19 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn expression_from_return_values(
         &mut self,
         values: &[HirExpression],
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span)?;
 
         match values {
-            [] => Ok(self.unit_expression(location, region)),
+            [] => Ok(self.unit_expression(span, region)),
             [single] => Ok(single.to_owned()),
             many => {
                 let field_types = many.iter().map(|value| value.ty).collect::<Vec<_>>();
                 let tuple_type = self.type_environment.intern_tuple(field_types);
 
                 Ok(self.make_expression(
-                    location,
+                    span,
                     HirExpressionKind::TupleConstruct {
                         elements: many.to_vec(),
                     },
@@ -1087,10 +1099,10 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         from_block: BlockId,
         target: BlockId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         edge_label: &str,
     ) -> Result<(), CompilerError> {
-        self.emit_jump_with_args(from_block, target, vec![], location, edge_label)
+        self.emit_jump_with_args(from_block, target, vec![], span, edge_label)
     }
 
     /// Jumps to `target` from the block lowering is currently in.
@@ -1103,11 +1115,11 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn emit_jump_from_current_block(
         &mut self,
         target: BlockId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         edge_label: &str,
     ) -> Result<(), CompilerError> {
-        let continuation_block = self.current_block_id_or_error(location)?;
-        self.emit_jump_to(continuation_block, target, location, edge_label)
+        let continuation_block = self.current_block_id_or_error(span)?;
+        self.emit_jump_to(continuation_block, target, span, edge_label)
     }
 
     pub(crate) fn emit_jump_with_args(
@@ -1115,10 +1127,10 @@ impl<'a> HirBuilder<'a> {
         from_block: BlockId,
         target: BlockId,
         args: Vec<crate::compiler_frontend::hir::ids::LocalId>,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
         edge_label: &str,
     ) -> Result<(), CompilerError> {
-        self.emit_terminator(from_block, HirTerminator::Jump { target, args }, location)?;
+        self.emit_terminator(from_block, HirTerminator::Jump { target, args }, span)?;
 
         self.log_control_flow_edge(from_block, target, edge_label);
         Ok(())
@@ -1128,10 +1140,24 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         block_id: BlockId,
         terminator: HirTerminator,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        self.log_terminator_emitted(block_id, &terminator, location);
-        self.set_block_terminator(block_id, terminator, location)
+        self.emit_terminator_with_span(block_id, terminator, span, None)
+    }
+
+    pub(crate) fn emit_terminator_with_span(
+        &mut self,
+        block_id: BlockId,
+        terminator: HirTerminator,
+        span: &Option<SourceSpan>,
+        authored_span: Option<SourceSpan>,
+    ) -> Result<(), CompilerError> {
+        self.log_terminator_emitted(block_id, &terminator, span);
+        self.set_block_terminator(block_id, terminator, span)?;
+        if let Some(authored_span) = authored_span {
+            self.side_table.map_terminator_span(block_id, authored_span);
+        }
+        Ok(())
     }
 
     pub(super) fn push_loop_targets(&mut self, break_target: BlockId, continue_target: BlockId) {
@@ -1148,7 +1174,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn current_loop_targets_or_error(
         &self,
         keyword: &str,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<LoopTargets, CompilerError> {
         let Some(targets) = self.loop_targets.last().copied() else {
             return_hir_transformation_error!(
@@ -1156,7 +1182,7 @@ impl<'a> HirBuilder<'a> {
                     "'{}' reached HIR lowering without an active loop context",
                     keyword
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 

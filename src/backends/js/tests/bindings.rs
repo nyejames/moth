@@ -27,7 +27,6 @@ fn local_slot_assignment_emits_assign_value() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -137,7 +136,6 @@ fn borrow_assignment_emits_assign_borrow() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let assign_alias = statement(
@@ -152,7 +150,6 @@ fn borrow_assignment_emits_assign_borrow() {
                 ValueKind::RValue,
             ),
         },
-        2,
     );
 
     let block = HirBlock {
@@ -214,7 +211,6 @@ fn alias_local_read_emits_bs_read() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 99, types.int, RegionId(0)),
         },
-        1,
     );
 
     let assign_alias = statement(
@@ -229,7 +225,6 @@ fn alias_local_read_emits_bs_read() {
                 ValueKind::RValue,
             ),
         },
-        2,
     );
 
     let log_alias = statement(
@@ -245,7 +240,6 @@ fn alias_local_read_emits_bs_read() {
             )],
             result: None,
         },
-        3,
     );
 
     let block = HirBlock {
@@ -304,7 +298,6 @@ fn alias_only_local_assignment_emits_write() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -387,7 +380,6 @@ fn field_place_emits_bs_field() {
             },
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -461,7 +453,6 @@ fn index_place_emits_bs_index() {
             },
             value: int_expression(1, 42, types.int, RegionId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -529,7 +520,6 @@ fn computed_place_read_composes_with_bs_read() {
             )],
             result: None,
         },
-        1,
     );
 
     let block = HirBlock {

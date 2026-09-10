@@ -1,6 +1,5 @@
 //! Stable nominal blueprints and generated-local nominal reconstruction.
 
-use super::frozen_syntax::StableSourceLocation;
 use super::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     MaterialisationNominalOriginResolver, MaterialisationNominalSource,
@@ -23,9 +22,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, GenericParameterId, NominalTypeId, TypeConstructor,
     TypeId,
@@ -33,9 +30,6 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, PublicFoldedValue,
-};
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
@@ -85,11 +79,8 @@ pub(super) struct NominalFieldBlueprint {
     pub(super) name: String,
     pub(super) field_type: MaterialisationTypeBlueprint,
     pub(super) folded_default: Option<PublicFoldedValue>,
-    /// Stable authored range used when materialising diagnostics and resource origins.
-    ///
-    /// WHY: provenance is diagnostic data, not nominal semantic identity, so `PartialEq` excludes
-    /// this field when checking blueprint agreement.
-    pub(super) location: StableSourceLocation,
+    /// Exact authored range used when materialising diagnostics and resource origins.
+    pub(super) span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 impl PartialEq for NominalFieldBlueprint {
@@ -106,7 +97,9 @@ impl Eq for NominalFieldBlueprint {}
 
 impl NominalFieldBlueprint {
     fn merge_provenance_from(&mut self, other: &Self) {
-        self.location = self.location.preferred_with(&other.location);
+        if self.span.is_none() {
+            self.span = other.span;
+        }
     }
 }
 
@@ -248,62 +241,14 @@ pub(super) fn materialised_nominal_declaration(
         id: local_path,
         value: Expression::new(
             ExpressionKind::NoValue,
-            Default::default(),
+            None,
             type_id,
             diagnostic_type,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     })
-}
-
-pub(super) fn materialised_generic_nominal_metadata(
-    type_id: TypeId,
-    type_environment: &TypeEnvironment,
-) -> Result<Option<GenericDeclarationMetadata>, CompilerError> {
-    let Some(generic_parameter_list_id) =
-        type_environment.generic_parameter_list_id_for_type(type_id)
-    else {
-        return Ok(None);
-    };
-    let environment_parameters = type_environment
-        .generic_parameters(generic_parameter_list_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Materialised generic nominal has no registered parameter list",
-            )
-        })?
-        .parameters
-        .iter()
-        .enumerate()
-        .map(|(index, parameter)| GenericParameter {
-            id: TypeParameterId(index as u32),
-            name: parameter.name,
-            location: Default::default(),
-            trait_bounds: Vec::new(),
-        })
-        .collect::<Vec<_>>();
-    let kind = match type_environment.get(type_id) {
-        Some(TypeDefinition::Struct(_)) => GenericDeclarationKind::Struct,
-        Some(TypeDefinition::Choice(_)) => GenericDeclarationKind::Choice,
-        Some(TypeDefinition::GenericInstance(_)) => {
-            return Err(CompilerError::compiler_error(
-                "Materialised generic nominal metadata target is an instance",
-            ));
-        }
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "Materialised generic nominal metadata target is not a struct or choice",
-            ));
-        }
-    };
-    Ok(Some(GenericDeclarationMetadata {
-        kind,
-        parameters: GenericParameterList {
-            parameters: environment_parameters,
-        },
-        declaration_location: Default::default(),
-    }))
 }
 
 pub(super) fn materialised_struct_fields(
@@ -344,7 +289,7 @@ pub(super) fn materialised_struct_fields(
                 "Materialised struct field name disagrees with its stable blueprint",
             ));
         }
-        let field_location = blueprint_field.location.materialise(string_table);
+        let field_span = blueprint_field.span;
         let mut value = if let Some(default) = blueprint_field.folded_default.as_ref() {
             let mut materialiser = GeneratedFoldedValueMaterialiser {
                 type_environment,
@@ -358,22 +303,22 @@ pub(super) fn materialised_struct_fields(
                 default,
                 field.type_id,
                 string_table,
-                &field_location,
+                field_span,
             )?
         } else {
             Expression::new(
                 ExpressionKind::NoValue,
-                field.location.clone(),
+                field_span,
                 field.type_id,
                 diagnostic_type_spelling(field.type_id, type_environment),
                 ValueMode::ImmutableReference,
             )
         };
-        value.location = field.location.clone();
         value.value_mode = ValueMode::ImmutableReference;
         declarations.push(Declaration {
             id: field.name.clone(),
             value,
+            binding_span: None,
             config_qualifier: None,
         });
     }
@@ -616,15 +561,15 @@ impl ModuleMaterialisationPreparation {
                     }
                     _ => None,
                 };
-                let authored_location = field_declaration
-                    .map(|declaration| &declaration.value.location)
-                    .unwrap_or(&field.location);
+                let authored_span = field_declaration
+                    .map(|declaration| declaration.value.span)
+                    .unwrap_or(field.span);
                 Ok(NominalFieldBlueprint {
                     name: self.string_table.resolve(name).to_owned(),
                     field_type: self
                         .materialisation_type_blueprint(field.type_id, parameter_slots)?,
                     folded_default,
-                    location: StableSourceLocation::capture(authored_location, &self.string_table),
+                    span: authored_span,
                 })
             })
             .collect::<Result<Box<[_]>, CompilerError>>()
@@ -1253,23 +1198,22 @@ fn intern_materialisation_nominal(
             ))
         })?;
 
-    let parsed_parameters = GenericParameterList {
-        parameters: blueprint
-            .generic_parameters
-            .iter()
-            .enumerate()
-            .map(|(index, parameter)| GenericParameter {
-                id: TypeParameterId(index as u32),
-                name: string_table.intern(&parameter.name),
-                location: Default::default(),
-                trait_bounds: Vec::new(),
-            })
-            .collect(),
-    };
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
     // nominal for field/variant substitution does not re-run declaration-site evidence solving.
-    let generic_parameter_registration = (!parsed_parameters.parameters.is_empty()).then(|| {
-        type_environment.register_generic_parameter_list(&parsed_parameters, &FxHashMap::default())
+    let generic_parameter_registration = (!blueprint.generic_parameters.is_empty()).then(|| {
+        type_environment.register_generic_parameter_list(
+            blueprint
+                .generic_parameters
+                .iter()
+                .enumerate()
+                .map(|(index, parameter)| {
+                    (
+                        TypeParameterId(index as u32),
+                        string_table.intern(&parameter.name),
+                    )
+                }),
+            &FxHashMap::default(),
+        )
     });
     let generic_parameter_list_id = generic_parameter_registration
         .as_ref()
@@ -1359,7 +1303,7 @@ fn intern_materialisation_nominal(
                             external_registry,
                             string_table,
                         )?,
-                        location: Default::default(),
+                        span: None,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -1395,7 +1339,7 @@ fn intern_materialisation_nominal(
                                         external_registry,
                                         string_table,
                                     )?,
-                                    location: Default::default(),
+                                    span: None,
                                 })
                             })
                             .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -1405,7 +1349,7 @@ fn intern_materialisation_nominal(
                         name: string_table.intern(&variant.name),
                         tag: variant.tag,
                         payload,
-                        location: Default::default(),
+                        span: None,
                     })
                 })
                 .collect::<Result<Box<[_]>, CompilerError>>()?;

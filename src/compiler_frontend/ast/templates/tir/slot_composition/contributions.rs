@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrId, TemplateIrNodeId, TemplateIrStore,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use rustc_hash::FxHashMap;
@@ -27,10 +28,9 @@ use super::helpers::{
     loose_content_without_default_slot_error, root_node_id_for_template, unknown_slot_target_error,
 };
 use crate::compiler_frontend::ast::templates::tir::slot_layout::TirSlotSchema;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[cfg(test)]
-use super::helpers::location_for_template;
+use super::helpers::span_for_template;
 #[cfg(test)]
 use crate::compiler_frontend::ast::templates::tir::slot_layout::{
     TirSlotLayout, collect_tir_slot_layout,
@@ -128,12 +128,12 @@ pub(super) fn route_tir_fill_against_layout(
 
     let fill_root = root_node_id_for_template(store, fill_template_id)?;
     let fill_children = children_of_node(store, fill_root)?;
-    let fill_location = location_for_template(store, fill_template_id)?;
+    let fill_span = span_for_template(store, fill_template_id)?;
     route_tir_fill_nodes_against_schema(
         store,
         &layout.schema,
         &fill_children,
-        &fill_location,
+        fill_span,
         string_table,
     )
 }
@@ -143,7 +143,7 @@ pub(super) fn route_tir_fill_nodes_against_schema(
     store: &TemplateIrStore,
     schema: &TirSlotSchema,
     fill_children: &[TemplateIrNodeId],
-    fill_location: &SourceLocation,
+    fill_span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> ContributionResult<TirSlotContributions> {
     increment_ast_counter(AstCounter::TirContributionRoutingCalls);
@@ -210,11 +210,9 @@ pub(super) fn route_tir_fill_nodes_against_schema(
             };
 
             if !schema.accepts_target(target_key) {
-                return Err(unknown_slot_target_error(
-                    target_key,
-                    target_template.location.to_owned(),
-                )
-                .into());
+                return Err(
+                    unknown_slot_target_error(target_key, target_template.span.to_owned()).into(),
+                );
             }
 
             // The slot-insert helper is a routing marker: its body content fills
@@ -266,10 +264,10 @@ pub(super) fn route_tir_fill_nodes_against_schema(
         }
 
         if schema.positional_slots.is_empty() {
-            return Err(loose_content_without_default_slot_error(fill_location.clone()).into());
+            return Err(loose_content_without_default_slot_error(fill_span).into());
         }
 
-        return Err(extra_loose_content_without_default_slot_error(fill_location.clone()).into());
+        return Err(extra_loose_content_without_default_slot_error(fill_span).into());
     }
 
     Ok(contributions)
@@ -317,7 +315,7 @@ fn collect_insert_contribution_content(
                 if !schema.accepts_target(target_key) {
                     return Err(unknown_slot_target_error(
                         target_key,
-                        target_template.location.to_owned(),
+                        target_template.span.to_owned(),
                     )
                     .into());
                 }

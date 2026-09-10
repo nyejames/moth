@@ -10,21 +10,27 @@
 //! This module stops at prepared syntax. Interface binding, declaration ordering, AST, HIR, borrow
 //! validation and generated completion belong to `compiler_frontend::module_compilation`.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, HeaderParseOptions,
-    PreparedHeaderSyntax, prepare_header_syntax,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
+    HeaderParseOptions, HeaderPreparationFailure, PreparedHeaderSyntax, SourcePreparationDelta,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::PreparedModuleInput;
-use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::paths::file_references::{
+    PreparedFileReference, ResolvedFileReferenceTable,
+};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpanBuilders,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
@@ -33,12 +39,13 @@ use crate::compiler_frontend::{
 use crate::timed_stage_attributed;
 
 use super::prepared_module::PreparedModule;
-use super::prepared_source::PreparedSourceInput;
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
+use super::source_loading::SelectedSourceTextMap;
 
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Parallel file-preparation scheduling policy.
 ///
@@ -82,9 +89,9 @@ const FILE_PREPARATION_MIN_CHUNK_SIZE: usize = 4;
 
 struct FilePreparationChunk {
     chunk_index: usize,
-    file_range: Range<usize>,
     local_string_table: StringTable,
     results: Vec<PreparedFileResult>,
+    span_builders: Vec<(SourceId, ExtendedSpanBuilder)>,
 }
 
 struct PreparedFileResult {
@@ -166,18 +173,105 @@ impl FilePreparationStrategy {
 /// Provider-independent context for preparing one module's source files and aggregating
 /// `PreparedHeaderSyntax` without requiring provider interfaces.
 ///
-/// WHAT: owns only the inputs file preparation actually requires — style directives and the
-///       project path resolver — and works against a caller-owned `StringTable` and
-///       `SourceFileTable`. It deliberately excludes `ExternalPackageRegistry`, the import
-///       resolution table and builder runtime packages.
-/// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before the
-///      provider graph is compiled. Keeping provider-interface values out of this context makes
-///      the preparation phase genuinely provider-independent, so it cannot reach provider state
-///      and the orchestrator can schedule provider binding between `prepare_module` and
-///      semantic compilation without touching this context.
+/// WHAT: borrows the boundary-owned source database for identity lookups and owns only the
+///       preparation settings needed by each file. It works against a caller-owned `StringTable`
+///       and does not construct or retain another source identity table. It deliberately excludes
+///       `ExternalPackageRegistry`, the import resolution table and builder runtime packages.
+/// WHY: source identities belong to the project or package compilation boundary, while this phase
+///      only prepares retained syntax. Keeping provider-interface values out of this context makes
+///      preparation genuinely provider-independent, so it cannot reach provider state and the
+///      orchestrator can schedule provider binding between preparation and semantic compilation.
 pub(super) struct ModulePreparationContext<'a> {
+    pub(super) source_files: &'a SourceDatabase,
     pub(super) style_directives: &'a StyleDirectiveRegistry,
     pub(super) project_path_resolver: Option<ProjectPathResolver>,
+}
+
+/// Resolve the canonical filesystem path for a final source identity.
+fn source_path_for_id(
+    source_files: &SourceDatabase,
+    source_id: SourceId,
+) -> Result<PathBuf, CompilerError> {
+    let record = source_files.get(source_id).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "source identity {} is absent from the source database",
+            source_id.index()
+        ))
+    })?;
+    record
+        .canonical_os_path
+        .clone()
+        .map(|canonical| canonical.into_path_buf())
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} has no canonical filesystem path",
+                source_id.index()
+            ))
+        })
+}
+
+/// Resolve the identity the boundary already assigned to a canonical path.
+///
+/// WHY: the active root arrives as a path from module discovery, and preparation validates it
+/// against the identity domain rather than trusting that argument. The database's canonical index
+/// answers this directly; a scan over records would reimplement it.
+fn source_id_for_canonical_path(
+    source_files: &SourceDatabase,
+    canonical_path: &Path,
+) -> Option<SourceId> {
+    source_files
+        .get_by_canonical_path(canonical_path)
+        .map(|record| record.id)
+}
+
+/// Borrow the exact source snapshot selected for the compilation boundary.
+///
+/// Directory discovery keeps source slots pending until the reachability walk selects them. The
+/// selected map supplies those not-yet-retained snapshots; cached snapshots remain borrowed from
+/// the boundary database.
+fn retained_source_text<'a>(
+    source_files: &'a SourceDatabase,
+    source_id: SourceId,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+) -> Result<&'a str, CompilerError> {
+    if source_files.get(source_id).is_none() {
+        return Err(CompilerError::compiler_error(format!(
+            "source identity {} is absent from the source database",
+            source_id.index()
+        )));
+    }
+
+    if let Some(source) = source_files.retained_text(source_id) {
+        return Ok(source);
+    }
+    if let Some(error) = source_files.source_load_error(source_id) {
+        return Err(error.clone());
+    }
+
+    let path = source_files
+        .get(source_id)
+        .and_then(|record| record.canonical_os_path.as_deref())
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} has no canonical filesystem path",
+                source_id.index()
+            ))
+        })?;
+    let Some(selected_source_texts) = selected_source_texts else {
+        return Err(CompilerError::compiler_error(format!(
+            "registered source identity {} has no retained source text",
+            source_id.index()
+        )));
+    };
+    selected_source_texts.load(path)
+}
+
+fn source_byte_len<'a>(
+    source_files: &'a SourceDatabase,
+    source_id: SourceId,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+) -> Result<usize, CompilerError> {
+    retained_source_text(source_files, source_id, selected_source_texts).map(str::len)
 }
 
 /// Incremental provider-independent syntax preparation for one indexed directory module.
@@ -185,18 +279,25 @@ pub(super) struct ModulePreparationContext<'a> {
 /// Stage 0 prepares each selected source once, reads its retained dependency shells from the same
 /// header output and only then decides which same-module source to prepare next. This keeps
 /// semantic reachability and header ownership aligned without a second lexical dependency scanner.
-pub(super) struct ModuleSyntaxDiscovery<'a> {
+pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     context: &'a ModulePreparationContext<'a>,
+    /// Source text selected during this walk but not retained in the boundary database yet.
+    selected_source_texts: &'texts mut SelectedSourceTextMap,
     entry_file_path: PathBuf,
     /// Explicit file role for transient entry selections; canonical module roots derive this from
     /// `active_root_role`.
     entry_file_role: Option<FileRole>,
     active_root_role: ModuleRootRole,
     expected_active_origin: StableModuleOriginIdentity,
-    source_module_origins: SourceModuleOriginTable,
-    source_files: SourceFileTable,
+    /// Ordered owned-source candidates used by the module's pre-slice source identity table.
+    /// Unselected candidates remain here because provider resolution historically considered this
+    /// complete module-local set, not only the files reached by header discovery.
+    candidate_source_ids: Vec<SourceId>,
+    /// One immutable origin table is shared by every prepared module in this project or package
+    /// boundary. Cloning this handle does not duplicate the boundary-wide rows.
+    source_module_origins: Arc<SourceModuleOriginTable>,
     string_table: StringTable,
-    prepared_outputs: Vec<(usize, FileFrontendPrepareOutput)>,
+    prepared_outputs: Vec<Option<FileFrontendPrepareOutput>>,
     resolved_file_references: ResolvedFileReferenceTable,
     warnings: Vec<CompilerDiagnostic>,
     source_byte_count: usize,
@@ -205,38 +306,52 @@ pub(super) struct ModuleSyntaxDiscovery<'a> {
     timing_context: Option<crate::timing::TimingContext>,
 }
 
+/// One module's share of the boundary's completed source registration.
+///
+/// WHAT: the module's ordered owned candidates plus the boundary-wide origin table they index
+///       into.
+/// WHY: both are produced once by the enclosing project or package boundary and are immutable for
+///      the rest of the build. Passing them as one value keeps that shared provenance visible and
+///      stops a caller supplying candidates from one boundary and origins from another.
+pub(super) struct RegisteredModuleSources {
+    pub(super) candidate_source_ids: Vec<SourceId>,
+    pub(super) source_module_origins: Arc<SourceModuleOriginTable>,
+}
+
 impl ModulePreparationContext<'_> {
     /// Begin header-owned reachability discovery for one indexed directory module.
+    ///
+    /// The source database and origin table have already been built by the enclosing project or
+    /// package boundary. Discovery borrows the immutable source table and shares the immutable
+    /// origin-table handle, so no module or worker can allocate or copy boundary identities while
+    /// preparation is in flight. Failures travel in the premerge lane; the final boundary owns
+    /// the single vessel conversion.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn begin_syntax_discovery<'a>(
+    pub(super) fn begin_syntax_discovery<'a, 'texts>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
-        origin_by_canonical_path: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
-        candidate_source_paths: impl ExactSizeIterator<Item = &'a Path>,
+        registered_sources: RegisteredModuleSources,
         entry_file_path: &Path,
         entry_file_role: Option<FileRole>,
-        mut string_table: StringTable,
+        string_table: StringTable,
+        selected_source_texts: &'texts mut SelectedSourceTextMap,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<ModuleSyntaxDiscovery<'a>, CompilerMessages> {
-        let source_files = SourceFileTable::build(
-            candidate_source_paths,
-            entry_file_path,
-            self.project_path_resolver.as_ref(),
-            &mut string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
-        let source_module_origins =
-            SourceModuleOriginTable::from_graph_ownership(&source_files, origin_by_canonical_path);
+    ) -> Result<ModuleSyntaxDiscovery<'a, 'texts>, PremergeFailure> {
+        let candidate_source_ids = registered_sources.candidate_source_ids;
+        let mut prepared_outputs = Vec::new();
+        prepared_outputs.resize_with(candidate_source_ids.len(), || None);
+
         Ok(ModuleSyntaxDiscovery {
             context: self,
+            selected_source_texts,
             entry_file_path: entry_file_path.to_path_buf(),
             entry_file_role,
             active_root_role: stable_origin.role(),
             expected_active_origin: stable_origin,
-            source_module_origins,
-            source_files,
+            candidate_source_ids,
+            source_module_origins: registered_sources.source_module_origins,
             string_table,
-            prepared_outputs: Vec::new(),
+            prepared_outputs,
             resolved_file_references: ResolvedFileReferenceTable::new(),
             warnings: Vec::new(),
             source_byte_count: 0,
@@ -246,36 +361,48 @@ impl ModulePreparationContext<'_> {
         })
     }
 
-    /// Prepare one discovered module's source files and aggregate provider-independent header
-    /// syntax, retaining it with the module string-table context and the active root's file
-    /// identity for semantic compilation.
+    /// Prepare one selected module's source files and aggregate provider-independent header
+    /// syntax, retaining it with the module string-table context and the active root's `SourceId`
+    /// for semantic compilation.
     ///
     /// WHAT: prepares every source file against local string-table forks, merges chunk-local
-    ///       string tables in deterministic input order, and runs `prepare_header_syntax` to
+    ///       string tables in deterministic input order and runs `prepare_header_syntax` to
     ///       produce the retained `PreparedHeaderSyntax`. Directory Moth inputs consume retained
-    ///       token streams; synthetic Moth inputs consume complete outputs retained during
-    ///       discovery. Stops before provider-dependent binding.
-    ///       After building the per-file source-origin table, resolves the entry file's `FileId`
-    ///       through `SourceFileTable` once and validates that the table maps it to the expected
-    ///       active origin from `ModuleOriginInput`, then retains the `FileId` and discards the
-    ///       loose origin.
-    /// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before
-    ///      the provider graph is compiled. This context owns no provider-interface values, so
+    ///       token streams, synthetic Moth inputs consume complete outputs retained during
+    ///       discovery and single-file compilation retains its own synthetic origin table.
+    ///       Preparation stops before provider-dependent binding.
+    /// WHY: the compiler design overview requires `PreparedHeaderSyntax` to be produced before the
+    ///      provider graph is compiled. This context owns no provider-interface values, so
     ///      preparation cannot reach provider state. Retaining the syntax, string-table context,
-    ///      source identities and the active root `FileId` lets semantic compilation begin with
-    ///      interface binding without retokenizing or reparsing source and without
-    ///      reconstructing module identity from paths. Provider binding is scheduled after this
-    ///      call, inside the compiler's module compilation service.
+    ///      source identities and the active root `SourceId` lets semantic compilation begin with
+    ///      interface binding without retokenizing or reparsing source and without reconstructing
+    ///      module identity from paths. Provider binding is scheduled after this call, inside the
+    ///      compiler's module compilation service.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "source mutation is borrowed separately from immutable preparation services"
+    )]
     pub(super) fn prepare_module(
         &self,
         stable_origin: StableModuleOriginIdentity,
         module: Vec<PreparedSourceInput>,
+        source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         mut string_table: StringTable,
         source_byte_count: usize,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<PreparedModule, CompilerMessages> {
+    ) -> Result<PreparedModule, PremergeFailure> {
         let mut warnings = Vec::new();
+
+        // Discovery owns the final source identity domain and supplies this database in
+        // deterministic logical-path order. Prepared inputs carry only these final IDs, so the
+        // preparation phase does not construct or rebind a traversal-local identity table.
+        let candidate_source_ids = self
+            .source_files
+            .iter()
+            .map(|identity| identity.id)
+            .collect::<Vec<_>>();
+
         let module_file_count = module.len();
         let contains_moth_template = module.iter().any(PreparedSourceInput::is_moth_template);
 
@@ -283,17 +410,7 @@ impl ModulePreparationContext<'_> {
         // the active file is a normal runtime-capable root or an API-only support/facade root.
         let active_root_role = stable_origin.role();
 
-        // 1. Build the module source identity table against the caller-owned string table. Source
-        //    identities are deterministic and provider-free, so this needs no provider interface.
-        let source_files = Self::attach_source_files(
-            &mut string_table,
-            &self.project_path_resolver,
-            &module,
-            entry_file_path,
-        )?;
-
-        // 2. Rebind retained synthetic outputs against this module-owned source table, then
-        //    prepare all remaining files against one local string-table per worker chunk. Directory
+        // 1. Prepare all selected files against one local string-table per worker chunk. Directory
         //    Moth files parse retained Stage 0 tokens, synthetic Moth files consume their complete
         //    retained output, Moth templates tokenize their body once and plain Markdown bypasses
         //    tokenization. Merge/remap once before aggregating header syntax.
@@ -303,8 +420,8 @@ impl ModulePreparationContext<'_> {
             {
                 self.prepare_module_files(
                     &mut string_table,
-                    &source_files,
                     module,
+                    source_spans,
                     entry_file_path,
                     active_root_role,
                     source_byte_count,
@@ -313,41 +430,36 @@ impl ModulePreparationContext<'_> {
         )?;
         warnings.extend(file_warnings);
 
-        // 3. Build the immutable per-file source-origin side table from the origin input. For
-        //    directory modules the graph-owned lookup resolves each source file to its owning
-        //    origin; for single-file compilation every file maps to the synthetic origin. The
-        //    table is remap-free and provider-independent: it carries no StringIds and needs no
-        //    provider interface.
-        let source_module_origins =
-            SourceModuleOriginTable::from_synthetic_origin(&source_files, &stable_origin);
+        // The final source IDs are mapped to the stable module origin used by this compilation.
+        // Directory discovery supplies the same boundary table through `begin_syntax_discovery`;
+        // single-file discovery has already finalized it before calling this phase.
+        let source_module_origins = Arc::new(SourceModuleOriginTable::from_synthetic_origin(
+            self.source_files,
+            &stable_origin,
+        ));
 
-        // 4. Resolve the entry file's FileId through the source file table once and validate that
-        //    the per-file origin table maps it to the expected active origin. The active root must
-        //    have an owning origin, and that origin must match the origin declared by the
-        //    discovery/graph path. A missing entry identity, an unowned active source or an origin
-        //    mismatch is an internal CompilerError surfaced through the build-boundary messages.
-        //    The loose origin is then discarded: `PreparedModule` carries only the retained FileId
-        //    so semantic compilation resolves the active origin from the table, not a loose
-        //    argument.
+        // 3. Resolve the entry file's `SourceId` through the boundary source database once and
+        //    validate that the synthetic origin table maps it to the expected active origin. The
+        //    active root must have an owning origin, and that origin must match the origin declared
+        //    by the single-file path.
         let active_root_file_id = Self::resolve_and_validate_active_root(
-            &source_files,
-            &source_module_origins,
+            self.source_files,
+            source_module_origins.as_ref(),
             &stable_origin,
             entry_file_path,
             &string_table,
         )?;
 
-        // Retain the deterministic preparation context so semantic compilation can continue against
-        // the same string table and source identities. The payload owns no `CompilerFrontend` or
-        // provider state: only syntax, the string table, source identities and warnings.
+        // Retain the deterministic preparation context so semantic compilation can continue
+        // against the same string table and boundary source identities.
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
+                candidate_source_ids,
                 source_module_origins,
                 prepared_header_syntax,
                 resolved_file_references: ResolvedFileReferenceTable::new(),
                 string_table,
-                source_files,
                 warnings,
                 source_file_count: module_file_count,
                 source_byte_count,
@@ -356,81 +468,46 @@ impl ModulePreparationContext<'_> {
         })
     }
 
-    /// Build the module `SourceFileTable` from input source paths against a caller-owned string
-    /// table and the project path resolver.
+    /// Resolve the entry file's `SourceId` from the boundary `SourceDatabase` and validate that
+    /// the supplied origin table maps it to the expected active origin.
     ///
-    /// WHAT: assigns deterministic source identities for the prepared module without touching any
-    ///       provider interface.
-    /// WHY: preparation needs source identities to drive file preparation and header syntax, but
-    ///      not the external package registry or dependency resolution table.
-    fn attach_source_files(
-        string_table: &mut StringTable,
-        project_path_resolver: &Option<ProjectPathResolver>,
-        module: &[PreparedSourceInput],
-        entry_file_path: &Path,
-    ) -> Result<SourceFileTable, CompilerMessages> {
-        SourceFileTable::build(
-            module.iter().map(|input_file| input_file.source_path()),
-            entry_file_path,
-            project_path_resolver.as_ref(),
-            string_table,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
-    }
-
-    /// Resolve the entry file's `FileId` from the `SourceFileTable` and validate that the
-    /// per-file source-origin table maps it to the expected active origin.
-    ///
-    /// WHAT: the active root must be present in the source file table and must have an owning
-    ///       origin in the source-origin table. That origin must equal the expected active origin
-    ///       declared by the discovery or single-file path. A missing entry identity, an unowned
-    ///       active source or an origin mismatch is an internal `CompilerError`.
+    /// WHAT: the active root must be present in the source identity table and must have an owning
+    ///       origin. That origin must equal the expected active origin declared by the discovery
+    ///       or single-file path. A missing entry identity, an unowned active source or an origin
+    ///       mismatch is an internal `CompilerError`.
     /// WHY: validating the active root origin during preparation lets `PreparedModule` discard the
-    ///      loose origin and carry only the retained `FileId`, so the semantic projection resolves
-    ///      the active origin from the table rather than trusting a loose argument.
+    ///      loose origin, then retains only the `SourceId` and shared origin-table handle so
+    ///      semantic projection resolves the active origin from the identity domain rather than
+    ///      trusting a loose argument.
     fn resolve_and_validate_active_root(
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         source_module_origins: &SourceModuleOriginTable,
         expected_active_origin: &StableModuleOriginIdentity,
         entry_file_path: &Path,
-        string_table: &StringTable,
-    ) -> Result<FileId, CompilerMessages> {
-        let active_root_file_id = source_files
-            .get_by_canonical_path(entry_file_path)
-            .map(|identity| identity.file_id)
+        _string_table: &StringTable,
+    ) -> Result<SourceId, CompilerError> {
+        let active_root_file_id = source_id_for_canonical_path(source_files, entry_file_path)
             .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "module preparation: the entry file path {:?} is not in the source file table",
-                        entry_file_path
-                    )),
-                    string_table,
-                )
+                CompilerError::compiler_error(format!(
+                    "module preparation: the entry file path {:?} is not in the source file table",
+                    entry_file_path
+                ))
             })?;
 
         let table_origin = source_module_origins
-            .origin_for(active_root_file_id)
-            .map_err(|error| {
-                CompilerMessages::from_error_ref(error, string_table)
-            })?
+            .origin_for(active_root_file_id)?
             .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "module preparation: the active root (file id {}) has no owning module origin in the source module origin table",
-                        active_root_file_id.0
-                    )),
-                    string_table,
-                )
+                CompilerError::compiler_error(format!(
+                    "module preparation: the active root (file id {}) has no owning module origin in the source module origin table",
+                    active_root_file_id.index()
+                ))
             })?;
 
         if table_origin != expected_active_origin {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "module preparation: the active root's table-resolved origin ({:?}) does not match the expected active origin ({:?})",
-                    table_origin, expected_active_origin
-                )),
-                string_table,
-            ));
+            return Err(CompilerError::compiler_error(format!(
+                "module preparation: the active root's table-resolved origin ({:?}) does not match the expected active origin ({:?})",
+                table_origin, expected_active_origin
+            )));
         }
 
         Ok(active_root_file_id)
@@ -446,21 +523,17 @@ impl ModulePreparationContext<'_> {
     fn prepare_module_files(
         &self,
         string_table: &mut StringTable,
-        source_files: &SourceFileTable,
-        mut module: Vec<PreparedSourceInput>,
+        module: Vec<PreparedSourceInput>,
+        source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
-        Self::rebind_synthetic_prepared_inputs(&mut module, source_files, string_table)?;
-
-        let entry_file_id = source_files
-            .get_by_canonical_path(entry_file_path)
-            .map(|identity| identity.file_id);
+    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
+        let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.project_path_resolver.clone(),
+            project_path_resolver: self.project_path_resolver.as_ref(),
             entry_file_role: None,
             active_root_role,
         };
@@ -478,7 +551,7 @@ impl ModulePreparationContext<'_> {
         let runtime_fragment_offset = 0usize;
 
         let prepare_context = FrontendFilePrepareContext {
-            source_files,
+            source_files: self.source_files,
             style_directives: self.style_directives,
             entry_file_path,
             options: &options,
@@ -498,14 +571,21 @@ impl ModulePreparationContext<'_> {
             FilePreparationStrategy::selection_for_module(module_file_count, source_byte_count);
         record_file_preparation_strategy(strategy, strategy_reason);
 
-        let preparation_chunks = Self::prepare_module_file_chunks(
+        let mut preparation_chunks = Self::prepare_module_file_chunks(
             module,
             &fork_source,
             &prepare_context,
             const_template_offset,
             runtime_fragment_offset,
             strategy,
+            source_spans,
         );
+        // Restore all owners before any diagnostic, remap or aggregation path can return early.
+        for chunk in &mut preparation_chunks {
+            for (source, builder) in chunk.span_builders.drain(..) {
+                source_spans.retain_span_builder(source, builder);
+            }
+        }
 
         Self::merge_file_preparation_chunks(
             string_table,
@@ -515,91 +595,31 @@ impl ModulePreparationContext<'_> {
         )
     }
 
-    /// Rebind complete synthetic discovery outputs against the module's retained source table.
+    /// Merge chunk-local string tables and place prepared file outputs into source-order slots.
     ///
-    /// WHAT: moves every provisional synthetic `FileId` and source scope onto the exact
-    ///       `SourceFileTable` that `PreparedModule` retains for later semantic binding.
-    /// WHY: Stage 0 must discover and prepare files before the complete closure is known, but
-    ///      module preparation is the sole owner of final source identity. Keeping rebinding here
-    ///      prevents a discarded discovery-time table from becoming a second identity authority.
-    fn rebind_synthetic_prepared_inputs(
-        module: &mut [PreparedSourceInput],
-        source_files: &SourceFileTable,
-        string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
-        for input in module {
-            let (source_path, output) = match input {
-                PreparedSourceInput::MothPrepared {
-                    source_path,
-                    output,
-                    ..
-                }
-                | PreparedSourceInput::MothTemplatePrepared {
-                    source_path,
-                    output,
-                    ..
-                } => (source_path, output),
-                _ => continue,
-            };
-
-            let identity = source_files
-                .get_by_canonical_path(source_path)
-                .ok_or_else(|| {
-                    CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(format!(
-                            "module source identity table is missing retained synthetic file {:?}",
-                            source_path
-                        )),
-                        string_table,
-                    )
-                })?;
-            output
-                .rebind_source_identity(
-                    identity.file_id,
-                    identity.logical_path.clone(),
-                    identity.canonical_os_path.clone(),
-                )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            output
-                .freeze_path_syntax(string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        }
-
-        Ok(())
-    }
-
-    /// Merge chunk-local string tables and aggregate prepared file outputs.
-    ///
-    /// WHAT: all scheduling strategies converge here after producing ordered chunk records.
-    /// WHY: chunk-local workers may finish in any order, but the frontend's source identity,
-    /// warning, diagnostic, and header order must follow the original module input order.
+    /// WHAT: all scheduling strategies converge here after producing chunk records. String-table
+    ///       deltas, warnings and diagnostics follow deterministic chunk order; prepared outputs
+    ///       are placed by `file_index` so header order follows the original module input.
+    /// WHY: chunk-local workers may finish in any order, but an unfilled slot means a selected
+    ///      source was never prepared and an occupied slot means one was prepared twice.
     fn merge_file_preparation_chunks(
         string_table: &mut StringTable,
         mut preparation_chunks: Vec<FilePreparationChunk>,
         module_file_count: usize,
         base_len: usize,
-    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), CompilerMessages> {
+    ) -> Result<(PreparedHeaderSyntax, Vec<CompilerDiagnostic>), PremergeFailure> {
         // Completion order is a scheduler detail. Merge order is the module input order encoded
-        // by deterministic chunk indexes.
+        // by deterministic chunk indexes; prepared outputs are then placed by `file_index`, so
+        // header order never depends on which worker finished first.
         preparation_chunks.sort_by_key(|chunk| chunk.chunk_index);
+        validate_distinct_chunk_indexes(&preparation_chunks)?;
 
-        // Release-safe validation replaces the previous ordering debug_asserts so release
-        // builds reject malformed scheduler payloads with a CompilerError instead of silently
-        // dropping, reordering or truncating prepared files.
-        validate_preparation_chunk_order(&preparation_chunks, module_file_count)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-        let mut prepared_outputs = Vec::new();
+        let mut prepared_outputs = Vec::with_capacity(module_file_count);
+        prepared_outputs.resize_with(module_file_count, || None);
         let mut warnings = Vec::new();
         let mut diagnostics = Vec::new();
         let mut const_fragment_source_count = 0usize;
         let mut runtime_fragment_source_count = 0usize;
-
-        let prepared_file_capacity = preparation_chunks
-            .iter()
-            .map(|chunk| chunk.results.len())
-            .sum();
-        prepared_outputs.reserve(prepared_file_capacity);
 
         for chunk in preparation_chunks {
             let remap = string_table.merge_delta_from(&chunk.local_string_table, base_len);
@@ -614,6 +634,22 @@ impl ModulePreparationContext<'_> {
             for prepared_file in chunk.results {
                 match prepared_file.result {
                     Ok(mut output) => {
+                        if prepared_file.file_index >= module_file_count {
+                            return Err(CompilerError::compiler_error(format!(
+                                "file preparation record carries file index {} but the module \
+                                 has only {module_file_count} files",
+                                prepared_file.file_index,
+                            ))
+                            .into());
+                        }
+
+                        if prepared_outputs[prepared_file.file_index].is_some() {
+                            return Err(CompilerError::compiler_error(format!(
+                                "file preparation record occupies file index {} more than once",
+                                prepared_file.file_index,
+                            ))
+                            .into());
+                        }
                         if output.const_template_count > 0 {
                             const_fragment_source_count += 1;
                         }
@@ -632,13 +668,9 @@ impl ModulePreparationContext<'_> {
                                         FrontendCounter::FilePrepareNonIdentityPayloadRemaps,
                                         1,
                                     );
-                                    output.remap_string_ids(&remap).map_err(|error| {
-                                        CompilerMessages::from_error_ref(error, string_table)
-                                    })?;
+                                    output.remap_string_ids(&remap)?;
                                 }
-                                output.freeze_path_syntax(string_table).map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, string_table)
-                                })?;
+                                output.freeze_path_syntax(string_table)?;
                             }
                             PreparedFileStringDomain::AlreadyGlobal => {
                                 if !remap_is_identity {
@@ -647,13 +679,11 @@ impl ModulePreparationContext<'_> {
                                         1,
                                     );
                                 }
-                                output.require_frozen_path_syntax().map_err(|error| {
-                                    CompilerMessages::from_error_ref(error, string_table)
-                                })?;
+                                output.require_frozen_path_syntax()?;
                             }
                         }
                         warnings.append(&mut output.warnings);
-                        prepared_outputs.push(output);
+                        prepared_outputs[prepared_file.file_index] = Some(output);
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
                         if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal
@@ -667,11 +697,16 @@ impl ModulePreparationContext<'_> {
                             );
                             error.remap_string_ids(&remap);
                         }
-                        warnings.extend(error.warnings);
-                        diagnostics.push(*error.diagnostic);
+                        let FileFrontendPrepareError {
+                            warnings: file_warnings,
+                            diagnostic,
+                            ..
+                        } = error;
+                        warnings.extend(file_warnings);
+                        diagnostics.push(diagnostic);
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                        return Err(CompilerMessages::from_error_ref(error, string_table));
+                        return Err(PremergeFailure::Infrastructure(error));
                     }
                 }
             }
@@ -687,19 +722,51 @@ impl ModulePreparationContext<'_> {
         );
 
         if !diagnostics.is_empty() {
-            let mut messages =
-                CompilerMessages::from_diagnostics(diagnostics, string_table.clone());
-            messages.prepend_diagnostics_preserving_context(warnings);
-            return Err(messages);
+            // Move the module table into the batch; the caller discards its table on this
+            // diagnosed path, so no clone is needed to carry the diagnostics.
+            let table = std::mem::take(string_table);
+            let mut batch = PremergeDiagnosticBatch::from_diagnostics(diagnostics, table);
+            batch.prepend_diagnostics(warnings);
+            return Err(PremergeFailure::Diagnosed(batch));
+        }
+        let mut filled_outputs = Vec::with_capacity(module_file_count);
+        for (file_index, slot) in prepared_outputs.into_iter().enumerate() {
+            match slot {
+                Some(output) => filled_outputs.push(output),
+                None => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "file preparation left file index {file_index} unfilled; every \
+                         selected source must be prepared exactly once"
+                    ))
+                    .into());
+                }
+            }
         }
 
-        record_successful_prepared_outputs(&prepared_outputs);
-        let prepared = prepare_header_syntax(prepared_outputs, string_table).map_err(|bag| {
-            let mut messages =
-                CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone());
-            messages.prepend_diagnostics_preserving_context(warnings.iter().cloned());
-            messages
-        })?;
+        record_successful_prepared_outputs(&filled_outputs);
+        let prepared = match prepare_header_syntax(
+            &mut filled_outputs,
+            string_table,
+            &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        ) {
+            Ok(prepared) => prepared,
+            Err(bag) => {
+                return Err(match bag {
+                    HeaderPreparationFailure::Diagnosed(bag) => {
+                        // Move the module table and owned warnings into the batch; header
+                        // aggregation failed, so the caller discards both and the batch
+                        // becomes the sole owner with no diagnostic clone.
+                        let table = std::mem::take(string_table);
+                        let mut batch = PremergeDiagnosticBatch::from_bag(bag, table);
+                        batch.prepend_diagnostics(warnings);
+                        PremergeFailure::Diagnosed(batch)
+                    }
+                    HeaderPreparationFailure::Infrastructure(error) => {
+                        PremergeFailure::Infrastructure(error)
+                    }
+                });
+            }
+        };
 
         Ok((prepared, warnings))
     }
@@ -711,21 +778,27 @@ impl ModulePreparationContext<'_> {
         const_template_offset: usize,
         runtime_fragment_offset: usize,
         strategy: FilePreparationStrategy,
+        source_spans: &mut SourceSpanBuilders<'_>,
     ) -> Vec<FilePreparationChunk> {
         let module_file_count = module.len();
+        let files = module.into_iter().map(|file| {
+            let builder = source_spans.take_span_builder(file.source_id());
+            (file, builder)
+        });
         match strategy {
             FilePreparationStrategy::Serial => vec![Self::prepare_module_file_chunk(
                 FilePreparationChunkPlan {
                     chunk_index: 0,
                     file_range: 0..module_file_count,
                 },
-                module.into_iter().enumerate(),
+                files.enumerate(),
                 fork_source,
                 prepare_context,
                 const_template_offset,
                 runtime_fragment_offset,
             )],
-            FilePreparationStrategy::ParallelPerFile => module
+            FilePreparationStrategy::ParallelPerFile => files
+                .collect::<Vec<_>>()
                 .into_par_iter()
                 .enumerate()
                 .map(|(file_index, file)| {
@@ -745,7 +818,7 @@ impl ModulePreparationContext<'_> {
             FilePreparationStrategy::ParallelChunked => {
                 let plans =
                     plan_file_preparation_chunks(module_file_count, rayon::current_num_threads());
-                let mut module_files = module.into_iter().enumerate();
+                let mut module_files = files.enumerate();
                 let planned_files = plans
                     .into_iter()
                     .map(|plan| {
@@ -776,7 +849,7 @@ impl ModulePreparationContext<'_> {
 
     fn prepare_module_file_chunk(
         plan: FilePreparationChunkPlan,
-        module: impl IntoIterator<Item = (usize, PreparedSourceInput)>,
+        module: impl IntoIterator<Item = (usize, (PreparedSourceInput, ExtendedSpanBuilder))>,
         fork_source: &StringTableForkSource,
         prepare_context: &FrontendFilePrepareContext<'_>,
         const_template_offset: usize,
@@ -784,59 +857,53 @@ impl ModulePreparationContext<'_> {
     ) -> FilePreparationChunk {
         let (mut local_string_table, _) = fork_source.fork_for_module().into_parts();
         let mut results = Vec::with_capacity(plan.file_range.len());
+        let mut span_builders = Vec::with_capacity(plan.file_range.len());
 
-        for (file_index, file) in module {
-            let (string_domain, result) = match file {
-                PreparedSourceInput::MothPrepared { output, .. }
-                | PreparedSourceInput::MothTemplatePrepared { output, .. } => {
-                    (PreparedFileStringDomain::AlreadyGlobal, Ok(*output))
-                }
-                file => {
-                    let source = match file {
-                        PreparedSourceInput::Moth {
-                            source_path,
-                            tokens,
-                            ..
-                        } => FrontendFilePrepareSource::Moth {
-                            source_path,
-                            tokens,
-                        },
-                        PreparedSourceInput::MothTemplate {
-                            source_code,
-                            source_path,
-                        } => FrontendFilePrepareSource::MothTemplate {
-                            source_code,
-                            source_path,
-                        },
-                        PreparedSourceInput::PlainMarkdown {
-                            source_code,
-                            source_path,
-                        } => FrontendFilePrepareSource::PlainMarkdown {
-                            source_code,
-                            source_path,
-                        },
-                        PreparedSourceInput::MothPrepared { .. }
-                        | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                            unreachable!(
-                                "prepared Moth output was handled before source conversion"
-                            )
-                        }
-                    };
-                    let input = FrontendFilePrepareInput {
+        for (file_index, (file, span_builder)) in module {
+            let PreparedSourceInput { source_id, source } = file;
+            let (string_domain, delta) = match source {
+                PreparedSourceKind::MothPrepared { output }
+                | PreparedSourceKind::MothTemplatePrepared { output } => (
+                    PreparedFileStringDomain::AlreadyGlobal,
+                    SourcePreparationDelta {
+                        file_id: source_id,
+                        span_builder,
+                        result: Ok(*output),
+                    },
+                ),
+                source => {
+                    let delta = match frontend_source(
                         source,
-                        const_template_offset,
-                        runtime_fragment_offset,
-                    };
-                    (
-                        PreparedFileStringDomain::ChunkLocal,
-                        CompilerFrontend::prepare_file_frontend_local(
+                        source_id,
+                        prepare_context.source_files,
+                        None,
+                    ) {
+                        Ok(source) => CompilerFrontend::prepare_file_frontend_local(
                             prepare_context,
-                            input,
+                            FrontendFilePrepareInput {
+                                source,
+                                source_id,
+                                span_builder,
+                                const_template_offset,
+                                runtime_fragment_offset,
+                            },
                             &mut local_string_table,
                         ),
-                    )
+                        Err(error) => SourcePreparationDelta {
+                            file_id: source_id,
+                            span_builder,
+                            result: Err(FileFrontendPrepareFailure::Infrastructure(error)),
+                        },
+                    };
+                    (PreparedFileStringDomain::ChunkLocal, delta)
                 }
             };
+            let SourcePreparationDelta {
+                file_id,
+                span_builder,
+                result,
+            } = delta;
+            span_builders.push((file_id, span_builder));
             results.push(PreparedFileResult {
                 file_index,
                 string_domain,
@@ -846,29 +913,34 @@ impl ModulePreparationContext<'_> {
 
         FilePreparationChunk {
             chunk_index: plan.chunk_index,
-            file_range: plan.file_range,
             local_string_table,
             results,
+            span_builders,
         }
     }
 }
-
-impl ModuleSyntaxDiscovery<'_> {
+impl ModuleSyntaxDiscovery<'_, '_> {
     pub(super) fn string_table_mut(&mut self) -> &mut StringTable {
         &mut self.string_table
     }
 
+    /// Borrow both mutable selection inputs for one source preparation call.
+    pub(super) fn source_preparation_inputs_mut(
+        &mut self,
+    ) -> (&mut StringTable, &mut SelectedSourceTextMap) {
+        (&mut self.string_table, self.selected_source_texts)
+    }
+
     /// Resolve one prepared file-reference row while keeping the source table and its string
     /// table in their distinct owned lanes. The build resolver never receives an expression or
-    /// source text; it only joins the retained row to Stage 0 physical facts.
     pub(super) fn resolve_file_reference(
         &mut self,
         resolver: &mut crate::build_system::create_project_modules::file_reference_resolution::FileReferenceResolver<'_>,
         consumer_module_id: crate::build_system::create_project_modules::module_identity::ModuleId,
         path_syntax: &PathSyntaxTable,
-        reference: &crate::compiler_frontend::paths::file_references::PreparedFileReference,
+        reference: &PreparedFileReference,
         discovered_content_sources: &mut Vec<
-            crate::build_system::create_project_modules::source_tree_index::SourceId,
+            crate::build_system::create_project_modules::source_tree_index::SourceRecordIndex,
         >,
     ) -> Result<
         crate::compiler_frontend::paths::file_references::ResolvedFileReference,
@@ -878,7 +950,7 @@ impl ModuleSyntaxDiscovery<'_> {
             consumer_module_id,
             path_syntax,
             reference,
-            &self.source_files,
+            self.context.source_files,
             &mut self.string_table,
             discovered_content_sources,
         )
@@ -896,72 +968,59 @@ impl ModuleSyntaxDiscovery<'_> {
     pub(super) fn prepare_source(
         &mut self,
         source: PreparedSourceInput,
-    ) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+        source_spans: &mut SourceSpanBuilders<'_>,
+    ) -> Result<FileFrontendPrepareOutput, PremergeFailure> {
         if matches!(
-            &source,
-            PreparedSourceInput::MothPrepared { .. }
-                | PreparedSourceInput::MothTemplatePrepared { .. }
+            &source.source,
+            PreparedSourceKind::MothPrepared { .. }
+                | PreparedSourceKind::MothTemplatePrepared { .. }
         ) {
-            return Err(CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "indexed module syntax discovery received an already-prepared synthetic source",
-                ),
-                &self.string_table,
-            ));
+            return Err(CompilerError::compiler_error(
+                "indexed module syntax discovery received an already-prepared synthetic source",
+            )
+            .into());
         }
-        let source_byte_len = source.source_byte_len();
+
+        let source_id = source.source_id();
+        let source_byte_len = source_byte_len(
+            self.context.source_files,
+            source_id,
+            Some(self.selected_source_texts),
+        )?;
         self.contains_moth_template |= source.is_moth_template();
-        let entry_file_id = self
-            .source_files
-            .get_by_canonical_path(&self.entry_file_path)
-            .map(|identity| identity.file_id);
+        let entry_file_id =
+            source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
         let options = HeaderParseOptions {
             entry_file_id,
-            project_path_resolver: self.context.project_path_resolver.clone(),
+            project_path_resolver: self.context.project_path_resolver.as_ref(),
             entry_file_role: self.entry_file_role,
             active_root_role: self.active_root_role,
         };
         let prepare_context = FrontendFilePrepareContext {
-            source_files: &self.source_files,
+            source_files: self.context.source_files,
             style_directives: self.context.style_directives,
             entry_file_path: &self.entry_file_path,
             options: &options,
         };
-        let frontend_source = match source {
-            PreparedSourceInput::Moth {
-                source_path,
-                tokens,
-                ..
-            } => FrontendFilePrepareSource::Moth {
-                source_path,
-                tokens,
-            },
-            PreparedSourceInput::MothTemplate {
-                source_code,
-                source_path,
-            } => FrontendFilePrepareSource::MothTemplate {
-                source_code,
-                source_path,
-            },
-            PreparedSourceInput::PlainMarkdown {
-                source_code,
-                source_path,
-            } => FrontendFilePrepareSource::PlainMarkdown {
-                source_code,
-                source_path,
-            },
-            PreparedSourceInput::MothPrepared { .. }
-            | PreparedSourceInput::MothTemplatePrepared { .. } => {
-                unreachable!("already-prepared synthetic source was rejected above")
-            }
-        };
+        let frontend_source = frontend_source(
+            source.source,
+            source_id,
+            self.context.source_files,
+            Some(self.selected_source_texts),
+        )?;
         let input = FrontendFilePrepareInput {
             source: frontend_source,
+            source_id,
+            span_builder: source_spans.take_span_builder(source_id),
             const_template_offset: 0,
             runtime_fragment_offset: 0,
         };
 
-        let output = match timed_stage_attributed!(
+        let SourcePreparationDelta {
+            file_id,
+            span_builder,
+            result,
+        } = timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
             CompilerFrontend::prepare_file_frontend_local(
@@ -969,18 +1028,19 @@ impl ModuleSyntaxDiscovery<'_> {
                 input,
                 &mut self.string_table,
             ),
-        ) {
+        );
+        source_spans.retain_span_builder(file_id, span_builder);
+        let output = match result {
             Ok(output) => output,
             Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                let mut messages = CompilerMessages::from_diagnostics(
-                    vec![*error.diagnostic],
-                    self.string_table.clone(),
-                );
-                messages.prepend_diagnostics_preserving_context(error.warnings);
-                return Err(messages);
+                // Move the discovery table into the batch; this source failed, so the
+                // discovery owner hands its table to the diagnosed lane instead of cloning.
+                let table = std::mem::take(&mut self.string_table);
+                let batch = error.into_premerge_batch(table);
+                return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+                return Err(PremergeFailure::Infrastructure(error));
             }
         };
 
@@ -991,48 +1051,74 @@ impl ModuleSyntaxDiscovery<'_> {
 
     /// Retain one completed source output after Stage 0 has consumed its dependency facts.
     ///
-    /// WHAT: commits the already prepared file output to the module's deterministic source-order
-    ///      collection.
+    /// WHAT: commits the already prepared file output into the candidate-order slot assigned at
+    ///      construction.
     /// WHY: Stage 0 must consume the retained clause and flat-selection facts before the output is
-    ///      frozen, while source preparation itself remains exactly once.
+    ///      frozen, while source preparation itself remains exactly once. An occupied slot is a
+    ///      second preparation of the same candidate; an order past the slot count is outside the
+    ///      candidate domain.
     pub(super) fn retain_prepared_output(
         &mut self,
         source_order: usize,
         output: FileFrontendPrepareOutput,
-    ) {
-        self.prepared_outputs.push((source_order, output));
+    ) -> Result<(), CompilerError> {
+        if source_order >= self.prepared_outputs.len() {
+            return Err(CompilerError::compiler_error(format!(
+                "prepared output order {source_order} is outside the candidate source slot count {}",
+                self.prepared_outputs.len(),
+            )));
+        }
+
+        if self.prepared_outputs[source_order].is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "prepared output occupies candidate source order {source_order} more than once"
+            )));
+        }
+
+        self.prepared_outputs[source_order] = Some(output);
+        Ok(())
     }
 
     /// Freeze the selected source outputs into the one retained module preparation payload.
-    pub(super) fn finish(mut self) -> Result<PreparedModule, CompilerMessages> {
-        self.prepared_outputs.sort_by_key(|(order, _)| *order);
+    pub(super) fn finish(mut self) -> Result<PreparedModule, PremergeFailure> {
         let mut prepared_outputs = self
             .prepared_outputs
             .into_iter()
-            .map(|(_, output)| output)
+            .flatten()
             .collect::<Vec<_>>();
         for output in &mut prepared_outputs {
-            output
-                .freeze_path_syntax(&self.string_table)
-                .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
+            output.freeze_path_syntax(&self.string_table)?;
         }
         let source_file_count = prepared_outputs.len();
         record_successful_prepared_outputs(&prepared_outputs);
-        let prepared_header_syntax = timed_stage_attributed!(
+        let prepared_header_syntax = match timed_stage_attributed!(
             crate::timing::TimingMetric::FrontendPrepare,
             self.timing_context,
-            prepare_header_syntax(prepared_outputs, &mut self.string_table),
-        )
-        .map_err(|bag| {
-            let mut messages = CompilerMessages::from_diagnostics(
-                bag.into_diagnostics(),
-                self.string_table.clone(),
-            );
-            messages.prepend_diagnostics_preserving_context(self.warnings.iter().cloned());
-            messages
-        })?;
+            prepare_header_syntax(
+                &mut prepared_outputs,
+                &mut self.string_table,
+                &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+            )
+        ) {
+            Ok(prepared_header_syntax) => prepared_header_syntax,
+            Err(bag) => {
+                return Err(match bag {
+                    HeaderPreparationFailure::Diagnosed(bag) => {
+                        // `finish` owns `self`, so move its table and warnings into the batch
+                        // instead of cloning the local table to carry the diagnostics.
+                        let batch = PremergeDiagnosticBatch::from_bag(bag, self.string_table);
+                        let mut batch = batch;
+                        batch.prepend_diagnostics(self.warnings);
+                        PremergeFailure::Diagnosed(batch)
+                    }
+                    HeaderPreparationFailure::Infrastructure(error) => {
+                        PremergeFailure::Infrastructure(error)
+                    }
+                });
+            }
+        };
         let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
-            &self.source_files,
+            self.context.source_files,
             &self.source_module_origins,
             &self.expected_active_origin,
             &self.entry_file_path,
@@ -1042,11 +1128,11 @@ impl ModuleSyntaxDiscovery<'_> {
         Ok(PreparedModule {
             semantic: PreparedModuleInput {
                 active_root_file_id,
+                candidate_source_ids: self.candidate_source_ids,
                 source_module_origins: self.source_module_origins,
                 prepared_header_syntax,
                 resolved_file_references: self.resolved_file_references,
                 string_table: self.string_table,
-                source_files: self.source_files,
                 warnings: self.warnings,
                 source_file_count,
                 source_byte_count: self.source_byte_count,
@@ -1066,6 +1152,33 @@ fn record_successful_prepared_outputs(outputs: &[FileFrontendPrepareOutput]) {
 
     add_frontend_counter(FrontendCounter::PreparedFileCount, outputs.len());
     add_frontend_counter(FrontendCounter::TokenCount, token_count);
+}
+
+fn frontend_source<'a>(
+    source: PreparedSourceKind,
+    source_id: SourceId,
+    sources: &'a SourceDatabase,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+) -> Result<FrontendFilePrepareSource<'a>, CompilerError> {
+    let source_path = source_path_for_id(sources, source_id)?;
+    Ok(match source {
+        PreparedSourceKind::Moth { tokens } => FrontendFilePrepareSource::Moth {
+            source_path,
+            tokens,
+        },
+        PreparedSourceKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
+            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
+            source_path,
+        },
+        PreparedSourceKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
+            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
+            source_path,
+        },
+        PreparedSourceKind::MothPrepared { .. }
+        | PreparedSourceKind::MothTemplatePrepared { .. } => {
+            unreachable!("retained syntax bypasses frontend source conversion")
+        }
+    })
 }
 
 fn plan_file_preparation_chunks(
@@ -1103,87 +1216,40 @@ fn plan_file_preparation_chunks(
     plans
 }
 
-/// Validate that sorted file-preparation chunks cover the module input exactly, in order, with
-/// no gaps, overlaps, mismatched record counts or wrong internal file indexes.
+/// Validate that no two file-preparation chunks claim the same `chunk_index`.
 ///
-/// WHAT: release-safe replacement for the ordering `debug_assert`s that previously guarded the
-///      merge loop. Malformed scheduler payloads produce a `CompilerError` instead of silently
-///      dropping, reordering or truncating prepared files.
-/// WHY:  release builds must reject corrupted chunk payloads with the same invariant checks as
-///      debug builds, and the merge path must not silently heal a broken scheduler result.
-fn validate_preparation_chunk_order(
+/// WHAT: release-safe check that sorting the chunk vector yields one deterministic merge order.
+///      Slot placement, not this check, proves each selected file is prepared exactly once.
+/// WHY: sorting normalises worker completion order, but a stable sort leaves two chunks sharing
+///      an index in completion order, which would merge their local string tables
+///      nondeterministically.
+fn validate_distinct_chunk_indexes(
     preparation_chunks: &[FilePreparationChunk],
-    module_file_count: usize,
 ) -> Result<(), CompilerError> {
-    let mut expected_file_index = 0usize;
-
-    for chunk in preparation_chunks {
-        if chunk.file_range.start != expected_file_index {
+    for pair in preparation_chunks.windows(2) {
+        if pair[0].chunk_index == pair[1].chunk_index {
             return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} starts at file index {} but expected \
-                 {expected_file_index}; chunks must be ordered, non-overlapping and gap-free",
-                chunk.chunk_index, chunk.file_range.start,
+                "two file preparation chunks claim chunk index {}; chunk indexes must be unique \
+                 for the merge order to be deterministic",
+                pair[0].chunk_index,
             )));
         }
-
-        if chunk.file_range.end < chunk.file_range.start {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} has reversed range {:?}",
-                chunk.chunk_index, chunk.file_range,
-            )));
-        }
-
-        if chunk.file_range.end > module_file_count {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} ends at file index {} but the module has only \
-                 {module_file_count} files",
-                chunk.chunk_index, chunk.file_range.end,
-            )));
-        }
-
-        if chunk.results.len() != chunk.file_range.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "file preparation chunk {} declares range {:?} ({} files) but carries {} results",
-                chunk.chunk_index,
-                chunk.file_range,
-                chunk.file_range.len(),
-                chunk.results.len(),
-            )));
-        }
-
-        for (expected_index, prepared_file) in (chunk.file_range.start..).zip(&chunk.results) {
-            if prepared_file.file_index != expected_index {
-                return Err(CompilerError::compiler_error(format!(
-                    "file preparation chunk {} record carries file index {} but expected \
-                     {expected_index}",
-                    chunk.chunk_index, prepared_file.file_index,
-                )));
-            }
-        }
-
-        expected_file_index = chunk.file_range.end;
     }
-
-    if expected_file_index != module_file_count {
-        return Err(CompilerError::compiler_error(format!(
-            "file preparation chunks cover {expected_file_index} files but the module has \
-             {module_file_count} files",
-        )));
-    }
-
     Ok(())
 }
 
-pub(super) fn record_module_input_counters(module: &[PreparedSourceInput]) -> usize {
+pub(super) fn record_module_input_counters(
+    module: &[PreparedSourceInput],
+    source_files: &SourceDatabase,
+) -> Result<usize, CompilerError> {
+    let source_byte_count = module.iter().try_fold(0usize, |count, input| {
+        source_byte_len(source_files, input.source_id(), None).map(|length| count + length)
+    })?;
+
     add_frontend_counter(FrontendCounter::ModuleCount, 1);
     add_frontend_counter(FrontendCounter::SourceFileCount, module.len());
-
-    let source_byte_count = module
-        .iter()
-        .map(PreparedSourceInput::source_byte_len)
-        .sum();
     add_frontend_counter(FrontendCounter::SourceByteCount, source_byte_count);
-    source_byte_count
+    Ok(source_byte_count)
 }
 
 fn record_file_preparation_strategy(

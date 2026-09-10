@@ -5,7 +5,7 @@
 //! WHY: dependency sorting must order constants before AST folds their initializer expressions.
 //! MUST NOT: type-check expressions or decide whether a full initializer is foldable.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticBag,
 };
@@ -14,7 +14,9 @@ use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, NamespaceTypeMember, NamespaceValueMember,
 };
 use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
-use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::headers::parse_file_headers::{
+    Header, HeaderKind, HeaderPreparationFailure,
+};
 use crate::compiler_frontend::headers::types::LocalDeclarationOrderingHint;
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -63,7 +65,7 @@ pub(crate) enum ConstantReferenceResolution {
 
 pub(crate) fn add_constant_initializer_dependencies(
     input: ConstantDependencyInput<'_>,
-) -> Result<ConstantDependencyReport, DiagnosticBag> {
+) -> Result<ConstantDependencyReport, HeaderPreparationFailure> {
     let ConstantDependencyInput {
         headers,
         module_symbols,
@@ -90,7 +92,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 constant_positions.insert(
                     path.clone(),
                     ConstantPosition {
-                        source_file: header.canonical_source_file(string_table),
+                        source_file: header.source_file.clone(),
                         header_index,
                     },
                 );
@@ -132,10 +134,7 @@ pub(crate) fn add_constant_initializer_dependencies(
 
         let visibility = match binding_environment.visibility_for(&header.source_file) {
             Ok(v) => v,
-            Err(error) => {
-                diagnostic_bag.push(compiler_error_to_diagnostic(&error));
-                continue;
-            }
+            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
         };
 
         let current_path = header.tokens.src_path.clone();
@@ -164,14 +163,15 @@ pub(crate) fn add_constant_initializer_dependencies(
                     // this path as a constant, so a missing record is a compiler invariant
                     // violation - not a user-facing source diagnostic.
                     let Some(position) = constant_positions.get(&path) else {
-                        diagnostic_bag.push(missing_constant_position_error(&path, string_table));
-                        continue;
+                        return Err(HeaderPreparationFailure::Infrastructure(
+                            missing_constant_position_error(&path, string_table),
+                        ));
                     };
 
-                    // Compare canonical source files to distinguish same-file from cross-file
-                    // references. Both sides use canonical OS paths, not logical source paths.
-                    let current_canonical_source = header.canonical_source_file(string_table);
-                    if position.source_file == current_canonical_source {
+                    // Compare source files to distinguish same-file from cross-file references.
+                    // Both sides use the compiler's logical source identity.
+                    let current_source_file = header.source_file.clone();
+                    if position.source_file == current_source_file {
                         if position.header_index > reference_header_index {
                             diagnostic_bag.push(same_file_forward_reference_error(
                                 &current_path,
@@ -227,7 +227,7 @@ pub(crate) fn add_constant_initializer_dependencies(
     }
 
     if diagnostic_bag.has_errors() {
-        return Err(diagnostic_bag);
+        return Err(HeaderPreparationFailure::Diagnosed(diagnostic_bag));
     }
 
     Ok(report)
@@ -430,9 +430,9 @@ fn is_nominal_constructor(
     }
 
     // Fallback: generic declarations with struct/choice kinds are also constructors.
-    if let Some(metadata) = module_symbols.generic_declarations_by_path.get(target_path) {
+    if let Some(kind) = module_symbols.generic_declarations_by_path.get(target_path) {
         return matches!(
-            metadata.kind,
+            kind,
             GenericDeclarationKind::Struct | GenericDeclarationKind::Choice
         );
     }
@@ -444,27 +444,44 @@ fn is_nominal_constructor(
 // Diagnostic helpers
 // ---------------------------------------------------------------------------
 
+fn attach_reference_span(
+    mut diagnostic: CompilerDiagnostic,
+    reference: &InitializerReference,
+) -> CompilerDiagnostic {
+    diagnostic.primary_span = reference.span;
+    diagnostic
+}
+
 fn self_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::ConstantSelfReference,
-        Some(reference.name),
-        reference.location.clone(),
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::ConstantSelfReference,
+            Some(reference.name),
+            reference.span,
+        ),
+        reference,
     )
 }
 
 fn not_visible_constant_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::ConstantNotVisible,
-        Some(reference.name),
-        reference.location.clone(),
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::ConstantNotVisible,
+            Some(reference.name),
+            reference.span,
+        ),
+        reference,
     )
 }
 
 fn non_constant_reference_error(reference: &InitializerReference) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-        Some(reference.name),
-        reference.location.clone(),
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+            Some(reference.name),
+            reference.span,
+        ),
+        reference,
     )
 }
 
@@ -474,10 +491,13 @@ fn same_file_forward_reference_error(
     reference: &InitializerReference,
 ) -> CompilerDiagnostic {
     let target_name = target_path.name().or_else(|| constant_path.name());
-    CompilerDiagnostic::compile_time_evaluation_error(
-        CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
-        target_name,
-        reference.location.clone(),
+    attach_reference_span(
+        CompilerDiagnostic::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
+            target_name,
+            reference.span,
+        ),
+        reference,
     )
 }
 
@@ -490,12 +510,12 @@ fn same_file_forward_reference_error(
 fn missing_constant_position_error(
     constant_path: &InternedPath,
     string_table: &StringTable,
-) -> CompilerDiagnostic {
-    compiler_error_to_diagnostic(&CompilerError::compiler_error(format!(
+) -> CompilerError {
+    CompilerError::compiler_error(format!(
         "Missing constant position metadata for classified source constant '{}' - \
          the constant inventory map is corrupted",
         constant_path.to_portable_string(string_table),
-    )))
+    ))
 }
 
 #[cfg(test)]

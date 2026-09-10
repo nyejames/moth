@@ -8,16 +8,16 @@
 use super::{
     BindingEnvironmentBuilder, FileVisibility, ReceiverMethodVisibility, SourceFunctionTarget,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 impl<'a> BindingEnvironmentBuilder<'a> {
     pub(super) fn add_visible_receiver_method(
         file_visibility: &mut FileVisibility,
         local_name: StringId,
         function_path: &InternedPath,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) {
         let methods = file_visibility
             .visible_receiver_methods
@@ -33,7 +33,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         methods.push(ReceiverMethodVisibility {
             target: SourceFunctionTarget::Local(function_path.clone()),
-            location,
+            span,
         });
     }
 }

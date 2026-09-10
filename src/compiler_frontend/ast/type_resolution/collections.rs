@@ -13,25 +13,25 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 pub(crate) type CollectionCapacityResult<T> = Result<T, CollectionCapacityDiagnostic>;
 
-pub(crate) struct CollectionCapacityDiagnostic(Box<CompilerDiagnostic>);
+pub(crate) struct CollectionCapacityDiagnostic(CompilerDiagnostic);
 
 impl CollectionCapacityDiagnostic {
     pub(crate) fn as_diagnostic(&self) -> &CompilerDiagnostic {
         &self.0
     }
 
-    pub(crate) fn into_boxed(self) -> Box<CompilerDiagnostic> {
+    pub(crate) fn into_diagnostic(self) -> CompilerDiagnostic {
         self.0
     }
 }
 
 impl From<CompilerDiagnostic> for CollectionCapacityDiagnostic {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        Self(Box::new(diagnostic))
+        Self(diagnostic)
     }
 }
 
@@ -46,16 +46,19 @@ pub(crate) fn fold_collection_capacity(
     scope_context: Option<&ScopeContext>,
     type_environment: &mut TypeEnvironment,
 ) -> CollectionCapacityResult<usize> {
-    match capacity {
-        ParsedCollectionCapacity::Literal { value, location } => {
-            validate_capacity_value(*value, location)
-        }
+    let span = match capacity {
+        ParsedCollectionCapacity::Literal { span, .. }
+        | ParsedCollectionCapacity::BareConstant { span, .. } => *span,
+    };
 
-        ParsedCollectionCapacity::BareConstant { name, location } => {
+    match capacity {
+        ParsedCollectionCapacity::Literal { value, .. } => validate_capacity_value(*value, span),
+
+        ParsedCollectionCapacity::BareConstant { name, .. } => {
             let Some(scope_context) = scope_context else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
-                    location.clone(),
+                    span,
                 )
                 .into());
             };
@@ -63,7 +66,7 @@ pub(crate) fn fold_collection_capacity(
             let Some(declaration) = scope_context.get_reference(name) else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
-                    location.clone(),
+                    span,
                 )
                 .into());
             };
@@ -71,7 +74,7 @@ pub(crate) fn fold_collection_capacity(
             if !scope_context.is_explicit_compile_time_constant(declaration.as_declaration()) {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
-                    location.clone(),
+                    span,
                 )
                 .into());
             }
@@ -81,7 +84,7 @@ pub(crate) fn fold_collection_capacity(
             if declaration.value.type_id != type_environment.builtins().int {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
-                    location.clone(),
+                    span,
                 )
                 .into());
             }
@@ -89,24 +92,23 @@ pub(crate) fn fold_collection_capacity(
             let ExpressionKind::Int(value) = &declaration.value.kind else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
-                    location.clone(),
+                    span,
                 )
                 .into());
             };
 
-            validate_capacity_value(*value, location)
+            validate_capacity_value(*value, span)
         }
     }
 }
-
 fn validate_capacity_value(
     value: i32,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CollectionCapacityResult<usize> {
     if value < 0 {
         return Err(CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::NegativeCapacity,
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -114,7 +116,7 @@ fn validate_capacity_value(
     if value == 0 {
         return Err(CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::ZeroCapacity,
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -122,7 +124,7 @@ fn validate_capacity_value(
     usize::try_from(value).map_err(|_| {
         CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::CapacityOverflow,
-            location.clone(),
+            span,
         )
         .into()
     })

@@ -12,7 +12,6 @@ use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[test]
 fn assertion_failure_message_display_escapes_debug_text() {
@@ -26,6 +25,7 @@ fn assertion_failure_message_display_escapes_debug_text() {
             ty: TypeId(0),
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         },
         message_evaluation: HirAssertionMessageEvaluation::Folded,
     });
@@ -58,6 +58,7 @@ fn float_expression(value: f64) -> HirExpression {
         ty: TypeId(0),
         value_kind: ValueKind::RValue,
         region: RegionId(0),
+        span: None,
     }
 }
 
@@ -65,7 +66,7 @@ fn float_statement(kind: HirStatementKind) -> HirStatement {
     HirStatement {
         id: HirNodeId(0),
         kind,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 

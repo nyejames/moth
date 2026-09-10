@@ -10,16 +10,17 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BorrowCheckError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl BorrowCheckError {
+    #[cfg(test)]
     pub(crate) fn into_diagnostic_or_infrastructure(
         self,
     ) -> Result<CompilerDiagnostic, CompilerError> {
         match self {
-            BorrowCheckError::Diagnostic(diagnostic) => Ok(*diagnostic),
+            BorrowCheckError::Diagnostic(diagnostic) => Ok(diagnostic),
             BorrowCheckError::Infrastructure(error) => Err(*error),
         }
     }
@@ -27,7 +28,7 @@ impl BorrowCheckError {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
         match self {
-            BorrowCheckError::Diagnostic(diagnostic) => Some(diagnostic.as_ref()),
+            BorrowCheckError::Diagnostic(diagnostic) => Some(diagnostic),
             BorrowCheckError::Infrastructure(_) => None,
         }
     }
@@ -49,6 +50,6 @@ impl From<CompilerError> for BorrowCheckError {
 
 impl From<CompilerDiagnostic> for BorrowCheckError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        BorrowCheckError::Diagnostic(Box::new(diagnostic))
+        BorrowCheckError::Diagnostic(diagnostic)
     }
 }

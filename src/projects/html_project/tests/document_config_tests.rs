@@ -1,9 +1,8 @@
 //! Tests for HTML document-shell config parsing.
 
 use super::*;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use std::path::PathBuf;
@@ -68,42 +67,35 @@ fn parser_rejects_empty_lang() {
 }
 
 #[test]
-fn parser_uses_precise_location_from_setting_locations() {
+fn parser_uses_precise_span_from_setting_spans() {
     let mut config = project_config();
     config.html_section.html_lang = Some(String::new());
     let mut string_table = StringTable::new();
-    let precise_location = SourceLocation::new(
-        InternedPath::try_from_filesystem_path(
-            PathBuf::from("project/config.moth").as_path(),
-            &mut string_table,
-        )
-        .expect("test path should be UTF-8"),
-        Default::default(),
-        Default::default(),
+    let mut extended = ExtendedSpanBuilder::default();
+    let precise_span = SourceSpan::new(
+        SourceId::from_index(0),
+        LocalSpan::exact(4, 2, &mut extended).expect("fixture span should fit"),
     );
     config
-        .setting_locations
-        .insert(String::from("html_lang"), precise_location.clone());
+        .setting_spans
+        .insert(String::from("html_lang"), precise_span);
 
     let error = parse_html_document_config(&config, &mut string_table)
         .expect_err("invalid lang should fail");
     let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(diagnostic.primary_location.scope, precise_location.scope);
+    assert_eq!(diagnostic.primary_span, Some(precise_span));
 }
 
 #[test]
-fn parser_falls_back_to_config_file_location() {
+fn parser_falls_back_to_spanless_config_file() {
     let mut config = project_config();
     config.html_section.html_lang = Some(String::new());
 
-    // Don't add the key to setting_locations
+    // Don't add the key to setting_spans.
 
     let mut string_table = StringTable::new();
     let error =
         parse_html_document_config(&config, &mut string_table).expect_err("empty lang should fail");
     let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(
-        diagnostic.primary_location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/config.moth")
-    );
+    assert_eq!(diagnostic.primary_span, None);
 }

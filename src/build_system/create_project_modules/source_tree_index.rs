@@ -9,9 +9,10 @@
 //! module inventory, and collision validators from repeating the same expensive walk.
 //!
 //! The traversal also inventories every compiler-recognized or provider-owned source file once
-//! into a central `SourceRecord` table addressed by dense `SourceId` values. Owned and unrooted collections
-//! store only `SourceId`s, so the index is the sole source inventory/ownership owner and later
-//! consumers resolve source data through it rather than through duplicated per-module records.
+//! into a central `SourceRecord` table addressed by dense `SourceRecordIndex` handles. Owned and
+//! unrooted collections store only those handles, so the index is the sole source
+//! inventory/ownership owner and later consumers resolve source data through it rather than
+//! through duplicated per-module records.
 use super::module_identity::{
     ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
 };
@@ -19,14 +20,17 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StableOwnedSourceIdentity, StablePackageIdentity,
     portable_relative_logical_path_from,
 };
+use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
     file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
@@ -42,7 +46,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 
 use super::project_structure_diagnostics::{
-    non_utf8_filesystem_name_error, path_id, project_structure_messages,
+    non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
 };
 
 const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[
@@ -169,47 +173,47 @@ struct DiscoveredSourceCandidate {
     logical_candidate_path: String,
 }
 
-/// Dense build-local handle addressing one slot in the contiguous [`SourceRecord`] table.
+/// Zero-based row handle for a source candidate in one [`SourceTreeIndex`].
 ///
-/// `SourceId` is assigned deterministically from portable logical identity (see
-/// [`SourceLogicalIdentity`]) and is independent of traversal, file-creation order and checkout
-/// root. Absolute physical paths never become semantic identity. `SourceId` is build-local and
-/// never leaks across module boundaries or into persistent artefacts.
+/// This is a Stage 0 table position, not a compiler source identity. The compiler assigns the
+/// boundary's [`crate::compiler_frontend::source::SourceId`] after the rows are registered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct SourceId(usize);
+pub(crate) struct SourceRecordIndex(usize);
 
-impl SourceId {
-    /// The contiguous table index this handle addresses.
+impl SourceRecordIndex {
     pub(crate) fn index(self) -> usize {
         self.0
     }
 
     fn from_index(index: usize) -> Self {
-        SourceId(index)
+        Self(index)
     }
 }
 
-/// The portable logical identity of one source record, used as the deterministic `SourceId` sort
-/// key.
+/// Owned portable entry-root-relative spelling for an unrooted source.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct UnrootedSourceLogicalPath(String);
+
+impl UnrootedSourceLogicalPath {
+    pub(crate) fn from_portable(spelling: String) -> Self {
+        Self(spelling)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The logical identity of one source record.
 ///
 /// `Owned` carries the cross-build [`StableOwnedSourceIdentity`] rooted in the owning module
-/// origin plus the module-relative source file path. `Unrooted` carries the entry-root-relative
-/// portable logical path for files outside any module root. Both variants are portable forward
-/// slash spellings with no absolute path component, so ordering is stable across checkout roots.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// origin plus the module-relative source file path. `Unrooted` carries an owned
+/// entry-root-relative portable spelling for files outside any module root. Both variants have no
+/// absolute path component.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SourceLogicalIdentity {
     Owned(StableOwnedSourceIdentity),
     Unrooted(UnrootedSourceLogicalPath),
-}
-
-impl SourceLogicalIdentity {
-    /// The owning module origin for an owned source, or `None` for an unrooted source.
-    pub(crate) fn module_origin(&self) -> Option<&StableModuleOriginIdentity> {
-        match self {
-            SourceLogicalIdentity::Owned(identity) => Some(identity.module_origin()),
-            SourceLogicalIdentity::Unrooted(_) => None,
-        }
-    }
 }
 
 impl PartialOrd for SourceLogicalIdentity {
@@ -239,20 +243,13 @@ impl Ord for SourceLogicalIdentity {
     }
 }
 
-/// The entry-root-relative portable logical path for one unrooted source file.
-///
-/// A newtype around the portable forward-slash spelling so it is never confused with an owned
-/// source's module-relative path or an absolute physical path.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct UnrootedSourceLogicalPath(String);
-
-impl UnrootedSourceLogicalPath {
-    fn from_portable(path: String) -> Self {
-        Self(path)
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
+impl SourceLogicalIdentity {
+    /// The owning module origin for an owned source, or `None` for an unrooted source.
+    pub(crate) fn module_origin(&self) -> Option<&StableModuleOriginIdentity> {
+        match self {
+            SourceLogicalIdentity::Owned(identity) => Some(identity.module_origin()),
+            SourceLogicalIdentity::Unrooted(_) => None,
+        }
     }
 }
 
@@ -273,8 +270,8 @@ pub(crate) enum SourceOwnership {
 /// WHAT: distinguishes files that feed tokenization, header preparation and semantic
 /// compilation from files whose extension is registered with an external import provider but is
 /// not a compiler `SourceFileKind`. Provider-owned records never pretend to be `.moth`, `.mtf`
-/// or `.md`; the provider extension is retained so the directory provider path validates
-/// the target from indexed facts rather than re-probing the filesystem.
+/// or `.md`; the provider extension is retained so the directory provider path validates the
+/// target from indexed facts rather than re-probing the filesystem.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SourceClassification {
     /// A compiler semantic input (`.moth`, `.mtf`, `.md`) that feeds the frontend pipeline.
@@ -284,19 +281,25 @@ pub(crate) enum SourceClassification {
     ProviderOwned(ExternalFileExtension),
 }
 
-/// One recognized compiler source or provider-owned file stored exactly once in the central
-/// [`SourceTreeIndex`] table.
+/// Map Stage 0's authored classification onto the compiler source-record kind.
 ///
-/// WHAT: owns the dense `SourceId`, canonical physical path (the IO handle), source
-/// classification, portable logical identity (the deterministic sort key) and explicit owned
-/// `ModuleId` or unrooted state. The canonical path is never semantic identity; the logical
-/// identity is.
-/// WHY: the index is the sole source inventory/ownership owner. Later Stage 0 consumers resolve
-/// source data through `SourceId` rather than through duplicated per-module records, so identity,
-/// ownership and physical lookup each have one owner.
+/// The lexical file name is classified before canonicalize, so this mapping preserves that
+/// authority rather than re-deriving kind from the canonical extension.
+fn source_kind_from_classification(classification: &SourceClassification) -> SourceKind {
+    match classification {
+        SourceClassification::CompilerSemantic(kind) => SourceKind::Compiler(*kind),
+        SourceClassification::ProviderOwned(_) => SourceKind::ProviderOwned,
+    }
+}
+
+/// One recognized compiler source or provider-owned file stored exactly once in the Stage 0
+/// source-tree table.
+///
+/// The row owns the canonical physical path used for IO, classification, stable logical identity,
+/// and explicit `ModuleId` ownership. Its zero-based position is a tree-local lookup handle, not a
+/// compiler `SourceId`; the boundary `SourceDatabase` assigns the latter from registration rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceRecord {
-    id: SourceId,
     canonical_path: PathBuf,
     classification: SourceClassification,
     supported: bool,
@@ -305,10 +308,6 @@ pub(crate) struct SourceRecord {
 }
 
 impl SourceRecord {
-    pub(crate) fn id(&self) -> SourceId {
-        self.id
-    }
-
     pub(crate) fn canonical_path(&self) -> &Path {
         &self.canonical_path
     }
@@ -344,34 +343,27 @@ impl SourceRecord {
     }
 }
 
-/// One classified source awaiting deterministic `SourceId` assignment.
+/// One classified source awaiting compiler-boundary registration.
 ///
-/// Built during the single post-traversal classification pass. The logical identity is the
-/// portable sort key; ownership records the owning module or unrooted state. `SourceId` is
-/// assigned after sorting, so this struct deliberately carries no dense handle.
+/// The stable logical identity is the portable sort key. No compiler `SourceId` is assigned in
+/// this Stage 0 pass.
 struct ClassifiedSource {
     canonical_path: PathBuf,
     classification: SourceClassification,
     supported: bool,
     logical_identity: SourceLogicalIdentity,
     ownership: SourceOwnership,
-    entry_root_relative_logical_path: Option<String>,
 }
 
-/// Completed central source inventory produced after classification and deterministic ID
-/// assignment.
+/// Completed central source inventory produced after classification and deterministic sorting.
 ///
-/// WHAT: groups the one record table with its ID-only owned and unrooted projections plus the
-/// entry-root-relative logical path and canonical path lookup maps that let the directory
-/// provider path resolve an authored target to a `SourceId` without filesystem probing.
-/// WHY: the collections form one construction result and must enter `SourceTreeIndex` together
-/// without an opaque tuple or a second durable owner.
+/// The collections hold zero-based source-row handles for Stage 0 ownership and namespace
+/// resolution. The compiler-facing registration index is produced after these rows are sorted.
 struct SourceInventory {
     sources: Vec<SourceRecord>,
-    owned_source_ids: Vec<Vec<SourceId>>,
-    unrooted_source_ids: Vec<SourceId>,
-    logical_path_to_source_id: FxHashMap<String, SourceId>,
-    canonical_path_to_source_id: FxHashMap<PathBuf, SourceId>,
+    owned_source_indices: Vec<Vec<SourceRecordIndex>>,
+    unrooted_source_indices: Vec<SourceRecordIndex>,
+    canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex>,
 }
 
 /// Canonical module identities and traversal evidence for one directory build.
@@ -382,15 +374,10 @@ struct SourceInventory {
 /// Stage 0 tests; directory compilation derives its complete normal-and-support table directly
 /// from `module_identities`.
 ///
-/// `sources` is the central contiguous `SourceRecord` table addressed by dense `SourceId`s; it is
-/// the sole source inventory/ownership owner. `owned_source_ids` and `unrooted_source_ids` store
-/// only `SourceId`s so no consumer duplicates source records.
-///
-/// `logical_path_to_source_id` and `canonical_path_to_source_id` are the two non-probing lookup
-/// maps for the directory provider path: the logical path map resolves an authored
-/// provider target by its entry-root-relative portable spelling, and the canonical path map
-/// resolves a consumer file to its owning record. Canonical paths remain IO handles; the maps
-/// never make them semantic identity.
+/// `sources` is the central source-row table addressed by [`SourceRecordIndex`]. It is the sole
+/// Stage 0 source inventory/ownership owner. The compiler-facing [`SourceRegistrationIndex`] is
+/// assembled from its already-sorted canonical rows when a boundary constructs the
+/// [`crate::compiler_frontend::source::SourceDatabase`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceTreeIndex {
     entry_root: PathBuf,
@@ -398,10 +385,9 @@ pub(crate) struct SourceTreeIndex {
     module_identities: ModuleIdentityTable,
     module_roots: ModuleRootTable,
     sources: Vec<SourceRecord>,
-    owned_source_ids: Vec<Vec<SourceId>>,
-    unrooted_source_ids: Vec<SourceId>,
-    logical_path_to_source_id: FxHashMap<String, SourceId>,
-    canonical_path_to_source_id: FxHashMap<PathBuf, SourceId>,
+    owned_source_indices: Vec<Vec<SourceRecordIndex>>,
+    unrooted_source_indices: Vec<SourceRecordIndex>,
+    canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex>,
     stats: SourceTreeDiscoveryStats,
 }
 
@@ -461,11 +447,10 @@ impl SourceTreeIndex {
     /// not a compiler `SourceFileKind`. Unknown extensions never enter owned source sets. After
     /// deterministic `ModuleIdentityTable` construction, each recognized candidate is classified
     /// under its nearest containing normal or support root into
-    /// the central [`SourceRecord`] table; the optional project facade owns its root file even
+    /// central [`SourceRecord`] table; the optional project facade owns its root file even
     /// though it sits outside entry-root containment. Recognized candidates with no enclosing
     /// module root remain explicit unrooted [`SourceRecord`]s rather than being silently
-    /// discarded. Each record receives a dense [`SourceId`] assigned in portable logical identity
-    /// order, and per-module owned and unrooted collections store only `SourceId`s.
+    /// discarded. Sorted rows are handed to the boundary's compiler-facing registration index.
     pub(super) fn discover(
         entry_root: PathBuf,
         project_context: SourceTreeProjectContext<'_>,
@@ -474,7 +459,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let SourceTreeProjectContext {
             project_root,
             validated_output_settings,
@@ -500,16 +485,15 @@ impl SourceTreeIndex {
     }
 
     /// Build one source-package boundary index from its already-canonical root directory.
-    ///
     /// WHAT: traverses one source-backed package root with its own stable package identity,
-    /// dense `SourceId`s, module IDs and ownership tables. The package index becomes the
-    /// filesystem owner for the package root's direct-child root discovery and for sibling
-    /// `.moth` file/folder collisions throughout the package tree, using the same traversal
-    /// implementation as the project index.
-    /// WHY: each project or package compilation boundary owns a separate `SourceTreeIndex` so
-    /// raw `SourceId`/`ModuleId` values never cross boundaries. Reusing the project traversal
-    /// avoids a parallel package traversal while preserving package-specific missing-root and
-    /// multiple-root diagnostics at the package root directory.
+    /// source-row and module ownership tables. The package index becomes the filesystem owner for
+    /// the package root's direct-child root discovery and for sibling `.moth` file/folder
+    /// collisions throughout the package tree, using the same traversal implementation as the
+    /// project index.
+    /// WHY: each project or package boundary owns a separate `SourceTreeIndex`; compiler
+    /// `SourceId`s are assigned later by that boundary's `SourceDatabase`. Reusing the project
+    /// traversal avoids a parallel package traversal while preserving package-specific
+    /// missing-root and multiple-root diagnostics at the package root directory.
     pub(crate) fn discover_package(
         canonical_root: PathBuf,
         package_identity: StablePackageIdentity,
@@ -517,7 +501,7 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let boundary = SourceTreeBoundary {
             entry_root: canonical_root,
             package_identity,
@@ -533,18 +517,18 @@ impl SourceTreeIndex {
     }
 
     /// Run the shared boundary-parameterized source-tree traversal.
-    ///
     /// This is the single filesystem inventory implementation. The boundary descriptor supplies
     /// the stable package identity, skip policy, project-only facade and entry-root prefix
     /// collision inputs, and selects package-specific root-directory classification. Every other
-    /// step — per-directory collision checks, candidate inventory, nearest-module ownership,
-    /// deterministic `SourceId` assignment — is shared between project and package boundaries.
+    /// step — per-directory collision checks, candidate inventory and nearest-module ownership —
+    /// is shared between project and package boundaries. Compiler identity assignment happens in
+    /// the boundary's `SourceDatabase`.
     fn discover_for_boundary(
         boundary: SourceTreeBoundary,
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<Self, CompilerMessages> {
+    ) -> Result<Self, PremergeFailure> {
         let SourceTreeBoundary {
             entry_root,
             package_identity: boundary_package,
@@ -576,7 +560,7 @@ impl SourceTreeIndex {
             // cannot duplicate source identities, and do not traverse aliases outside this
             // boundary.
             let directory = fs::canonicalize(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error, string_table))?;
+                .map_err(|error| Self::directory_read_error(&directory, error))?;
             if !directory.starts_with(&entry_root) || !visited_directories.insert(directory.clone())
             {
                 continue;
@@ -584,7 +568,7 @@ impl SourceTreeIndex {
             stats.dirs_visited += 1;
 
             let mut entries = fs::read_dir(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error, string_table))?
+                .map_err(|error| Self::directory_read_error(&directory, error))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| {
                     CompilerError::file_error(
@@ -592,10 +576,8 @@ impl SourceTreeIndex {
                         format!(
                             "Failed to read directory entry while indexing source tree: {error}"
                         ),
-                        string_table,
                     )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                })?;
             entries.sort_by_key(|entry| entry.path());
 
             let mut subdirectories = Vec::new();
@@ -614,11 +596,7 @@ impl SourceTreeIndex {
                             .file_name()
                             .and_then(|name| name.to_str())
                             .ok_or_else(|| {
-                                non_utf8_filesystem_name_error(
-                                    &path,
-                                    "source tree folder name",
-                                    string_table,
-                                )
+                                non_utf8_filesystem_name_error(&path, "source tree folder name")
                             })?;
                         dependency_folder_names.insert(folder_name.to_owned());
                         subdirectories.push(path);
@@ -635,11 +613,7 @@ impl SourceTreeIndex {
                     path.file_name()
                         .and_then(|name| name.to_str())
                         .ok_or_else(|| {
-                            non_utf8_filesystem_name_error(
-                                &path,
-                                "source tree file name",
-                                string_table,
-                            )
+                            non_utf8_filesystem_name_error(&path, "source tree file name")
                         })?;
 
                 if let SourceTreeBoundaryKind::Project { .. } = kind
@@ -648,10 +622,12 @@ impl SourceTreeIndex {
                         == Some(PROJECT_GLOBALS_DEPENDENCY_NAME)
                         || file_name_claims_project_globals_root(file_name))
                 {
-                    return Err(project_structure_messages(
-                        &path,
+                    let diagnostic = project_structure_diagnostic(
                         InvalidConfigReason::ProjectGlobalsNameReserved,
-                        string_table,
+                    );
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
 
@@ -663,13 +639,14 @@ impl SourceTreeIndex {
                 // Reject them with a structured diagnostic before any other classification so
                 // they are never treated as ordinary source files or silently ignored.
                 if file_name_is_legacy_hash_root_file(file_name) {
-                    return Err(project_structure_messages(
-                        &path,
-                        InvalidConfigReason::LegacyModuleRootFileName {
-                            file_name: string_table.intern(file_name),
-                            directory: path_id(&directory, string_table),
-                        },
-                        string_table,
+                    let reason = InvalidConfigReason::LegacyModuleRootFileName {
+                        file_name: string_table.intern(file_name),
+                        directory: path_id(&directory, string_table),
+                    };
+                    let diagnostic = project_structure_diagnostic(reason);
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
 
@@ -692,15 +669,12 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                let canonical_path = fs::canonicalize(&path)
-                    .map_err(|error| {
-                        CompilerError::file_error(
-                            &path,
-                            format!("Failed to canonicalize source path: {error}"),
-                            string_table,
-                        )
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let canonical_path = fs::canonicalize(&path).map_err(|error| {
+                    CompilerError::file_error(
+                        &path,
+                        format!("Failed to canonicalize source path: {error}"),
+                    )
+                })?;
 
                 if let Some(kind) = source_kind
                     // When the project root equals the entry root, the facade root file is
@@ -714,7 +688,7 @@ impl SourceTreeIndex {
                     }
                 {
                     let logical_candidate_path =
-                        entry_root_relative_logical_path(&path, &entry_root, string_table)?;
+                        entry_root_relative_logical_path(&path, &entry_root)?;
                     recognized_candidates.push(DiscoveredSourceCandidate {
                         canonical_path: canonical_path.clone(),
                         classification: SourceClassification::CompilerSemantic(kind),
@@ -727,7 +701,7 @@ impl SourceTreeIndex {
                     // classified under their nearest enclosing module root, exactly like
                     // compiler semantic candidates.
                     let logical_candidate_path =
-                        entry_root_relative_logical_path(&path, &entry_root, string_table)?;
+                        entry_root_relative_logical_path(&path, &entry_root)?;
                     recognized_candidates.push(DiscoveredSourceCandidate {
                         canonical_path: canonical_path.clone(),
                         classification: SourceClassification::ProviderOwned(extension),
@@ -773,14 +747,15 @@ impl SourceTreeIndex {
                     .iter()
                     .find(|folder_name| folder_name.eq_ignore_ascii_case(stem))
                 {
-                    return Err(project_structure_messages(
-                        &directory,
-                        InvalidConfigReason::SourceFileFolderCollision {
-                            file_name: string_table.intern(file_name),
-                            folder_name: string_table.intern(folder_name),
-                            directory: path_id(&directory, string_table),
-                        },
-                        string_table,
+                    let reason = InvalidConfigReason::SourceFileFolderCollision {
+                        file_name: string_table.intern(file_name),
+                        folder_name: string_table.intern(folder_name),
+                        directory: path_id(&directory, string_table),
+                    };
+                    let diagnostic = project_structure_diagnostic(reason);
+                    let table = std::mem::take(string_table);
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                     ));
                 }
             }
@@ -788,11 +763,11 @@ impl SourceTreeIndex {
                 && directory == entry_root
                 && dependency_folder_names.contains(PROJECT_GLOBALS_DEPENDENCY_NAME)
             {
-                let colliding_folder = directory.join(PROJECT_GLOBALS_DEPENDENCY_NAME);
-                return Err(project_structure_messages(
-                    &colliding_folder,
-                    InvalidConfigReason::ProjectGlobalsNameReserved,
-                    string_table,
+                let diagnostic =
+                    project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
+                let table = std::mem::take(string_table);
+                return Err(PremergeFailure::Diagnosed(
+                    PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                 ));
             }
 
@@ -807,13 +782,14 @@ impl SourceTreeIndex {
                 for folder_name in &dependency_folder_names {
                     if source_packages.has_prefix(folder_name) {
                         let colliding_folder = directory.join(folder_name);
-                        return Err(project_structure_messages(
-                            &colliding_folder,
-                            InvalidConfigReason::EntryRootPackagePrefixCollision {
-                                prefix: string_table.intern(folder_name),
-                                entry_folder: path_id(&colliding_folder, string_table),
-                            },
-                            string_table,
+                        let reason = InvalidConfigReason::EntryRootPackagePrefixCollision {
+                            prefix: string_table.intern(folder_name),
+                            entry_folder: path_id(&colliding_folder, string_table),
+                        };
+                        let diagnostic = project_structure_diagnostic(reason);
+                        let table = std::mem::take(string_table);
+                        return Err(PremergeFailure::Diagnosed(
+                            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
                         ));
                     }
                 }
@@ -837,30 +813,24 @@ impl SourceTreeIndex {
                 }
             };
             if let Some(root) = directory_root {
-                let canonical_root_directory = fs::canonicalize(&directory)
-                    .map_err(|error| {
-                        CompilerError::file_error(
-                            &directory,
-                            format!("Failed to canonicalize module root directory: {error}"),
-                            string_table,
-                        )
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let canonical_root_directory = fs::canonicalize(&directory).map_err(|error| {
+                    CompilerError::file_error(
+                        &directory,
+                        format!("Failed to canonicalize module root directory: {error}"),
+                    )
+                })?;
 
                 let logical_module_path =
-                    logical_module_path_from(&canonical_root_directory, &entry_root, string_table)?;
+                    logical_module_path_from(&canonical_root_directory, &entry_root)?;
 
                 stats.module_roots_found += 1;
-                records.push(
-                    ModuleIdentityRecord::new(
-                        canonical_root_directory,
-                        root.root_file,
-                        root.role,
-                        logical_module_path,
-                        &boundary_package,
-                    )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                );
+                records.push(ModuleIdentityRecord::new(
+                    canonical_root_directory,
+                    root.root_file,
+                    root.role,
+                    logical_module_path,
+                    &boundary_package,
+                )?);
             }
 
             subdirectories.sort();
@@ -871,26 +841,20 @@ impl SourceTreeIndex {
             let SourceTreeBoundaryKind::Project { project_root, .. } = kind else {
                 unreachable!("only project boundaries discover a project package facade");
             };
-            let facade_directory = fs::canonicalize(project_root)
-                .map_err(|error| {
-                    CompilerError::file_error(
-                        project_root,
-                        format!("Failed to canonicalize project root directory: {error}"),
-                        string_table,
-                    )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-
-            records.push(
-                ModuleIdentityRecord::new(
-                    facade_directory.clone(),
-                    facade_file,
-                    ModuleRootRole::ProjectPackageFacade,
-                    logical_module_path_from(&facade_directory, &facade_directory, string_table)?,
-                    &boundary_package,
+            let facade_directory = fs::canonicalize(project_root).map_err(|error| {
+                CompilerError::file_error(
+                    project_root,
+                    format!("Failed to canonicalize project root directory: {error}"),
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-            );
+            })?;
+
+            records.push(ModuleIdentityRecord::new(
+                facade_directory.clone(),
+                facade_file,
+                ModuleRootRole::ProjectPackageFacade,
+                logical_module_path_from(&facade_directory, &facade_directory)?,
+                &boundary_package,
+            )?);
         }
 
         record_discovery_metrics(&stats);
@@ -903,18 +867,15 @@ impl SourceTreeIndex {
             &module_identities,
             recognized_candidates,
             facade_file_for_inventory,
-            &entry_root,
-            string_table,
         )?;
+        validate_unique_source_logical_identities(&classified)?;
 
         let SourceInventory {
             sources,
-            owned_source_ids,
-            unrooted_source_ids,
-            logical_path_to_source_id,
-            canonical_path_to_source_id,
-        } = build_source_inventory(classified, module_count)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            owned_source_indices,
+            unrooted_source_indices,
+            canonical_path_to_source_index,
+        } = build_source_inventory(classified, module_count)?;
 
         Ok(Self {
             entry_root,
@@ -922,10 +883,9 @@ impl SourceTreeIndex {
             module_identities,
             module_roots,
             sources,
-            owned_source_ids,
-            unrooted_source_ids,
-            logical_path_to_source_id,
-            canonical_path_to_source_id,
+            owned_source_indices,
+            unrooted_source_indices,
+            canonical_path_to_source_index,
             stats,
         })
     }
@@ -941,13 +901,11 @@ impl SourceTreeIndex {
         source_file_kinds: &SourceFileKindRegistry,
         external_import_providers: &ExternalImportProviderRegistry,
         string_table: &mut StringTable,
-    ) -> Result<ModuleRootTable, CompilerMessages> {
+    ) -> Result<ModuleRootTable, PremergeFailure> {
         let file_name = entry_file
             .file_name()
             .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                non_utf8_filesystem_name_error(entry_file, "single-file entry name", string_table)
-            })?;
+            .ok_or_else(|| non_utf8_filesystem_name_error(entry_file, "single-file entry name"))?;
         if !file_name_is_normal_module_root_file(file_name) {
             return Ok(ModuleRootTable::empty());
         }
@@ -955,15 +913,12 @@ impl SourceTreeIndex {
         let Some(root_directory) = entry_file.parent() else {
             return Ok(ModuleRootTable::empty());
         };
-        let canonical_root = fs::canonicalize(root_directory)
-            .map_err(|error| {
-                CompilerError::file_error(
-                    root_directory,
-                    format!("Failed to canonicalize single-file source root: {error}"),
-                    string_table,
-                )
-            })
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let canonical_root = fs::canonicalize(root_directory).map_err(|error| {
+            CompilerError::file_error(
+                root_directory,
+                format!("Failed to canonicalize single-file source root: {error}"),
+            )
+        })?;
 
         Self::discover(
             canonical_root.clone(),
@@ -1017,73 +972,58 @@ impl SourceTreeIndex {
         &self.module_identities
     }
 
-    /// The central contiguous source record table, addressed by dense `SourceId`s.
+    /// The central source-record table, addressed by zero-based [`SourceRecordIndex`] rows.
     ///
-    /// WHAT: every recognized compiler source and provider-owned file discovered by the single
-    /// Stage 0 traversal, stored
-    /// exactly once with its canonical physical path, source classification, portable logical
-    /// identity and owned `ModuleId` or unrooted state. `SourceId`s are assigned in deterministic
-    /// portable logical identity order so the table order is independent of traversal,
-    /// file-creation order and checkout root.
-    /// WHY: the index is the sole source inventory/ownership owner. Later Stage 0 consumers
-    /// resolve source data through `SourceId` rather than through duplicated per-module records.
+    /// The table owns Stage 0 classification, ownership and canonical IO paths. The compiler-facing
+    /// registration index borrows its sorted canonical rows and assigns `SourceId`s separately.
     #[cfg(test)]
     pub(crate) fn sources(&self) -> &[SourceRecord] {
         &self.sources
     }
 
-    /// One source record addressed by its dense `SourceId`.
+    /// Build the compact compiler-facing registration rows in this index's deterministic order.
     ///
-    /// `source_id` must be a valid `SourceId` produced by this index. A valid `SourceId` always
-    /// addresses a record because `SourceId`s are assigned contiguously from `0`.
-    pub(crate) fn source(&self, source_id: SourceId) -> &SourceRecord {
-        let record = &self.sources[source_id.index()];
-        debug_assert_eq!(record.id(), source_id);
-        record
+    /// Rows are already sorted by [`SourceLogicalIdentity`]. The boundary source database consumes
+    /// this order unchanged when assigning compiler identities. Each row carries the authored
+    /// kind classified from the lexical file name, not a kind re-derived from the canonical
+    /// extension.
+    pub(crate) fn source_registration_index(&self) -> SourceRegistrationIndex<'_> {
+        SourceRegistrationIndex::from_rows(self.sources.iter().map(|record| {
+            (
+                record.canonical_path(),
+                source_kind_from_classification(record.classification()),
+            )
+        }))
     }
 
-    /// The `SourceId`s owned by one canonical module, indexed by `ModuleId`.
-    ///
-    /// WHAT: every recognized compiler source or provider-owned file whose nearest containing
-    /// normal or support root is this
-    /// module, plus the optional project package facade's root file. The IDs are in portable
-    /// module-relative source path order so ordering is independent of traversal and checkout
-    /// root.
-    /// WHY: later Phase 3 slices consume this as the ownership authority for semantic source
-    /// sets, check-only orphan units and source attribution.
-    pub(crate) fn owned_source_ids(&self, module_id: ModuleId) -> &[SourceId] {
-        &self.owned_source_ids[module_id.index()]
+    /// One source record addressed by its zero-based tree row.
+    pub(crate) fn source(&self, source_index: SourceRecordIndex) -> &SourceRecord {
+        &self.sources[source_index.index()]
     }
 
-    /// The `SourceId`s for recognized or provider-owned files with no enclosing module root.
+    /// The source-row handles owned by one canonical module, indexed by `ModuleId`.
     ///
-    /// WHAT: explicit deterministic Stage 0 facts for files that sit outside any normal or
-    /// support module root. They are not silently discarded; later phases decide whether they
-    /// become check-only orphan units or are rejected. This slice invents no orphan diagnostic.
-    /// The IDs are in portable entry-root-relative logical path order.
-    #[allow(dead_code)]
-    pub(crate) fn unrooted_source_ids(&self) -> &[SourceId] {
-        &self.unrooted_source_ids
+    /// Every recognized compiler source or provider-owned file whose nearest containing normal or
+    /// support root is this module appears in portable module-relative source order.
+    pub(crate) fn owned_source_indices(&self, module_id: ModuleId) -> &[SourceRecordIndex] {
+        &self.owned_source_indices[module_id.index()]
     }
 
-    /// Resolve one `SourceId` by its entry-root-relative portable logical path.
-    ///
-    /// Focused index-invariant tests use this to verify deterministic logical lookup. Production
-    /// dependency resolution consumes the prebuilt module namespace instead.
+    /// The source-row handles for recognized or provider-owned files with no enclosing module root.
     #[cfg(test)]
-    pub(crate) fn source_id_for_entry_root_relative_logical_path(
-        &self,
-        logical_path: &str,
-    ) -> Option<SourceId> {
-        self.logical_path_to_source_id.get(logical_path).copied()
+    pub(crate) fn unrooted_source_indices(&self) -> &[SourceRecordIndex] {
+        &self.unrooted_source_indices
     }
 
-    /// Resolve one `SourceId` by its canonical physical path.
+    /// Resolve one source-row handle by its canonical physical path.
     ///
     /// The directory namespace uses this to select the consuming file's owning boundary-local
     /// module. Returns `None` when no indexed record carries that canonical path.
-    pub(crate) fn source_id_for_canonical_path(&self, canonical_path: &Path) -> Option<SourceId> {
-        self.canonical_path_to_source_id
+    pub(crate) fn source_index_for_canonical_path(
+        &self,
+        canonical_path: &Path,
+    ) -> Option<SourceRecordIndex> {
+        self.canonical_path_to_source_index
             .get(canonical_path)
             .copied()
     }
@@ -1093,18 +1033,10 @@ impl SourceTreeIndex {
         &self.stats
     }
 
-    fn directory_read_error(
-        directory: &Path,
-        error: std::io::Error,
-        string_table: &mut StringTable,
-    ) -> CompilerMessages {
-        CompilerMessages::from_error_ref(
-            CompilerError::file_error(
-                directory,
-                format!("Failed to read directory while indexing source tree: {error}"),
-                string_table,
-            ),
-            string_table,
+    fn directory_read_error(directory: &Path, error: std::io::Error) -> CompilerError {
+        CompilerError::file_error(
+            directory,
+            format!("Failed to read directory while indexing source tree: {error}"),
         )
     }
 }
@@ -1119,18 +1051,14 @@ fn discover_project_package_facade(
     project_root: &Path,
     stats: &mut SourceTreeDiscoveryStats,
     string_table: &mut StringTable,
-) -> Result<Option<PathBuf>, CompilerMessages> {
+) -> Result<Option<PathBuf>, PremergeFailure> {
     // A project-root read failure is an infrastructure error, not the absence of a facade.
     // Preserve it through the file-error lane with the project-root path so the build boundary
     // can render it instead of silently treating the facade as missing.
     let entries = fs::read_dir(project_root).map_err(|error| {
-        CompilerMessages::from_error_ref(
-            CompilerError::file_error(
-                project_root,
-                format!("Failed to read project root while discovering package facade: {error}"),
-                string_table,
-            ),
-            string_table,
+        CompilerError::file_error(
+            project_root,
+            format!("Failed to read project root while discovering package facade: {error}"),
         )
     })?;
 
@@ -1143,10 +1071,8 @@ fn discover_project_package_facade(
                     format!(
                         "Failed to read project root entry while discovering package facade: {error}"
                     ),
-                    string_table,
                 )
-            })
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?
+            })?
             .path();
 
         if !path.is_file() {
@@ -1157,31 +1083,25 @@ fn discover_project_package_facade(
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| {
-                non_utf8_filesystem_name_error(
-                    &path,
-                    "project package facade candidate name",
-                    string_table,
-                )
+                non_utf8_filesystem_name_error(&path, "project package facade candidate name")
             })?;
 
         if file_name_claims_project_globals_facade(file_name) {
-            return Err(project_structure_messages(
-                &path,
-                InvalidConfigReason::ProjectGlobalsNameReserved,
-                string_table,
+            let diagnostic =
+                project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
+            let table = std::mem::take(string_table);
+            return Err(PremergeFailure::Diagnosed(
+                PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
             ));
         }
 
         if file_name_is_support_root_file(file_name) {
-            let canonical = fs::canonicalize(&path)
-                .map_err(|error| {
-                    CompilerError::file_error(
-                        &path,
-                        format!("Failed to canonicalize project package facade path: {error}"),
-                        string_table,
-                    )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let canonical = fs::canonicalize(&path).map_err(|error| {
+                CompilerError::file_error(
+                    &path,
+                    format!("Failed to canonicalize project package facade path: {error}"),
+                )
+            })?;
             support_roots.push(canonical);
         }
     }
@@ -1193,13 +1113,14 @@ fn discover_project_package_facade(
             .iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        return Err(project_structure_messages(
-            project_root,
-            InvalidConfigReason::MultipleModuleRootFiles {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(project_root, string_table),
                 candidates,
-            },
-            string_table,
+            });
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1216,7 +1137,7 @@ fn classify_directory_root(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
     if directory_roots.is_empty() {
         return Ok(None);
     }
@@ -1227,13 +1148,14 @@ fn classify_directory_root(
             .iter()
             .map(|root| path_id(&root.root_file, string_table))
             .collect();
-        return Err(project_structure_messages(
-            directory,
-            InvalidConfigReason::MultipleModuleRootFiles {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
                 directory: path_id(directory, string_table),
                 candidates,
-            },
-            string_table,
+            });
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1257,20 +1179,21 @@ fn classify_package_root_directory(
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, CompilerMessages> {
+) -> Result<Option<DiscoveredDirectoryRoot>, PremergeFailure> {
     let normal_roots = directory_roots
         .iter()
         .filter(|root| root.role == ModuleRootRole::Normal)
         .collect::<Vec<_>>();
 
     if normal_roots.is_empty() {
-        return Err(project_structure_messages(
-            directory,
-            InvalidConfigReason::SourcePackageMissingRoot {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
                 prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
-            },
-            string_table,
+            });
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1284,14 +1207,15 @@ fn classify_package_root_directory(
             .into_iter()
             .map(|path| path_id(path, string_table))
             .collect();
-        return Err(project_structure_messages(
-            directory,
-            InvalidConfigReason::SourcePackageMultipleRoots {
+        let diagnostic =
+            project_structure_diagnostic(InvalidConfigReason::SourcePackageMultipleRoots {
                 prefix: string_table.intern(package_prefix),
                 root: path_id(directory, string_table),
                 candidates,
-            },
-            string_table,
+            });
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -1309,22 +1233,15 @@ fn classify_package_root_directory(
 /// indexing or the directory escaped the entry-root tree. Rather than silently falling back to an
 /// absolute machine-local path (which would make `ModuleId` non-deterministic across machines),
 /// surface it as an internal compiler error so the failure is never hidden.
-fn logical_module_path_from(
-    root_directory: &Path,
-    base: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+fn logical_module_path_from(root_directory: &Path, base: &Path) -> Result<PathBuf, CompilerError> {
     root_directory
         .strip_prefix(base)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Module root directory {root_directory:?} is not under the canonical base \
+            CompilerError::compiler_error(format!(
+                "Module root directory {root_directory:?} is not under the canonical base \
                  {base:?}; logical module path cannot fall back to an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })
 }
 
@@ -1402,20 +1319,16 @@ fn provider_owned_extension_for_file(
 fn relative_source_path_from(
     file_path: &Path,
     module_root_directory: &Path,
-    string_table: &mut StringTable,
-) -> Result<PathBuf, CompilerMessages> {
+) -> Result<PathBuf, CompilerError> {
     file_path
         .strip_prefix(module_root_directory)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Owned source {file_path:?} is not under its nearest module root \
+            CompilerError::compiler_error(format!(
+                "Owned source {file_path:?} is not under its nearest module root \
                      {module_root_directory:?}; module-relative source path cannot fall back to \
                      an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })
 }
 
@@ -1428,61 +1341,37 @@ fn relative_source_path_from(
 fn entry_root_relative_logical_path(
     traversal_path: &Path,
     entry_root: &Path,
-    string_table: &mut StringTable,
-) -> Result<String, CompilerMessages> {
+) -> Result<String, CompilerError> {
     let relative_path = traversal_path
         .strip_prefix(entry_root)
         .map(PathBuf::from)
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Discovered source candidate {traversal_path:?} is not under the entry root \
+            CompilerError::compiler_error(format!(
+                "Discovered source candidate {traversal_path:?} is not under the entry root \
                      {entry_root:?}; logical candidate path cannot fall back to an absolute path"
-                )),
-                string_table,
-            )
+            ))
         })?;
     portable_relative_logical_path_from(&relative_path)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))
 }
 
-/// Compute the entry-root-relative portable logical path for the optional facade file.
-///
-/// The facade lives beside `config.moth` at the project root. When the project root equals the
-/// entry root, the facade is under the entry root and receives a
-/// logical path entry. The accepted future strict-entry-root design places the facade outside
-/// entry-root containment, so the strip then fails and `None` is returned rather than erroring;
-/// the facade still enters the canonical-path lookup map because its canonical path is always
-/// available.
-fn entry_root_relative_logical_path_for_facade(
-    facade_file: &Path,
-    entry_root: &Path,
-) -> Option<String> {
-    let relative_path = facade_file.strip_prefix(entry_root).ok()?;
-    portable_relative_logical_path_from(relative_path).ok()
-}
-
-/// Classify every recognized candidate discovered during traversal and assign each a portable
-/// logical identity and explicit ownership, ready for deterministic `SourceId` assignment.
+/// Classify every recognized candidate discovered during traversal and assign its portable logical
+/// identity and explicit ownership, ready for deterministic `SourceId` assignment.
 ///
 /// WHAT: classifies every recognized candidate under its nearest containing normal or support
 /// root by walking parent directories through the identity table. A nested module root and all
 /// files beneath it transfer to the nested module because the nearest-module walk finds it
 /// first. Unrooted internal subdirectories stay owned by their nearest ancestor module. The
 /// optional project facade owns its root file even though it sits outside entry-root
-/// containment, so it is added directly as a classified owned source. Recognized candidates
-/// with no enclosing module root become explicit deterministic unrooted classified sources.
-/// WHY: one authoritative classification feeds later Phase 3 semantic-source-set and
-/// check-only slices. Each classified source carries its portable logical identity and explicit
-/// ownership; `SourceId`s are assigned deterministically afterwards in [`build_source_inventory`],
-/// so ordering is independent of traversal and checkout root.
+/// containment, so it is added directly as a classified owned source. Recognized candidates with
+/// no enclosing module root become explicit deterministic unrooted classified sources.
+/// WHY: one authoritative classification feeds later Phase 3 semantic-source-set and check-only
+/// slices. Each classified source carries its portable logical identity and explicit ownership.
+/// Source ordering uses the stable identity's explicit ordering.
 fn classify_owned_sources(
     module_identities: &ModuleIdentityTable,
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
     facade_file_for_inventory: Option<PathBuf>,
-    entry_root: &Path,
-    string_table: &mut StringTable,
-) -> Result<Vec<ClassifiedSource>, CompilerMessages> {
+) -> Result<Vec<ClassifiedSource>, CompilerError> {
     let mut classified = Vec::new();
 
     for candidate in recognized_candidates {
@@ -1498,16 +1387,12 @@ fn classify_owned_sources(
         };
 
         let record = module_identities.record(module_id);
-        let relative_path = relative_source_path_from(
-            &candidate.canonical_path,
-            record.root_directory(),
-            string_table,
-        )?;
+        let relative_path =
+            relative_source_path_from(&candidate.canonical_path, record.root_directory())?;
         let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
             record.stable_origin().clone(),
             &relative_path,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        )?;
 
         classified.push(ClassifiedSource {
             canonical_path: candidate.canonical_path,
@@ -1515,7 +1400,6 @@ fn classify_owned_sources(
             supported: candidate.supported,
             logical_identity: SourceLogicalIdentity::Owned(stable_identity),
             ownership: SourceOwnership::Owned(module_id),
-            entry_root_relative_logical_path: Some(candidate.logical_candidate_path),
         });
     }
 
@@ -1530,32 +1414,24 @@ fn classify_owned_sources(
         });
 
         let facade_module_id = facade_module_id.ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "A project package facade file {facade_file:?} was discovered but no matching \
+            CompilerError::compiler_error(format!(
+                "A project package facade file {facade_file:?} was discovered but no matching \
                      facade module record exists; the facade source must not be silently skipped"
-                )),
-                string_table,
-            )
+            ))
         })?;
         let record = module_identities.record(facade_module_id);
-        let relative_path =
-            relative_source_path_from(&facade_file, record.root_directory(), string_table)?;
+        let relative_path = relative_source_path_from(&facade_file, record.root_directory())?;
         let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
             record.stable_origin().clone(),
             &relative_path,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        )?;
 
-        let entry_root_relative_logical_path =
-            entry_root_relative_logical_path_for_facade(&facade_file, entry_root);
         classified.push(ClassifiedSource {
             canonical_path: facade_file,
             classification: SourceClassification::CompilerSemantic(SourceFileKind::Moth),
             supported: true,
             logical_identity: SourceLogicalIdentity::Owned(stable_identity),
             ownership: SourceOwnership::Owned(facade_module_id),
-            entry_root_relative_logical_path,
         });
     }
 
@@ -1565,32 +1441,46 @@ fn classify_owned_sources(
 /// Build one classified unrooted source from a traversal candidate that has no enclosing module
 /// root.
 fn unrooted_classified(candidate: DiscoveredSourceCandidate) -> ClassifiedSource {
-    let logical_candidate_path = candidate.logical_candidate_path;
+    let logical_path = UnrootedSourceLogicalPath::from_portable(candidate.logical_candidate_path);
     ClassifiedSource {
         canonical_path: candidate.canonical_path,
         classification: candidate.classification,
         supported: candidate.supported,
-        logical_identity: SourceLogicalIdentity::Unrooted(
-            UnrootedSourceLogicalPath::from_portable(logical_candidate_path.clone()),
-        ),
+        logical_identity: SourceLogicalIdentity::Unrooted(logical_path),
         ownership: SourceOwnership::Unrooted,
-        entry_root_relative_logical_path: Some(logical_candidate_path),
     }
 }
 
-/// Assign dense `SourceId`s and build the central [`SourceRecord`] table plus per-module owned
-/// and unrooted `SourceId` collections from the classified sources.
+/// Reject duplicate logical identities before assigning dense `SourceId`s.
 ///
-/// WHAT: sorts every classified source by its portable logical identity and rejects duplicate
-/// logical identities as an internal invariant violation. Each source receives a contiguous
-/// `SourceId` equal to its table index. Absolute paths remain diagnostic and IO context only; they
-/// never participate in identity or ordering.
-/// Per-module owned IDs and the unrooted ID list are projected from the sorted table, so each
-/// module's owned IDs are in portable module-relative source path order and the unrooted IDs are
-/// in portable entry-root-relative logical path order.
-/// WHY: one deterministic inventory projection feeds later Phase 3 semantic-source-set and
-/// check-only slices. Ordering is independent of traversal, file-creation order and checkout
-/// root because the sort key is the portable logical identity, not the absolute path.
+/// The duplicate key and both canonical physical paths stay in the invariant error so the
+/// diagnostic retains useful identity and filesystem context without a separate path table.
+fn validate_unique_source_logical_identities(
+    classified: &[ClassifiedSource],
+) -> Result<(), CompilerError> {
+    let mut seen: FxHashMap<&SourceLogicalIdentity, &ClassifiedSource> = FxHashMap::default();
+    for source in classified {
+        let Some(left) = seen.insert(&source.logical_identity, source) else {
+            continue;
+        };
+        let right = source;
+        let message = format!(
+            "Source tree index classified duplicate logical identity {:?} for physical sources {} \
+             and {}; source identity must be unique before SourceId assignment",
+            left.logical_identity,
+            left.canonical_path.display(),
+            right.canonical_path.display(),
+        );
+        return Err(CompilerError::compiler_error(message));
+    }
+    Ok(())
+}
+
+/// Sort classified sources and build the central Stage 0 source-row table plus ownership
+/// projections.
+///
+/// The row order is the only ordering contract this owner publishes to the compiler-facing
+/// registration index. No compiler `SourceId` is assigned here.
 fn build_source_inventory(
     classified: Vec<ClassifiedSource>,
     module_count: usize,
@@ -1598,40 +1488,17 @@ fn build_source_inventory(
     let mut classified = classified;
     classified.sort_by(|left, right| left.logical_identity.cmp(&right.logical_identity));
 
-    for sources in classified.windows(2) {
-        let [left, right] = sources else {
-            unreachable!("windows(2) always yields pairs");
-        };
-        if left.logical_identity == right.logical_identity {
-            return Err(CompilerError::compiler_error(format!(
-                "Source tree index classified two physical sources with the same portable logical identity {:?}: {} and {}; source identity must be unique before SourceId assignment",
-                left.logical_identity,
-                left.canonical_path.display(),
-                right.canonical_path.display(),
-            )));
-        }
-    }
-
     let mut sources = Vec::with_capacity(classified.len());
-    let mut owned_source_ids: Vec<Vec<SourceId>> = (0..module_count).map(|_| Vec::new()).collect();
-    let mut unrooted_source_ids = Vec::new();
-    let mut logical_path_to_source_id: FxHashMap<String, SourceId> = FxHashMap::default();
-    let mut canonical_path_to_source_id: FxHashMap<PathBuf, SourceId> = FxHashMap::default();
+    let mut owned_source_indices: Vec<Vec<SourceRecordIndex>> =
+        (0..module_count).map(|_| Vec::new()).collect();
+    let mut unrooted_source_indices = Vec::new();
+    let mut canonical_path_to_source_index: FxHashMap<PathBuf, SourceRecordIndex> =
+        FxHashMap::default();
 
     for (index, source) in classified.into_iter().enumerate() {
-        let source_id = SourceId::from_index(index);
-        if let Some(logical_path) = &source.entry_root_relative_logical_path
-            && logical_path_to_source_id
-                .insert(logical_path.clone(), source_id)
-                .is_some()
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "Source tree index assigned entry-root-relative logical path {logical_path:?} to \
-                 multiple source records; provider lookup paths must be unique",
-            )));
-        }
-        if canonical_path_to_source_id
-            .insert(source.canonical_path.clone(), source_id)
+        let source_index = SourceRecordIndex::from_index(index);
+        if canonical_path_to_source_index
+            .insert(source.canonical_path.clone(), source_index)
             .is_some()
         {
             return Err(CompilerError::compiler_error(format!(
@@ -1642,14 +1509,13 @@ fn build_source_inventory(
         }
         match source.ownership {
             SourceOwnership::Owned(module_id) => {
-                owned_source_ids[module_id.index()].push(source_id);
+                owned_source_indices[module_id.index()].push(source_index);
             }
             SourceOwnership::Unrooted => {
-                unrooted_source_ids.push(source_id);
+                unrooted_source_indices.push(source_index);
             }
         }
         sources.push(SourceRecord {
-            id: source_id,
             canonical_path: source.canonical_path,
             classification: source.classification,
             supported: source.supported,
@@ -1660,10 +1526,9 @@ fn build_source_inventory(
 
     Ok(SourceInventory {
         sources,
-        owned_source_ids,
-        unrooted_source_ids,
-        logical_path_to_source_id,
-        canonical_path_to_source_id,
+        owned_source_indices,
+        unrooted_source_indices,
+        canonical_path_to_source_index,
     })
 }
 
@@ -1699,3 +1564,7 @@ fn record_discovery_metrics(stats: &SourceTreeDiscoveryStats) {
         },
     );
 }
+
+#[cfg(test)]
+#[path = "../tests/source_tree_index_tests.rs"]
+mod tests;

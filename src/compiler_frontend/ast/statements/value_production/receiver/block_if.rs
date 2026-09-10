@@ -29,7 +29,8 @@ pub(super) fn parse_block_value_if(
         target,
         string_table,
         condition,
-        location,
+        span,
+        ..
     } = input;
 
     let receiver_kind = target.receiver_kind;
@@ -45,21 +46,22 @@ pub(super) fn parse_block_value_if(
         active_target: target,
     })?;
 
-    validate_closed_branch_pair(bodies.then_exits, bodies.else_exits, &location)?;
+    validate_closed_branch_pair(bodies.then_exits, bodies.else_exits, span)?;
 
     if needs_slot_inference {
-        return Ok(ParsedReceiverValue::NeedsSlotInference(ValueBlock::If(
-            ValueIfBlock {
+        return Ok(ParsedReceiverValue::NeedsSlotInference {
+            block: ValueBlock::If(ValueIfBlock {
                 condition,
                 then_body: bodies.then_body,
                 else_body: bodies.else_body,
                 then_scope: bodies.then_scope,
                 else_scope: bodies.else_scope,
-                location,
+                span,
                 generic_request_ranges: bodies.generic_request_ranges,
                 result_type_ids: Vec::new(),
-            },
-        )));
+            }),
+            span,
+        });
     }
 
     let result_type_id = infer_block_if_result_type(
@@ -67,7 +69,7 @@ pub(super) fn parse_block_value_if(
         &bodies.else_body,
         &expected_result_type_ids,
         type_interner,
-        &location,
+        span,
         receiver_kind,
     )?;
     let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
@@ -79,10 +81,11 @@ pub(super) fn parse_block_value_if(
             else_body: bodies.else_body,
             then_scope: bodies.then_scope,
             else_scope: bodies.else_scope,
-            location,
+            span,
             generic_request_ranges: bodies.generic_request_ranges,
             result_type_ids,
         },
+        span,
         result_type_id,
         type_interner.environment(),
     )))

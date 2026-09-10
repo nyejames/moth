@@ -4,9 +4,8 @@
 //!       selections.
 //! WHY: one authored clause owns one dependency shell. Stage 0 and later header stages must
 //!      consume that ownership instead of receiving one provider row per selected name.
-
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
     DependencyClauseParseError, RetainedDependencyPath, ScannedDependencyBinding,
     ScannedDependencyClause, parse_dependency_clause,
@@ -21,9 +20,10 @@ use crate::compiler_frontend::headers::types::{
     HeaderParseContext, HeaderParseFailure, RetainedDependencyClause,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
@@ -32,13 +32,13 @@ pub(super) fn parse_and_record_private_dependency(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    clause_location: SourceLocation,
+    clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     if context.is_config_file {
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
             crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::DependencyClauseNotAllowed,
-            clause_location,
+            Some(clause_span),
         )
         .into());
     }
@@ -47,7 +47,7 @@ pub(super) fn parse_and_record_private_dependency(
         state,
         context,
         HeaderExportMode::Private,
-        clause_location,
+        clause_span,
         token_stream.index.saturating_sub(1),
         false,
     )
@@ -58,14 +58,14 @@ pub(super) fn parse_and_record_public_dependency(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    clause_location: SourceLocation,
+    clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     parse_and_record_dependency_clause(
         token_stream,
         state,
         context,
         HeaderExportMode::Public,
-        clause_location,
+        clause_span,
         token_stream.index.saturating_sub(1),
         true,
     )
@@ -76,7 +76,7 @@ fn parse_and_record_dependency_clause(
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
-    clause_location: SourceLocation,
+    clause_span: SourceSpan,
     clause_token_index: usize,
     require_selection_clause: bool,
 ) -> FileDependencyClauseResult<()> {
@@ -84,6 +84,7 @@ fn parse_and_record_dependency_clause(
         &token_stream.tokens,
         clause_token_index,
         &token_stream.path_syntax,
+        token_stream.file_id,
     )
     .map_err(|scanner_error| match scanner_error {
         DependencyClauseParseError::Diagnostic(diagnostic) => {
@@ -96,10 +97,9 @@ fn parse_and_record_dependency_clause(
 
     // Path validity is independent of the selected binding shape. Validate it first so an
     // obsolete provider spelling such as `@./drawing.js` receives the same path diagnostic
-    // whether or not the clause also omitted its required binding.
     validate_dependency_path(
         &parsed.provider.path,
-        &parsed.provider.path_location,
+        &parsed.provider.path_span,
         context.string_table,
     )?;
 
@@ -112,7 +112,7 @@ fn parse_and_record_dependency_clause(
         return Err(CompilerDiagnostic::invalid_dependency_clause(
             crate::compiler_frontend::compiler_messages::DependencyClauseKind::Namespace,
             crate::compiler_frontend::compiler_messages::InvalidDependencyClauseReason::ProviderRequiresBinding,
-            parsed.provider.path_location.clone(),
+            Some(parsed.provider.path_span),
         )
         .into());
     }
@@ -123,15 +123,10 @@ fn parse_and_record_dependency_clause(
             ScannedDependencyBinding::DirectSelections { selections } if !selections.is_empty()
         )
     {
-        return Err(CompilerDiagnostic::invalid_export_target(clause_location).into());
+        return Err(CompilerDiagnostic::invalid_export_target(Some(clause_span)).into());
     }
 
-    let file_id = token_stream.file_id.ok_or_else(|| {
-        CompilerError::compiler_error(
-            "header dependency shell cannot be stamped without a retained source file identity",
-        )
-    })?;
-
+    let file_id = token_stream.file_id;
     let clause_shell_id = DependencyShellId::new(file_id, state.dependency_clause_count as u32);
     state.dependency_clause_count += 1;
     add_frontend_counter(FrontendCounter::DependencyClauseCount, 1);
@@ -147,7 +142,6 @@ fn parse_and_record_dependency_clause(
         clause_shell_id,
         parsed,
         target,
-        clause_location,
         export_mode,
         context.string_table,
     );
@@ -162,7 +156,6 @@ fn retain_scanned_clause(
     clause_shell_id: DependencyShellId,
     scanned: ScannedDependencyClause,
     target: DependencyTargetKind,
-    clause_location: SourceLocation,
     export_mode: HeaderExportMode,
     string_table: &mut StringTable,
 ) {
@@ -177,17 +170,14 @@ fn retain_scanned_clause(
                     .local_alias
                     .as_ref()
                     .map_or(selection.source_name, |alias| alias.name);
-                let location = selection
+                let span = selection
                     .local_alias
                     .as_ref()
-                    .map_or(&selection.source_location, |alias| &alias.location);
-                state
-                    .encountered_symbols
-                    .entry(local_name)
-                    .or_insert_with(|| location.clone());
+                    .map_or(selection.source_span, |alias| alias.span);
+                state.encountered_symbols.entry(local_name).or_insert(span);
                 state.dependency_selections.push(DependencySelection {
                     source_name: selection.source_name,
-                    source_location: selection.source_location,
+                    source_span: selection.source_span,
                     local_alias: selection.local_alias,
                 });
             }
@@ -202,23 +192,19 @@ fn retain_scanned_clause(
         path: scanned.provider.path,
         path_syntax: scanned.provider.path_syntax,
         target,
-        location: scanned.provider.path_location,
+        span: scanned.provider.path_span,
     };
 
     let retained_clause = RetainedDependencyClause {
         dependency,
         binding,
-        location: clause_location.clone(),
         export_mode,
     };
 
     if let Some(name) = retained_clause.effective_namespace_local_name(string_table)
-        && let Some(location) = retained_clause.namespace_binding_location()
+        && let Some(span) = retained_clause.namespace_binding_span()
     {
-        state
-            .encountered_symbols
-            .entry(name)
-            .or_insert_with(|| location.clone());
+        state.encountered_symbols.entry(name).or_insert(*span);
     }
 
     state.file_dependency_clauses.push(retained_clause);

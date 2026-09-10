@@ -1,7 +1,7 @@
 //! Project config compilation service tests.
 //!
-//! WHAT: the service's standalone contract — one authored source in, owned folded declarations
-//!       and authored key-name spans out.
+//! WHAT: the service's standalone contract — one authored source in, owned folded declarations,
+//!       authored key-name spans and the live source-span builder out.
 //! WHY:  the config dialect's rejections are owned by the `config_*` integration cases, which run a
 //!       whole build and assert exact diagnostic codes. What those cases cannot show is that config
 //!       compilation is a compiler entry point at all: that it needs no `Config`, no build-system
@@ -9,16 +9,20 @@
 //!       dialect rejections happen inside the service before any declaration is handed back.
 
 use super::{CompiledConfigSource, ConfigCompilationRequest, compile_config_source};
-use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, DiagnosticPayload, InvalidConfigReason, InvalidExpressionReason,
     TypeAnnotationContext,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use std::path::Path;
 
 fn compile_project_source(
@@ -29,10 +33,11 @@ fn compile_project_source(
     let mut string_table = StringTable::new();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let compiled = compile_config_source(
+    let outcome = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code,
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -44,8 +49,8 @@ fn compile_project_source(
                 .project_field_config_policies(),
         },
         &mut string_table,
-    )?;
-    Ok((compiled, string_table))
+    );
+    Ok((outcome.result?, string_table))
 }
 
 #[test]
@@ -58,11 +63,15 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
-            source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code:
+                "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
-            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
-            builder_config_globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
             project_field_config_policies: surface
                 .config_schemas
                 .project()
@@ -70,11 +79,8 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored config source should compile to folded declarations");
-
-    let expected_scope =
-        InternedPath::try_from_filesystem_path(Path::new("project/config.moth"), &mut string_table)
-            .expect("the authored path is UTF-8");
 
     let project = compiled
         .declarations
@@ -82,14 +88,14 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         .find(|declaration| string_table.resolve(declaration.name) == "project")
         .expect("the authored project record should reach the folded declarations");
     assert!(matches!(project.value, PublicFoldedValue::Record(_)));
-    assert_eq!(project.name_location.scope, expected_scope);
+    assert!(project.name_span.is_some());
     let PublicFoldedValue::Record(fields) = &project.value else {
         panic!("project value must be a record");
     };
     assert_eq!(
         fields.len(),
-        project.direct_field_locations.len(),
-        "direct field locations must align with folded record fields"
+        project.direct_field_spans.len(),
+        "direct field spans must align with folded record fields"
     );
     assert!(
         fields.iter().any(|field| field.name == "name"),
@@ -107,6 +113,7 @@ fn projects_authored_anonymous_const_records() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= |\n    first = \"a\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -121,6 +128,7 @@ fn projects_authored_anonymous_const_records() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored anonymous const record should project at the config boundary");
 
     let labels = compiled
@@ -140,6 +148,98 @@ fn projects_authored_anonymous_const_records() {
 }
 
 #[test]
+fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
+    let long_value = "x".repeat(1500);
+    let source_code = format!("value #= \"{long_value}\"\nentry_root = \"src\"\n");
+    let mut string_table = StringTable::new();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let authored_path = Path::new("project/config.moth");
+    let canonical_path = Path::new("/project/config.moth");
+    let mut source_files = SourceDatabase::empty();
+    let file_id = source_files
+        .insert(
+            canonical_path.to_path_buf(),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            canonical_path,
+            None,
+            &mut string_table,
+        )
+        .expect("the config source should register");
+    source_files
+        .retain_text(file_id, source_code)
+        .expect("the snapshot should load");
+    let source_code = source_files
+        .retained_text(file_id)
+        .expect("the snapshot should remain owned");
+    let authored_scope = InternedPath::try_from_filesystem_path(authored_path, &mut string_table)
+        .expect("the authored path should be UTF-8");
+    // A reference lexer pass captures the literal's local span; the span rows land in a
+    // throwaway reference builder, so the service's independent builder must re-encode the
+    // same bytes for the retained-span assertion below.
+    let mut reference_builder = ExtendedSpanBuilder::new();
+    let reference_tokens = tokenize(
+        source_code,
+        &authored_scope,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        file_id,
+        &mut reference_builder,
+    )
+    .expect("the config should tokenize before its later dialect rejection");
+    let literal_span = reference_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the reference lexer should produce the long literal")
+        .span;
+    drop(reference_tokens);
+    drop(reference_builder);
+
+    let outcome = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path,
+            canonical_path,
+            file_id,
+            source_code,
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    );
+
+    let messages = outcome
+        .result
+        .err()
+        .expect("a later config dialect rejection should produce diagnostics");
+    assert!(messages.diagnostics().any(|diagnostic| {
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidConfig {
+                reason: InvalidConfigReason::PlainBindingUnsupported,
+                ..
+            }
+        )
+    }));
+    assert_eq!(outcome.file_id, file_id);
+    let builder = &outcome.span_builder;
+    let literal_range = literal_span.resolve_with(builder.resolver());
+    assert_eq!(
+        source_code.get(literal_range.start() as usize..literal_range.end() as usize),
+        Some(format!("\"{long_value}\"").as_str())
+    );
+}
+
+#[test]
 fn rejects_config_local_nominal_values_with_structured_diagnostics() {
     let mut string_table = StringTable::new();
     let surface = BuilderSurface::with_mandatory_core();
@@ -149,6 +249,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "Inner = |\n    x Int,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -161,6 +262,7 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("config-local nominal values should not become CompilerError");
 
@@ -188,6 +290,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -202,6 +305,7 @@ fn rejects_authored_plain_bindings_inside_the_service() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("a plain config binding should be rejected by the compiler service");
 
@@ -229,6 +333,7 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    child = | value = 1 |,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -243,6 +348,7 @@ fn rejects_nested_record_literal_inside_a_grouped_project_record() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("a nested record literal should be rejected by the compiler service");
 
@@ -269,6 +375,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    alias = name,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -283,6 +390,7 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect("an implicit sibling field reference should be rejected by the compiler service");
 
@@ -308,6 +416,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "html #= |\n    origin #Config of String = \"/docs\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -322,6 +431,7 @@ fn rejects_config_qualifier_on_builder_section_fields() {
         },
         &mut string_table,
     )
+    .result
     .err()
     .expect(
         "a #Config qualifier on a builder section field should be rejected by the compiler service",
@@ -589,17 +699,10 @@ fn direct_project_config_qualifier_rejects_fixed_entry_root_field() {
         diagnostic.identity().reason_key,
         Some("invalid_config.config_qualifier_fixed_field")
     );
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "project/config.moth"
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "fixed-field diagnostics should retain their authored source span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 16);
-    assert_eq!(diagnostic.primary_location.end_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 16);
 
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
@@ -880,4 +983,92 @@ fn direct_project_config_qualifier_accepts_folded_optional_default() {
                 PublicFoldedValue::String(OwnedFoldedString::Text(text)) if text == "fallback"
             )
     ));
+}
+
+#[test]
+fn preparation_config_diagnostics_retain_their_original_source_spans() {
+    let cases = [
+        (
+            "value #= 1\nvalue #= 2\n",
+            "invalid_config.duplicate_key",
+            "value",
+        ),
+        (
+            "@core/math sin\n",
+            "invalid_dependency_clause.dependency_clause_not_allowed",
+            "@core/math",
+        ),
+        (
+            "logo #= @assets/logo.svg\n",
+            "invalid_config.file_value_path_unsupported",
+            "@assets/logo.svg",
+        ),
+        (
+            "helper ||:\n;\n",
+            "invalid_config.function_unsupported",
+            "helper",
+        ),
+    ];
+    let long_value = "🦋".repeat(600);
+    for (suffix, expected_reason, expected_text) in cases {
+        let source = format!("padding #= \"{long_value}\"\n{suffix}");
+        let mut strings = StringTable::new();
+        let surface = BuilderSurface::with_mandatory_core();
+        let directives = StyleDirectiveRegistry::built_ins();
+        let authored_path = Path::new("project/config.moth");
+        let canonical_path = Path::new("/project/config.moth");
+        let sources = SourceDatabase::build([canonical_path], canonical_path, None, &mut strings)
+            .expect("the config source registers before compilation");
+        let file_id = sources.get_by_canonical_path(canonical_path).unwrap().id;
+        let outcome = compile_config_source(
+            ConfigCompilationRequest {
+                authored_path,
+                canonical_path,
+                file_id,
+                source_code: &source,
+                style_directives: &directives,
+                binding_packages: &surface.binding_packages,
+                build_config_inputs:
+                    &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+                builder_config_globals:
+                    &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+                project_field_config_policies: surface
+                    .config_schemas
+                    .project()
+                    .project_field_config_policies(),
+            },
+            &mut strings,
+        );
+        let messages = outcome
+            .result
+            .err()
+            .expect("preparation must reject this config surface");
+        let diagnostics = messages.diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "fixture {suffix:?}");
+        let diagnostic = diagnostics[0];
+        assert_eq!(
+            diagnostic.identity().reason_key,
+            Some(expected_reason),
+            "fixture {suffix:?}"
+        );
+        let span = diagnostic
+            .primary_span
+            .expect("preparation must retain the primary source span");
+        assert_eq!(span.source(), file_id);
+        let range = span.resolve_with(outcome.span_builder.resolver_for(file_id));
+        let expected_start = source.rfind(expected_text).unwrap() as u32;
+        assert_eq!(
+            (range.start(), range.end()),
+            (expected_start, expected_start + expected_text.len() as u32),
+            "fixture {suffix:?}"
+        );
+        assert!(
+            diagnostic.labels.is_empty(),
+            "config retains its labelless primary presentation"
+        );
+        assert!(
+            !outcome.span_builder.is_empty(),
+            "the original table must retain the long token"
+        );
+    }
 }

@@ -8,8 +8,7 @@
 //! This is intentionally a syntactic HIR analysis. It does not fold constants, eliminate dead
 //! branches, inspect borrow facts, or perform backend lowering.
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
@@ -21,6 +20,7 @@ use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceProvenance,
 };
@@ -29,51 +29,9 @@ use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
-
-/// A compact, self-contained source location for a HIR function declaration.
-///
-/// HIR source locations normally borrow interned path components from the module compiler's
-/// `StringTable`. Link facts outlive that compiler, so this lane copies only the declaration
-/// scope strings and positions instead of retaining the complete table.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct HirFunctionDiagnosticLocation {
-    scope: Box<[String]>,
-    start_pos: CharPosition,
-    end_pos: CharPosition,
-}
-
-impl HirFunctionDiagnosticLocation {
-    fn from_source_location(location: &SourceLocation, string_table: &StringTable) -> Self {
-        Self {
-            scope: location
-                .scope
-                .as_components()
-                .iter()
-                .map(|component| string_table.resolve(*component).to_owned())
-                .collect(),
-            start_pos: location.start_pos,
-            end_pos: location.end_pos,
-        }
-    }
-
-    /// Reconstruct a regular diagnostic location using the caller's output string table.
-    pub(crate) fn to_source_location(&self, string_table: &mut StringTable) -> SourceLocation {
-        SourceLocation::new(
-            crate::compiler_frontend::symbols::interned_path::InternedPath::from_components(
-                self.scope
-                    .iter()
-                    .map(|component| string_table.intern(component))
-                    .collect(),
-            ),
-            self.start_pos,
-            self.end_pos,
-        )
-    }
-}
 
 /// The first reachable local function with a direct ProjectContext dependency.
 ///
@@ -84,7 +42,7 @@ impl HirFunctionDiagnosticLocation {
 pub(crate) struct ReachableProjectContextFunction {
     function_id: FunctionId,
     synthetic_interface_provenance: SyntheticInterfaceProvenance,
-    diagnostic_location: Option<HirFunctionDiagnosticLocation>,
+    declaration_span: Option<SourceSpan>,
 }
 
 impl ReachableProjectContextFunction {
@@ -98,8 +56,8 @@ impl ReachableProjectContextFunction {
         &self.synthetic_interface_provenance
     }
 
-    pub(crate) fn diagnostic_location(&self) -> Option<&HirFunctionDiagnosticLocation> {
-        self.diagnostic_location.as_ref()
+    pub(crate) fn declaration_span(&self) -> Option<SourceSpan> {
+        self.declaration_span
     }
 }
 
@@ -132,14 +90,13 @@ pub(crate) struct HirReachability {
 ///
 /// In addition to the entry block, each row carries the complete direct synthetic-interface
 /// provenance retained for its local function. Functions with direct ProjectContext provenance
-/// also retain an owned declaration location so boundary diagnostics outlive the compiler's source
-/// string table.
+/// also retain their exact declaration span.
 #[derive(Clone, Debug)]
 pub(crate) struct HirFunctionLinkFacts {
     pub(crate) function_id: FunctionId,
     entry_block: BlockId,
     pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
-    declaration_location: Option<HirFunctionDiagnosticLocation>,
+    declaration_span: Option<SourceSpan>,
 }
 
 /// Deterministic direct link facts for one reachable block inside a base HIR function.
@@ -254,13 +211,6 @@ impl HirModuleLinkFacts {
         }
         targets
     }
-
-    /// Remap source locations retained for later target diagnostics.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for block in &mut self.blocks {
-            block.direct_facts.remap_string_ids(remap);
-        }
-    }
 }
 
 impl HirBackendSelection {
@@ -374,7 +324,7 @@ impl HirBackendSelection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableMapUse {
     pub(crate) kind: ReachableMapUseKind,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 /// One reachable structural resource anchor and its executable owner.
 ///
@@ -386,7 +336,7 @@ pub(crate) struct ReachableMapUse {
 pub(crate) struct ReachableResourceUse {
     pub(crate) resource_id: ResourceId,
     pub(crate) owner: FunctionId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// One reachable structural site-root anchor and its executable owner.
@@ -397,7 +347,7 @@ pub(crate) struct ReachableResourceUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableSiteRootUse {
     pub(crate) owner: FunctionId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable assertion failure message and its HIR evaluation fact.
@@ -408,7 +358,7 @@ pub(crate) struct ReachableSiteRootUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableAssertionMessageUse {
     pub(crate) evaluation: HirAssertionMessageEvaluation,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -425,7 +375,7 @@ pub(crate) enum ReachableMapUseKind {
 pub(crate) struct ReachableExternalCall {
     pub(crate) function_id: ExternalFunctionId,
     pub(crate) statement_id: HirNodeId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable reactive template-backed value.
@@ -435,7 +385,7 @@ pub(crate) struct ReachableExternalCall {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableReactiveTemplateUse {
     pub(crate) template_id: ReactiveTemplateId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable sink that consumes a reactive template-backed value.
@@ -443,7 +393,7 @@ pub(crate) struct ReachableReactiveTemplateUse {
 pub(crate) struct ReachableReactiveSinkUse {
     pub(crate) kind: ReachableReactiveSinkKind,
     pub(crate) template_id: ReactiveTemplateId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,7 +412,7 @@ pub(crate) enum ReachableReactiveSinkKind {
 ///      cast without re-scanning HIR expressions locally.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableRuntimeCastUse {
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable compiler-owned checked numeric operation.
@@ -471,7 +421,7 @@ pub(crate) struct ReachableRuntimeCastUse {
 ///      operation before lowering instead of failing with a backend-internal error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableNumericOpUse {
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// A reachable compiler-owned Float formatting or validation statement.
@@ -482,7 +432,7 @@ pub(crate) struct ReachableNumericOpUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableFloatStatementUse {
     pub(crate) kind: ReachableFloatStatementKind,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -509,30 +459,10 @@ struct HirReachabilityContext<'index, 'hir> {
 
 /// Record direct CFG and call facts for every function without selecting an entry root.
 ///
-/// This compatibility wrapper intentionally omits declaration locations for hand-built callers
-/// that do not retain the compiler's `StringTable`. Production compilation uses
-/// [`collect_module_function_link_facts_with_string_table`] below.
-#[cfg(test)]
+/// Exact source spans are copied from HIR side tables when present. Generated functions and
+/// compiler-created declarations carry `None`; no source identity or render table is retained.
 pub(crate) fn collect_module_function_link_facts(
     hir: &HirModule,
-) -> Result<HirModuleLinkFacts, CompilerError> {
-    collect_module_function_link_facts_inner(hir, None)
-}
-
-/// Record direct CFG and call facts while retaining self-contained declaration locations.
-///
-/// Only the scope strings and span positions are copied from `string_table`; the complete table
-/// remains owned by the compiler and is not retained in link facts.
-pub(crate) fn collect_module_function_link_facts_with_string_table(
-    hir: &HirModule,
-    string_table: &StringTable,
-) -> Result<HirModuleLinkFacts, CompilerError> {
-    collect_module_function_link_facts_inner(hir, Some(string_table))
-}
-
-fn collect_module_function_link_facts_inner(
-    hir: &HirModule,
-    string_table: Option<&StringTable>,
 ) -> Result<HirModuleLinkFacts, CompilerError> {
     let index = HirReachabilityIndex::new(hir)?;
     let mut function_ids = hir
@@ -563,29 +493,16 @@ fn collect_module_function_link_facts_inner(
                     "HIR function {function_id:?} is missing a synthetic-interface provenance fact"
                 ))
             })?;
-        let declaration_location = string_table
-            .filter(|_| {
-                synthetic_interface_provenance
-                    .contains_class(SyntheticInterfaceClass::ProjectContext)
-            })
-            .and_then(|string_table| {
-                hir.side_table
-                    .hir_source_location_for_hir(HirLocation::Function(function_id))
-                    .or_else(|| {
-                        hir.side_table
-                            .ast_location_for_hir(HirLocation::Function(function_id))
-                    })
-                    .map(|location| {
-                        HirFunctionDiagnosticLocation::from_source_location(location, string_table)
-                    })
-            });
+        let declaration_span = hir
+            .side_table
+            .hir_source_span_for_hir(HirLocation::Function(function_id));
         let context = HirReachabilityContext::new(&index, function_id, function.entry);
         let function_block_facts = context.collect()?;
         functions.push(HirFunctionLinkFacts {
             function_id,
             entry_block: function.entry,
             synthetic_interface_provenance,
-            declaration_location,
+            declaration_span,
         });
         blocks.extend(function_block_facts);
     }
@@ -631,7 +548,7 @@ pub(crate) fn collect_reachability_from_function_link_facts(
                         synthetic_interface_provenance: function
                             .synthetic_interface_provenance
                             .clone(),
-                        diagnostic_location: function.declaration_location.clone(),
+                        declaration_span: function.declaration_span,
                     });
             }
             reachability
@@ -743,41 +660,6 @@ impl HirReachability {
             .extend(direct.reachable_float_statements.iter().cloned());
         self.reachable_assertion_messages
             .extend(direct.reachable_assertion_messages.iter().cloned());
-    }
-}
-
-impl HirBlockRuntimeFacts {
-    fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for call in &mut self.reachable_external_calls {
-            call.location.remap_string_ids(remap);
-        }
-        for map_use in &mut self.reachable_map_uses {
-            map_use.location.remap_string_ids(remap);
-        }
-        for resource_use in &mut self.reachable_resource_uses {
-            resource_use.location.remap_string_ids(remap);
-        }
-        for site_root_use in &mut self.reachable_site_root_uses {
-            site_root_use.location.remap_string_ids(remap);
-        }
-        for template in &mut self.reachable_reactive_templates {
-            template.location.remap_string_ids(remap);
-        }
-        for sink in &mut self.reachable_reactive_sinks {
-            sink.location.remap_string_ids(remap);
-        }
-        for runtime_cast in &mut self.reachable_runtime_casts {
-            runtime_cast.location.remap_string_ids(remap);
-        }
-        for numeric_op in &mut self.reachable_numeric_ops {
-            numeric_op.location.remap_string_ids(remap);
-        }
-        for float_statement in &mut self.reachable_float_statements {
-            float_statement.location.remap_string_ids(remap);
-        }
-        for assertion_message in &mut self.reachable_assertion_messages {
-            assertion_message.location.remap_string_ids(remap);
-        }
     }
 }
 
@@ -899,7 +781,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         .push(ReachableExternalCall {
                             function_id: *function_id,
                             statement_id: statement.id,
-                            location: statement.location.clone(),
+                            span: statement.span,
                         });
                 }
             }
@@ -907,10 +789,12 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
     }
 
     fn collect_runtime_feature_uses_from_statement(&mut self, statement: &HirStatement) {
+        let span = statement.span;
+
         match &statement.kind {
             // Expressions and calls: recurse into sub-expressions only.
             HirStatementKind::Assign { value, .. } | HirStatementKind::Expr(value) => {
-                self.collect_runtime_feature_uses_from_expression(value, &statement.location);
+                self.collect_runtime_feature_uses_from_expression(value, span);
             }
 
             HirStatementKind::Call { target, args, .. } => {
@@ -922,10 +806,10 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                 argument_index,
                             },
                             arg,
-                            &statement.location,
+                            span,
                         );
                     }
-                    self.collect_runtime_feature_uses_from_expression(arg, &statement.location);
+                    self.collect_runtime_feature_uses_from_expression(arg, span);
                 }
             }
 
@@ -933,9 +817,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.collect_reactive_sink_from_expression(
                     ReachableReactiveSinkKind::RuntimeFragment,
                     value,
-                    &statement.location,
+                    span,
                 );
-                self.collect_runtime_feature_uses_from_expression(value, &statement.location);
+                self.collect_runtime_feature_uses_from_expression(value, span);
             }
 
             // Map operations: record the use, then recurse into receiver and args.
@@ -944,11 +828,11 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             } => {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Operation(*op),
-                    location: statement.location.clone(),
+                    span,
                 });
-                self.collect_runtime_feature_uses_from_expression(receiver, &statement.location);
+                self.collect_runtime_feature_uses_from_expression(receiver, span);
                 for arg in args {
-                    self.collect_runtime_feature_uses_from_expression(arg, &statement.location);
+                    self.collect_runtime_feature_uses_from_expression(arg, span);
                 }
             }
 
@@ -957,26 +841,15 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             HirStatementKind::NumericOp { operands, .. } => {
                 self.direct_facts
                     .reachable_numeric_ops
-                    .push(ReachableNumericOpUse {
-                        location: statement.location.clone(),
-                    });
+                    .push(ReachableNumericOpUse { span });
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
-                        self.collect_runtime_feature_uses_from_expression(
-                            operand,
-                            &statement.location,
-                        );
+                        self.collect_runtime_feature_uses_from_expression(operand, span);
                     }
                     HirNumericOperands::Binary { left, right } => {
-                        self.collect_runtime_feature_uses_from_expression(
-                            left,
-                            &statement.location,
-                        );
-                        self.collect_runtime_feature_uses_from_expression(
-                            right,
-                            &statement.location,
-                        );
+                        self.collect_runtime_feature_uses_from_expression(left, span);
+                        self.collect_runtime_feature_uses_from_expression(right, span);
                     }
                 }
             }
@@ -984,10 +857,8 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             HirStatementKind::CastOp { source, .. } => {
                 self.direct_facts
                     .reachable_runtime_casts
-                    .push(ReachableRuntimeCastUse {
-                        location: statement.location.clone(),
-                    });
-                self.collect_runtime_feature_uses_from_expression(source, &statement.location);
+                    .push(ReachableRuntimeCastUse { span });
+                self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
             HirStatementKind::FormatFloat { source, .. } => {
@@ -995,9 +866,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
-                        location: statement.location.clone(),
+                        span,
                     });
-                self.collect_runtime_feature_uses_from_expression(source, &statement.location);
+                self.collect_runtime_feature_uses_from_expression(source, span);
             }
 
             HirStatementKind::ValidateFloat { source, .. } => {
@@ -1005,41 +876,35 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
-                        location: statement.location.clone(),
+                        span,
                     });
-                self.collect_runtime_feature_uses_from_expression(source, &statement.location);
+                self.collect_runtime_feature_uses_from_expression(source, span);
             }
         }
     }
 
     fn collect_runtime_feature_uses_from_terminator(&mut self, block: &HirBlock) {
-        let fallback_location = self
-            .index
-            .hir
-            .side_table
-            .hir_source_location_for_hir(HirLocation::Terminator(block.id))
-            .cloned()
-            .unwrap_or_default();
+        let fallback_span = self.index.hir.side_table.terminator_span(block.id).copied();
 
         match &block.terminator {
             // Terminators that carry a sub-expression to inspect.
             HirTerminator::If { condition, .. } => {
-                self.collect_runtime_feature_uses_from_expression(condition, &fallback_location);
+                self.collect_runtime_feature_uses_from_expression(condition, fallback_span);
             }
 
             HirTerminator::FallibleBranch { result, .. } => {
-                self.collect_runtime_feature_uses_from_expression(result, &fallback_location);
+                self.collect_runtime_feature_uses_from_expression(result, fallback_span);
             }
 
             HirTerminator::Match { scrutinee, .. } => {
-                self.collect_runtime_feature_uses_from_expression(scrutinee, &fallback_location);
+                self.collect_runtime_feature_uses_from_expression(scrutinee, fallback_span);
             }
 
             // Terminators that return a value.
             HirTerminator::Return(value)
             | HirTerminator::ReturnSuccess(value)
             | HirTerminator::ReturnError(value) => {
-                self.collect_runtime_feature_uses_from_expression(value, &fallback_location);
+                self.collect_runtime_feature_uses_from_expression(value, fallback_span);
             }
 
             // Terminators with no sub-expressions to inspect.
@@ -1053,20 +918,20 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 message,
                 message_evaluation,
             } => {
-                let location = self
+                let span = self
                     .index
                     .hir
                     .side_table
-                    .value_source_location(message.id)
-                    .cloned()
-                    .unwrap_or(fallback_location.clone());
+                    .value_source_span(message.id)
+                    .or(message.span)
+                    .or(fallback_span);
                 self.direct_facts
                     .reachable_assertion_messages
                     .push(ReachableAssertionMessageUse {
                         evaluation: *message_evaluation,
-                        location,
+                        span,
                     });
-                self.collect_runtime_feature_uses_from_expression(message, &fallback_location);
+                self.collect_runtime_feature_uses_from_expression(message, fallback_span);
             }
         }
     }
@@ -1074,15 +939,15 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
     fn collect_runtime_feature_uses_from_expression(
         &mut self,
         expression: &HirExpression,
-        fallback_location: &SourceLocation,
+        fallback_span: Option<SourceSpan>,
     ) {
-        let expression_location = self
+        let expression_span = self
             .index
             .hir
             .side_table
-            .value_source_location(expression.id)
-            .unwrap_or(fallback_location)
-            .clone();
+            .value_source_span(expression.id)
+            .or(expression.span)
+            .or(fallback_span);
 
         // Only templates with actual runtime subscriptions are unsupported reactive runtime
         // features. Plain runtime templates with variable interpolations are snapshots, not live
@@ -1098,7 +963,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 .reachable_reactive_templates
                 .push(ReachableReactiveTemplateUse {
                     template_id: template.id,
-                    location: expression_location.clone(),
+                    span: expression_span,
                 });
         }
 
@@ -1107,24 +972,21 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             HirExpressionKind::MapLiteral(entries) => {
                 self.direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Literal,
-                    location: expression_location.clone(),
+                    span: expression_span,
                 });
                 for entry in entries {
-                    self.collect_runtime_feature_uses_from_expression(
-                        &entry.key,
-                        &expression_location,
-                    );
+                    self.collect_runtime_feature_uses_from_expression(&entry.key, expression_span);
                     self.collect_runtime_feature_uses_from_expression(
                         &entry.value,
-                        &expression_location,
+                        expression_span,
                     );
                 }
             }
 
             // Composite expressions: recurse into sub-expressions.
             HirExpressionKind::BinOp { left, right, .. } => {
-                self.collect_runtime_feature_uses_from_expression(left, &expression_location);
-                self.collect_runtime_feature_uses_from_expression(right, &expression_location);
+                self.collect_runtime_feature_uses_from_expression(left, expression_span);
+                self.collect_runtime_feature_uses_from_expression(right, expression_span);
             }
 
             HirExpressionKind::Cast {
@@ -1133,9 +995,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
-                        location: expression_location.clone(),
+                        span: expression_span,
                     });
-                self.collect_runtime_feature_uses_from_expression(operand, &expression_location);
+                self.collect_runtime_feature_uses_from_expression(operand, expression_span);
             }
 
             HirExpressionKind::UnaryOp { operand, .. }
@@ -1144,39 +1006,36 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             | HirExpressionKind::VariantPayloadGet {
                 source: operand, ..
             } => {
-                self.collect_runtime_feature_uses_from_expression(operand, &expression_location);
+                self.collect_runtime_feature_uses_from_expression(operand, expression_span);
             }
 
             HirExpressionKind::StructConstruct { fields, .. } => {
                 for (_, value) in fields {
-                    self.collect_runtime_feature_uses_from_expression(value, &expression_location);
+                    self.collect_runtime_feature_uses_from_expression(value, expression_span);
                 }
             }
 
             HirExpressionKind::Collection(elements)
             | HirExpressionKind::TupleConstruct { elements } => {
                 for element in elements {
-                    self.collect_runtime_feature_uses_from_expression(
-                        element,
-                        &expression_location,
-                    );
+                    self.collect_runtime_feature_uses_from_expression(element, expression_span);
                 }
             }
 
             HirExpressionKind::Range { start, end } => {
-                self.collect_runtime_feature_uses_from_expression(start, &expression_location);
-                self.collect_runtime_feature_uses_from_expression(end, &expression_location);
+                self.collect_runtime_feature_uses_from_expression(start, expression_span);
+                self.collect_runtime_feature_uses_from_expression(end, expression_span);
             }
 
             HirExpressionKind::TupleGet { tuple, .. } => {
-                self.collect_runtime_feature_uses_from_expression(tuple, &expression_location);
+                self.collect_runtime_feature_uses_from_expression(tuple, expression_span);
             }
 
             HirExpressionKind::VariantConstruct { fields, .. } => {
                 for field in fields {
                     self.collect_runtime_feature_uses_from_expression(
                         &field.value,
-                        &expression_location,
+                        expression_span,
                     );
                 }
             }
@@ -1190,7 +1049,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                 .push(ReachableResourceUse {
                                     resource_id: *resource_id,
                                     owner: self.owner_function,
-                                    location: expression_location.clone(),
+                                    span: expression_span,
                                 });
                         }
                         ConstStringPiece::SiteRoot => {
@@ -1198,7 +1057,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                 .reachable_site_root_uses
                                 .push(ReachableSiteRootUse {
                                     owner: self.owner_function,
-                                    location: expression_location.clone(),
+                                    span: expression_span,
                                 });
                         }
                     }
@@ -1220,7 +1079,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
         &mut self,
         kind: ReachableReactiveSinkKind,
         expression: &HirExpression,
-        fallback_location: &SourceLocation,
+        fallback_span: Option<SourceSpan>,
     ) {
         let Some(template) = self
             .index
@@ -1232,20 +1091,20 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             return;
         };
 
-        let location = self
+        let span = self
             .index
             .hir
             .side_table
-            .value_source_location(expression.id)
-            .unwrap_or(fallback_location)
-            .clone();
+            .value_source_span(expression.id)
+            .or(expression.span)
+            .or(fallback_span);
 
         self.direct_facts
             .reachable_reactive_sinks
             .push(ReachableReactiveSinkUse {
                 kind,
                 template_id: template.id,
-                location,
+                span,
             });
     }
 
@@ -1319,9 +1178,5 @@ fn build_block_map(hir: &HirModule) -> Result<FxHashMap<BlockId, &HirBlock>, Com
 }
 
 fn hir_reachability_error(message: impl Into<String>) -> CompilerError {
-    CompilerError::new(
-        message,
-        SourceLocation::default(),
-        ErrorType::HirTransformation,
-    )
+    CompilerError::new(message, None, ErrorType::HirTransformation)
 }

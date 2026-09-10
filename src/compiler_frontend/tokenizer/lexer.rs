@@ -5,6 +5,7 @@
 //! callers can run it against worker-local string tables before deterministic module aggregation.
 
 use crate::compiler_frontend::arena::TokenStats;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticCompoundAssignmentOperator,
     DiagnosticOperator, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
@@ -16,8 +17,10 @@ use crate::compiler_frontend::keywords::{
 use crate::compiler_frontend::numeric_text::parse::parse_numeric_literal;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
 use crate::compiler_frontend::paths::const_paths::parse_file_path;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::newline_handling::normalize_consumed_carriage_return_newline;
@@ -27,8 +30,7 @@ use crate::compiler_frontend::tokenizer::text_modes::{
     tokenize_string, tokenize_template_body,
 };
 use crate::compiler_frontend::tokenizer::tokens::{
-    FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode,
-    TokenizerEntryMode,
+    FileTokens, TemplateBodyMode, Token, TokenKind, TokenStream, TokenizeMode, TokenizerEntryMode,
 };
 use crate::projects::settings;
 use crate::token_log;
@@ -37,20 +39,79 @@ use std::str::Chars;
 
 pub const END_SCOPE_CHAR: char = ';';
 
-/// Boxed diagnostic result shared by every lexer result boundary in this file.
+/// Lexical source diagnoses and infrastructure failures leave preparation through separate lanes.
+#[derive(Debug)]
+pub(crate) enum TokenizeFailure {
+    Diagnosed(CompilerDiagnostic),
+    Infrastructure(CompilerError),
+}
+
+pub(crate) type TokenizeResult<T> = Result<T, TokenizeFailure>;
+
+impl From<CompilerDiagnostic> for TokenizeFailure {
+    fn from(diagnostic: CompilerDiagnostic) -> Self {
+        Self::Diagnosed(diagnostic)
+    }
+}
+
+impl From<CompilerError> for TokenizeFailure {
+    fn from(error: CompilerError) -> Self {
+        Self::Infrastructure(error)
+    }
+}
+
+/// Map one source-owned span packing failure without allocating another span from the builder.
 ///
-/// WHAT: one file-local alias for the boxed `CompilerDiagnostic` error variant returned by
-/// `tokenize`, `get_token_kind`, `require_symbolic_spacing`, `tokenize_style_directive`
-/// and `tokenize_identifier_or_keyword`.
-/// WHY: lexer dispatch propagates one diagnostic through several nested mode helpers and the
-/// production callers already own boxed diagnostic boundaries. Numeric and text-mode helpers
-/// remain separate owners, so their plain results are adapted only where they enter this family.
-type LexerResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// The inline source-start anchor is always representable, so ExtendedTableFull retains the
+/// rejected range as typed facts while EndUnrepresentable stays on the compiler-invariant lane.
+pub(crate) fn map_span_capacity_error(
+    source: SourceId,
+    error: SpanCapacityError,
+) -> TokenizeFailure {
+    let source_start = SourceSpan::new(source, LocalSpan::source_start());
+    match CompilerDiagnostic::from_span_capacity_error(error, Some(source_start)) {
+        Ok(diagnostic) => TokenizeFailure::Diagnosed(diagnostic),
+        Err(error) => TokenizeFailure::Infrastructure(error),
+    }
+}
+
+/// Encode a tokenizer-owned source span while retaining the stream's source identity on failure.
+pub(crate) fn current_source_span(stream: &mut TokenStream<'_>) -> TokenizeResult<SourceSpan> {
+    let source = stream.file_id;
+    stream
+        .current_source_span()
+        .map_err(|error| map_span_capacity_error(source, error))
+}
+
+/// Encode an exact tokenizer-owned source range while retaining its source identity on failure.
+pub(crate) fn source_span_for_bytes(
+    stream: &mut TokenStream<'_>,
+    start: u32,
+    end: u32,
+) -> TokenizeResult<SourceSpan> {
+    let source = stream.file_id;
+    stream
+        .source_span_for_bytes(start, end)
+        .map_err(|error| map_span_capacity_error(source, error))
+}
+
+/// Mint the token the stream has just finished reading, from its anchored start to the cursor.
+///
+/// WHY: `return_token!` expands to this call, so every authored token in the lexer takes its
+/// span from the one encoder. A rejected extended-table row is reported through the typed
+/// diagnostic lane with the stream's own inline source-start anchor; an unrepresentable end
+/// remains a compiler-invariant failure.
+pub(crate) fn mint_token(stream: &mut TokenStream<'_>, kind: TokenKind) -> TokenizeResult<Token> {
+    let source = stream.file_id;
+    stream
+        .new_token(kind)
+        .map_err(|error| map_span_capacity_error(source, error))
+}
 
 #[macro_export]
 macro_rules! return_token {
     ($kind:expr, $stream:expr $(,)?) => {
-        return Ok(Token::new($kind, $stream.new_location()))
+        return $crate::compiler_frontend::tokenizer::lexer::mint_token($stream, $kind)
     };
 }
 
@@ -357,13 +418,14 @@ fn symbolic_spacing_error(
     stream: &mut TokenStream<'_>,
     construct: SymbolicSpacingConstruct,
     missing: MissingWhitespace,
-) -> CompilerDiagnostic {
-    CompilerDiagnostic::common_syntax_mistake(
+) -> TokenizeResult<CompilerDiagnostic> {
+    let span = Some(current_source_span(stream)?);
+    Ok(CompilerDiagnostic::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidSymbolicSpacing {
             error: SymbolicSpacingError { construct, missing },
         },
-        stream.new_location(),
-    )
+        span,
+    ))
 }
 
 /// Compute the missing whitespace side from independent leading and trailing checks.
@@ -376,11 +438,14 @@ fn missing_whitespace_side(missing_left: bool, missing_right: bool) -> Option<Mi
     }
 }
 
-fn unary_negation_spacing_error(stream: &mut TokenStream<'_>) -> CompilerDiagnostic {
-    CompilerDiagnostic::common_syntax_mistake(
+fn unary_negation_spacing_error(
+    stream: &mut TokenStream<'_>,
+) -> TokenizeResult<CompilerDiagnostic> {
+    let span = Some(current_source_span(stream)?);
+    Ok(CompilerDiagnostic::common_syntax_mistake(
         CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing,
-        stream.new_location(),
-    )
+        span,
+    ))
 }
 
 /// Enforce outer spacing when the current complete symbolic token follows an expression.
@@ -393,7 +458,7 @@ fn require_symbolic_spacing(
     context: LexerTokenContext<'_>,
     whitespace_before_current: bool,
     construct: SymbolicSpacingConstruct,
-) -> LexerResult<()> {
+) -> TokenizeResult<()> {
     if !context.previous_can_end_expression() {
         return Ok(());
     }
@@ -402,7 +467,7 @@ fn require_symbolic_spacing(
     let missing_right = !next_char_is_whitespace_or_end(stream);
 
     if let Some(missing) = missing_whitespace_side(missing_left, missing_right) {
-        return Err(Box::new(symbolic_spacing_error(stream, construct, missing)));
+        return Err(symbolic_spacing_error(stream, construct, missing)?.into());
     }
 
     Ok(())
@@ -458,9 +523,12 @@ fn greater_than_is_template_tag_end(
         )
 }
 
-/// Tokenize one source file and optionally attach stable file identity metadata.
+/// Tokenize one source file and attach its stable file identity metadata.
 ///
-/// WHAT: wraps lexing output in `FileTokens` carrying both logical path and optional `FileId`.
+/// WHAT: wraps lexing output in `FileTokens` carrying logical path and `SourceId`. Spans are
+/// encoded into the caller's `span_builder`, which the caller retains on every exit; successive
+/// tokenizations against one builder append to it.
+///
 /// WHY: later frontend stages should prefer explicit file identity over path string comparisons.
 pub fn tokenize(
     source_code: &str,
@@ -468,21 +536,21 @@ pub fn tokenize(
     entry_mode: TokenizerEntryMode,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-    file_id: Option<FileId>,
-) -> LexerResult<FileTokens> {
+    file_id: SourceId,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> TokenizeResult<FileTokens> {
     // WHY: Estimating token capacity reduces reallocations for large files.
     // Preliminary tests suggest a ratio of roughly 6 characters per token.
     let initial_capacity = source_code.len() / settings::SRC_TO_TOKEN_RATIO;
 
     let mut tokens: Vec<Token> = Vec::with_capacity(initial_capacity);
-    let mut stream = TokenStream::new(source_code, src_path, entry_mode);
+    let mut stream = TokenStream::new(source_code, file_id, entry_mode, span_builder);
 
-    // `ModuleStart` is synthetic, but it can remain in a retained dormant `start` body. Give it
-    // the source file scope so every token that crosses the prepared-file boundary has one
-    // coherent source identity.
-    let mut token = Token::new(
+    // `ModuleStart` is synthetic and carries the source-local empty anchor. Its owner is the
+    // enclosing `FileTokens.file_id`, not a fabricated path/position record.
+    let mut token = Token::with_span(
         TokenKind::ModuleStart,
-        SourceLocation::new(src_path.to_owned(), Default::default(), Default::default()),
+        crate::compiler_frontend::source::LocalSpan::source_start(),
     );
     let mut last_meaningful_token_kind: Option<TokenKind> = None;
     let mut meaningful_token_before_last_kind: Option<TokenKind> = None;
@@ -509,18 +577,30 @@ pub fn tokenize(
             last_meaningful_token_kind: last_meaningful_token_kind.as_ref(),
             meaningful_token_before_last_kind: meaningful_token_before_last_kind.as_ref(),
         };
-        token = get_token_kind(&mut stream, style_directives, string_table, context)?;
+        token = match get_token_kind(&mut stream, style_directives, string_table, context) {
+            Ok(token) => token,
+            Err(TokenizeFailure::Diagnosed(mut diagnostic)) => {
+                // Every lexical failure crosses this boundary while its original source
+                // builder is live. Extended-table exhaustion is terminal: capture returns
+                // the capacity failure carrying the exact range, replacing the produced
+                // diagnostic; invalid producer ranges retain the existing infrastructure
+                // error lane.
+                if let Err(error) = diagnostic.capture_preparation_span(file_id) {
+                    return Err(TokenizeFailure::Infrastructure(error));
+                }
+                return Err(TokenizeFailure::Diagnosed(diagnostic));
+            }
+            Err(failure @ TokenizeFailure::Infrastructure(_)) => return Err(failure),
+        };
     }
 
     tokens.push(token);
-
-    let mut file_tokens = FileTokens::new_with_identity(
-        src_path.to_owned(),
-        file_id,
-        None,
-        tokens,
-        stream.path_syntax,
+    let path_syntax = std::mem::replace(
+        &mut stream.path_syntax,
+        crate::compiler_frontend::paths::path_syntax::PathSyntaxTable::new(),
     );
+    let mut file_tokens =
+        FileTokens::new_with_identity(src_path.to_owned(), file_id, None, tokens, path_syntax);
     file_tokens.token_stats = token_stats;
     Ok(file_tokens)
 }
@@ -530,16 +610,25 @@ fn get_token_kind(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     context: LexerTokenContext<'_>,
-) -> LexerResult<Token> {
+) -> TokenizeResult<Token> {
     // WHY: Comments do not produce tokens. A labeled loop allows the comment handler
     // to restart tokenization with `continue` instead of a recursive call, preventing
     // stack overflow in files with deep comment blocks.
     'next_token: loop {
         let mut whitespace_before_current = false;
 
+        // Anchor the token's byte start at the character that begins it, before any dispatch can
+        // return. Every path below — template bodies, raw strings, newline runs, comments that
+        // restart this loop — inherits an exact byte start from here.
         let mut current_char = match stream.next() {
-            Some(ch) => ch,
-            None => return_token!(TokenKind::Eof, stream),
+            Some(ch) => {
+                stream.begin_token_bytes_at_consumed_char();
+                ch
+            }
+            None => {
+                stream.begin_token_bytes_at_cursor();
+                return_token!(TokenKind::Eof, stream);
+            }
         };
 
         let mut token_value = String::new();
@@ -595,15 +684,21 @@ fn get_token_kind(
                 return_token!(TokenKind::Newline, stream);
             } else {
                 current_char = match stream.next() {
-                    Some(ch) => ch,
-                    None => return_token!(TokenKind::Eof, stream),
+                    Some(ch) => {
+                        // Discarded whitespace: re-anchor so the token starts where it starts.
+                        stream.begin_token_bytes_at_consumed_char();
+                        ch
+                    }
+                    None => {
+                        stream.begin_token_bytes_at_cursor();
+                        return_token!(TokenKind::Eof, stream);
+                    }
                 };
             }
         }
 
-        // Ignore leading whitespace for the next token's source location.
-        stream.update_start_position();
-
+        // Byte offsets are anchored at the token's own first character; no character positions
+        // need to be rewound after trivia.
         // ---------------------
         //  Template delimiters
         // ---------------------
@@ -616,12 +711,11 @@ fn get_token_kind(
 
         if current_char == ']' {
             if let Some(source_kind) = stream.initial_template_close_rejection() {
-                return Err(Box::new(
-                    CompilerDiagnostic::unescaped_implicit_template_close(
-                        source_kind,
-                        stream.new_location(),
-                    ),
-                ));
+                return Err(CompilerDiagnostic::unescaped_implicit_template_close(
+                    source_kind,
+                    Some(current_source_span(stream)?),
+                )
+                .into());
             }
 
             // Closing a template restores the parent template's mode.
@@ -683,9 +777,9 @@ fn get_token_kind(
                 return_token!(TokenKind::CharLiteral(c), stream);
             };
 
-            return Err(Box::new(CompilerDiagnostic::invalid_char_literal(
-                stream.new_location(),
-            )));
+            return Err(
+                CompilerDiagnostic::invalid_char_literal(Some(current_source_span(stream)?)).into(),
+            );
         }
 
         // -----------------
@@ -726,11 +820,12 @@ fn get_token_kind(
                     let missing_right = !next_char_is_whitespace_or_end(stream);
 
                     if let Some(missing) = missing_whitespace_side(missing_left, missing_right) {
-                        return Err(Box::new(symbolic_spacing_error(
+                        let diagnostic = symbolic_spacing_error(
                             stream,
                             SymbolicSpacingConstruct::Assignment,
                             missing,
-                        )));
+                        )?;
+                        return Err(diagnostic.into());
                     }
                 }
             }
@@ -855,7 +950,7 @@ fn get_token_kind(
                 return_token!(TokenKind::Negative, stream);
             }
 
-            return Err(Box::new(unary_negation_spacing_error(stream)));
+            return Err(unary_negation_spacing_error(stream)?.into());
         }
 
         // ------------------------
@@ -890,10 +985,11 @@ fn get_token_kind(
                 return_token!(TokenKind::Add, stream);
             }
 
-            return Err(Box::new(CompilerDiagnostic::common_syntax_mistake(
+            return Err(CompilerDiagnostic::common_syntax_mistake(
                 CommonSyntaxMistakeReason::UnsupportedUnaryPlus,
-                stream.new_location(),
-            )));
+                Some(current_source_span(stream)?),
+            )
+            .into());
         }
 
         if current_char == '*' {
@@ -1125,11 +1221,12 @@ fn get_token_kind(
                     stream.advance_after_peek(
                         "Tokenizer peeked the mutable declaration assignment marker but could not advance.",
                     );
-                    return Err(Box::new(symbolic_spacing_error(
+                    let diagnostic = symbolic_spacing_error(
                         stream,
                         SymbolicSpacingConstruct::MutableDeclaration,
                         missing,
-                    )));
+                    )?;
+                    return Err(diagnostic.into());
                 }
             }
 
@@ -1181,10 +1278,11 @@ fn get_token_kind(
             return tokenize_identifier_or_keyword(&mut token_value, stream, string_table);
         }
 
-        return Err(Box::new(CompilerDiagnostic::invalid_character(
+        return Err(CompilerDiagnostic::invalid_character(
             current_char,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     } // 'next_token loop
 }
 
@@ -1192,26 +1290,27 @@ fn tokenize_style_directive(
     stream: &mut TokenStream<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-) -> LexerResult<Token> {
+) -> TokenizeResult<Token> {
     if stream.mode != TokenizeMode::TemplateHead {
-        return Err(Box::new(CompilerDiagnostic::invalid_character(
-            '$',
-            stream.new_location(),
-        )));
+        return Err(
+            CompilerDiagnostic::invalid_character('$', Some(current_source_span(stream)?)).into(),
+        );
     }
 
     let Some(&first_char) = stream.peek() else {
-        return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
+        return Err(CompilerDiagnostic::unexpected_end_of_file(
             None,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     };
 
     if !first_char.is_alphabetic() && first_char != '_' {
-        return Err(Box::new(CompilerDiagnostic::invalid_character(
+        return Err(CompilerDiagnostic::invalid_character(
             first_char,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     }
 
     let mut directive_text = String::new();
@@ -1237,11 +1336,12 @@ fn tokenize_style_directive(
         // This is diagnostic-only string-table mutation.
         let supported =
             string_table.intern(&style_directives.supported_directives_for_diagnostic());
-        return Err(Box::new(CompilerDiagnostic::invalid_style_directive(
+        return Err(CompilerDiagnostic::invalid_style_directive(
             directive,
             supported,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     };
 
     stream.mark_current_template_body_mode(body_mode);
@@ -1256,7 +1356,7 @@ pub(crate) fn tokenize_identifier_or_keyword(
     token_value: &mut String,
     stream: &mut TokenStream<'_>,
     string_table: &mut StringTable,
-) -> LexerResult<Token> {
+) -> TokenizeResult<Token> {
     // WHY: Variable names and keywords can contain alphanumeric characters or underscores.
     // The loop keeps consuming identifier characters until a non-identifier boundary is
     // reached, then falls through to keyword and symbol matching.
@@ -1287,9 +1387,9 @@ pub(crate) fn tokenize_identifier_or_keyword(
             return_token!(TokenKind::Symbol(interned_symbol), stream);
         }
 
-        return Err(Box::new(CompilerDiagnostic::invalid_identifier(
-            stream.new_location(),
-        )));
+        return Err(
+            CompilerDiagnostic::invalid_identifier(Some(current_source_span(stream)?)).into(),
+        );
     }
 }
 

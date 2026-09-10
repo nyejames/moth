@@ -7,7 +7,6 @@
 //!           symbols, or produce runtime fragments.
 
 use crate::compiler_frontend::arena::TokenStats;
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
@@ -15,10 +14,10 @@ use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
 };
 use crate::compiler_frontend::plain_markdown::render_plain_markdown;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind};
 use std::path::PathBuf;
 
 /// Inputs needed to prepare one plain Markdown source file.
@@ -28,7 +27,7 @@ use std::path::PathBuf;
 pub(crate) struct PlainMarkdownPrepareInput<'a> {
     pub(crate) source_code: &'a str,
     pub(crate) source_file: InternedPath,
-    pub(crate) file_id: Option<FileId>,
+    pub(crate) file_id: SourceId,
     pub(crate) canonical_os_path: Option<PathBuf>,
 }
 
@@ -45,18 +44,14 @@ pub(crate) fn prepare_plain_markdown_file(
     let rendered = render_plain_markdown(input.source_code);
     let rendered_html_id = string_table.intern(&rendered.html);
 
-    let file_start_location = SourceLocation::new(
-        input.source_file.clone(),
-        CharPosition::default(),
-        CharPosition::default(),
-    );
+    let file_start_span = LocalSpan::source_start();
 
     // A `StringSliceLiteral` is the normal top-level string literal token. It preserves the
     // already-rendered HTML exactly and folds to `#String` through the existing AST constant
     // folder without re-serializing or escaping source text.
     let initializer_tokens = vec![Token::new(
         TokenKind::StringSliceLiteral(rendered_html_id),
-        file_start_location.clone(),
+        file_start_span,
     )];
 
     let content_header = synthetic_content_header(
@@ -64,7 +59,6 @@ pub(crate) fn prepare_plain_markdown_file(
             source_file: input.source_file,
             file_id: input.file_id,
             canonical_os_path: canonical_os_path.clone(),
-            location: file_start_location,
             initializer_tokens,
             initializer_references: Vec::new(),
         },

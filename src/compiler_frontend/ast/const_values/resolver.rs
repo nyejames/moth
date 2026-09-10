@@ -195,7 +195,6 @@ impl<'a> ConstValueResolver<'a> {
             source: ConstBindingSource::InferredImmutable,
             value_kind,
             value: AstConstFactValue::Expression(Box::new(resolved)),
-            location: declaration.value.location.clone(),
         })
     }
 
@@ -221,7 +220,6 @@ impl<'a> ConstValueResolver<'a> {
             source: ConstBindingSource::InferredImmutable,
             value_kind,
             value: AstConstFactValue::Expression(Box::new(resolved)),
-            location: declaration.value.location.clone(),
         })
     }
 

@@ -9,7 +9,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::FxHashMap;
 use std::fs;
@@ -230,7 +229,6 @@ impl ResourceInputRegistry {
     pub(crate) fn hash_source(
         &mut self,
         source_id: ResourceSourceId,
-        string_table: &mut StringTable,
     ) -> Result<u64, CompilerError> {
         let source_index = source_id.index();
         let (content_state, canonical_source_path) = self
@@ -255,7 +253,6 @@ impl ResourceInputRegistry {
                             "Failed to read resource source '{}': {error}",
                             canonical_source_path.display()
                         ),
-                        string_table,
                     )
                 })?;
                 let content_hash = resource_content_hash(&bytes);
@@ -281,9 +278,8 @@ impl ResourceInputRegistry {
     pub(crate) fn read_source(
         &mut self,
         source_id: ResourceSourceId,
-        string_table: &mut StringTable,
     ) -> Result<&[u8], CompilerError> {
-        let content_hash = self.hash_source(source_id, string_table)?;
+        let content_hash = self.hash_source(source_id)?;
         let record = self.records.get_mut(source_id.index()).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "resource source ID {} disappeared while reading",

@@ -86,34 +86,41 @@ impl<'a> HirValidator<'a> {
         &self,
         statement: &HirStatement,
     ) -> Result<(), CompilerError> {
+        // Compiler-generated statements intentionally have no authored span and therefore no
+        // side-table source mapping. Authored statements must carry both reversible provenance
+        // and the exact diagnostic span.
+        if statement.span.is_none() {
+            return Ok(());
+        }
+
         let statement_location = HirLocation::Statement(statement.id);
         if self
             .module
             .side_table
-            .ast_source_id_for_hir(statement_location)
+            .ast_span_for_hir(statement_location)
             .is_none()
         {
-            return Err(self.error_with_text_location(
+            return Err(self.error_with_hir(
                 format!(
                     "Statement {} is missing AST->HIR side-table mapping",
                     statement.id
                 ),
-                &statement.location,
+                Some(statement_location),
             ));
         }
 
         if self
             .module
             .side_table
-            .hir_source_id_for_hir(statement_location)
+            .hir_source_span_for_hir(statement_location)
             .is_none()
         {
-            return Err(self.error_with_text_location(
+            return Err(self.error_with_hir(
                 format!(
                     "Statement {} is missing HIR source side-table mapping",
                     statement.id
                 ),
-                &statement.location,
+                Some(statement_location),
             ));
         }
 
@@ -124,11 +131,17 @@ impl<'a> HirValidator<'a> {
         &self,
         block_id: BlockId,
     ) -> Result<(), CompilerError> {
+        // Only authored terminators have an exact syntax marker. Generated CFG terminators are
+        // deliberately span-free and do not need synthetic provenance.
+        if self.module.side_table.terminator_span(block_id).is_none() {
+            return Ok(());
+        }
+
         let terminator_location = HirLocation::Terminator(block_id);
         if self
             .module
             .side_table
-            .ast_source_id_for_hir(terminator_location)
+            .ast_span_for_hir(terminator_location)
             .is_none()
         {
             return Err(self.error_with_hir(
@@ -140,7 +153,7 @@ impl<'a> HirValidator<'a> {
         if self
             .module
             .side_table
-            .hir_source_id_for_hir(terminator_location)
+            .hir_source_span_for_hir(terminator_location)
             .is_none()
         {
             return Err(self.error_with_hir(

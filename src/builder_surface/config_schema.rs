@@ -8,7 +8,7 @@
 //!      a flat key registry, so grouped `project` records, builder sections and entry-local
 //!      config can be validated recursively as they are introduced.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use std::collections::HashSet;
 
@@ -378,7 +378,7 @@ impl ConfigSchema {
         if self.frozen {
             Err(CompilerError::new(
                 "a frozen config schema cannot register more nodes or fields",
-                SourceLocation::default(),
+                None,
                 ErrorType::Compiler,
             ))
         } else {

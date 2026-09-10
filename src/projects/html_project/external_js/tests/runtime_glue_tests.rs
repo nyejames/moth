@@ -359,12 +359,12 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
         Ok(_) => panic!("unregistered runtime module should fail"),
         Err(error) => error,
     };
-    let (_, message, _) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("runtime module failure should be an infrastructure error");
 
     assert!(
-        message.contains("@moth/missing"),
+        error.msg.contains("@moth/missing"),
         "expected unregistered module name in error"
     );
 }

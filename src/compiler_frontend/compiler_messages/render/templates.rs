@@ -9,12 +9,12 @@ use super::named_value_or_default;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_template_slot_message(
     reason: InvalidTemplateSlotReason,
     slot_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let slot_text = named_value_or_default(slot_name, string_table, "this slot");
 
@@ -46,7 +46,7 @@ pub(crate) fn invalid_template_slot_message(
 pub(crate) fn compile_time_evaluation_error_message(
     reason: CompileTimeEvaluationErrorReason,
     operation: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let operation_text = named_value_or_default(operation, string_table, "this expression");
 

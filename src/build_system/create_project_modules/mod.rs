@@ -66,12 +66,18 @@ pub(crate) mod resource_inputs;
 mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
+
+#[cfg(test)]
+#[path = "../tests/source_loading_test_support.rs"]
+mod source_loading_test_support;
 pub(crate) mod source_package_discovery;
 pub(crate) mod source_preparation;
 mod source_tree_index;
 
 #[cfg(test)]
-pub(super) use module_inventory::{ModuleCompilationSchedule, discover_all_modules_in_project};
+pub(super) use module_inventory::{
+    ModuleCompilationSchedule, discover_all_modules_in_project_with_check_only,
+};
 
 pub(crate) use project_roots::resolve_project_entry_root;
 pub(crate) use source_loading::extract_source_code;
@@ -89,8 +95,10 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::instrumentation::{log_frontend_counters, reset_frontend_counters};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::sync::Arc;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 use crate::timed_stage;
@@ -130,16 +138,24 @@ pub fn compile_project_frontend(
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    compile_project_frontend_with_inputs(
+    let mut project_source_files = None;
+    let result = compile_project_frontend_with_inputs(
         config,
         build_profile,
         validated_output_settings,
         style_directives,
         builder_surface,
         string_table,
+        &mut project_source_files,
         &BuildConfigInputSet::new(),
         FrontendCompilationMode::Canonical,
-    )
+    );
+    result.map(|mut frontend| {
+        // Retain the finalized owner so the config-free seam can pass it to the canonical frozen
+        // render tail without cloning source snapshots.
+        frontend.project_source_database = project_source_files;
+        frontend
+    })
 }
 
 /// Compile all project modules with one command-owned typed input set and frontend mode.
@@ -151,6 +167,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     string_table: &mut StringTable,
+    project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
 ) -> Result<ProjectFrontendCompilation, CompilerMessages> {
@@ -177,6 +194,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 style_directives,
                 builder_surface,
                 string_table,
+                project_source_files,
                 build_config_inputs,
                 mode,
             )
@@ -188,6 +206,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 builder_surface,
                 extension,
                 string_table,
+                project_source_files,
                 build_config_inputs,
                 mode,
             )
@@ -199,7 +218,6 @@ pub(crate) fn compile_project_frontend_with_inputs(
                 format!(
                     "Found a file without an extension set. Moth files use .{LANGUAGE_SOURCE_EXTENSION}"
                 ),
-                string_table,
             );
             Err(CompilerMessages::from_error_ref(err, string_table))
         }
@@ -227,7 +245,6 @@ pub(crate) fn compile_single_file_boracle(
         let error = crate::compiler_frontend::compiler_errors::CompilerError::file_error(
             &config.entry_dir,
             format!("Boracle source mode requires a .{LANGUAGE_SOURCE_EXTENSION} file entry"),
-            string_table,
         );
         return Err(CompilerMessages::from_error_ref(error, string_table));
     };
@@ -251,7 +268,7 @@ mod create_project_modules_tests;
 mod stage0_filesystem_identity_tests;
 
 #[cfg(test)]
-#[path = "../tests/compile_project_frontend_tests.rs"]
+#[path = "../tests/compile_project_frontend_tests/mod.rs"]
 mod compile_project_frontend_tests;
 
 #[cfg(test)]

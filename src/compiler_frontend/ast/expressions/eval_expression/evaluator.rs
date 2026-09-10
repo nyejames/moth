@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, TypeMismatchContext,
 };
@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -48,7 +49,7 @@ pub fn evaluate_expression(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionTypingError> {
-    let (rpn_items, location) = ordering::order_expression_nodes(nodes)?;
+    let (rpn_items, span) = ordering::order_expression_nodes(nodes)?;
 
     // Fast path: a single R-value needs no operator resolution or RPN assembly.
     if rpn_items.len() == 1 {
@@ -69,7 +70,7 @@ pub fn evaluate_expression(
         validate_expression_result_type(
             expected_type,
             only_expression.type_id,
-            &rpn_items[0].source_location(),
+            rpn_items[0].source_span(),
             type_interner.environment_mut_for_derived_types(),
         )?;
 
@@ -87,7 +88,7 @@ pub fn evaluate_expression(
     // General path: resolve operator types across the full RPN shape, then attempt folding.
     let resolved_type = resolve_expression_result_type(
         &rpn_items,
-        &location,
+        span,
         string_table,
         type_interner.environment(),
     )?;
@@ -95,7 +96,7 @@ pub fn evaluate_expression(
     validate_expression_result_type(
         expected_type,
         resolved_type,
-        &location,
+        span,
         type_interner.environment_mut_for_derived_types(),
     )?;
 
@@ -103,11 +104,14 @@ pub fn evaluate_expression(
         *expected_type = ExpectedType::Known(resolved_type);
     }
 
+    let stack_span = rpn_items.iter().find_map(|item| match item {
+        ExpressionRpnItem::Operand(expression) => expression.span,
+        ExpressionRpnItem::Operator { .. } => None,
+    });
     // Runtime RPN needs an owned value mode for the final expression node.
     let value_mode = value_mode.as_owned();
     eval_log!("Attempting to Fold: ", Pretty rpn_items);
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
-
     let fold_outcome = constant_fold(rpn_items, string_table)?;
     increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
     eval_log!("Stack after folding: ", Pretty fold_outcome);
@@ -140,7 +144,7 @@ pub fn evaluate_expression(
     if stack.is_empty() {
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::UnresolvedStackShape,
-            location,
+            span,
         )
         .into());
     }
@@ -156,7 +160,7 @@ pub fn evaluate_expression(
         diagnostic_type,
         resolved_type,
         value_mode,
-        location.clone(),
+        stack_span.or(span),
     )?)
 }
 
@@ -170,13 +174,13 @@ fn runtime_expression_from_items(
     diagnostic_type: DataType,
     type_id: TypeId,
     value_mode: ValueMode,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<Expression, CompilerError> {
     Ok(Expression::runtime_with_type_id(
         ExpressionRpn { items },
         diagnostic_type,
         type_id,
-        location,
+        span,
         value_mode,
     ))
 }
@@ -190,7 +194,7 @@ fn runtime_expression_from_items(
 fn validate_expression_result_type(
     expected_type: &mut ExpectedType,
     actual_type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &mut TypeEnvironment,
 ) -> Result<(), ExpressionTypingError> {
     let Some(expected_type_id) = expected_type.known_type_id() else {
@@ -205,7 +209,7 @@ fn validate_expression_result_type(
         expected_type_id,
         actual_type_id,
         TypeMismatchContext::General,
-        location.clone(),
+        span,
     )
     .into())
 }

@@ -18,17 +18,18 @@
 //! - expression typing/coercion policy
 //! - call-site/feature-specific diagnostic framing outside type syntax itself
 
-use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::reserved_trait_keyword_or_dispatch_mismatch;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericApplicationErrorReason, InvalidCollectionTypeReason,
-    InvalidMapTypeReason, InvalidTypeAnnotationReason,
+    InvalidMapTypeReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 pub(crate) use crate::compiler_frontend::compiler_messages::TypeAnnotationContext;
 
@@ -51,7 +52,6 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
         ParsedTypeRef::BuiltinFloat { .. } => DataType::Float,
         ParsedTypeRef::BuiltinString { .. } => DataType::StringSlice,
         ParsedTypeRef::BuiltinChar { .. } => DataType::Char,
-        ParsedTypeRef::BuiltinNone { .. } => DataType::None,
         ParsedTypeRef::Named { name, .. } => DataType::NamedType(*name),
         ParsedTypeRef::Qualified { path, .. } => DataType::NamespacedType { path: path.clone() },
         ParsedTypeRef::Applied {
@@ -78,9 +78,6 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
         }
         ParsedTypeRef::Optional { inner, .. } => {
             DataType::Option(Box::new(parsed_ref_to_data_type(inner)))
-        }
-        ParsedTypeRef::Result { ok, err, .. } => {
-            DataType::fallible_carrier(parsed_ref_to_data_type(ok), parsed_ref_to_data_type(err))
         }
 
         ParsedTypeRef::This { .. } => DataType::Inferred,

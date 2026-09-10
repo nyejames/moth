@@ -3,12 +3,14 @@
 use super::{
     escape_html, format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::CharPosition;
 use std::fs;
+use std::sync::Arc;
 
 #[test]
 fn escape_html_rewrites_special_characters() {
@@ -34,7 +36,7 @@ fn formatted_compiler_messages_include_typed_diagnostics() {
     let diagnostic = CompilerDiagnostic::invalid_config_reason(
         None,
         InvalidConfigReason::UnsupportedScalarValue,
-        SourceLocation::default(),
+        None,
     );
     let messages = CompilerMessages::from_diagnostic(diagnostic, StringTable::new());
 
@@ -57,25 +59,31 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
     .expect("should create source dir");
     fs::write(&source_file, "broken()\n").expect("should write source file");
 
-    let header_scope = source_file.join("start.header");
     let mut string_table = StringTable::new();
+    let mut source_database = SourceDatabase::build(
+        std::iter::once(source_file.as_path()),
+        &root.join("main.moth"),
+        None,
+        &mut string_table,
+    )
+    .expect("source identity should build");
+    let source_id = source_database
+        .get_by_canonical_path(&source_file)
+        .expect("source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, "broken()\n".to_owned())
+        .expect("source text should be retained");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span = LocalSpan::exact(4, 3, &mut span_builder).expect("span should fit inline");
+    let source_span = SourceSpan::new(source_id, local_span);
     let diagnostic = CompilerDiagnostic::invalid_config_reason(
         None,
         InvalidConfigReason::UnsupportedScalarValue,
-        SourceLocation::new(
-            InternedPath::try_from_filesystem_path(&header_scope, &mut string_table)
-                .expect("test path should be UTF-8"),
-            CharPosition {
-                line_number: 0,
-                char_column: 4,
-            },
-            CharPosition {
-                line_number: 0,
-                char_column: 7,
-            },
-        ),
+        Some(source_span),
     );
-    let messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    let mut messages = CompilerMessages::from_diagnostic(diagnostic, string_table);
+    messages.set_source_database(Arc::new(source_database));
 
     let page = render_compiler_error_page(&messages, &root, "/docs", 7);
 

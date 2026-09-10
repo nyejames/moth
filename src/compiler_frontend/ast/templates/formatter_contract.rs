@@ -7,9 +7,8 @@
 //! WHY: These shapes are intentionally narrow so formatters operate on text and
 //! opaque anchors only, without reaching into template internals.
 
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 // -------------------------
 //  Formatter Anchors
 // -------------------------
@@ -72,11 +71,11 @@ pub enum FormatterInputPiece {
     Opaque(FormatterOpaquePiece),
 }
 
-/// Body text visible to a formatter, with source location for diagnostics.
+/// Body text visible to a formatter, with an optional exact source span.
 #[derive(Debug, Clone)]
 pub struct FormatterTextPiece {
     pub text: StringId,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// Formatter output — newly generated text and preserved opaque anchors.
@@ -96,12 +95,12 @@ pub enum FormatterOutputPiece {
 /// Converts formatter output back into formatter input for the next pipeline stage.
 ///
 /// WHAT: interns transformed text with the formatter run's representative
-/// source location and preserves opaque anchors unchanged.
+/// source span and preserves opaque anchors unchanged.
 /// WHY: pre-format whitespace, directive formatting and post-format whitespace
 /// share one narrow contract without exposing TIR nodes or template content.
 pub(crate) fn output_to_input(
     output: FormatterOutput,
-    representative_location: &SourceLocation,
+    representative_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> FormatterInput {
     let pieces = output
@@ -110,7 +109,7 @@ pub(crate) fn output_to_input(
         .map(|piece| match piece {
             FormatterOutputPiece::Text(text) => FormatterInputPiece::Text(FormatterTextPiece {
                 text: string_table.intern(&text),
-                location: representative_location.clone(),
+                span: representative_span,
             }),
 
             FormatterOutputPiece::Opaque(anchor) => FormatterInputPiece::Opaque(anchor),

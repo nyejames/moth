@@ -44,9 +44,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList as ParsedGenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -55,12 +53,13 @@ use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -158,6 +157,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -170,11 +170,12 @@ fn field_declaration_no_default(
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -183,7 +184,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 #[test]
@@ -271,7 +272,8 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
 
     let max_size_constant = Declaration {
         id: InternedPath::from_single_str("MaxSize", &mut string_table),
-        value: Expression::int(256, SourceLocation::default(), ValueMode::ImmutableOwned),
+        value: Expression::int(256, None, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
     let module_constants = vec![max_size_constant];
@@ -461,16 +463,10 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     // Register a generic parameter list with one authored parameter "A".
     let a_name = string_table.intern("A");
-    let parsed_params = ParsedGenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name: a_name,
-            location: SourceLocation::default(),
-            trait_bounds: vec![],
-        }],
-    };
-    let registered_list =
-        env.register_generic_parameter_list(&parsed_params, &FxHashMap::default());
+    let registered_list = env.register_generic_parameter_list(
+        [(TypeParameterId(0), a_name)].into_iter(),
+        &FxHashMap::default(),
+    );
     let list_id = registered_list.list_id;
 
     // Register a generic struct Box<A> whose generic parameter list matches the method
@@ -488,11 +484,12 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let receiver = Declaration {
         id: path("this", &mut string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
+            None,
             DataType::Inferred,
             struct_type_id,
             ValueMode::MutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let method_signature = FunctionSignature {
@@ -552,9 +549,10 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         signature: method_signature,
         body_tokens: Some(GenericFunctionBody::source(FileTokens::new(
             method_fn_path.clone(),
+            SourceId::COMPILATION_ROOT,
             vec![],
         ))),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
     };
     let template_map: FxHashMap<InternedPath, GenericFunctionTemplate> =
         [(method_fn_path.clone(), template)].into_iter().collect();
@@ -716,7 +714,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
             string_id,
             Expression::string_slice(
                 string_table.intern("default-prefix"),
-                SourceLocation::default(),
+                None,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
@@ -727,7 +725,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(42, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("subject", string_id, &mut string_table),
@@ -829,13 +827,13 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_declaration_with_default(
             "x",
             int_id,
-            Expression::int(10, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(10, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_with_default(
             "flag",
             bool_id,
-            Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::bool(true, None, ValueMode::ImmutableOwned),
             &mut string_table,
         ),
         field_declaration_no_default("label", string_id, &mut string_table),
@@ -921,10 +919,10 @@ fn choice_payload_fields_remain_default_free() {
             fields: Box::new([FieldDefinition {
                 name: path("value", &mut string_table),
                 type_id: int_id,
-                location: SourceLocation::default(),
+                span: None,
             }]),
         },
-        location: SourceLocation::default(),
+        span: None,
     };
 
     let choice_path = path("Option", &mut string_table);
@@ -1016,7 +1014,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 string_id,
                 Expression::string_slice(
                     string_table.intern("fallback"),
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 ),
                 &mut string_table,

@@ -11,7 +11,7 @@
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, HeaderParseOptions,
+    FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -24,14 +24,17 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::single_source_compilation::MothTemplateFileValueBundle;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
 use std::path::Path;
+use std::sync::Arc;
 
 const TEMPLATE_PATH: &str = "site/intro.mtf";
 const MARKDOWN_PATH: &str = "site/docs/intro.md";
@@ -44,7 +47,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
     let folded = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: Path::new("/templates/intro.mtf"),
-            source_code: String::from("# Intro"),
+            source_code: Some(String::from("# Intro")),
             style_directives: &style_directives,
             file_value_resolution: None,
         },
@@ -56,6 +59,7 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         content,
         module_resources,
         warnings,
+        mut source_database,
     } = folded;
     assert_eq!(
         content,
@@ -71,6 +75,55 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
         "a plain request has no file values, so no resource origin is interned"
     );
     assert!(warnings.is_empty());
+
+    let source_id = source_database
+        .get_by_canonical_path(Path::new("/templates/intro.mtf"))
+        .expect("standalone source identity should remain retained")
+        .id;
+    assert_eq!(
+        source_database.retained_text(source_id),
+        Some("# Intro"),
+        "the folded result should retain the exact standalone source snapshot",
+    );
+
+    Arc::get_mut(&mut source_database)
+        .expect("the folded result should own its source database uniquely")
+        .install_extended_spans(source_id, ExtendedSpanBuilder::new().freeze())
+        .expect_err("the service should install each source span table exactly once");
+}
+
+#[test]
+fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
+    let mut string_table = StringTable::new();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let source_path = Path::new("/templates/broken.mtf");
+    let source_code = "]";
+
+    let messages = match compile_moth_template_source(
+        MothTemplateCompilationRequest {
+            source_path,
+            source_code: Some(source_code.to_owned()),
+            style_directives: &style_directives,
+            file_value_resolution: None,
+        },
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("an unescaped template close should be diagnosed during preparation"),
+        Err(messages) => messages,
+    };
+
+    let source_database = messages
+        .source_database_for_diagnostic(0)
+        .expect("preparation diagnostics should retain their source database");
+    let source_id = source_database
+        .get_by_canonical_path(source_path)
+        .expect("diagnosed source identity should remain registered")
+        .id;
+    assert_eq!(
+        source_database.retained_text(source_id),
+        Some(source_code),
+        "diagnosed preparation must retain the exact authored snapshot",
+    );
 }
 
 #[test]
@@ -80,30 +133,44 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
 
     let template_path = Path::new(TEMPLATE_PATH);
     let markdown_path = Path::new(MARKDOWN_PATH);
-    let source_files = SourceFileTable::build(
+    // The template names a nested Markdown content source, a resource file and the site root.
+    let template_source = "# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]";
+    let mut source_files = SourceDatabase::build(
         [template_path, markdown_path],
         template_path,
         None,
         &mut string_table,
     )
     .expect("bundle source identities should build");
-    let file_id = |source_files: &SourceFileTable, path: &Path| {
+    let template_id = source_files
+        .get_by_canonical_path(template_path)
+        .expect("template source should have a source identity")
+        .id;
+    source_files
+        .retain_text(template_id, template_source.to_owned())
+        .expect("template source should retain its text");
+    let markdown_id = source_files
+        .get_by_canonical_path(markdown_path)
+        .expect("markdown source should have a source identity")
+        .id;
+    source_files
+        .retain_text(markdown_id, "Nested intro body.".to_owned())
+        .expect("markdown source should retain its text");
+    let file_id = |source_files: &SourceDatabase, path: &Path| {
         source_files
             .get_by_canonical_path(path)
             .unwrap_or_else(|| panic!("bundle file {path:?} should have a source identity"))
-            .file_id
+            .id
     };
 
-    // The template names a nested Markdown content source, a resource file and the site root.
-    let template_source = "# Intro\n\n[@docs/intro.md]\n\n[@assets/logo.svg] [@/]";
-    let prepared_template = prepare_bundle_source(
+    let (prepared_template, template_span_builder) = prepare_bundle_source(
         &source_files,
         template_path,
         template_source,
         &style_directives,
         &mut string_table,
     );
-    let prepared_markdown = prepare_bundle_source(
+    let (prepared_markdown, markdown_span_builder) = prepare_bundle_source(
         &source_files,
         markdown_path,
         "Nested intro body.",
@@ -115,9 +182,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     // the site root's no-target outcome, keyed by the prepared occurrence identities.
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
     for reference in prepared_template.structural_file_references.references() {
-        let source_file = reference
-            .source_file
-            .expect("prepared rows carry a source FileId");
+        let source_file = reference.source_file;
         let outcome = match reference.class {
             PreparedFileReferenceClass::ContentSource => {
                 ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ContentSource {
@@ -145,10 +210,14 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     }
 
     let module_origin = direct_test_module_origin();
+    let mut source_builder = SourceDatabaseBuilder::new(source_files);
+    source_builder.retain_span_builder(template_id, template_span_builder);
+    source_builder.retain_span_builder(markdown_id, markdown_span_builder);
     let bundle = MothTemplateFileValueBundle {
+        prepared_entry: prepared_template,
         prepared_content_sources: vec![prepared_markdown],
         resolved_file_references,
-        source_files,
+        source_files: source_builder,
         module_origin: Some(module_origin.clone()),
     };
 
@@ -156,10 +225,11 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         content,
         module_resources,
         warnings,
+        source_database,
     } = compile_moth_template_source(
         MothTemplateCompilationRequest {
             source_path: template_path,
-            source_code: template_source.to_owned(),
+            source_code: None,
             style_directives: &style_directives,
             file_value_resolution: Some(bundle),
         },
@@ -204,28 +274,49 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         "the folded module's resource table must report the resolved origin as a source fact"
     );
     assert!(warnings.is_empty());
+
+    let template_id = source_database
+        .get_by_canonical_path(template_path)
+        .expect("folded bundle should retain the template source identity")
+        .id;
+    let markdown_id = source_database
+        .get_by_canonical_path(markdown_path)
+        .expect("folded bundle should retain the content source identity")
+        .id;
+    assert_eq!(
+        source_database.retained_text(template_id),
+        Some(template_source),
+        "bundle folding must preserve the exact template snapshot",
+    );
+    assert_eq!(
+        source_database.retained_text(markdown_id),
+        Some("Nested intro body."),
+        "bundle folding must preserve the exact dependency snapshot",
+    );
 }
 
 fn prepare_bundle_source(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     source_path: &Path,
     source_code: &str,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
-) -> FileFrontendPrepareOutput {
+) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
+    let source_id = source_files
+        .get_by_canonical_path(source_path)
+        .unwrap_or_else(|| panic!("bundle source {source_path:?} should have a source identity"))
+        .id;
     let source = match source_path.extension() {
         Some(extension) if extension == "md" => FrontendFilePrepareSource::PlainMarkdown {
-            source_code: source_code.to_owned(),
+            source_code,
             source_path: source_path.to_path_buf(),
         },
         _ => FrontendFilePrepareSource::MothTemplate {
-            source_code: source_code.to_owned(),
+            source_code,
             source_path: source_path.to_path_buf(),
         },
     };
 
-    // Bundle construction only needs the shared per-file preparation owner; the service
-    // re-prepares its own source from the same identity facts.
     let options = HeaderParseOptions::default();
     let context = FrontendFilePrepareContext {
         source_files,
@@ -235,11 +326,21 @@ fn prepare_bundle_source(
     };
     let input = FrontendFilePrepareInput {
         source,
+        source_id,
+        span_builder: ExtendedSpanBuilder::new(),
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
-    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
-        .expect("bundle source preparation should succeed")
+    let SourcePreparationDelta {
+        span_builder,
+        result,
+        ..
+    } = CompilerFrontend::prepare_file_frontend_local(&context, input, string_table);
+    let mut prepared = result.expect("bundle source preparation should succeed");
+    prepared
+        .freeze_path_syntax(string_table)
+        .expect("bundle source should freeze its path syntax");
+    (prepared, span_builder)
 }
 
 fn direct_test_module_origin() -> StableModuleOriginIdentity {

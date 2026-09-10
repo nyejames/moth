@@ -11,9 +11,7 @@ use crate::builder_surface::external_import_providers::provider::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, source_location::SourceLocation,
-};
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -25,6 +23,7 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use crate::compiler_frontend::module_metadata::{HirLoweringMetadata, ModuleDocFragment};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 use std::path::PathBuf;
@@ -60,7 +59,6 @@ impl Module {
 
         self.executable
             .remap_string_ids_with_type_environment_cache(remap, type_environment_cache);
-        self.link_facts.functions.remap_string_ids(remap);
         self.metadata.remap_string_ids(remap);
     }
 }
@@ -146,6 +144,7 @@ pub(crate) struct ModuleCompilerMetadata {
     pub(crate) warnings: Vec<CompilerDiagnostic>,
     pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
     pub(crate) root_activity: ModuleRootActivity,
+    #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
     pub(crate) doc_fragments: Vec<ModuleDocFragment>,
     /// Self-contained declaring-module semantics used by generated-function materialisation.
     ///
@@ -173,23 +172,15 @@ impl ModuleCompilerMetadata {
         }
     }
 
-    /// WHY: warnings, documentation and const-fragment locations must remap exactly once. Const
-    ///      fragment values are already owned folded strings with no interned IDs, root activity
-    ///      carries no interned fields, and the entry path is a `PathBuf`.
+    /// WHY: warnings remap exactly once. Const-fragment spans are global and carry no interned
+    ///      identity, values are already owned folded strings, root activity has no interned
+    ///      fields, and the entry path is a `PathBuf`.
     ///
     /// Materialisation metadata owns self-contained strings and stable semantic identities, so
     /// this remap covers only executable presentation fields that retain local `StringId` values.
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for warning in &mut self.warnings {
             warning.remap_string_ids(remap);
-        }
-
-        for fragment in &mut self.const_top_level_fragments {
-            fragment.location.remap_string_ids(remap);
-        }
-
-        for fragment in &mut self.doc_fragments {
-            fragment.location.remap_string_ids(remap);
         }
     }
 }
@@ -215,17 +206,18 @@ impl ModuleRootActivity {
     }
 }
 
-/// A resolved const top-level fragment: an owned folded string, its source location and runtime insertion index.
+/// A resolved const top-level fragment: an owned folded string, its authored source span and
+/// runtime insertion index.
 ///
-/// WHAT: carries the fully resolved module-local structural string value plus the source location
-///       and count of runtime fragments that precede it in source order.
+/// WHAT: carries the fully resolved module-local structural string value plus the authored source
+/// span, when available, and the count of runtime fragments that precede it in source order.
 /// WHY: builders merge const strings with the runtime fragment list using the insertion index to
-///      reconstruct source-order interleaving, while resolving structural pieces at their boundary.
+/// reconstruct source-order interleaving, while resolving structural pieces at their boundary.
 pub(crate) struct ResolvedConstFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
-    /// The authored source location of this const fragment.
-    pub location: SourceLocation,
+    /// The authored source span of this const fragment, when available.
+    pub span: Option<SourceSpan>,
     /// The owned structural string value of this const fragment.
     pub value: OwnedFoldedString,
 }

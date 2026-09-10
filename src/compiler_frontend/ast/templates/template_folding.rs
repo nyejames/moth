@@ -30,7 +30,6 @@ use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 // -------------------------
 //  Folding Context
@@ -250,44 +249,33 @@ fn option_capture_binding_path(pattern: &MatchPattern) -> Result<InternedPath, T
 fn option_capture_const_deferred_error(expression: &Expression) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_template_structure(
         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-        expression.location.clone(),
+        expression.span,
     )
 }
 
 pub(crate) fn fold_conditional_loop_const_condition(
     condition: &Expression,
-    location: &SourceLocation,
+    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Result<bool, TemplateError> {
     match &condition.kind {
         ExpressionKind::Bool(value) => Ok(*value),
 
         ExpressionKind::Coerced { value, .. } => {
-            fold_conditional_loop_const_condition(value, location)
+            fold_conditional_loop_const_condition(value, fallback_span)
         }
 
         _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
-            condition_location_or_loop_location(condition, location),
+            condition.span.or(fallback_span),
         )
         .into()),
-    }
-}
-
-pub(crate) fn condition_location_or_loop_location(
-    condition: &Expression,
-    loop_location: &SourceLocation,
-) -> SourceLocation {
-    if condition.location == Default::default() {
-        loop_location.clone()
-    } else {
-        condition.location.clone()
     }
 }
 
 /// Evaluates a const template condition and returns the exact value provenance consumed by it.
 pub(crate) fn fold_bool_condition_with_provenance(
     condition: &Expression,
-    fallback_location: &SourceLocation,
+    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(bool, SyntheticInterfaceProvenance), TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(condition, fold_context)?;
@@ -299,26 +287,20 @@ pub(crate) fn fold_bool_condition_with_provenance(
         FoldResolvedExpression::Owned(expr) => expr,
     };
 
-    let value = fold_resolved_bool_condition(resolved_ref, fallback_location)?;
+    let value = fold_resolved_bool_condition(resolved_ref, fallback_span)?;
     Ok((value, resolved_ref.synthetic_interface_provenance.clone()))
 }
 
 fn fold_resolved_bool_condition(
     condition: &Expression,
-    fallback_location: &SourceLocation,
+    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Result<bool, TemplateError> {
     match &condition.kind {
         ExpressionKind::Bool(value) => Ok(*value),
-        ExpressionKind::Coerced { value, .. } => {
-            fold_resolved_bool_condition(value, fallback_location)
-        }
+        ExpressionKind::Coerced { value, .. } => fold_resolved_bool_condition(value, fallback_span),
         _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-            if condition.location == Default::default() {
-                fallback_location.clone()
-            } else {
-                condition.location.clone()
-            },
+            condition.span.or(fallback_span),
         )
         .into()),
     }

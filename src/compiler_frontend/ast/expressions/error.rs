@@ -9,12 +9,13 @@
 use crate::compiler_frontend::ast::expressions::call_validation::CallValidationError;
 use crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::headers::HeaderParseFailure;
 
 #[derive(Debug)]
 pub(crate) enum ExpressionParseError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -24,35 +25,28 @@ impl ExpressionParseError {
     #[cfg(test)]
     pub(super) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
         match self {
-            ExpressionParseError::Diagnostic(diagnostic) => Some(diagnostic.as_ref()),
+            ExpressionParseError::Diagnostic(diagnostic) => Some(diagnostic),
             ExpressionParseError::Infrastructure(_) => None,
-        }
-    }
-}
-
-impl From<ExpressionParseError> for CompilerDiagnostic {
-    fn from(error: ExpressionParseError) -> Self {
-        match error {
-            ExpressionParseError::Diagnostic(diagnostic) => *diagnostic,
-            ExpressionParseError::Infrastructure(error) => {
-                compiler_error_to_diagnostic(error.as_ref())
-            }
         }
     }
 }
 
 impl From<CompilerDiagnostic> for ExpressionParseError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ExpressionParseError::Diagnostic(Box::new(diagnostic))
+        ExpressionParseError::Diagnostic(diagnostic)
     }
 }
 
-/// Reuses an already-boxed diagnostic without re-allocating, so boundaries that return
-/// `Box<CompilerDiagnostic>` (such as receiver-access validation) thread directly into
-/// `ExpressionParseError` without an adapter that re-boxes the diagnostic.
-impl From<Box<CompilerDiagnostic>> for ExpressionParseError {
-    fn from(diagnostic: Box<CompilerDiagnostic>) -> Self {
-        ExpressionParseError::Diagnostic(diagnostic)
+impl From<HeaderParseFailure> for ExpressionParseError {
+    fn from(error: HeaderParseFailure) -> Self {
+        match error {
+            HeaderParseFailure::Diagnostic(diagnostic) => {
+                ExpressionParseError::Diagnostic(diagnostic)
+            }
+            HeaderParseFailure::Infrastructure(error) => {
+                ExpressionParseError::Infrastructure(Box::new(error))
+            }
+        }
     }
 }
 

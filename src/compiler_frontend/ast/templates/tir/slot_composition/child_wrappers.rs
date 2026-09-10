@@ -12,8 +12,8 @@ use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::helpers::{compose_wrapper_application, internal_compiler_error};
 
@@ -30,9 +30,9 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
     wrapper_references: &[TemplateWrapperReference],
     string_table: &StringTable,
 ) -> ChildWrapperResult<TemplateIrNodeId> {
-    let child_location = store
+    let child_span = store
         .get_node(child_node_id)
-        .map(|node| node.location.to_owned())
+        .map(|node| node.span)
         .ok_or_else(|| {
             internal_compiler_error(
                 "TIR child wrapper application: child node ID was not present in the store.",
@@ -50,7 +50,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                 *wrapper_reference,
                 &layout,
                 vec![current_child_node_id],
-                child_location.clone(),
+                child_span,
                 string_table,
                 false,
             )?;
@@ -61,14 +61,14 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                     reference: resolved,
                     occurrence_id,
                 },
-                child_location.clone(),
+                child_span,
             ));
         } else {
             let combined_template_id = build_tir_prepended_wrapper_template(
                 store,
                 *wrapper_reference,
                 current_child_node_id,
-                child_location.clone(),
+                child_span,
             )?;
 
             let occurrence_id = store.next_child_template_occurrence_id();
@@ -80,7 +80,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                     reference,
                     occurrence_id,
                 },
-                child_location.clone(),
+                child_span,
             ));
         }
     }
@@ -93,11 +93,11 @@ fn build_tir_prepended_wrapper_template(
     store: &mut TemplateIrStore,
     wrapper_reference: TemplateWrapperReference,
     child_node_id: TemplateIrNodeId,
-    child_location: SourceLocation,
+    child_span: Option<SourceSpan>,
 ) -> ChildWrapperResult<TemplateIrId> {
-    let wrapper_location = store
+    let wrapper_span = store
         .get_template(wrapper_reference.root)
-        .map(|wrapper_template| wrapper_template.location.to_owned())
+        .map(|wrapper_template| wrapper_template.span)
         .ok_or_else(|| {
             internal_compiler_error(
                 "TIR child wrapper application: wrapper template ID was not present in the store.",
@@ -111,14 +111,14 @@ fn build_tir_prepended_wrapper_template(
             reference: wrapper_child_reference,
             occurrence_id,
         },
-        wrapper_location.to_owned(),
+        wrapper_span,
     ));
 
     let combined_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![wrapper_node_id, child_node_id],
         },
-        child_location,
+        child_span,
     ));
 
     let mut summary = TemplateIrSummary::default();
@@ -130,6 +130,6 @@ fn build_tir_prepended_wrapper_template(
         Style::default(),
         TemplateType::String,
         summary,
-        wrapper_location,
+        wrapper_span,
     )))
 }

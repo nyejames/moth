@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -102,7 +103,7 @@ fn create_multiple_expressions_inner(
                         expected_count: context.expected_result_type_ids.len(),
                         provided_count: expressions.len(),
                     },
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -116,7 +117,7 @@ fn create_multiple_expressions_inner(
             return Err(CompilerDiagnostic::expected_token(
                 TokenKind::CloseParenthesis,
                 Some(token_stream.current_token_kind().to_owned()),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -293,7 +294,7 @@ fn create_expression_until_with_policy(
         let expected_delimiter = input.string_table.intern(&expected_tokens);
         return Err(CompilerDiagnostic::unexpected_end_of_file(
             Some(expected_delimiter),
-            input.token_stream.current_location(),
+            Some(input.token_stream.current_span()),
         )
         .into());
     }
@@ -301,7 +302,10 @@ fn create_expression_until_with_policy(
     if end_index == start_index {
         return Err(CompilerDiagnostic::unexpected_token(
             input.token_stream.tokens[end_index].kind.to_owned(),
-            input.token_stream.tokens[end_index].location.clone(),
+            Some(SourceSpan::new(
+                input.token_stream.file_id,
+                input.token_stream.tokens[end_index].span,
+            )),
         )
         .into());
     }
@@ -312,7 +316,10 @@ fn create_expression_until_with_policy(
     {
         return Err(CompilerDiagnostic::unexpected_token(
             input.token_stream.tokens[end_index].kind.to_owned(),
-            input.token_stream.tokens[end_index].location.clone(),
+            Some(SourceSpan::new(
+                input.token_stream.file_id,
+                input.token_stream.tokens[end_index].span,
+            )),
         )
         .into());
     }

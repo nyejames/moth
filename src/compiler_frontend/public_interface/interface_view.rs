@@ -8,12 +8,11 @@
 //! completed interface stays vector-backed, deterministic and free of durable lookup maps; the
 //! view is never stored inside it.
 
-use super::model::{
-    PublicBindingExport, PublicDeclarationRecord, PublicDiagnosticLocation, PublicSemanticInterface,
-};
+use super::model::{PublicBindingExport, PublicDeclarationRecord, PublicSemanticInterface};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginFunctionId};
+use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashMap;
 
@@ -138,12 +137,9 @@ impl<'a> ProviderBindingView<'a> {
             .map(|index| &self.interface.concrete_call_summaries[*index].summary)
     }
 
-    pub(crate) fn export_diagnostic_provenance(
-        &self,
-        public_name: &str,
-    ) -> Option<&PublicDiagnosticLocation> {
+    pub(crate) fn export_diagnostic_provenance(&self, public_name: &str) -> Option<SourceSpan> {
         self.provenance_by_name
             .get(public_name)
-            .map(|index| &self.interface.export_diagnostic_provenance[*index].location)
+            .and_then(|index| self.interface.export_diagnostic_provenance[*index].span)
     }
 }

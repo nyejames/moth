@@ -17,7 +17,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
+use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId as HirBlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
@@ -68,6 +68,7 @@ struct ValueRef {
 struct CallEffectSpec<'a> {
     label: String,
     arguments: Vec<PlaceId>,
+    argument_sources: Vec<EventSource>,
     accesses: Vec<AccessKind>,
     provenance: CallResultProvenance,
     result: Option<LocalId>,
@@ -244,7 +245,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 ),
                 EventSource {
                     hir_node: None,
-                    location: local.source_info.clone(),
+                    span: local.span,
                 },
             ));
         }
@@ -256,7 +257,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let problem_block_id = self.problem_block(hir_block_id)?;
         self.current_problem_block = Some(problem_block_id);
         let block_source = self.block_source(hir_block_id);
-        let entry = self.new_point(problem_block_id, block_source.clone());
+        let entry = self.new_point(problem_block_id, block_source);
         let mut event_ids = Vec::new();
 
         if hir_block_id == self.function.entry {
@@ -288,7 +289,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::Terminator { kind },
         );
 
-        let exit = self.new_point(problem_block_id, block_source.clone());
+        let exit = self.new_point(problem_block_id, block_source);
         self.blocks
             .push(CfgBlock::new(problem_block_id, entry, exit, event_ids));
 
@@ -303,8 +304,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let to = if bindings.is_empty() {
                 original_to
             } else {
-                let edge_block =
-                    self.new_edge_block(bindings, original_to, block_source.clone())?;
+                let edge_block = self.new_edge_block(bindings, original_to, block_source)?;
                 self.edges.push(CfgEdge::new(edge_block, original_to));
                 edge_block
             };
@@ -333,7 +333,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             let source = self
                 .bindings
                 .get(binding.index())
-                .map(|binding| binding.source.clone())
+                .map(|binding| binding.source)
                 .unwrap_or_else(EventSource::none);
             let place = self.local_place(local, &source)?;
             let origin = self.new_origin(OriginKind::Parameter {
@@ -360,7 +360,7 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<(), CompilerError> {
         let source = EventSource {
             hir_node: Some(statement.id),
-            location: Some(statement.location.clone()),
+            span: statement.span,
         };
         match &statement.kind {
             HirStatementKind::Assign { target, value } => {
@@ -449,7 +449,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.emit_write(target, source, event_ids)?;
                 self.emit_event(
                     event_ids,
-                    source.clone(),
+                    *source,
                     EventKind::Copy {
                         source: source_place,
                         destination: target,
@@ -531,7 +531,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Fresh {
                 destination: target,
                 origin,
@@ -555,7 +555,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Aggregate {
                 destination: target,
                 origin,
@@ -719,7 +719,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirExpressionKind::Copy(place) => {
                 let source_place = self.lower_place(place, &source, event_ids)?;
                 self.emit_read(source_place, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_copy_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -744,7 +744,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 if expression.value_kind == ValueKind::Const {
                     return Ok(ValueRef { place: None });
                 }
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -797,7 +797,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirExpressionKind::TupleConstruct { .. }
             | HirExpressionKind::VariantConstruct { .. }
             | HirExpressionKind::MapLiteral(_) => {
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 self.lower_aggregate_into(destination, expression, &source, event_ids)?;
                 Ok(ValueRef {
                     place: Some(destination),
@@ -805,7 +805,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
             _ => {
                 let _ = self.lower_expression_children(expression, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0, &source)?;
+                let destination = self.synthetic_place(expression.id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -863,11 +863,7 @@ impl<'a> FunctionProblemBuilder<'a> {
 
         for local in locals {
             let place = self.local_place(LocalId(local), source)?;
-            self.emit_event(
-                event_ids,
-                source.clone(),
-                EventKind::ReactiveObserve { place },
-            );
+            self.emit_event(event_ids, *source, EventKind::ReactiveObserve { place });
         }
         Ok(())
     }
@@ -887,7 +883,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(destination, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Projection {
                 source: source_place,
                 destination,
@@ -914,7 +910,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.emit_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Projection {
                 source: source_place,
                 destination: target,
@@ -951,11 +947,16 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let arguments = self.lower_call_arguments(args, source, event_ids)?;
+        let argument_sources = args
+            .iter()
+            .map(|argument| self.value_source(argument, source))
+            .collect();
         let (accesses, provenance) = self.call_effect(target, args.len())?;
         self.emit_call_effect_with_label(
             CallEffectSpec {
                 label: format!("{target:?}"),
                 arguments,
+                argument_sources,
                 accesses,
                 provenance,
                 result,
@@ -978,6 +979,10 @@ impl<'a> FunctionProblemBuilder<'a> {
         expressions.push(receiver.clone());
         expressions.extend(args.iter().cloned());
         let arguments = self.lower_call_arguments(&expressions, source, event_ids)?;
+        let argument_sources = expressions
+            .iter()
+            .map(|argument| self.value_source(argument, source))
+            .collect();
         let receiver_access = if op.requires_mutable_receiver() {
             AccessKind::Exclusive
         } else {
@@ -999,6 +1004,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallEffectSpec {
                 label,
                 arguments,
+                argument_sources,
                 accesses,
                 provenance,
                 result,
@@ -1016,13 +1022,14 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<Vec<PlaceId>, CompilerError> {
         args.iter()
             .map(|argument| {
+                let argument_source = self.value_source(argument, source);
                 let value = match &argument.kind {
                     HirExpressionKind::Load(place) => ValueRef {
-                        place: Some(self.lower_place(place, source, event_ids)?),
+                        place: Some(self.lower_place(place, &argument_source, event_ids)?),
                     },
                     _ => self.lower_expression(argument, source, event_ids)?,
                 };
-                self.materialize_value_place(value, argument, source, event_ids)
+                self.materialize_value_place(value, argument, &argument_source, event_ids)
             })
             .collect()
     }
@@ -1032,7 +1039,9 @@ impl<'a> FunctionProblemBuilder<'a> {
         spec: CallEffectSpec<'_>,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        if spec.arguments.len() != spec.accesses.len() {
+        if spec.arguments.len() != spec.accesses.len()
+            || spec.arguments.len() != spec.argument_sources.len()
+        {
             return Err(compiler_error(
                 "Boracle problem extraction produced mismatched call argument metadata",
             ));
@@ -1040,6 +1049,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let CallEffectSpec {
             label,
             arguments,
+            argument_sources,
             accesses,
             provenance,
             result: result_local,
@@ -1048,8 +1058,13 @@ impl<'a> FunctionProblemBuilder<'a> {
         let call_id = self.next_call_id()?;
         self.calls.push(Call { id: call_id, label });
         let mut call_arguments = Vec::with_capacity(arguments.len());
-        for (index, (place, access)) in arguments.into_iter().zip(accesses).enumerate() {
-            let point = self.new_point(self.current_problem_block()?, source.clone());
+        for (index, ((place, access), argument_source)) in arguments
+            .into_iter()
+            .zip(accesses)
+            .zip(argument_sources)
+            .enumerate()
+        {
+            let point = self.new_point(self.current_problem_block()?, argument_source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -1081,7 +1096,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                         .cloned()
                         .expect("call argument was just appended"),
                 },
-                source.clone(),
+                argument_source,
             ));
             event_ids.push(event_id);
         }
@@ -1096,7 +1111,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallResult { place, origin }
         });
         let event_id = self.next_event_id()?;
-        let point = self.new_point(self.current_problem_block()?, source.clone());
+        let point = self.new_point(self.current_problem_block()?, *source);
         self.events.push(Event::new(
             event_id,
             point,
@@ -1105,11 +1120,11 @@ impl<'a> FunctionProblemBuilder<'a> {
                 arguments: call_arguments.into_boxed_slice(),
                 result: call_result,
             }),
-            source.clone(),
+            *source,
         ));
         event_ids.push(event_id);
         if let Some(result) = result {
-            let point = self.new_point(self.current_problem_block()?, source.clone());
+            let point = self.new_point(self.current_problem_block()?, *source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
@@ -1123,7 +1138,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 event_id,
                 point,
                 EventKind::Access { use_id },
-                spec.source.clone(),
+                *source,
             ));
             event_ids.push(event_id);
         }
@@ -1132,7 +1147,6 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     /// Lower a terminator's operand accesses and return its event kind.
     ///
-    /// The caller emits the terminator event, so scope retirement can be recorded between the
     /// operand accesses and the terminator itself.
     fn lower_terminator_kind(
         &mut self,
@@ -1286,7 +1300,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         if !bindings.is_empty() {
             self.emit_event(
                 event_ids,
-                source.clone(),
+                *source,
                 EventKind::ScopeExit {
                     bindings: bindings.into_boxed_slice(),
                 },
@@ -1341,15 +1355,15 @@ impl<'a> FunctionProblemBuilder<'a> {
             .next_problem_block_id
             .checked_add(1)
             .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
-        let entry = self.new_point(id, source.clone());
+        let entry = self.new_point(id, source);
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
             event_id,
             entry,
             EventKind::ScopeExit { bindings },
-            source.clone(),
+            source,
         ));
-        let jump_point = self.new_point(id, source.clone());
+        let jump_point = self.new_point(id, source);
         let jump_event_id = self.next_event_id()?;
         self.events.push(Event::new(
             jump_event_id,
@@ -1357,7 +1371,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump { target },
             },
-            source.clone(),
+            source,
         ));
         let exit = self.new_point(id, source);
         self.blocks.push(CfgBlock::new(
@@ -1465,11 +1479,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         self.intern_place(base_place.root, projections)
     }
 
-    fn synthetic_place(
-        &mut self,
-        value_id: u32,
-        source: &EventSource,
-    ) -> Result<PlaceId, CompilerError> {
+    fn synthetic_place(&mut self, value_id: u32) -> Result<PlaceId, CompilerError> {
         let binding = if let Some(binding) = self.synthetic_binding_by_value.get(&value_id) {
             *binding
         } else {
@@ -1483,7 +1493,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 None,
                 false,
                 false,
-                source.clone(),
+                EventSource::none(),
             ));
             self.synthetic_binding_by_value.insert(value_id, binding);
             binding
@@ -1519,12 +1529,12 @@ impl<'a> FunctionProblemBuilder<'a> {
         if let Some(place) = value.place {
             return Ok(place);
         }
-        let place = self.synthetic_place(expression.id.0, source)?;
+        let place = self.synthetic_place(expression.id.0)?;
         let origin = self.new_fresh_origin();
         self.emit_write(place, source, event_ids)?;
         self.emit_event(
             event_ids,
-            source.clone(),
+            *source,
             EventKind::Fresh {
                 destination: place,
                 origin,
@@ -1558,7 +1568,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 destination,
             }
         };
-        self.emit_event(event_ids, source.clone(), event);
+        self.emit_event(event_ids, *source, event);
         Ok(())
     }
 
@@ -1594,7 +1604,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             destination,
             origin,
         };
-        self.emit_event(event_ids, source.clone(), event);
+        self.emit_event(event_ids, *source, event);
         Ok(())
     }
 
@@ -1623,7 +1633,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        let point = self.new_point(self.current_problem_block()?, source.clone());
+        let point = self.new_point(self.current_problem_block()?, *source);
         let use_id = self.next_use_id()?;
         self.uses.push(Use {
             id: use_id,
@@ -1641,7 +1651,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             event_id,
             point,
             EventKind::Access { use_id },
-            source.clone(),
+            *source,
         ));
         event_ids.push(event_id);
         Ok(())
@@ -1656,7 +1666,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let point = self.new_point(
             self.current_problem_block
                 .expect("Boracle event emission requires an active CFG block"),
-            source.clone(),
+            source,
         );
         let event_id = EventId::new(self.events.len() as u32);
         self.events.push(Event::new(event_id, point, kind, source));
@@ -1909,34 +1919,36 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn block_source(&self, block: HirBlockId) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
+            span: self
                 .module
                 .side_table
-                .hir_source_location_for_hir(HirLocation::Block(block))
-                .cloned(),
+                .hir_source_span_for_hir(
+                    crate::compiler_frontend::hir::hir_side_table::HirLocation::Block(block),
+                )
+                .or_else(|| {
+                    self.module.side_table.ast_span_for_hir(
+                        crate::compiler_frontend::hir::hir_side_table::HirLocation::Block(block),
+                    )
+                }),
         }
     }
 
     fn terminator_source(&self, block: HirBlockId) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
-                .module
-                .side_table
-                .hir_source_location_for_hir(HirLocation::Terminator(block))
-                .cloned(),
+            span: self.module.side_table.terminator_span(block).copied(),
         }
     }
 
     fn value_source(&self, expression: &HirExpression, fallback: &EventSource) -> EventSource {
         EventSource {
             hir_node: None,
-            location: self
+            span: self
                 .module
                 .side_table
-                .value_source_location(expression.id)
-                .cloned()
-                .or_else(|| fallback.location.clone()),
+                .value_source_span(expression.id)
+                .or(expression.span)
+                .or(fallback.span),
         }
     }
 

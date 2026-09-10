@@ -8,5 +8,5 @@ code = "MOTH-SYNTAX-0002"
 reason = "invalid_multi_bind.missing_target_after_comma"
 path = "input/@page.moth"
 line = 5
-column = 6
+column = 5
 count = 1

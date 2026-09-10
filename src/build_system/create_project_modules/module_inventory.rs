@@ -13,14 +13,20 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidConfigReason, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::source::{
+    SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
+};
+use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
@@ -34,18 +40,19 @@ use std::sync::Arc;
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
-use super::module_preparation::ModulePreparationContext;
+use super::module_preparation::{ModulePreparationContext, RegisteredModuleSources};
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
-use super::project_structure_diagnostics::{config_diagnostic_messages, path_id};
+use super::project_structure_diagnostics::{config_diagnostic, path_id};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
-    StructuralProviderAction, merge_prepared_owned_source, prepare_owned_source_input,
-    prepare_owned_source_inputs, resolve_structural_provider_reference,
-    should_parallelize_owned_source_preparation,
+    StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
 };
-use super::source_tree_index::{SourceClassification, SourceId, SourceOwnership};
+use super::source_loading::SelectedSourceTextMap;
+use super::source_tree_index::{
+    SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
+};
 
 /// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
 ///
@@ -93,12 +100,10 @@ pub(crate) struct ModuleCompilationJob {
 ///
 /// Discovery records these descriptors while canonical sources still mutate the shared external
 /// provider state. The descriptors are prepared only after every canonical boundary has finished
-/// discovery, so each transient job forks the final canonical registry/cache/resolution state.
 struct CheckOnlyModuleSpec {
     owner_module_id: ModuleId,
-    source_id: SourceId,
-    candidate_source_ids: Vec<SourceId>,
-    source_origin_lookup: FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    source_index: SourceRecordIndex,
+    candidate_source_indices: Vec<SourceRecordIndex>,
     stable_origin: StableModuleOriginIdentity,
 }
 
@@ -132,7 +137,7 @@ pub(crate) struct CheckOnlyModuleCompilationJob {
 /// One transient authored provider clause bound to a canonical module interface.
 ///
 /// This is intentionally not a `ResolvedDependencyEdge`: check-only resolution must not carry
-/// graph insertion locations or be mistaken for a canonical graph edge.
+/// graph insertion spans or be mistaken for a canonical graph edge.
 #[derive(Clone, Debug)]
 pub(crate) struct CheckOnlyProviderBinding {
     pub(crate) dependency_shell_id: DependencyShellId,
@@ -142,7 +147,6 @@ pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) dependency_prefix: String,
 }
-
 /// The check-only jobs stay in a separate lane so no caller can accidentally publish their
 /// interfaces, generated functions, resource associations, graph edges or backend roots.
 struct ModuleCompilationJobBatch {
@@ -157,23 +161,29 @@ fn resolve_directory_dependency_path(
     provider: &RetainedDependencyPath,
     source_path: &Path,
     string_table: &mut StringTable,
-) -> Result<ResolvedDependency, CompilerMessages> {
+) -> Result<ResolvedDependency, PremergeFailure> {
     directory_dependency_resolution
         .resolve_dependency(provider, source_path, string_table)
         .map_err(|diagnostic| {
-            CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
+            // Move the local table into the batch; the caller aborts discovery on this
+            // diagnosed path, so no clone is needed to carry the diagnostic.
+            let table = std::mem::take(string_table);
+            PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table))
         })
 }
-
-/// Immutable Stage 0 owners shared while the serial discovery pass prepares graph modules.
-struct ModuleDiscoveryContext<'a> {
+/// Borrowed Stage 0 services and live source spans for one serial discovery pass.
+struct ModuleDiscoveryContext<'a, 'sources> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
+    source_spans: &'a mut SourceSpanBuilders<'sources>,
+    /// Snapshots selected by the reachability walk and retained after the walk completes.
+    selected_source_texts: &'a mut SelectedSourceTextMap,
     directory_dependency_resolution: DirectoryDependencyResolution<'a>,
     project_module_graph: &'a ProjectModuleGraph,
-    source_origin_lookup: &'a FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    /// One boundary-owned source-origin table shared by every prepared module and check-only
+    /// source in this project or package boundary.
+    source_module_origins: Arc<SourceModuleOriginTable>,
 }
-
 /// Normal entry modules grouped by the populated graph's compile waves.
 ///
 /// WHAT: owns the wave-preserving data contract between module inventory and directory
@@ -189,6 +199,8 @@ pub(crate) struct ModuleCompilationSchedule {
     waves: Vec<Vec<ModuleCompilationJob>>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
+    /// Shared immutable source origins for this project or package boundary.
+    source_module_origins: Arc<SourceModuleOriginTable>,
     /// Transient check-only units, kept separate from canonical publication lanes.
     check_only_jobs: Vec<CheckOnlyModuleCompilationJob>,
     /// Deferred transient source descriptors awaiting the final canonical provider state.
@@ -211,22 +223,27 @@ impl ModuleCompilationSchedule {
     /// Prepare deferred transient jobs from the final canonical provider state.
     ///
     /// Canonical discovery for every project and source-package boundary must complete before
-    /// this method is called. Each job still receives its own clone, so transient provider
-    /// mutations cannot leak to canonical discovery or sibling jobs.
+    /// this method is called. Each job receives the same boundary source database, live span
+    /// builder view and source-origin table while transient provider mutations remain isolated
+    /// to the job. Failures travel in the premerge lane; the final boundary owns the single
+    /// vessel conversion.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn prepare_check_only_jobs(
+    pub(super) fn prepare_check_only_jobs(
         &mut self,
         style_directives: &StyleDirectiveRegistry,
+        source_spans: &mut SourceSpanBuilders<'_>,
         project_path_resolver: &ProjectPathResolver,
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
+        selected_source_texts: &mut SelectedSourceTextMap,
+    ) -> Result<(), PremergeFailure> {
         let specs = std::mem::take(&mut self.check_only_specs);
         if specs.is_empty() {
             return Ok(());
         }
         let preparation_context = ModulePreparationContext {
+            source_files: source_spans.sources(),
             style_directives,
             project_path_resolver: Some(project_path_resolver.clone()),
         };
@@ -234,25 +251,25 @@ impl ModuleCompilationSchedule {
         for spec in specs {
             let CheckOnlyModuleSpec {
                 owner_module_id,
-                source_id,
-                candidate_source_ids,
-                source_origin_lookup,
+                source_index,
+                candidate_source_indices,
                 stable_origin,
             } = spec;
             self.check_only_jobs.push(prepare_check_only_module(
                 owner_module_id,
-                source_id,
-                &candidate_source_ids,
+                source_index,
+                &candidate_source_indices,
                 directory_dependency_resolution.source_tree_index(),
                 style_directives,
                 &preparation_context,
+                source_spans,
                 project_path_resolver,
                 external_imports,
                 directory_dependency_resolution,
-                &source_origin_lookup,
+                Arc::clone(&self.source_module_origins),
                 stable_origin,
                 &fork_source,
-                string_table,
+                selected_source_texts,
             )?);
         }
         Ok(())
@@ -288,13 +305,15 @@ impl ModuleCompilationSchedule {
 /// consumes these waves sequentially; each job may use Rayon for file preparation, but semantic
 /// module publication remains serial. Only normal roots remain entry candidates, but support and
 /// facade roots now own API-only semantic jobs. A defensive
-/// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces through
-/// the existing `CompilerMessages`/string-table boundary without panicking.
+/// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces as a
+/// typed premerge failure without panicking; the final boundary owns the vessel conversion.
 #[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_project(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -302,16 +321,20 @@ pub(crate) fn discover_all_modules_in_project(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+    let mut selected_source_texts = SelectedSourceTextMap::default();
     discover_all_modules_in_project_with_check_only(
         config,
         project_path_resolver,
+        source_files,
+        source_spans,
         project_module_graph,
         style_directives,
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
         false,
+        &mut selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -321,23 +344,27 @@ pub(crate) fn discover_all_modules_in_project(
 /// Discover a project inventory and optionally prepare transient check-only units.
 ///
 /// The default project discovery path remains canonical-only. Check mode opts in explicitly so
-/// malformed or otherwise failing unselected sources do not affect build/dev commands.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_project_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
+        source_files,
+        source_spans,
         project_module_graph,
         style_directives,
         external_imports,
@@ -345,6 +372,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         resource_inputs,
         true,
         include_check_only,
+        selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -353,23 +381,27 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
 /// Discover a source-package inventory and optionally prepare transient check-only units.
 ///
 /// Source packages use the same explicit opt-in as the project boundary; their canonical graph
-/// jobs and provider bindings remain unchanged in either mode.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     package_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     discover_all_modules_in_boundary(
         config,
         project_path_resolver,
+        source_files,
+        source_spans,
         package_module_graph,
         style_directives,
         external_imports,
@@ -377,6 +409,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         resource_inputs,
         false,
         include_check_only,
+        selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -387,6 +420,8 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
 fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_module_graph: &mut ProjectModuleGraph,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -394,22 +429,35 @@ fn discover_all_modules_in_boundary(
     resource_inputs: &mut ResourceInputRegistry,
     require_normal_entry: bool,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
+) -> Result<ModuleCompilationSchedule, PremergeFailure> {
     let seeds = module_seeds_in_module_id_order(project_module_graph);
     let source_origin_lookup = project_module_graph
-        .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        .build_source_origin_lookup(directory_dependency_resolution.source_tree_index())?;
+    // Construct one immutable source-origin table for this project or package boundary. Prepared
+    // module payloads retain only cloned `Arc` handles, never per-module origin rows.
+    let source_module_origins = Arc::new(SourceModuleOriginTable::from_graph_ownership(
+        source_files,
+        &source_origin_lookup,
+    ));
+    drop(source_origin_lookup);
 
     if require_normal_entry && project_module_graph.entry_modules().is_empty() {
-        return Err(config_diagnostic_messages(
+        // Move the local table into the diagnosed batch; the final boundary owns the single
+        // vessel conversion.
+        let diagnostic = config_diagnostic(
             config,
             "entry_root",
             InvalidConfigReason::NoRootModuleEntries {
                 entry_root: path_id(project_path_resolver.entry_root(), string_table),
             },
             string_table,
+        );
+        let table = std::mem::take(string_table);
+        return Err(PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_diagnostic(diagnostic, table),
         ));
     }
 
@@ -423,9 +471,11 @@ fn discover_all_modules_in_boundary(
         ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
+            source_spans,
+            selected_source_texts,
             directory_dependency_resolution,
             project_module_graph,
-            source_origin_lookup: &source_origin_lookup,
+            source_module_origins: Arc::clone(&source_module_origins),
         },
         external_imports,
         resource_inputs,
@@ -438,14 +488,12 @@ fn discover_all_modules_in_boundary(
     // Insert the resolved dependency edges directly by ModuleId before the graph completes.
     // Edges are idempotent, so duplicate retained dependency shells collapse without changing the
     // graph.
-    insert_resolved_dependency_edges(project_module_graph, &resolved_edges, string_table)?;
+    insert_resolved_dependency_edges(project_module_graph, &resolved_edges)?;
 
     // Freeze the graph's adjacency into sorted `Vec<ModuleId>` storage before compile waves are
     // computed. The no-edge production graph also completes here so scheduling always reads one
     // frozen adjacency. Mutation or scheduling in an invalid phase is an internal `CompilerError`.
-    project_module_graph
-        .complete()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    project_module_graph.complete()?;
 
     // Order the discovered modules by the completed graph's compile waves so providers precede
     // consumers in the returned inventory waves. Discovery seeded entries in `ModuleId` order;
@@ -458,7 +506,7 @@ fn discover_all_modules_in_boundary(
         resolved_edges,
         source_package_dependencies,
         check_only_specs,
-        string_table,
+        source_module_origins,
     )?;
     Ok(schedule)
 }
@@ -489,18 +537,18 @@ fn module_seeds_in_module_id_order(
 /// deterministic module-relative path ordering while excluding templates, Markdown, provider-owned
 /// records and any source outside the owner boundary. In particular, an unrooted record can never
 /// enter a transient unit because it cannot satisfy the explicit ownership check.
-fn classify_check_only_source_ids(
+fn classify_check_only_source_indices(
     module_id: ModuleId,
-    candidate_source_ids: &[SourceId],
-    selected_source_ids: &BTreeSet<SourceId>,
+    candidate_source_indices: &[SourceRecordIndex],
+    selected_source_indices: &BTreeSet<SourceRecordIndex>,
     source_tree_index: &super::source_tree_index::SourceTreeIndex,
-) -> Vec<SourceId> {
-    candidate_source_ids
+) -> Vec<SourceRecordIndex> {
+    candidate_source_indices
         .iter()
         .copied()
-        .filter(|source_id| !selected_source_ids.contains(source_id))
-        .filter(|source_id| {
-            let source = source_tree_index.source(*source_id);
+        .filter(|source_index| !selected_source_indices.contains(source_index))
+        .filter(|source_index| {
+            let source = source_tree_index.source(*source_index);
             matches!(
                 source.classification(),
                 SourceClassification::CompilerSemantic(SourceFileKind::Moth)
@@ -508,6 +556,32 @@ fn classify_check_only_source_ids(
                 source.ownership(),
                 SourceOwnership::Owned(owner) if owner == module_id
             )
+        })
+        .collect()
+}
+/// Convert the ordered Stage 0 source rows into compiler identities owned by this boundary.
+///
+/// Source rows are Stage 0 handles rather than compiler identities. Resolve each row's canonical
+/// path through the boundary database so a source registered ahead of the rows cannot shift their
+/// identities.
+fn compiler_source_ids_for_indices(
+    source_indices: &[SourceRecordIndex],
+    source_tree_index: &SourceTreeIndex,
+    source_files: &SourceDatabase,
+) -> Result<Vec<CompilerSourceId>, CompilerError> {
+    source_indices
+        .iter()
+        .map(|source_index| {
+            let canonical_path = source_tree_index.source(*source_index).canonical_path();
+            source_files
+                .get_by_canonical_path(canonical_path)
+                .map(|source_record| source_record.id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "module inventory: source row {} is absent from the boundary source file table",
+                        source_index.index(),
+                    ))
+                })
         })
         .collect()
 }
@@ -522,20 +596,26 @@ fn classify_check_only_source_ids(
 #[allow(clippy::too_many_arguments)]
 fn prepare_check_only_module(
     owner_module_id: ModuleId,
-    source_id: SourceId,
-    candidate_source_ids: &[SourceId],
+    source_index: SourceRecordIndex,
+    candidate_source_indices: &[SourceRecordIndex],
     source_tree_index: &super::source_tree_index::SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
     preparation_context: &ModulePreparationContext<'_>,
+    source_spans: &mut SourceSpanBuilders<'_>,
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
-    source_origin_lookup: &FxHashMap<PathBuf, StableModuleOriginIdentity>,
+    source_module_origins: Arc<SourceModuleOriginTable>,
     stable_origin: StableModuleOriginIdentity,
     fork_source: &StringTableForkSource,
-    string_table: &mut StringTable,
-) -> Result<CheckOnlyModuleCompilationJob, CompilerMessages> {
-    let source = source_tree_index.source(source_id);
+    selected_source_texts: &mut SelectedSourceTextMap,
+) -> Result<CheckOnlyModuleCompilationJob, PremergeFailure> {
+    let candidate_source_ids = compiler_source_ids_for_indices(
+        candidate_source_indices,
+        source_tree_index,
+        preparation_context.source_files,
+    )?;
+    let source = source_tree_index.source(source_index);
     if !matches!(
         source.classification(),
         SourceClassification::CompilerSemantic(SourceFileKind::Moth)
@@ -543,14 +623,12 @@ fn prepare_check_only_module(
         source.ownership(),
         SourceOwnership::Owned(owner) if owner == owner_module_id
     ) {
-        return Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(format!(
-                "ModuleId {} check-only source ID {} is not an owned Moth source",
-                owner_module_id.index(),
-                source_id.index()
-            )),
-            string_table,
-        ));
+        return Err(CompilerError::compiler_error(format!(
+            "ModuleId {} check-only source row {} is not an owned Moth source",
+            owner_module_id.index(),
+            source_index.index()
+        ))
+        .into());
     }
 
     // Provider-backed discovery is intentionally forked from the canonical builder surface. A
@@ -568,10 +646,10 @@ fn prepare_check_only_module(
         resolution_table: &mut isolated_resolution_table,
     };
 
-    let source_order = candidate_source_ids
+    let source_order = candidate_source_indices
         .iter()
         .enumerate()
-        .map(|(order, source_id)| (*source_id, order))
+        .map(|(order, source_index)| (*source_index, order))
         .collect::<FxHashMap<_, _>>();
 
     let entry_file_path = source.canonical_path().to_path_buf();
@@ -579,21 +657,22 @@ fn prepare_check_only_module(
     let (local_string_table, string_table_base_len) = fork.into_parts();
     let mut syntax = preparation_context.begin_syntax_discovery(
         stable_origin,
-        source_origin_lookup,
-        candidate_source_ids
-            .iter()
-            .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+        RegisteredModuleSources {
+            candidate_source_ids,
+            source_module_origins,
+        },
         &entry_file_path,
         Some(FileRole::Normal),
         local_string_table,
+        selected_source_texts,
         #[cfg(feature = "timers")]
         None,
     )?;
 
     let mut provider_bindings = Vec::new();
     let mut source_package_dependencies = Vec::new();
-    let mut pending_module_sources = VecDeque::from([source_id]);
-    let mut queued_module_sources = BTreeSet::from([source_id]);
+    let mut pending_module_sources = VecDeque::from([source_index]);
+    let mut queued_module_sources = BTreeSet::from([source_index]);
     // Resolve file-value paths against a job-local resource registry. The prepared payload retains
     // the settled occurrence table, while physical source IDs and missing watches are discarded
     // with this resolver instead of entering the canonical resource registry.
@@ -606,8 +685,8 @@ fn prepare_check_only_module(
     // Same-module clauses form a source closure inside the transient job. Every reached Moth
     // source is prepared into the one module-local header set, while cross-module and
     // source-package clauses remain job-local binding metadata.
-    while let Some(current_source_id) = pending_module_sources.pop_front() {
-        let current_source = source_tree_index.source(current_source_id);
+    while let Some(current_source_index) = pending_module_sources.pop_front() {
+        let current_source = source_tree_index.source(current_source_index);
         if !matches!(
             current_source.classification(),
             SourceClassification::CompilerSemantic(SourceFileKind::Moth)
@@ -615,35 +694,40 @@ fn prepare_check_only_module(
             current_source.ownership(),
             SourceOwnership::Owned(owner) if owner == owner_module_id
         ) {
-            return Err(graph_inventory_mismatch_error(
-                format!(
-                    "ModuleId {} reached check-only source ID {} outside its owned Moth source set",
-                    owner_module_id.index(),
-                    current_source_id.index()
-                ),
-                syntax.string_table_mut(),
-            ));
+            return Err(graph_inventory_mismatch_error(format!(
+                "ModuleId {} reached check-only source row {} outside its owned Moth source set",
+                owner_module_id.index(),
+                current_source_index.index()
+            )));
         }
-        let current_order = source_order.get(&current_source_id).copied().ok_or_else(|| {
-            graph_inventory_mismatch_error(
-                format!(
+        let current_order = source_order
+            .get(&current_source_index)
+            .copied()
+            .ok_or_else(|| {
+                graph_inventory_mismatch_error(format!(
                     "ModuleId {} reached check-only source ID {} outside its candidate source set",
                     owner_module_id.index(),
-                    current_source_id.index()
-                ),
-                syntax.string_table_mut(),
-            )
-        })?;
+                    current_source_index.index()
+                ))
+            })?;
         let current_file_path = current_source.canonical_path().to_path_buf();
-        let input = prepare_owned_source_input(
-            current_source_id,
-            source_tree_index,
-            style_directives,
-            syntax.string_table_mut(),
-        )
-        .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
-        let prepared_output = syntax.prepare_source(input)?;
-
+        let input_result = {
+            let (syntax_string_table, selected_source_texts) =
+                syntax.source_preparation_inputs_mut();
+            prepare_owned_source_input(
+                current_source_index,
+                source_tree_index,
+                preparation_context.source_files,
+                source_spans,
+                style_directives,
+                syntax_string_table,
+                selected_source_texts,
+            )
+        };
+        let input = input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        // `prepare_source` already returns the premerge lane, so propagate directly without
+        // building an intermediate vessel.
+        let prepared_output = syntax.prepare_source(input, source_spans)?;
         for dependency in &prepared_output.file_dependency_clauses {
             let provider = &dependency.dependency;
             let action = match resolve_structural_provider_reference(
@@ -656,7 +740,7 @@ fn prepare_check_only_module(
                 syntax.string_table_mut(),
             ) {
                 Ok(action) => action,
-                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+                Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
             };
             if matches!(&action, StructuralProviderAction::Handled) {
                 continue;
@@ -670,7 +754,7 @@ fn prepare_check_only_module(
             )?;
             match resolved {
                 ResolvedDependency::SameModuleSource {
-                    source_id: target_source_id,
+                    source_index: target_source_index,
                     consumer_module_id,
                     ..
                 } => {
@@ -678,12 +762,11 @@ fn prepare_check_only_module(
                         return Err(graph_inventory_mismatch_error(
                             "Check-only same-module dependency resolved to another module"
                                 .to_owned(),
-                            syntax.string_table_mut(),
                         ));
                     }
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                    if queued_module_sources.insert(target_source_id) {
-                        pending_module_sources.push_back(target_source_id);
+                    if queued_module_sources.insert(target_source_index) {
+                        pending_module_sources.push_back(target_source_index);
                     }
                 }
                 ResolvedDependency::CrossModule {
@@ -692,11 +775,8 @@ fn prepare_check_only_module(
                     ..
                 } => {
                     if consumer_module_id != owner_module_id {
-                        return Err(graph_inventory_mismatch_error(
-                            "Check-only cross-module dependency resolved to another consumer module"
-                                .to_owned(),
-                            syntax.string_table_mut(),
-                        ));
+                        return Err(graph_inventory_mismatch_error("Check-only cross-module dependency resolved to another consumer module"
+                            .to_owned()));
                     }
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                     provider_bindings.push(CheckOnlyProviderBinding {
@@ -710,11 +790,8 @@ fn prepare_check_only_module(
                     ..
                 } => {
                     if consumer_module_id != owner_module_id {
-                        return Err(graph_inventory_mismatch_error(
-                            "Check-only source-package dependency resolved to another consumer module"
-                                .to_owned(),
-                            syntax.string_table_mut(),
-                        ));
+                        return Err(graph_inventory_mismatch_error("Check-only source-package dependency resolved to another consumer module"
+                            .to_owned()));
                     }
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                     source_package_dependencies.push(CheckOnlySourcePackageDependency {
@@ -730,50 +807,39 @@ fn prepare_check_only_module(
 
         let mut discovered_content_sources = Vec::new();
         for file_reference in prepared_output.structural_file_references.iter() {
-            let resolved = syntax
-                .resolve_file_reference(
-                    &mut file_reference_resolver,
-                    owner_module_id,
-                    prepared_output.path_syntax.table(),
-                    file_reference,
-                    &mut discovered_content_sources,
-                )
-                .map_err(|error| {
-                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                })?;
-            syntax
-                .record_resolved_file_reference(resolved)
-                .map_err(|error| {
-                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                })?;
+            let resolved = syntax.resolve_file_reference(
+                &mut file_reference_resolver,
+                owner_module_id,
+                prepared_output.path_syntax.table(),
+                file_reference,
+                &mut discovered_content_sources,
+            )?;
+            syntax.record_resolved_file_reference(resolved)?;
         }
         discovered_content_sources.sort_unstable();
         discovered_content_sources.dedup();
-        for target_source_id in discovered_content_sources {
-            if prepared_content_sources.insert(target_source_id) {
-                pending_content_sources.insert(target_source_id);
+        for target_source_index in discovered_content_sources {
+            if prepared_content_sources.insert(target_source_index) {
+                pending_content_sources.insert(target_source_index);
             }
         }
-        syntax.retain_prepared_output(current_order, prepared_output);
+        syntax.retain_prepared_output(current_order, prepared_output)?;
     }
 
     // A `.mtf` or `.md` file-value target contributes its synthetic `content` declaration to this
     // check-only source's own prepared header set. It is not a Moth root and therefore never gets a
     // separate graph/check-only job. Process nested content references in SourceId order so a
     // content source can itself depend on another content source without a second traversal.
-    while let Some(target_source_id) = pending_content_sources.pop_first() {
-        let target = source_tree_index.source(target_source_id);
+    while let Some(target_source_index) = pending_content_sources.pop_first() {
+        let target = source_tree_index.source(target_source_index);
         let target_kind = match target.classification() {
             SourceClassification::CompilerSemantic(kind) => *kind,
             _ => {
-                return Err(graph_inventory_mismatch_error(
-                    format!(
-                        "ModuleId {} content target source ID {} is not compiler semantic",
-                        owner_module_id.index(),
-                        target_source_id.index()
-                    ),
-                    syntax.string_table_mut(),
-                ));
+                return Err(graph_inventory_mismatch_error(format!(
+                    "ModuleId {} content target source ID {} is not compiler semantic",
+                    owner_module_id.index(),
+                    target_source_index.index()
+                )));
             }
         };
         if target_kind == SourceFileKind::Moth {
@@ -786,62 +852,59 @@ fn prepare_check_only_module(
             target.ownership(),
             SourceOwnership::Owned(owner) if owner == owner_module_id
         ) {
-            return Err(graph_inventory_mismatch_error(
-                format!(
-                    "ModuleId {} content target source ID {} is not owned by its consumer",
-                    owner_module_id.index(),
-                    target_source_id.index()
-                ),
-                syntax.string_table_mut(),
-            ));
+            return Err(graph_inventory_mismatch_error(format!(
+                "ModuleId {} content target source ID {} is not owned by its consumer",
+                owner_module_id.index(),
+                target_source_index.index()
+            )));
         }
-        let target_order = source_order.get(&target_source_id).copied().ok_or_else(|| {
-            graph_inventory_mismatch_error(
-                format!(
-                    "ModuleId {} content target source ID {} is absent from its candidate source set",
-                    owner_module_id.index(),
-                    target_source_id.index()
-                ),
-                syntax.string_table_mut(),
-            )
+        let target_order = source_order.get(&target_source_index).copied().ok_or_else(|| {
+            graph_inventory_mismatch_error(format!(
+                "ModuleId {} content target source ID {} is absent from its candidate source set",
+                owner_module_id.index(),
+                target_source_index.index()
+            ))
         })?;
-        let target_input = prepare_owned_source_input(
-            target_source_id,
-            source_tree_index,
-            style_directives,
-            syntax.string_table_mut(),
-        )
-        .map_err(|error| error.into_messages(syntax.string_table_mut()))?;
-        let target_output = syntax.prepare_source(target_input)?;
+        let target_input_result = {
+            let (syntax_string_table, selected_source_texts) =
+                syntax.source_preparation_inputs_mut();
+            prepare_owned_source_input(
+                target_source_index,
+                source_tree_index,
+                preparation_context.source_files,
+                source_spans,
+                style_directives,
+                syntax_string_table,
+                selected_source_texts,
+            )
+        };
+        let target_input =
+            target_input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        // Already in the premerge lane; propagate without an intermediate vessel.
+        let target_output = syntax.prepare_source(target_input, source_spans)?;
         let mut nested_content_sources = Vec::new();
         for file_reference in target_output.structural_file_references.iter() {
-            let resolved = syntax
-                .resolve_file_reference(
-                    &mut file_reference_resolver,
-                    owner_module_id,
-                    target_output.path_syntax.table(),
-                    file_reference,
-                    &mut nested_content_sources,
-                )
-                .map_err(|error| {
-                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                })?;
-            syntax
-                .record_resolved_file_reference(resolved)
-                .map_err(|error| {
-                    CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                })?;
+            let resolved = syntax.resolve_file_reference(
+                &mut file_reference_resolver,
+                owner_module_id,
+                target_output.path_syntax.table(),
+                file_reference,
+                &mut nested_content_sources,
+            )?;
+            syntax.record_resolved_file_reference(resolved)?;
         }
         nested_content_sources.sort_unstable();
         nested_content_sources.dedup();
-        for nested_source_id in nested_content_sources {
-            if prepared_content_sources.insert(nested_source_id) {
-                pending_content_sources.insert(nested_source_id);
+        for nested_source_index in nested_content_sources {
+            if prepared_content_sources.insert(nested_source_index) {
+                pending_content_sources.insert(nested_source_index);
             }
         }
-        syntax.retain_prepared_output(target_order, target_output);
+        syntax.retain_prepared_output(target_order, target_output)?;
     }
 
+    // `finish` already returns the premerge lane; propagate directly. The final boundary
+    // owns the single vessel conversion.
     let prepared = syntax.finish()?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
@@ -857,17 +920,16 @@ fn prepare_check_only_module(
 /// Insert resolved dependency edges directly by `ModuleId` into the project module graph.
 ///
 /// WHAT: the namespace already resolved each edge to boundary-local `ModuleId` pairs, so this
-///       function inserts provider-before-consumer edges with authored locations without a
+///       function inserts provider-before-consumer edges with authored spans without a
 ///       path-to-ID mapping step. Edges are sorted by (provider, consumer) `ModuleId` pair before
-///       insertion so the retained location and insertion order are deterministic and independent
+///       insertion so the retained span and insertion order are deterministic and independent
 ///       of Rayon completion order.
-/// WHY: the graph owns edge adjacency and the retained location side table, while the namespace
+/// WHY: the graph owns edge adjacency and the retained span side table, while the namespace
 ///      resolves structural references to `ModuleId`s before they reach this insertion boundary.
 fn insert_resolved_dependency_edges(
     project_module_graph: &mut ProjectModuleGraph,
     resolved_edges: &[ResolvedDependencyEdge],
-    string_table: &mut StringTable,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PremergeFailure> {
     if resolved_edges.is_empty() {
         return Ok(());
     }
@@ -885,13 +947,11 @@ fn insert_resolved_dependency_edges(
     });
 
     for edge in ordered_edges {
-        project_module_graph
-            .add_resolved_dependency_edge(
-                edge.provider_module_id,
-                edge.consumer_module_id,
-                edge.graph_location,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        project_module_graph.add_resolved_dependency_edge(
+            edge.provider_module_id,
+            edge.consumer_module_id,
+            edge.graph_span,
+        )?;
     }
 
     Ok(())
@@ -902,11 +962,8 @@ fn insert_resolved_dependency_edges(
 ///
 /// Reaching this helper means the graph and discovery disagree on which normal entry roots exist,
 /// which is a proven invariant violation rather than a user-facing failure.
-fn graph_inventory_mismatch_error(
-    reason: String,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
-    CompilerMessages::from_error_ref(CompilerError::compiler_error(reason), string_table)
+fn graph_inventory_mismatch_error(reason: String) -> PremergeFailure {
+    PremergeFailure::Infrastructure(CompilerError::compiler_error(reason))
 }
 
 /// Group module-job drafts by the populated graph's compile waves and attach each stable origin.
@@ -920,20 +977,17 @@ fn graph_inventory_mismatch_error(
 ///      dependency-ordered wave order is known after those edges enter the graph. The graph and
 ///      discovery must agree exactly on the graph node set: every graph node needs one matching
 ///      discovered draft and vice versa. Duplicate jobs, missing graph entries and leftover
-///      inventories are all internal invariant failures surfaced through the
-///      `CompilerMessages`/string-table boundary. A graph cycle is the same kind of internal
-///      failure reported by `compile_waves`.
+///      inventories are all internal invariant failures in the premerge lane. A graph cycle is
+///      the same kind of internal failure reported by `compile_waves`.
 fn order_discovered_modules_by_compile_waves(
     project_module_graph: &ProjectModuleGraph,
     drafts: Vec<ModuleCompilationJobDraft>,
     provider_bindings: Vec<ResolvedDependencyEdge>,
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     check_only_specs: Vec<CheckOnlyModuleSpec>,
-    string_table: &mut StringTable,
-) -> Result<ModuleCompilationSchedule, CompilerMessages> {
-    let waves = project_module_graph
-        .compile_waves()
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    source_module_origins: Arc<SourceModuleOriginTable>,
+) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+    let waves = project_module_graph.compile_waves()?;
 
     // Index discovered drafts by their graph-assigned `ModuleId`. A duplicate `ModuleId` means
     // two inventories claim the same graph node, which breaks the one-to-one correspondence the
@@ -943,13 +997,10 @@ fn order_discovered_modules_by_compile_waves(
     for draft in drafts {
         let module_id = draft.module_id;
         if draft_by_module_id.insert(module_id, draft).is_some() {
-            return Err(graph_inventory_mismatch_error(
-                format!(
-                    "Module discovery produced duplicate inventories for ModuleId {}; the project module graph expects one discovered job per canonical module",
-                    module_id.index()
-                ),
-                string_table,
-            ));
+            return Err(graph_inventory_mismatch_error(format!(
+                "Module discovery produced duplicate inventories for ModuleId {}; the project module graph expects one discovered job per canonical module",
+                module_id.index()
+            )));
         }
     }
 
@@ -962,13 +1013,10 @@ fn order_discovered_modules_by_compile_waves(
             let draft = match draft_by_module_id.remove(module_id) {
                 Some(draft) => draft,
                 None => {
-                    return Err(graph_inventory_mismatch_error(
-                        format!(
-                            "The project module graph lists ModuleId {} that has no matching discovered module job",
-                            module_id.index()
-                        ),
-                        string_table,
-                    ));
+                    return Err(graph_inventory_mismatch_error(format!(
+                        "The project module graph lists ModuleId {} that has no matching discovered module job",
+                        module_id.index()
+                    )));
                 }
             };
             #[cfg(test)]
@@ -993,18 +1041,16 @@ fn order_discovered_modules_by_compile_waves(
 
     // Any remaining inventory has no graph node.
     if let Some(leftover) = draft_by_module_id.keys().next() {
-        return Err(graph_inventory_mismatch_error(
-            format!(
-                "Module discovery returned a job for ModuleId {} that has no project module graph node",
-                leftover.index()
-            ),
-            string_table,
-        ));
+        return Err(graph_inventory_mismatch_error(format!(
+            "Module discovery returned a job for ModuleId {} that has no project module graph node",
+            leftover.index()
+        )));
     }
     Ok(ModuleCompilationSchedule {
         waves: grouped_waves,
         provider_bindings,
         source_package_dependencies,
+        source_module_origins,
         check_only_jobs: Vec::new(),
         check_only_specs,
     })
@@ -1021,58 +1067,63 @@ fn order_discovered_modules_by_compile_waves(
 /// tokenization before that serial BFS, while semantic module compilation remains serial.
 fn discover_modules_serial_provider_capable(
     seeds: &[ModuleEntrySeed],
-    context: ModuleDiscoveryContext<'_>,
+    context: ModuleDiscoveryContext<'_, '_>,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
-) -> Result<ModuleCompilationJobBatch, CompilerMessages> {
+) -> Result<ModuleCompilationJobBatch, PremergeFailure> {
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
+        source_spans,
+        selected_source_texts,
         directory_dependency_resolution,
         project_module_graph,
-        source_origin_lookup,
+        source_module_origins,
     } = context;
+    let source_files = source_spans.sources();
     let mut drafts = Vec::with_capacity(seeds.len());
     let mut resolved_edges = Vec::new();
     let mut source_package_dependencies = Vec::new();
     let mut check_only_specs = Vec::new();
     let fork_source = string_table.fork_source();
     let preparation_context = ModulePreparationContext {
+        source_files,
         style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
     let source_tree_index = directory_dependency_resolution.source_tree_index();
     for seed in seeds {
-        let module_edge_start = resolved_edges.len();
-        let candidate_source_ids = source_tree_index
-            .owned_source_ids(seed.module_id)
+        let candidate_source_indices = source_tree_index
+            .owned_source_indices(seed.module_id)
             .iter()
             .copied()
-            .filter(|source_id| {
+            .filter(|source_index| {
                 matches!(
-                    source_tree_index.source(*source_id).classification(),
+                    source_tree_index.source(*source_index).classification(),
                     SourceClassification::CompilerSemantic(_)
                 )
             })
             .collect::<Vec<_>>();
-        let source_order = candidate_source_ids
+        let candidate_source_ids = compiler_source_ids_for_indices(
+            &candidate_source_indices,
+            source_tree_index,
+            source_files,
+        )?;
+        let source_order = candidate_source_indices
             .iter()
             .enumerate()
-            .map(|(order, source_id)| (*source_id, order))
+            .map(|(order, source_index)| (*source_index, order))
             .collect::<FxHashMap<_, _>>();
-        let entry_source_id = source_tree_index
-            .source_id_for_canonical_path(&seed.entry_path)
+        let entry_source_index = source_tree_index
+            .source_index_for_canonical_path(&seed.entry_path)
             .ok_or_else(|| {
-                graph_inventory_mismatch_error(
-                    format!(
-                        "ModuleId {} root is absent from the source index",
-                        seed.module_id.index()
-                    ),
-                    string_table,
-                )
+                graph_inventory_mismatch_error(format!(
+                    "ModuleId {} root is absent from the source index",
+                    seed.module_id.index()
+                ))
             })?;
 
         let stable_origin = project_module_graph
@@ -1087,90 +1138,75 @@ fn discover_modules_serial_provider_capable(
             seed.module_id.index() as u32,
             &timing_logical_module_path,
         );
+        #[cfg(feature = "timers")]
+        let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
         let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
-        #[cfg(feature = "timers")]
-        let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
-        let mut prepared_owned_sources =
-            should_parallelize_owned_source_preparation(candidate_source_ids.len()).then(|| {
-                prepare_owned_source_inputs(
-                    &candidate_source_ids,
-                    source_tree_index,
-                    style_directives,
-                    &fork_source,
-                    #[cfg(feature = "timers")]
-                    timing_context,
-                )
-            });
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin.clone(),
-            source_origin_lookup,
-            candidate_source_ids
-                .iter()
-                .map(|source_id| source_tree_index.source(*source_id).canonical_path()),
+            RegisteredModuleSources {
+                candidate_source_ids: candidate_source_ids.clone(),
+                source_module_origins: Arc::clone(&source_module_origins),
+            },
             &seed.entry_path,
             None,
             local_string_table,
+            selected_source_texts,
             #[cfg(feature = "timers")]
             timing_context,
         )?;
 
         let mut queued = BTreeSet::new();
-        let mut queue = VecDeque::from([entry_source_id]);
-        queued.insert(entry_source_id);
+        let mut queue = VecDeque::from([entry_source_index]);
+        queued.insert(entry_source_index);
         let mut file_reference_resolver =
             FileReferenceResolver::new(source_tree_index, resource_inputs);
-        while let Some(source_id) = queue.pop_front() {
-            let order = source_order.get(&source_id).copied().ok_or_else(|| {
-                graph_inventory_mismatch_error(
-                    format!(
-                        "ModuleId {} reached source ID {} outside its owned source set",
-                        seed.module_id.index(),
-                        source_id.index()
-                    ),
-                    syntax.string_table_mut(),
-                )
+        while let Some(source_index) = queue.pop_front() {
+            let order = source_order.get(&source_index).copied().ok_or_else(|| {
+                graph_inventory_mismatch_error(format!(
+                    "ModuleId {} reached source ID {} outside its owned source set",
+                    seed.module_id.index(),
+                    source_index.index()
+                ))
             })?;
             if !matches!(
-                source_tree_index.source(source_id).ownership(),
+                source_tree_index.source(source_index).ownership(),
                 SourceOwnership::Owned(owner) if owner == seed.module_id
             ) {
-                return Err(graph_inventory_mismatch_error(
-                    format!(
-                        "ModuleId {} reached source ID {} without owning it in SourceTreeIndex",
-                        seed.module_id.index(),
-                        source_id.index()
-                    ),
-                    syntax.string_table_mut(),
-                ));
+                return Err(graph_inventory_mismatch_error(format!(
+                    "ModuleId {} reached source ID {} without owning it in SourceTreeIndex",
+                    seed.module_id.index(),
+                    source_index.index()
+                )));
             }
             let source_path = source_tree_index
-                .source(source_id)
+                .source(source_index)
                 .canonical_path()
                 .to_path_buf();
-            let input_result = match prepared_owned_sources.as_mut() {
-                Some(prepared_sources) => merge_prepared_owned_source(
-                    source_id,
-                    prepared_sources,
-                    syntax.string_table_mut(),
-                ),
-                None => crate::timed_stage_attributed!(
-                    crate::timing::TimingMetric::FrontendPrepare,
-                    timing_context,
+            let input_result = crate::timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendPrepare,
+                timing_context,
+                {
+                    let (syntax_string_table, selected_source_texts) =
+                        syntax.source_preparation_inputs_mut();
                     prepare_owned_source_input(
-                        source_id,
+                        source_index,
                         source_tree_index,
+                        source_files,
+                        source_spans,
                         style_directives,
-                        syntax.string_table_mut(),
-                    ),
-                ),
-            };
+                        syntax_string_table,
+                        selected_source_texts,
+                    )
+                },
+            );
             let input = match input_result {
                 Ok(input) => input,
-                Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+                Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
             };
-            let prepared_output = syntax.prepare_source(input)?;
+            // Already in the premerge lane; propagate without an intermediate vessel.
+            let prepared_output = syntax.prepare_source(input, source_spans)?;
             for dependency in &prepared_output.file_dependency_clauses {
                 let provider = &dependency.dependency;
                 let action = match resolve_structural_provider_reference(
@@ -1183,7 +1219,7 @@ fn discover_modules_serial_provider_capable(
                     syntax.string_table_mut(),
                 ) {
                     Ok(action) => action,
-                    Err(error) => return Err(error.into_messages(syntax.string_table_mut())),
+                    Err(error) => return Err(error.into_failure(syntax.string_table_mut())),
                 };
                 if matches!(&action, StructuralProviderAction::Handled) {
                     continue;
@@ -1197,7 +1233,7 @@ fn discover_modules_serial_provider_capable(
                 )?;
                 match resolved {
                     ResolvedDependency::SameModuleSource {
-                        source_id: target_source_id,
+                        source_index: target_source_index,
                         consumer_module_id,
                         ..
                     } => {
@@ -1205,12 +1241,11 @@ fn discover_modules_serial_provider_capable(
                         if consumer_module_id != seed.module_id {
                             return Err(graph_inventory_mismatch_error(
                                 "Same-module dependency resolved to another module".to_owned(),
-                                syntax.string_table_mut(),
                             ));
                         }
-                        let inserted = queued.insert(target_source_id);
+                        let inserted = queued.insert(target_source_index);
                         if inserted {
-                            queue.push_back(target_source_id);
+                            queue.push_back(target_source_index);
                         }
                     }
                     ResolvedDependency::CrossModule {
@@ -1223,7 +1258,7 @@ fn discover_modules_serial_provider_capable(
                             provider_module_id,
                             consumer_module_id,
                             dependency_shell_id: provider.dependency_shell_id,
-                            graph_location: provider.location.clone(),
+                            graph_span: Some(provider.span),
                         });
                     }
                     ResolvedDependency::SourcePackageSurface {
@@ -1246,47 +1281,41 @@ fn discover_modules_serial_provider_capable(
 
             // File-value paths are graph-active independently of dependency clauses. The focused
             // resolver owns module-root-relative physical validation and records resource inputs;
-            // this loop only queues newly discovered semantic content sources and publishes the
             // resolved occurrence table.
-            let mut discovered_content_sources = Vec::<SourceId>::new();
+            let mut discovered_content_sources = Vec::<SourceRecordIndex>::new();
             for file_reference in prepared_output.structural_file_references.iter() {
-                let resolved = syntax
-                    .resolve_file_reference(
-                        &mut file_reference_resolver,
-                        seed.module_id,
-                        prepared_output.path_syntax.table(),
-                        file_reference,
-                        &mut discovered_content_sources,
-                    )
-                    .map_err(|error| {
-                        CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                    })?;
-                syntax
-                    .record_resolved_file_reference(resolved)
-                    .map_err(|error| {
-                        CompilerMessages::from_error_ref(error, syntax.string_table_mut())
-                    })?;
+                // Infrastructure failures propagate typed without an intermediate vessel.
+                let resolved = syntax.resolve_file_reference(
+                    &mut file_reference_resolver,
+                    seed.module_id,
+                    prepared_output.path_syntax.table(),
+                    file_reference,
+                    &mut discovered_content_sources,
+                )?;
+                syntax.record_resolved_file_reference(resolved)?;
             }
             discovered_content_sources.sort_unstable();
             discovered_content_sources.dedup();
-            for target_source_id in discovered_content_sources {
-                if queued.insert(target_source_id) {
-                    queue.push_back(target_source_id);
+            for target_source_index in discovered_content_sources {
+                if queued.insert(target_source_index) {
+                    queue.push_back(target_source_index);
                 }
             }
 
-            syntax.retain_prepared_output(order, prepared_output);
+            syntax.retain_prepared_output(order, prepared_output)?;
         }
-        let check_only_source_ids = if include_check_only {
-            classify_check_only_source_ids(
+        let check_only_source_indices = if include_check_only {
+            classify_check_only_source_indices(
                 seed.module_id,
-                &candidate_source_ids,
+                &candidate_source_indices,
                 &queued,
                 source_tree_index,
             )
         } else {
             Vec::new()
         };
+        // `finish` already returns the premerge lane; propagate directly. The final boundary
+        // owns the single vessel conversion.
         let prepared = syntax.finish()?;
         add_frontend_counter(FrontendCounter::ModuleCount, 1);
         add_frontend_counter(
@@ -1303,17 +1332,11 @@ fn discover_modules_serial_provider_capable(
             prepared.semantic.source_file_count as u64,
             prepared.semantic.source_byte_count as u64,
         );
-        let graph_location_remap =
-            string_table.merge_delta_from(&prepared.semantic.string_table, string_table_base_len);
-        for edge in &mut resolved_edges[module_edge_start..] {
-            edge.graph_location.remap_string_ids(&graph_location_remap);
-        }
-        for check_only_source_id in check_only_source_ids {
+        for check_only_source_index in check_only_source_indices {
             check_only_specs.push(CheckOnlyModuleSpec {
                 owner_module_id: seed.module_id,
-                source_id: check_only_source_id,
-                candidate_source_ids: candidate_source_ids.clone(),
-                source_origin_lookup: source_origin_lookup.clone(),
+                source_index: check_only_source_index,
+                candidate_source_indices: candidate_source_indices.clone(),
                 stable_origin: stable_origin.clone(),
             });
         }

@@ -18,9 +18,10 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::collection_builtin::parse_collection_builtin_member_typed;
@@ -39,7 +40,7 @@ pub(crate) fn reference_expression_from_declaration(
     reference_arg: &Declaration,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
-    base_location: SourceLocation,
+    base_span: Option<SourceSpan>,
 ) -> Expression {
     if context.kind.is_constant_context() {
         if reference_arg.is_unresolved_constant_placeholder() {
@@ -57,7 +58,7 @@ pub(crate) fn reference_expression_from_declaration(
                 reference_arg.id.to_owned(),
                 placeholder_type,
                 placeholder_type_id,
-                base_location,
+                base_span,
                 ValueMode::ImmutableOwned,
                 reference_arg.value.const_record_state,
             );
@@ -68,13 +69,14 @@ pub(crate) fn reference_expression_from_declaration(
                 reference_arg.id.to_owned(),
                 reference_arg.value.diagnostic_type.to_owned(),
                 reference_arg.value.type_id,
-                base_location,
+                base_span,
                 ValueMode::ImmutableOwned,
                 reference_arg.value.const_record_state,
             );
         }
 
         let mut inlined_expression = reference_arg.value.to_owned();
+        inlined_expression.span = base_span;
         inlined_expression.value_mode = ValueMode::ImmutableOwned;
         inlined_expression
     } else {
@@ -82,7 +84,7 @@ pub(crate) fn reference_expression_from_declaration(
             reference_arg.id.to_owned(),
             reference_arg.value.diagnostic_type.to_owned(),
             reference_arg.value.type_id,
-            base_location,
+            base_span,
             reference_arg.value.value_mode.to_owned(),
             reference_arg.value.const_record_state,
         );
@@ -101,17 +103,17 @@ fn receiver_reference_node(
     reference_arg: &Declaration,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
-    base_location: SourceLocation,
+    base_span: Option<SourceSpan>,
 ) -> AstNode {
     AstNode {
         kind: NodeKind::ExpressionStatement(reference_expression_from_declaration(
             reference_arg,
             context,
             type_interner,
-            base_location.clone(),
+            base_span,
         )),
         scope: context.scope.to_owned(),
-        location: base_location,
+        span: base_span,
     }
 }
 
@@ -129,7 +131,7 @@ fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> 
 pub(crate) fn parse_postfix_chain_expression(
     token_stream: &mut FileTokens,
     receiver_expression: Expression,
-    receiver_location: SourceLocation,
+    receiver_span: Option<SourceSpan>,
     chain_access: PostfixChainAccess,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -138,7 +140,7 @@ pub(crate) fn parse_postfix_chain_expression(
     let receiver_node = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_expression),
         scope: context.scope.to_owned(),
-        location: receiver_location,
+        span: receiver_span,
     };
 
     let postfix_node = parse_postfix_chain_typed(
@@ -175,7 +177,7 @@ fn parse_postfix_chain_typed(
     string_table: &mut StringTable,
 ) -> Result<AstNode, ExpressionParseError> {
     let receiver_access_mode = chain_access.mode;
-    let authored_marker_location = chain_access.authored_marker_location;
+    let authored_marker_span = chain_access.authored_marker_span;
     let mut encountered_receiver_call = false;
 
     // ----------------------------
@@ -188,33 +190,39 @@ fn parse_postfix_chain_typed(
 
         // An access that ends immediately after the authored dot has no member name. The dot
         // we just consumed is the owning boundary: point at it directly so EOF (or a stream
-        // with no trailing Eof token) never falls back to the receiver start or a default
-        // location. Non-EOF missing-member boundaries keep their offending-token location
-        // through `parse_member_name_typed` below.
+        // with no trailing Eof token) never falls back to the receiver start or a default span.
+        // Non-EOF missing-member boundaries keep their offending-token span through
+        // `parse_member_name_typed` below.
         if token_stream.index >= token_stream.length
             || matches!(token_stream.current_token_kind(), TokenKind::Eof)
         {
-            let dot_location = token_stream.tokens[token_stream.index - 1].location.clone();
+            let dot_span = Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.tokens[token_stream.index - 1].span,
+            ));
             return Err(CompilerDiagnostic::invalid_field_access(
                 InvalidFieldAccessReason::ExpectedNameAfterDot,
                 None,
                 None,
                 Vec::new(),
-                dot_location,
+                dot_span,
             )
             .into());
         }
 
         let member_name = parse_member_name_typed(token_stream, string_table)?;
         let receiver_type_id = receiver_node_type_id(&receiver_node)?;
-        let member_location = token_stream.current_location();
+        let member_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
         let member_context = MemberStepContext {
             receiver_node: &receiver_node,
             receiver_type_id,
             member_name,
-            member_location: member_location.clone(),
+            member_span,
             receiver_access_mode,
-            authored_marker_location: authored_marker_location.clone(),
+            authored_marker_span,
             scope_context: context,
         };
 
@@ -284,13 +292,12 @@ fn parse_postfix_chain_typed(
 
         // Collect known field/method names for "did you mean?" suggestions on UnknownMember.
         let known_fields = collect_known_member_names(receiver_type_id, type_interner);
-
         return Err(CompilerDiagnostic::invalid_field_access(
             reason,
             Some(member_name),
             Some(receiver_type_id),
             known_fields,
-            member_location,
+            member_span,
         )
         .into());
     }
@@ -308,7 +315,7 @@ fn parse_postfix_chain_typed(
                 None,
                 None,
                 None,
-                receiver_node.location.clone(),
+                receiver_node.span,
             );
             return Err(diagnostic.into());
         }
@@ -318,9 +325,7 @@ fn parse_postfix_chain_typed(
         // The authored `~` marker is the source the author must change when no receiver call
         // followed it. Fall back to the receiver boundary only when the marker was not threaded
         // through this chain entry.
-        let marker_location = authored_marker_location
-            .clone()
-            .unwrap_or_else(|| receiver_node.location.clone());
+        let marker_span = authored_marker_span.or(receiver_node.span);
         // When the chain is followed by an assignment operator, the author wrote `~place = ...`
         // and intended an assignment target, not a receiver call.
         if token_stream.current_token_kind().is_assignment_operator() {
@@ -331,7 +336,7 @@ fn parse_postfix_chain_typed(
                 None,
                 None,
                 None,
-                marker_location,
+                marker_span,
             )
             .into());
         }
@@ -341,7 +346,7 @@ fn parse_postfix_chain_typed(
             None,
             None,
             None,
-            marker_location,
+            marker_span,
         )
         .into());
     }
@@ -376,15 +381,18 @@ fn parse_field_access_with_receiver_access(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<AstNode, ExpressionParseError> {
-    let base_location = if token_stream.index > 0 {
-        token_stream.tokens[token_stream.index - 1].location.clone()
+    let base_span = if token_stream.index > 0 {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.tokens[token_stream.index - 1].span,
+        ))
     } else {
-        token_stream.current_location()
+        Some(token_stream.current_span())
     };
 
     parse_postfix_chain_typed(
         token_stream,
-        receiver_reference_node(base_arg, context, type_interner, base_location),
+        receiver_reference_node(base_arg, context, type_interner, base_span),
         chain_access,
         context,
         type_interner,
@@ -400,23 +408,22 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<Expression, ExpressionParseError> {
-    let base_location = if token_stream.index > 0 {
-        token_stream.tokens[token_stream.index - 1].location.clone()
+    let base_span = if token_stream.index > 0 {
+        Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.tokens[token_stream.index - 1].span,
+        ))
     } else {
-        token_stream.current_location()
+        Some(token_stream.current_span())
     };
 
-    let receiver_expression = reference_expression_from_declaration(
-        base_arg,
-        context,
-        type_interner,
-        base_location.clone(),
-    );
+    let receiver_expression =
+        reference_expression_from_declaration(base_arg, context, type_interner, base_span);
 
     parse_postfix_chain_expression(
         token_stream,
         receiver_expression,
-        base_location,
+        base_span,
         chain_access,
         context,
         type_interner,

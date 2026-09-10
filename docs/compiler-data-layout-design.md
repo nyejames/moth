@@ -2,13 +2,16 @@
 
 > **Repository path:** `docs/compiler-data-layout-design.md`
 >
-> **Status:** Accepted end-state architecture. Implementation is queued after the delivered Compiler
-> Test Suite Hardening work and before further user-facing diagnostic improvement work; diagnostics
-> remain paused until this plan completes.
+> **Status:** Accepted end-state architecture. Implementation is active under
+> `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`; user-facing
+> diagnostic improvement work remains paused until that plan completes.
 >
-> **Initial repository audit anchor:** `d119988861aad9732c19d945eeabeb249a7e5caa`. The implementation
-> plan records delivered hardening at `03168082d`; it must replace this historical anchor with the
-> final activation baseline before code changes begin.
+> **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
+> `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
+> prerequisite at `03168082d`. The baseline validation was green:
+> `just validate`, plus Clippy with warnings denied on `aarch64-apple-darwin`,
+> `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` under Rust 1.97.1. This records the
+> starting point only; it is not a report of the current workspace.
 
 ## Authority and ownership
 
@@ -171,14 +174,18 @@ The following are also hard rules:
 - no missing identity is represented by a magic valid ID
 - reserved bits must be zero on construction and validated when records cross a trust boundary
 
-## Current-to-target architecture
+## Historical activation shape and current target
 
-| Current shape | Target shape |
+The left-hand column records the predecessor representation measured at plan activation. It is
+historical evidence, not a description of the current workspace; the right-hand column is the
+accepted layout.
+
+| Historical activation shape | Current target shape |
 |---|---|
 | `SourceLocation { InternedPath, start line/column, end line/column }` | `SourceSpan { SourceId, LocalSpan }` |
 | source paths cloned into each token and diagnostic | one path and source record in shared tables |
 | `Token { TokenKind, SourceLocation }` | source-owned `TokenShape` plus `LocalSpan` |
-| `TokenKind::Path(Vec<PathTokenItem>)` | `TokenKind::Path(PathSyntaxId)` into one file-owned `PathSyntaxTable` |
+| `TokenKind` widened to 24 bytes by its inline numeric literal payload | 8-byte `TokenShape` plus typed source-local cold stores |
 | declaration shells clone `Vec<Token>` | `TokenRange` into immutable source-owned tokens |
 | `InternedPath(Vec<StringId>)` | `PathId` into a dense path trie/table |
 | wide `CompilerDiagnostic` and `DiagnosticPayload` | small `DiagnosticDraft`, 32-byte `DiagnosticRecord`, side stores |
@@ -189,23 +196,37 @@ The following are also hard rules:
 
 ## Compilation identity context
 
-One project or package compilation boundary owns one identity context.
+One project or package compilation boundary owns one identity context. That context is mutable while
+compilation runs and becomes a lookup-only frozen bundle afterwards. Diagnostics are **not** part of
+the frozen identity bundle; they belong to the report that a diagnosed or warning outcome owns.
 
 ```rust
-pub struct CompilationContextBuilder {
+/// Mutable build-lifetime identity construction. One explicit owner.
+pub struct IdentityContextBuilder {
     sources: SourceDatabaseBuilder,
     strings: StringTableBuilder,
-    paths: PathInternerBuilder,
-    diagnostic_types: DiagnosticTypeStoreBuilder,
-    diagnostics: DiagnosticStoreBuilder,
+    paths: PathTableBuilder,
 }
 
-pub struct FrozenCompilationContext {
+/// Lookup-only immutable identity. Owns no diagnostics, no report-local type
+/// display data, no driver, no scheduler and no injected services.
+pub struct FrozenIdentityContext {
     sources: FrozenSourceDatabase,
     strings: FrozenStringTable,
     paths: FrozenPathTable,
-    diagnostic_types: FrozenDiagnosticTypeStore,
-    diagnostics: FrozenDiagnosticStore,
+}
+
+/// One report has one normal identity domain. Rare foreign sites use explicit
+/// typed cold ownership data rather than changing that domain.
+pub struct DiagnosticReport {
+    context: Arc<FrozenIdentityContext>,
+    diagnostics: DiagnosticStore,
+    types: DiagnosticTypeStore,
+}
+
+/// The command-level one-or-many container over independent project/package domains.
+pub struct DiagnosticReportSet {
+    reports: Vec<DiagnosticReport>,
 }
 ```
 
@@ -216,12 +237,15 @@ Exact Rust names may change. The ownership rules may not.
 - Workers use local append-only deltas rather than mutating shared global tables.
 - Deltas merge in canonical source or module order.
 - Worker-owned records are remapped once before a later consumer can observe them.
-- The completed context freezes into immutable storage.
-- Build results and diagnostics that outlive compilation retain an `Arc<FrozenCompilationContext>`
-  or an equivalent single shared owner.
+- The completed identity context freezes once into immutable lookup storage.
+- A result retains `Arc<FrozenIdentityContext>` only while it still contains compact IDs that need
+  it. A clean success whose final outputs carry no compact compiler IDs builds no frozen context at
+  all and drops source/token/identity data at its last diagnostic-capable boundary.
+- `DiagnosticReport` owns its own dense diagnostic and type-display stores; `DiagnosticReportSet`
+  owns only the ordered collection and adds no second context or store layer.
 - Bulk owning stores are move-only until frozen.
 - Compact IDs and records may be `Copy`.
-- Broad `Clone` implementations on message sets, diagnostic bags, source databases and owning render
+- Broad `Clone` implementations on report sets, diagnostic bags, source databases and owning render
   contexts are prohibited.
 
 A frozen context is a process-local rendering and inspection boundary. It is not a persistent cache
@@ -237,15 +261,17 @@ key or a cross-process protocol.
 pub struct SourceId(NonZeroU32);
 ```
 
-`SourceId` identifies one source snapshot inside one `FrozenCompilationContext`.
+`SourceId` identifies one source snapshot inside one identity context.
 
 Rules:
 
-- `SourceId(1)` is a deterministic synthetic compilation-root record with empty source text. It gives
-  project-wide user diagnostics an exact context-owned primary span before or outside any physical
-  source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
-- Physical and other synthetic IDs begin after that root record.
-- IDs are assigned deterministically before tokenization begins.
+- `SourceId(1)` is a deterministic synthetic compilation-root slot that never loads a snapshot. It
+  gives project-wide user diagnostics an exact context-owned primary span before or outside any
+  physical source. It is not a fake filesystem path and its provenance is `CompilationRoot`.
+- Physical and other synthetic IDs begin after that root slot.
+- Inventory-backed lanes assign final IDs in canonical order before tokenization. Traversal-only
+  lanes use the single private discovery-finalization barrier below. Every discovery output and
+  downstream compiler boundary carries final, immutable source identities.
 - Physical sources are sorted by canonical logical source order, never filesystem iteration or
   worker completion order.
 - Compiler-known synthetic sources are registered in a deterministic category and owner order before
@@ -260,30 +286,88 @@ Rules:
   exact byte ranges and remap into a new context.
 - Absence uses `Option<SourceSpan>`, never `SourceId(0)` or a fabricated source.
 
+### Private discovery finalization
+
+Synthetic single-file traversal and recursive direct-template discovery learn source membership
+from preparation. Only these membership-discovering lanes may prepare under provisional IDs.
+Directory/package inventories and standalone templates register final IDs before tokenization.
+
+- Keep the provisional database private and disposable. Never compare its IDs with final IDs or
+  retain either the database or its IDs outside the traversal owner. Use ordinary `SourceId`,
+  not a second provisional-ID type.
+- Keep `SourceDatabase::insert` a discovery escape hatch, with the narrowest Rust visibility
+  that permits its owners. Inventory-backed compilation uses ordered registration.
+- Prepare each source once. On success, one barrier settles the complete reachable closure,
+  constructs its final database and normalizes every retained source-bearing record exactly once.
+  Normalization may rebind an existing fact or rebuild it against the final table.
+- Move snapshots and live span builders without copying. Identity finalization does not freeze a
+  builder whose later consumers can still produce spans. Destroy the provisional domain before
+  publishing the result.
+- Preserve each lane's canonical order: Stage 0 inventory identity order for directory/packages,
+  deterministic canonical logical order for synthetic traversal. Neither visit order nor worker
+  completion order determines final IDs.
+- On diagnosis, apply the same barrier to the known source set before publishing diagnostics and
+  their source context. Every retained source-bearing fact must leave in the final domain.
+- Discovery outputs, module preparation, header aggregation, semantic compilation, escaped
+  diagnostics and resolved-reference tables see only final IDs. Those identities never change
+  within their owning context. Cross-context import still requires explicit context ownership
+  or canonical remapping under the interface contract.
+
 ### Source records
 
+Registration, snapshot ownership and load failure are three arrays, not one row. Every candidate
+gets a slot when its identity is assigned; only a candidate whose snapshot loads gets a record, and
+only a candidate that fails to load occupies a failure row.
+
 ```rust
-pub struct SourceRecord {
+pub struct SourceSlot {
+    id: SourceId,
     logical_path: PathId,
     canonical_os_path: Option<Box<Path>>,
+    kind: Option<SourceKind>,
+    provenance: SourceProvenance,
+    load: SourceLoadStatus,
+}
+
+pub struct SourceRecord {
     text: Box<str>,
     line_starts: Box<[u32]>,
     extended_spans: Box<[ExtendedSpan]>,
-    kind: SourceKind,
-    provenance: SourceProvenance,
 }
 ```
 
-The final record may split hot and cold fields into parallel arrays after measurement. Its semantics
-are fixed:
+The final arrays may split hot and cold fields further after measurement. Their semantics are
+fixed:
 
+- a slot exists for every registered candidate, addressed directly by its `SourceId`.
 - `logical_path` is the compiler-visible logical path.
 - `canonical_os_path` exists only for filesystem-adjacent operations and is absent for synthetic
   sources.
+- `load` is the candidate's lifecycle: identity assigned and nothing attempted, one loaded record,
+  or one read failure. A failure belongs to the slot's lifecycle, but its payload does not: a
+  `CompilerError` is wide and absent for every source in a successful build, so it lives in a cold
+  database-owned failure array that the slot indexes. The transition out of the pending state
+  happens exactly once per candidate, and both indexes stay private to the source database.
+- a record is created only by a successful load, so it unconditionally owns its payload and has no
+  absent or failed state of its own. Its index is private to the source database: a consumer
+  addresses source text and spans through the `SourceId` on the slot.
 - `text` is the exact UTF-8 source snapshot compiled.
-- `line_starts` contains byte offsets into `text`; the first entry is always `0`.
+- `line_starts` contains byte offsets into `text`. A snapshot with any content starts its first
+  entry at `0`; an empty snapshot has no lines, so its table is empty rather than carrying a
+  phantom entry every consumer would have to special-case.
 - `extended_spans` owns exact ranges that do not fit inline in `LocalSpan`.
-- `kind` identifies Moth, Moth template, Markdown, config or another registered source kind.
+- `kind` identifies Moth, Moth template, Markdown, config or another recognized source kind, or
+  marks the candidate as provider-owned. It is absent only for the reserved compilation root, which
+  is not a file and has no lexical kind; an adapted or synthetic source that does carry content
+  keeps its real kind here.
+- `SourceKind` needs a provider-owned variant because the database is registered from Stage 0's
+  whole sorted canonical inventory, which includes provider-owned physical files such as an
+  external `.js` module. Those slots exist to hold an identity, not to be compiled, so they
+  carry no compiler source kind and their extension stays in `canonical_os_path`.
+- a candidate's kind states what the compiler recognizes, not what the active builder supports, and
+  it is the kind of the authored spelling rather than of whatever the path resolves to. Registration
+  is unconditional: an unsupported kind still gets an identity, and support is diagnosed where the
+  source is referenced.
 - `provenance` distinguishes authored physical source from synthetic or adapted source and points to
   its owning source where needed.
 
@@ -424,6 +508,43 @@ Selection rules, in order:
 The initial design default is therefore 22 start/index bits and 10 length bits. Benchmark evidence
 may select another listed split, but it may not invent an unreviewed format.
 
+#### Selected split, frozen by measurement
+
+`LENGTH_BITS = 10`: **22 start/index bits, 10 length bits**, a 4 MiB inline start range and a
+1,022-byte inline maximum length. The measured corpus is 4,585 tokenized sources, 2,352,836 bytes
+and 286,779 exact token spans; the census is `just span-census` and its evidence is recorded in
+`benchmarks/frontend-optimization-results.md`.
+
+| `LENGTH_BITS` | Extended spans | Excess over the best | Share of all spans | Max entries in one source | Extended-table bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 808 | +763 | 0.266% | 49 | 6,464 |
+| 9 | 453 | +408 | 0.142% | 22 | 3,624 |
+| 10 | 249 | +204 | 0.071% | 16 | 1,992 |
+| 11 | 123 | +78 | 0.027% | 9 | 984 |
+| 12 | 45 | — | — | 5 | 360 |
+
+No candidate suffers a start overflow: the largest source is 92,557 bytes, well under the tightest
+candidate's 1 MiB start range. Rules 1 and 2 reject nothing. Every candidate can index four times
+its observed maximum per-source extended count with room to spare: usable capacities of
+16,777,215, 8,388,607, 4,194,303, 2,097,151 and 1,048,575 entries stand against required margins of
+196, 88, 64, 36 and 20, and even the smallest usable capacity exceeds its requirement by over
+5,000 times. The extended table can encode any range exactly, so no source is impossible to
+encode. Rule 3 prefers `LENGTH_BITS = 12`; rule 4 then admits every candidate within 0.1% of it —
+10, 11 and 12 — and selects the largest inline start range among them, which is
+`LENGTH_BITS = 10`. Rule 5 is not reached.
+
+Timing does not separate the candidates. Encoding all 286,779 spans takes roughly 9 ms and
+decoding them roughly 7 ms for every candidate, and the same candidate varies more between runs
+than the candidates vary from each other in one run, with the fastest-to-slowest ordering changing
+run to run. No candidate is timing-preferred on this evidence, so the decision rests on
+extended-span count and start range alone. The measurement establishes nothing further: it times an
+enum-tagged prototype, not the packed production codec, so it predicts neither `LocalSpan`'s speed
+nor that the selected split is free of a cost the prototype cannot express.
+
+Length overflow is one authored shape: a long `StringSliceLiteral`, almost always a template body
+in a documentation `.mtf`. The longest single span in the corpus is 31,475 bytes. Median span
+length is 1 byte and p99 is 52 bytes, so the inline case is overwhelmingly the common case.
+
 ### Extended-span insertion
 
 Each mutable source record owns its extended-span builder. A source tokenizer or parser can append to
@@ -458,6 +579,29 @@ It is accepted only if all of the following are true:
 Failure of any condition rejects the experiment. The result is recorded as a deliberately deferred
 or rejected optimisation in the roadmap. A durable span must never store an instruction that asks a
 renderer to reparse source.
+
+#### Result: deliberately deferred, not evaluated
+
+No terminator prototype was built at slice 1C2, and none of the eight acceptance gates was
+evaluated. This is a deliberate decision not to spend the investigation, recorded here as the
+authority requires, and it is not a measured failure of any gate.
+
+The census bounds what the investigation could win. At the selected split the exact overflow-table
+design retains **1,992 bytes** for the entire corpus: 249 extended spans at 8 bytes each, against
+2,352,836 bytes of source text. Eliminating that table outright — a saving no real design achieves
+— would recover 0.085% of the text those spans point into, and the memory gate's own bar is
+199 bytes. An optimisation whose entire ceiling is under 2 KB does not justify prototyping a second
+span encoding, so the work is declined on that ground alone.
+
+Two things are explicitly **not** claimed. The memory gate is not shown to be unreachable: the
+corpus's largest start and length both fit in 24 bits, so a packed pair of endpoints is a concrete
+6-byte match record, and 249 such records retain 1,494 bytes, which is 25% below the baseline.
+Nor is the auditability gate shown to fail, because no implementation exists to audit. A future
+reviewer should treat both gates as open questions, not as settled against the design.
+
+Reopening is legitimate when the premise changes: a corpus whose extended-span retention is large
+enough that a fraction of it is worth engineering. The absolute figure above, not this paragraph,
+is the thing to re-measure.
 
 ### Span API
 
@@ -500,6 +644,16 @@ For rendering or tooling:
 
 The source database may later cache hot conversions, but caching is benchmark-selectable and cannot
 change span representation. Newline handling must preserve the exact authored bytes, including CRLF.
+
+The line-break set is the tokenizer's, not `str::lines()`: `\n`, `\r\n` and a bare `\r` each start
+a new line, because a bare `\r` already ends a statement in the authored language. A line's visible
+text drops its terminator, and an offset inside a terminator resolves to the visible end of the
+line that terminator ends, so a caret cannot land on a byte that renders nowhere. A trailing
+terminator closes its line without opening another, so the zero-width EOF of a file ending in one
+resolves to the end of the last authored line rather than to a phantom line after it. An empty
+snapshot has no lines and still resolves its EOF to line 0, column 0. Columns count scalar starts
+before the offset, so an offset inside a scalar counts that scalar and no conversion slices on a
+non-boundary offset.
 
 ## Genuine path interning
 
@@ -763,9 +917,8 @@ compiler stage
 -> terminal, terse, dev-server and tooling renderers
 ```
 
-`DiagnosticDraft` is move-only. It is small enough to travel through local `Result` paths without
-boxing every diagnostic. Rare draft data may use one heap allocation because only the exceptional
-case pays for it.
+`DiagnosticDraft` is move-only and travels through local `Result` paths as a plain value. Rare
+draft data may use one heap allocation because only the exceptional case pays for it.
 
 `DiagnosticRecord` is the durable fixed record stored densely in `DiagnosticStore`.
 
@@ -879,9 +1032,9 @@ larger than 48 bytes on supported 64-bit targets.
 - draft facts use the producing worker's current identity domain
 - deterministic remapping happens before the draft becomes durable
 - draft destruction after compaction releases all temporary allocation
-
-Returning `Box<DiagnosticDraft>` or `Box<CompilerDiagnostic>` from every validation helper is not an
-accepted solution.
+Returning an owning pointer for every draft or diagnostic is not part of the compact plain
+diagnostic boundary. Keep common diagnosed failures as values and reserve indirection for typed
+rare data that the schema explicitly places in a side store.
 
 ### Diagnostic IDs and store
 
@@ -991,6 +1144,32 @@ label data reference.
 
 More than `2^24 - 1` label-data entries in one compilation is a typed diagnostic-capacity failure for
 user input, not integer wrapping.
+
+### Mixed-domain ownership
+
+The frozen identity context carried by a report is the normal identity domain for
+both `DiagnosticRecord::primary` and `SecondaryDiagnosticLabel::span`. A compact
+span without cold ownership data is interpreted only in that domain. Numeric
+source IDs or paths never infer a different owner.
+
+A rare primary or secondary site that genuinely belongs to another identity
+domain uses typed cold ownership data associated with that site. The cold data
+resolves the site through a compact, report-owned reference to the other
+`FrozenIdentityContext`; it must not widen the common record. An explicit
+`FrozenIdentityHandle` may provide this ownership during migration, but it is
+not the final packed representation. Phase 4 chooses the exact side-store
+encoding.
+
+The common `DiagnosticRecord` remains exactly 32 bytes and
+`SecondaryDiagnosticLabel` remains exactly 12 bytes. Neither common type carries
+an `Arc`, path object or pointer, or context pointer to implement this ownership.
+Foreign related-site ownership is separate from the report's default render
+ownership and must never change which normal context resolves the diagnostic's
+primary span.
+
+This subsection is the current authority for mixed-domain ownership. Any earlier
+R7 wording that describes portable coordinates or an optional explicit span is
+historical migration context only and does not override this contract.
 
 ### Diagnostic places
 
@@ -1177,26 +1356,22 @@ user-visible spelling unless an explicitly authorized diagnostics-improvement sl
 
 ## Frozen render context and cloning policy
 
-A diagnostic report carries one immutable context owner:
+A diagnostic report owns its diagnostic and type-display stores and shares one lookup-only identity
+context. See `Compilation identity context` for the exact split.
 
-```rust
-pub struct DiagnosticReport {
-    context: Arc<FrozenCompilationContext>,
-    diagnostics: DiagnosticRange,
-}
-```
-
-A graph-level result may carry several module/package reports when they belong to independent
-identity contexts. It does not concatenate raw IDs without preserving their context owner.
+A graph-level `DiagnosticReportSet` may carry several module/package reports when they belong to
+independent identity contexts. It does not concatenate raw IDs without preserving their context owner.
 
 Rules:
 
 - `StringTable::clone()` is not used to snapshot every failure boundary.
 - a finalized string table is shared immutably
-- source, path, type-display and diagnostic stores share the same context lifetime
-- renderers borrow the frozen context
+- source, string and path lookups share the frozen identity context's lifetime; diagnostic and
+  type-display stores belong to the report, not to that context
+- renderers borrow the frozen context and the report's stores
 - successful warnings and failed diagnostics use the same record/store model
-- a report can be cheaply cloned by cloning one `Arc` plus a range, not by copying tables
+- a report is move-only; a host that genuinely shares one wraps the whole report or set in `Arc`,
+  never a per-record or per-side-store `Arc`
 - stage-local mutable bags are consumed, not cloned
 - no context is kept alive by hidden global state
 
@@ -1324,6 +1499,11 @@ Compiler bugs are not another `Result` variant. They panic.
 
 ### Current `CompilerError` migration
 
+Phase 1 keeps expected operational failures in the typed outer `CompilerError` lane while
+user-caused failures use plain `CompilerDiagnostic` values. This is the transitional boundary:
+the infrastructure result described above is the Phase 5 target, after infrastructure and compiler
+bug context ownership are settled.
+
 Every current `CompilerError` construction site must be audited and assigned to one lane before the
 type is deleted:
 
@@ -1332,8 +1512,9 @@ type is deleted:
 - a proven invariant becomes `compiler_bug!`
 
 No broad automatic conversion is allowed. The audit records the old site, chosen lane and reason.
-`CompilerError`, `ErrorType`, metadata maps and the `DiagnosticPayload::InfrastructureError` bridge are
-deleted only after the inventory reaches zero.
+`CompilerError`, `ErrorType` and metadata maps are deleted only after the inventory reaches zero;
+the `DiagnosticPayload::InfrastructureError` bridge has already been removed by the Phase 1
+diagnostic boundary.
 
 ## Tooling host isolation
 
@@ -1395,7 +1576,9 @@ For each parallel wave:
 8. Diagnostics are appended in canonical production order, not completion order.
 9. The next consumer sees only remapped identities.
 
-Source spans do not need remapping because final `SourceId`s are assigned before tokenization.
+Source spans need no remapping within a final identity domain. Inventory-backed workers receive
+final IDs before tokenization. Traversal-only discovery normalizes its provisional facts once
+before this boundary, as specified in `Source identity and database > Private discovery finalization`.
 
 No compact ID is allocated through a timing-dependent global atomic simply because the numeric type
 is cheap.
@@ -1408,11 +1591,14 @@ This architecture uses the existing frontend instrumentation and benchmark tooli
 reports belong under those owners rather than being scattered through source, token or diagnostic
 modules.
 
-The implementation plan creates:
+Evidence lives in the existing indexed report:
 
 ```text
-benchmarks/compiler-data-layout-results.md
+benchmarks/frontend-optimization-results.md
 ```
+
+The implementation plan adds one indexed top-level section there per material phase. It does not
+create a second optimisation report or a second benchmark runner.
 
 Raw allocator logs, profiler captures and per-run data remain uncommitted.
 
@@ -1478,7 +1664,11 @@ must still demonstrate that the overall compiler actually retains less memory.
 
 ### Layout tests
 
-A dedicated layout test module asserts at least:
+Every width below is asserted beside the type it constrains, by the slice that introduces that
+type: a compile-time `const _: () = assert!(…)` in the module that owns the packing, or a size
+assertion in that module's own test file. A single shared layout module was rejected during
+implementation because it puts the assertion a file away from the layout it protects. The required
+set is:
 
 ```rust
 assert_eq!(size_of::<SourceId>(), 4);
@@ -1610,7 +1800,7 @@ phase's explicit stop/go gate accepts them:
 - process-isolated compiler workers
 - persistent serialization and remapping of `SourceId`, `PathId`, diagnostic IDs and type-display IDs
 - procedural-macro or build-script diagnostic schema generation
-- terminator-match span encoding when the required experiment does not beat exact overflow storage
+- terminator-match span encoding, deferred undone at slice 1C2 with its acceptance gates unevaluated
 - token records smaller than 8 bytes
 - global conversion of all `StringId`, `TypeId` and unrelated compiler IDs to non-zero or packed forms
 - memory mapping or compression of retained source snapshots
@@ -1632,8 +1822,8 @@ Implementation of this design requires synchronized changes to:
 - `docs/compiler-design-overview.md` — source context, token ownership, diagnostics and failure lanes
 - `docs/build-system-design.md` — deterministic source registration, compilation contexts and tooling
   worker boundaries
-- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; remove
-  boxing as the normal `result_large_err` answer
+- `docs/src/developer-docs/style-guide/style-guide.mtf` — hard layout and failure-lane rules; keep
+  diagnosed failures plain and do not recommend boxing or lint suppression at local `Result` boundaries
 - `docs/src/developer-docs/style-guide/testing.mtf` — layout/property/failure-lane ownership
 - `docs/src/developer-docs/style-guide/validation.mtf` — updated manual architecture audit
 - `docs/src/docs/progress/@page.moth` — current implementation status during and after migration
@@ -1741,7 +1931,7 @@ This architecture is implemented only when:
 - every former `CompilerError` site has one explicit failure lane
 - only proven invariant bugs panic
 - long-lived tooling isolates compilation state and no longer recovers poisoned compiler state
-- CI Clippy passes without `result_large_err` boxing or lint suppression
+- CI validates the compact plain diagnostic boundary without local boxing or lint suppression
 - representative memory measurements improve and timing stays within accepted bounds
 - the authority documents, progress matrix, roadmap and codebase index describe the final owners
 - no compatibility adapter preserves the old source-location, token, diagnostic or error path

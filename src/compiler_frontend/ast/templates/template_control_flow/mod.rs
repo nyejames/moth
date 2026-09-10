@@ -23,7 +23,7 @@ pub(crate) use const_folding::{
 };
 pub(crate) use types::{
     TemplateBodyEmission, TemplateBodyParseMode, TemplateBranchSelector,
-    TemplateControlFlowValidationMode, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
-    TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateControlFlowValidationMode, TemplateElseMarker, TemplateIfBodyParseInput,
+    TemplateLoopBodyParseInput, TemplateLoopControlKind, TemplateLoopHeader,
 };
 pub(crate) use validation::validate_runtime_template_control_flow_slot_artifacts;

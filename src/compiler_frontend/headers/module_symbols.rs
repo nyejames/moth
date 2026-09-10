@@ -29,7 +29,6 @@ use crate::compiler_frontend::ast::expressions::expression::{
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterList;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
@@ -38,14 +37,13 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
 use crate::compiler_frontend::headers::types::DependencySelection;
+use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
 
 /// Resolved target of a module-root public export entry.
 ///
@@ -125,13 +123,6 @@ pub(crate) enum GenericDeclarationKind {
     Function,
     Struct,
     Choice,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GenericDeclarationMetadata {
-    pub(crate) kind: GenericDeclarationKind,
-    pub(crate) parameters: GenericParameterList,
-    pub(crate) declaration_location: SourceLocation,
 }
 
 /// Dense module-local identity assigned when Stage 3 finalises declaration order.
@@ -233,15 +224,15 @@ pub(crate) struct ModuleSymbols {
 
     // Order-independent maps built during header parsing.
     pub(crate) canonical_source_by_symbol_path: FxHashMap<InternedPath, InternedPath>,
-    // Authored declaration-name locations keyed by canonical symbol path. These remain local to
-    // header/binding preparation; public interfaces convert them to portable diagnostic
-    // provenance before crossing a module boundary.
-    pub(crate) declaration_locations_by_symbol_path: FxHashMap<InternedPath, SourceLocation>,
+    /// Exact authored declaration-name spans keyed by canonical symbol path.
+    ///
+    /// WHAT: carries source-owned declaration anchors into binding collision diagnostics.
+    /// WHY: declaration provenance is a byte range and remains source-qualified until a
+    ///      diagnostic crosses the module boundary.
+    pub(crate) declaration_spans_by_symbol_path: FxHashMap<InternedPath, SourceSpan>,
     pub(crate) module_file_paths: FxHashSet<InternedPath>,
-    // Per-file metadata is recorded for every prepared file, including dependency-only root files that
-    // produce no declaration headers.
     pub(crate) file_roles_by_source: FxHashMap<InternedPath, FileRole>,
-    pub(crate) canonical_os_path_by_source: FxHashMap<InternedPath, PathBuf>,
+    pub(crate) source_ids_by_source: FxHashMap<InternedPath, SourceId>,
     pub(crate) file_dependency_clauses_by_source:
         FxHashMap<InternedPath, Vec<RetainedDependencyClause>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
@@ -259,7 +250,7 @@ pub(crate) struct ModuleSymbols {
     pub(crate) type_alias_paths: FxHashSet<InternedPath>,
     pub(crate) nominal_type_paths: FxHashSet<InternedPath>,
     pub(crate) trait_paths: FxHashSet<InternedPath>,
-    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationMetadata>,
+    pub(crate) generic_declarations_by_path: FxHashMap<InternedPath, GenericDeclarationKind>,
 
     // Builtin data merged during header parsing.
     pub(crate) builtin_visible_symbol_paths: FxHashSet<InternedPath>,
@@ -317,16 +308,29 @@ impl ModuleSymbols {
         clause.selections(selections)
     }
 
+    /// Join a module source's logical path to its build-lifetime registration slot.
+    ///
+    /// WHY: neighbouring tables stay keyed by `InternedPath`; canonical OS path and kind live
+    ///      only on `SourceSlot`. Callers with no registered identity observe `None`.
+    pub(crate) fn source_record<'a>(
+        &'a self,
+        source_file: &InternedPath,
+        source_files: &'a SourceDatabase,
+    ) -> Option<&'a SourceSlot> {
+        let source_id = *self.source_ids_by_source.get(source_file)?;
+        source_files.get(source_id)
+    }
+
     pub(crate) fn empty() -> Self {
         Self {
             ordered_semantic_declarations: Vec::new(),
             compiler_owned_declarations: Vec::new(),
             builtin_declarations: Vec::new(),
             canonical_source_by_symbol_path: FxHashMap::default(),
-            declaration_locations_by_symbol_path: FxHashMap::default(),
+            declaration_spans_by_symbol_path: FxHashMap::default(),
             module_file_paths: FxHashSet::default(),
             file_roles_by_source: FxHashMap::default(),
-            canonical_os_path_by_source: FxHashMap::default(),
+            source_ids_by_source: FxHashMap::default(),
             file_dependency_clauses_by_source: FxHashMap::default(),
             dependency_selections_by_source: FxHashMap::default(),
             dependency_bindable_source_symbol_paths: FxHashSet::default(),
@@ -423,18 +427,19 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 let data_type = DataType::Function(Box::new(None), FunctionSignature::default());
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.tokens.src_path,
             declaration,
-            &header.name_location,
+            header.name_span,
         )),
         HeaderKind::Struct { .. } => Some(Declaration {
             id: header.tokens.src_path.to_owned(),
@@ -445,12 +450,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 );
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
@@ -463,12 +469,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                 };
                 Expression::new(
                     ExpressionKind::NoValue,
-                    header.name_location.to_owned(),
+                    header.name_span,
                     type_id_hint_for_diagnostic_type(&data_type),
                     data_type,
                     ValueMode::ImmutableReference,
                 )
             },
+            binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::StartFunction => {
@@ -491,12 +498,13 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
                     );
                     Expression::new(
                         ExpressionKind::NoValue,
-                        header.name_location.to_owned(),
+                        header.name_span,
                         type_id_hint_for_diagnostic_type(&data_type),
                         data_type,
                         ValueMode::ImmutableReference,
                     )
                 },
+                binding_span: None,
                 config_qualifier: None,
             })
         }
@@ -511,7 +519,7 @@ fn declaration_from_header(header: &Header, string_table: &mut StringTable) -> O
 fn constant_declaration_placeholder(
     path: &InternedPath,
     declaration: &DeclarationSyntax,
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    name_span: Option<SourceSpan>,
 ) -> Declaration {
     Declaration {
         id: path.to_owned(),
@@ -519,12 +527,13 @@ fn constant_declaration_placeholder(
             let data_type = parsed_ref_to_data_type(&declaration.semantic_type());
             Expression::new(
                 ExpressionKind::NoValue,
-                location.to_owned(),
+                name_span,
                 type_id_hint_for_diagnostic_type(&data_type),
                 data_type,
                 declaration.value_mode(),
             )
         },
+        binding_span: name_span,
         config_qualifier: None,
     }
 }

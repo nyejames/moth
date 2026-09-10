@@ -1,10 +1,10 @@
-//! Borrow-checker diagnostic naming and source-location helpers.
+//! Borrow-checker diagnostic naming and source-span helpers.
 //!
-//! These helpers translate HIR IDs and side-table mappings into user-facing labels and error
-//! locations without forcing the transfer code to duplicate lookup logic.
+//! These helpers translate HIR IDs and side-table mappings into user-facing labels and exact
+//! source spans without forcing the transfer code to duplicate lookup logic.
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, CompilerDiagnostic, DiagnosticPlace, InvalidMutableAccessReason,
 };
@@ -13,7 +13,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalI
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatement;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(super) struct BorrowDiagnostics<'a> {
@@ -50,16 +50,10 @@ impl<'a> BorrowDiagnostics<'a> {
         self.module.side_table.local_origin_kind(local_id)
     }
 
-    pub(super) fn local_source_location(&self, local_id: LocalId) -> Option<SourceLocation> {
+    pub(super) fn local_source_span(&self, local_id: LocalId) -> Option<SourceSpan> {
         self.module
             .side_table
-            .hir_source_location_for_hir(HirLocation::Local(local_id))
-            .or_else(|| {
-                self.module
-                    .side_table
-                    .ast_location_for_hir(HirLocation::Local(local_id))
-            })
-            .cloned()
+            .hir_source_span_for_hir(HirLocation::Local(local_id))
     }
 
     pub(super) fn reactive_source_id_for_local(
@@ -79,93 +73,56 @@ impl<'a> BorrowDiagnostics<'a> {
             .unwrap_or_else(|| format!("{function_id}"))
     }
 
-    pub(super) fn statement_error_location(&self, statement: &HirStatement) -> SourceLocation {
-        statement.location.clone()
+    pub(super) fn statement_error_span(&self, statement: &HirStatement) -> Option<SourceSpan> {
+        statement.span
     }
 
-    pub(super) fn terminator_error_location(
-        &self,
-        block_id: BlockId,
-        _terminator: &HirTerminator,
-    ) -> SourceLocation {
+    pub(super) fn terminator_error_span(&self, block_id: BlockId) -> Option<SourceSpan> {
+        self.module.side_table.terminator_span(block_id).copied()
+    }
+
+    pub(super) fn function_error_span(&self, function_id: FunctionId) -> Option<SourceSpan> {
         self.module
             .side_table
-            .hir_source_location_for_hir(HirLocation::Terminator(block_id))
-            .or_else(|| {
-                self.module
-                    .side_table
-                    .ast_location_for_hir(HirLocation::Terminator(block_id))
-            })
-            .or_else(|| {
-                self.module
-                    .side_table
-                    .hir_source_location_for_hir(HirLocation::Block(block_id))
-            })
-            .or_else(|| {
-                self.module
-                    .side_table
-                    .ast_location_for_hir(HirLocation::Block(block_id))
-            })
-            .cloned()
-            .unwrap_or_default()
+            .hir_source_span_for_hir(HirLocation::Function(function_id))
     }
 
-    pub(super) fn function_error_location(&self, function_id: FunctionId) -> SourceLocation {
-        self.module
-            .side_table
-            .hir_source_location_for_hir(HirLocation::Function(function_id))
-            .or_else(|| {
-                self.module
-                    .side_table
-                    .ast_location_for_hir(HirLocation::Function(function_id))
-            })
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub(super) fn module_error_location(&self) -> SourceLocation {
+    pub(super) fn module_error_span(&self) -> Option<SourceSpan> {
         self.module
             .start_function
             .or_else(|| self.module.functions.first().map(|function| function.id))
-            .map(|function_id| self.function_error_location(function_id))
-            .unwrap_or_default()
+            .and_then(|function_id| self.function_error_span(function_id))
     }
 
-    pub(super) fn value_error_location(
+    pub(super) fn value_error_span(
         &self,
         value_id: HirValueId,
-        fallback: SourceLocation,
-    ) -> SourceLocation {
+        fallback: Option<SourceSpan>,
+    ) -> Option<SourceSpan> {
         self.module
             .side_table
-            .value_source_location(value_id)
-            .or_else(|| self.module.side_table.value_ast_location(value_id))
-            .cloned()
-            .unwrap_or(fallback)
+            .value_source_span(value_id)
+            .or_else(|| self.module.side_table.value_ast_span(value_id))
+            .or(fallback)
     }
 
     pub(super) fn internal_error(
         &self,
         message: impl Into<String>,
-        location: SourceLocation,
+        source_span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerError::new(message, location, ErrorType::Compiler).into()
+        CompilerError::new(message, source_span, ErrorType::Compiler).into()
     }
 
     pub(super) fn multiple_mutable_borrows(
         &self,
         place: DiagnosticPlace,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
-        location: SourceLocation,
+        existing_span: Option<SourceSpan>,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::multiple_mutable_borrows(
-            place,
-            conflicting_place,
-            existing_location,
-            location,
-        )
-        .into()
+        CompilerDiagnostic::multiple_mutable_borrows(place, conflicting_place, existing_span, span)
+            .into()
     }
 
     pub(super) fn shared_mutable_conflict(
@@ -174,16 +131,16 @@ impl<'a> BorrowDiagnostics<'a> {
         existing_access: BorrowAccessKind,
         requested_access: BorrowAccessKind,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
-        location: SourceLocation,
+        existing_span: Option<SourceSpan>,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
         CompilerDiagnostic::shared_mutable_conflict(
             place,
             existing_access,
             requested_access,
             conflicting_place,
-            existing_location,
-            location,
+            existing_span,
+            span,
         )
         .into()
     }
@@ -193,15 +150,15 @@ impl<'a> BorrowDiagnostics<'a> {
         place: DiagnosticPlace,
         reason: InvalidMutableAccessReason,
         conflicting_place: Option<DiagnosticPlace>,
-        conflicting_location: Option<SourceLocation>,
-        location: SourceLocation,
+        conflicting_span: Option<SourceSpan>,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
         CompilerDiagnostic::invalid_mutable_access(
             place,
             reason,
             conflicting_place,
-            conflicting_location,
-            location,
+            conflicting_span,
+            span,
         )
         .into()
     }
@@ -209,8 +166,8 @@ impl<'a> BorrowDiagnostics<'a> {
     pub(super) fn use_of_uninitialized_local(
         &self,
         place: DiagnosticPlace,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> BorrowCheckError {
-        CompilerDiagnostic::use_of_uninitialized_local(place, location).into()
+        CompilerDiagnostic::use_of_uninitialized_local(place, span).into()
     }
 }

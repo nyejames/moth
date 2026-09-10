@@ -36,14 +36,8 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::DuplicateDeclaration {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicateDeclaration { name } => {
                 *name = remap.get(*name);
-                if let Some(location) = first_location {
-                    location.remap_string_ids(remap);
-                }
             }
 
             DiagnosticPayload::MissingImportTarget { path }
@@ -61,12 +55,8 @@ impl DiagnosticPayload {
                 remap_path_import_payload(path, remap);
             }
 
-            DiagnosticPayload::DuplicateMothTemplateInputPath {
-                path,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicateMothTemplateInputPath { path } => {
                 remap_path_import_payload(path, remap);
-                first_location.remap_string_ids(remap);
             }
             DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor {
                 first_path,
@@ -80,14 +70,8 @@ impl DiagnosticPayload {
                 remap_invalid_import_path_payload(path, reason, remap);
             }
 
-            DiagnosticPayload::ImportNameCollision {
-                name,
-                previous_location,
-            } => {
+            DiagnosticPayload::ImportNameCollision { name } => {
                 *name = remap.get(*name);
-                if let Some(location) = previous_location {
-                    location.remap_string_ids(remap);
-                }
             }
 
             DiagnosticPayload::MissingPackageSymbol {
@@ -106,62 +90,40 @@ impl DiagnosticPayload {
             DiagnosticPayload::SharedMutableConflict {
                 place,
                 conflicting_place,
-                existing_location,
                 ..
             } => {
-                remap_shared_mutable_conflict_payload(
-                    place,
-                    conflicting_place,
-                    existing_location,
-                    remap,
-                );
+                remap_shared_mutable_conflict_payload(place, conflicting_place, remap);
             }
 
             DiagnosticPayload::WholeObjectBorrowConflict {
                 whole_place,
                 part_place,
-                part_location,
             } => {
-                remap_whole_object_borrow_conflict_payload(
-                    whole_place,
-                    part_place,
-                    part_location,
-                    remap,
-                );
+                whole_place.remap_string_ids(remap);
+                part_place.remap_string_ids(remap);
             }
 
             DiagnosticPayload::MultipleMutableBorrows {
                 place,
                 conflicting_place,
-                existing_location,
             } => {
                 remap_place_with_optional_conflict(place, conflicting_place, remap);
-                remap_optional_location(existing_location, remap);
             }
 
-            DiagnosticPayload::UseAfterPossibleMove {
-                place,
-                move_location,
-            } => {
-                remap_place_with_optional_location(place, move_location, remap);
+            DiagnosticPayload::UseAfterPossibleMove { place } => {
+                remap_single_place_borrow_payload(place, remap);
             }
 
-            DiagnosticPayload::MoveWhileBorrowed {
-                place,
-                borrow_location,
-                ..
-            } => {
-                remap_place_with_optional_location(place, borrow_location, remap);
+            DiagnosticPayload::MoveWhileBorrowed { place, .. } => {
+                remap_single_place_borrow_payload(place, remap);
             }
 
             DiagnosticPayload::InvalidMutableAccess {
                 place,
                 conflicting_place,
-                conflicting_location,
                 ..
             } => {
                 remap_place_with_optional_conflict(place, conflicting_place, remap);
-                remap_optional_location(conflicting_location, remap);
             }
 
             DiagnosticPayload::InvalidConfig { key, reason } => {
@@ -228,7 +190,8 @@ impl DiagnosticPayload {
                 }
             }
 
-            DiagnosticPayload::InvalidCharacter { .. }
+            DiagnosticPayload::SourceSpanCapacity { .. }
+            | DiagnosticPayload::InvalidCharacter { .. }
             | DiagnosticPayload::InvalidStringEscape { .. }
             | DiagnosticPayload::InvalidGenericApplication { .. }
             | DiagnosticPayload::InvalidPath { .. }
@@ -300,12 +263,8 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::ShadowedName {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::ShadowedName { name } => {
                 *name = remap.get(*name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::ReservedNameCollision { name, .. } => {
@@ -317,12 +276,8 @@ impl DiagnosticPayload {
             | DiagnosticPayload::InvalidReceiverDeclaration { .. }
             | DiagnosticPayload::InvalidCopyTarget { .. } => {}
 
-            DiagnosticPayload::DuplicatePublicExport {
-                name,
-                first_location,
-            } => {
+            DiagnosticPayload::DuplicatePublicExport { name } => {
                 *name = remap.get(*name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::PrivateTypeInExportedApi { exported_name, .. } => {
@@ -361,7 +316,6 @@ impl DiagnosticPayload {
                 target_name,
                 field_name,
                 root_binding_name,
-                declaration_location,
                 ..
             } => {
                 if let Some(name) = target_name {
@@ -373,7 +327,6 @@ impl DiagnosticPayload {
                 if let Some(name) = root_binding_name {
                     *name = remap.get(*name);
                 }
-                remap_optional_location(declaration_location, remap);
             }
 
             DiagnosticPayload::InvalidMultiBind {
@@ -466,15 +419,9 @@ impl DiagnosticPayload {
                     }
                     InvalidGenericInstantiationReason::ConflictingInference {
                         parameter_name,
-                        current_evidence_location,
-                        previous_evidence_location,
                         ..
                     } => {
                         *parameter_name = remap.get(*parameter_name);
-                        current_evidence_location.remap_string_ids(remap);
-                        if let Some(previous_evidence_location) = previous_evidence_location {
-                            previous_evidence_location.remap_string_ids(remap);
-                        }
                     }
                     InvalidGenericInstantiationReason::MissingTraitEvidence {
                         parameter_name,
@@ -623,11 +570,9 @@ impl DiagnosticPayload {
             DiagnosticPayload::DuplicateTraitRequirement {
                 trait_name,
                 requirement_name,
-                first_location,
             } => {
                 *trait_name = remap.get(*trait_name);
                 *requirement_name = remap.get(*requirement_name);
-                first_location.remap_string_ids(remap);
             }
 
             DiagnosticPayload::TraitPrivateSurfaceLeak { trait_name, .. } => {
@@ -693,197 +638,6 @@ impl DiagnosticPayload {
             DiagnosticPayload::CommonSyntaxMistake { reason } => {
                 reason.remap_string_ids(remap);
             }
-
-            DiagnosticPayload::InfrastructureError { .. } => {
-                // Infrastructure payloads carry rendered strings; no interned IDs to remap.
-            }
-        }
-    }
-
-    /// Rebind every source location carried by a diagnostic payload to one final file scope.
-    ///
-    /// Most payloads carry semantic names only; the variants below retain a secondary authored
-    /// span that must follow the diagnostic's primary location through synthetic identity rebinding.
-    pub(crate) fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        match self {
-            DiagnosticPayload::DuplicateDeclaration { first_location, .. }
-            | DiagnosticPayload::ImportNameCollision {
-                previous_location: first_location,
-                ..
-            } => rebind_optional_location(first_location, logical_path),
-
-            DiagnosticPayload::ShadowedName { first_location, .. }
-            | DiagnosticPayload::DuplicatePublicExport { first_location, .. }
-            | DiagnosticPayload::DuplicateTraitRequirement { first_location, .. } => {
-                first_location.rebind_source_identity(logical_path)
-            }
-
-            DiagnosticPayload::DuplicateMothTemplateInputPath { first_location, .. } => {
-                first_location.rebind_source_identity(logical_path)
-            }
-
-            DiagnosticPayload::MultipleMutableBorrows {
-                existing_location, ..
-            }
-            | DiagnosticPayload::UseAfterPossibleMove {
-                move_location: existing_location,
-                ..
-            }
-            | DiagnosticPayload::MoveWhileBorrowed {
-                borrow_location: existing_location,
-                ..
-            }
-            | DiagnosticPayload::WholeObjectBorrowConflict {
-                part_location: existing_location,
-                ..
-            }
-            | DiagnosticPayload::InvalidMutableAccess {
-                conflicting_location: existing_location,
-                ..
-            } => rebind_optional_location(existing_location, logical_path),
-
-            DiagnosticPayload::SharedMutableConflict {
-                existing_location, ..
-            } => rebind_optional_location(existing_location, logical_path),
-
-            DiagnosticPayload::InvalidAssignmentTarget {
-                declaration_location,
-                ..
-            } => rebind_optional_location(declaration_location, logical_path),
-
-            DiagnosticPayload::InvalidGenericInstantiation { reason, .. } => {
-                reason.rebind_source_identity(logical_path);
-            }
-
-            DiagnosticPayload::None
-            | DiagnosticPayload::ExpectedToken { .. }
-            | DiagnosticPayload::UnexpectedToken { .. }
-            | DiagnosticPayload::UnexpectedTrailingComma
-            | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
-            | DiagnosticPayload::UnknownName { .. }
-            | DiagnosticPayload::TypeMismatch { .. }
-            | DiagnosticPayload::MissingImportTarget { .. }
-            | DiagnosticPayload::AmbiguousImportTarget { .. }
-            | DiagnosticPayload::BareFileImport { .. }
-            | DiagnosticPayload::DirectSpecialFileImport { .. }
-            | DiagnosticPayload::NotExportedBySourceFile { .. }
-            | DiagnosticPayload::NotExportedByPublicSurface { .. }
-            | DiagnosticPayload::MissingModuleRootPublicSurface { .. }
-            | DiagnosticPayload::MissingPackageSymbol { .. }
-            | DiagnosticPayload::CrossModuleImportNotExported { .. }
-            | DiagnosticPayload::InvalidImportPath { .. }
-            | DiagnosticPayload::DirectSymbolPathImport { .. }
-            | DiagnosticPayload::InvalidNamespaceDefaultName { .. }
-            | DiagnosticPayload::DuplicateImportSurfaceMember { .. }
-            | DiagnosticPayload::ExplicitMothExtension { .. }
-            | DiagnosticPayload::ExplicitSourceExtension { .. }
-            | DiagnosticPayload::UnsupportedSourceFileKind { .. }
-            | DiagnosticPayload::InvalidSourceFileEntry { .. }
-            | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
-            | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
-            | DiagnosticPayload::UnsupportedExternalExtension { .. }
-            | DiagnosticPayload::InvalidExternalModule { .. }
-            | DiagnosticPayload::BorrowConflict { .. }
-            | DiagnosticPayload::UseOfUninitializedLocal { .. }
-            | DiagnosticPayload::InvalidConfig { .. }
-            | DiagnosticPayload::DeferredFeature { .. }
-            | DiagnosticPayload::UnsupportedExternalFunction { .. }
-            | DiagnosticPayload::UnusedName { .. }
-            | DiagnosticPayload::UnreachableMatchArm
-            | DiagnosticPayload::IdentifierNamingConvention { .. }
-            | DiagnosticPayload::DependencyAliasCaseMismatch { .. }
-            | DiagnosticPayload::MalformedTemplate { .. }
-            | DiagnosticPayload::InvalidCharacter { .. }
-            | DiagnosticPayload::InvalidStringEscape { .. }
-            | DiagnosticPayload::InvalidNumberLiteral { .. }
-            | DiagnosticPayload::InvalidStyleDirective { .. }
-            | DiagnosticPayload::MissingClosingDelimiter { .. }
-            | DiagnosticPayload::InvalidGenericApplication { .. }
-            | DiagnosticPayload::UnexpectedEndOfFile { .. }
-            | DiagnosticPayload::InvalidPath { .. }
-            | DiagnosticPayload::InvalidDependencyClause { .. }
-            | DiagnosticPayload::LegacyDependencyClause { .. }
-            | DiagnosticPayload::InvalidTypeAnnotation { .. }
-            | DiagnosticPayload::InvalidCollectionType { .. }
-            | DiagnosticPayload::InvalidMapType { .. }
-            | DiagnosticPayload::InvalidMapLiteral { .. }
-            | DiagnosticPayload::InvalidGenericParameter { .. }
-            | DiagnosticPayload::InvalidTemplateDirective { .. }
-            | DiagnosticPayload::InvalidTemplateStructure { .. }
-            | DiagnosticPayload::InvalidSignatureMember { .. }
-            | DiagnosticPayload::InvalidFunctionSignature { .. }
-            | DiagnosticPayload::InvalidChoiceVariant { .. }
-            | DiagnosticPayload::InvalidStructDefaultValue
-            | DiagnosticPayload::MissingDeclarationInitializer { .. }
-            | DiagnosticPayload::CircularDependency { .. }
-            | DiagnosticPayload::NamespaceMisuse { .. }
-            | DiagnosticPayload::ReservedNameCollision { .. }
-            | DiagnosticPayload::InvalidThisUsage { .. }
-            | DiagnosticPayload::InvalidReceiverDeclaration { .. }
-            | DiagnosticPayload::InvalidControlFlowStatement { .. }
-            | DiagnosticPayload::InvalidDeclaration { .. }
-            | DiagnosticPayload::InvalidMultiBind { .. }
-            | DiagnosticPayload::InvalidBuiltinCall { .. }
-            | DiagnosticPayload::InvalidCast { .. }
-            | DiagnosticPayload::InvalidReceiverCall { .. }
-            | DiagnosticPayload::InvalidCopyTarget { .. }
-            | DiagnosticPayload::InvalidFieldAccess { .. }
-            | DiagnosticPayload::InvalidMatchPattern { .. }
-            | DiagnosticPayload::NonExhaustiveMatch { .. }
-            | DiagnosticPayload::InvalidFallibleHandling { .. }
-            | DiagnosticPayload::InvalidTemplateSlot { .. }
-            | DiagnosticPayload::CompileTimeEvaluationError { .. }
-            | DiagnosticPayload::EmptyCollectionTypeAmbiguity
-            | DiagnosticPayload::UnsupportedOperatorTypes { .. }
-            | DiagnosticPayload::InvalidFallibleOperand { .. }
-            | DiagnosticPayload::IncompatibleChoiceComparison { .. }
-            | DiagnosticPayload::InvalidCallShape { .. }
-            | DiagnosticPayload::InvalidReturnShape { .. }
-            | DiagnosticPayload::InvalidRangeOperand { .. }
-            | DiagnosticPayload::UnsupportedBuilderPackage { .. }
-            | DiagnosticPayload::UnsupportedBackendFeature { .. }
-            | DiagnosticPayload::InvalidPageMetadata { .. }
-            | DiagnosticPayload::InvalidCompileTimePath { .. }
-            | DiagnosticPayload::DependencyNamespaceUsedAsValue { .. }
-            | DiagnosticPayload::ConstRecordUsedAsValue { .. }
-            | DiagnosticPayload::NestedDependencyTraversal { .. }
-            | DiagnosticPayload::NamespaceTypeValueMisuse { .. }
-            | DiagnosticPayload::UnknownTrait { .. }
-            | DiagnosticPayload::TraitPrivateSurfaceLeak { .. }
-            | DiagnosticPayload::GenericBoundPrivateSurfaceLeak { .. }
-            | DiagnosticPayload::UnsupportedTraitFeature { .. }
-            | DiagnosticPayload::InvalidTraitKeywordUsage { .. }
-            | DiagnosticPayload::PrivateTypeInExportedApi { .. }
-            | DiagnosticPayload::ProjectContextEscape { .. }
-            | DiagnosticPayload::InvalidTraitConformance { .. }
-            | DiagnosticPayload::InvalidTraitIncompatibility { .. }
-            | DiagnosticPayload::TraitNameUsedAsType { .. }
-            | DiagnosticPayload::InvalidExpression { .. }
-            | DiagnosticPayload::MissingOperatorOperand { .. }
-            | DiagnosticPayload::InvalidStandaloneStatement { .. }
-            | DiagnosticPayload::ExpectedSymbolStatement
-            | DiagnosticPayload::MissingCollectionItem
-            | DiagnosticPayload::InvalidMatchArm { .. }
-            | DiagnosticPayload::InvalidLoopHeader { .. }
-            | DiagnosticPayload::InvalidStatementPosition { .. }
-            | DiagnosticPayload::CommonSyntaxMistake { .. }
-            | DiagnosticPayload::InfrastructureError { .. } => {}
-        }
-    }
-}
-
-impl InvalidGenericInstantiationReason {
-    fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        if let Self::ConflictingInference {
-            current_evidence_location,
-            previous_evidence_location,
-            ..
-        } = self
-        {
-            current_evidence_location.rebind_source_identity(logical_path);
-            if let Some(previous_evidence_location) = previous_evidence_location {
-                previous_evidence_location.rebind_source_identity(logical_path);
-            }
         }
     }
 }
@@ -908,32 +662,10 @@ fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &String
 fn remap_shared_mutable_conflict_payload(
     place: &mut DiagnosticPlace,
     conflicting_place: &mut Option<DiagnosticPlace>,
-    existing_location: &mut Option<SourceLocation>,
     remap: &StringIdRemap,
 ) {
     place.remap_string_ids(remap);
     remap_optional_place(conflicting_place, remap);
-    remap_optional_location(existing_location, remap);
-}
-
-fn remap_whole_object_borrow_conflict_payload(
-    whole_place: &mut DiagnosticPlace,
-    part_place: &mut DiagnosticPlace,
-    part_location: &mut Option<SourceLocation>,
-    remap: &StringIdRemap,
-) {
-    whole_place.remap_string_ids(remap);
-    part_place.remap_string_ids(remap);
-    remap_optional_location(part_location, remap);
-}
-
-fn remap_place_with_optional_location(
-    place: &mut DiagnosticPlace,
-    location: &mut Option<SourceLocation>,
-    remap: &StringIdRemap,
-) {
-    place.remap_string_ids(remap);
-    remap_optional_location(location, remap);
 }
 
 fn remap_place_with_optional_conflict(
@@ -948,17 +680,5 @@ fn remap_place_with_optional_conflict(
 fn remap_optional_place(place: &mut Option<DiagnosticPlace>, remap: &StringIdRemap) {
     if let Some(place) = place {
         place.remap_string_ids(remap);
-    }
-}
-
-fn remap_optional_location(location: &mut Option<SourceLocation>, remap: &StringIdRemap) {
-    if let Some(location) = location {
-        location.remap_string_ids(remap);
-    }
-}
-
-fn rebind_optional_location(location: &mut Option<SourceLocation>, logical_path: &InternedPath) {
-    if let Some(location) = location {
-        location.rebind_source_identity(logical_path);
     }
 }

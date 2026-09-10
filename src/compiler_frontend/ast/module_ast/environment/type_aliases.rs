@@ -29,9 +29,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::headers::{
     VisibleNamedTypeResolution, resolve_visible_named_type_path,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::FxHashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -142,7 +142,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     "Type alias '{}' was never published with a completed target type.",
                     header.tokens.src_path.to_string(string_table),
                 ),
-                header.name_location.clone(),
+                header.name_span,
                 ErrorType::Compiler,
             );
             return Err(self.error_messages(error, string_table));
@@ -167,10 +167,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .environment_header_scope(header, string_table)
                 .with_file_visibility(Arc::clone(&visibility))
                 .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-            let target_location = parsed_type_location(&target);
+            let target_span = parsed_type_span(&target);
             let resolved_target = self.resolve_alias_target(
                 &target,
-                &target_location,
+                target_span,
                 &visibility,
                 &scope_context,
                 string_table,
@@ -205,23 +205,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     fn resolve_alias_target(
         &mut self,
         target: &ParsedTypeRef,
-        target_location: &SourceLocation,
+        target_span: Option<SourceSpan>,
         visibility: &FileVisibility,
         scope_context: &ScopeContext,
         string_table: &mut StringTable,
     ) -> Result<ResolvedTypeAnnotation, CompilerMessages> {
         let resolved_target = {
-            let mut type_resolution_context = self.type_resolution_context_for(visibility, None);
+            let mut type_resolution_context = self.type_resolution_context_for(
+                visibility,
+                scope_context.shared.declaring_file_id,
+                None,
+            );
             resolve_parsed_type_annotation(
                 target.clone(),
-                target_location,
+                target_span,
                 &mut type_resolution_context,
                 string_table,
                 Some(scope_context),
             )
         };
 
-        resolved_target.map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))
+        resolved_target.map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
     fn complete_alias(
@@ -249,47 +253,45 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         type_name: string_table.intern(&type_name),
                     },
                     header.tokens.src_path.name(),
-                    header.name_location.clone(),
+                    header.name_span,
                 ),
                 string_table,
             ));
         }
 
-        let target_location = parsed_type_location(target);
+        let target_span = parsed_type_span(target);
         let target_type_id = match resolved_target.type_id {
             Some(type_id) => type_id,
             None => resolve_diagnostic_type_to_type_id_checked(
                 &resolved_target.diagnostic_type,
                 &mut self.type_environment,
-                &target_location,
+                target_span,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?,
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?,
         };
 
         Ok(ResolvedTypeAlias {
             diagnostic_type: resolved_target.diagnostic_type,
             target_type_id,
-            declaration_location: header.name_location.clone(),
+            declaration_span: header.name_span,
         })
     }
 }
 
-fn parsed_type_location(parsed_type: &ParsedTypeRef) -> SourceLocation {
+fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
     match parsed_type {
-        ParsedTypeRef::Named { location, .. }
-        | ParsedTypeRef::Qualified { location, .. }
-        | ParsedTypeRef::BuiltinBool { location }
-        | ParsedTypeRef::BuiltinInt { location }
-        | ParsedTypeRef::BuiltinFloat { location }
-        | ParsedTypeRef::BuiltinString { location }
-        | ParsedTypeRef::BuiltinChar { location }
-        | ParsedTypeRef::BuiltinNone { location }
-        | ParsedTypeRef::This { location }
-        | ParsedTypeRef::Collection { location, .. }
-        | ParsedTypeRef::Map { location, .. }
-        | ParsedTypeRef::Optional { location, .. }
-        | ParsedTypeRef::Result { location, .. }
-        | ParsedTypeRef::Applied { location, .. } => location.clone(),
-        ParsedTypeRef::Inferred => SourceLocation::default(),
+        ParsedTypeRef::Named { span, .. }
+        | ParsedTypeRef::Qualified { span, .. }
+        | ParsedTypeRef::BuiltinBool { span, .. }
+        | ParsedTypeRef::BuiltinInt { span, .. }
+        | ParsedTypeRef::BuiltinFloat { span, .. }
+        | ParsedTypeRef::BuiltinString { span, .. }
+        | ParsedTypeRef::BuiltinChar { span, .. }
+        | ParsedTypeRef::This { span, .. }
+        | ParsedTypeRef::Collection { span, .. }
+        | ParsedTypeRef::Map { span, .. }
+        | ParsedTypeRef::Optional { span, .. }
+        | ParsedTypeRef::Applied { span, .. } => *span,
+        ParsedTypeRef::Inferred => None,
     }
 }

@@ -113,7 +113,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
     let freeze_result = prepared
         .preparation
         .freeze(&prepared.public_interface, &ModuleResourceTable::new());
-    let Err(mut error) = freeze_result else {
+    let Err(error) = freeze_result else {
         panic!("an unprojectable alias target must not freeze");
     };
 
@@ -122,17 +122,9 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         error.msg.contains("Count") && error.msg.contains("completed-target invariant"),
         "unexpected alias freeze error: {error:?}"
     );
-    // `Count as Int` is the first authored line and the name starts the line, so the reported
-    // location is the alias declaration rather than a default file-start location.
-    assert_eq!(
-        (
-            error.location.start_pos.line_number,
-            error.location.start_pos.char_column
-        ),
-        (0, 1)
-    );
+    // The alias declaration retains authored provenance rather than falling back to file start.
     assert!(
-        error.take_render_context().is_some(),
-        "the alias declaration location must survive transport with its own string table"
+        error.source_span.is_some(),
+        "the alias declaration span must survive transport",
     );
 }

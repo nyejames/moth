@@ -38,10 +38,9 @@ use crate::compiler_frontend::ast::templates::tir::view::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::collections::HashMap;
 
@@ -309,7 +308,9 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
             reference: *reference,
         },
         TemplateIrNodeKind::Sequence { children } => FormatterChildFact::Sequence(children.clone()),
-        TemplateIrNodeKind::BranchChain { branches, fallback } => FormatterChildFact::BranchChain {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => FormatterChildFact::BranchChain {
             branch_bodies: branches.iter().map(|branch| branch.body).collect(),
             fallback: *fallback,
         },
@@ -518,17 +519,17 @@ fn format_referenced_child_template(
 
 /// Cheap structural facts extracted from a TIR node for formatter dispatch.
 ///
-/// WHAT: carries only the children IDs and source location needed to format a
+/// WHAT: carries only the children IDs and source span needed to format a
 ///       single node, without cloning the entire `TemplateIrNode`.
 /// WHY: formatting may append to the store after the node facts are extracted,
 ///      so this boundary keeps reads and writes in separate steps.
 enum FormatterNodeFact {
     Sequence {
         children: Vec<TemplateIrNodeId>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
     BodyEligible {
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
     Passthrough,
 }
@@ -539,11 +540,11 @@ fn extract_formatter_node_fact(node: &TemplateIrNode) -> FormatterNodeFact {
     match &node.kind {
         TemplateIrNodeKind::Sequence { children } => FormatterNodeFact::Sequence {
             children: children.clone(),
-            location: node.location.clone(),
+            span: node.span,
         },
-        _ if is_body_eligible_kind(&node.kind) => FormatterNodeFact::BodyEligible {
-            location: node.location.clone(),
-        },
+        _ if is_body_eligible_kind(&node.kind) => {
+            FormatterNodeFact::BodyEligible { span: node.span }
+        }
         _ => FormatterNodeFact::Passthrough,
     }
 }
@@ -571,7 +572,7 @@ fn format_tir_node(
     };
 
     match fact {
-        FormatterNodeFact::Sequence { children, location } => {
+        FormatterNodeFact::Sequence { children, span } => {
             // The root template carries the authoritative head-prefix count
             // for its own root sequence. A sequence that is not the template
             // root (for example a nested body run) has no head prefix, so its
@@ -587,7 +588,7 @@ fn format_tir_node(
                 formatter_store,
                 node_ref,
                 &children,
-                location,
+                span,
                 head_node_count,
                 pre_format_passes,
                 post_format_passes,
@@ -596,16 +597,13 @@ fn format_tir_node(
             )
         }
 
-        FormatterNodeFact::BodyEligible { location } => {
+        FormatterNodeFact::BodyEligible { span } => {
             // A single body-eligible node is treated as a run of one. It is not
             // wrapped in a sequence unless the formatter expands it.
-            let representative_location =
-                representative_location_for_single_node(formatter_store, node_ref, string_table)?;
             let (replacement_nodes, warnings, content_changed) = process_formatter_run(
                 formatter_store,
                 std::slice::from_ref(&node_ref),
                 TemplateBodyRunPosition::Only,
-                &representative_location,
                 pre_format_passes,
                 post_format_passes,
                 formatter,
@@ -621,7 +619,7 @@ fn format_tir_node(
                         TemplateIrNodeKind::Sequence {
                             children: replacement_nodes,
                         },
-                        location,
+                        span,
                     ),
                     None,
                 )?
@@ -658,7 +656,7 @@ fn format_tir_sequence(
     formatter_store: &mut FormatterStore<'_>,
     original_node_ref: TemplateIrNodeId,
     children: &[TemplateIrNodeId],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     head_node_count: usize,
     pre_format_passes: &[TemplateWhitespacePassProfile],
     post_format_passes: &[TemplateWhitespacePassProfile],
@@ -694,14 +692,10 @@ fn format_tir_sequence(
 
         if !current_run.is_empty() {
             let run_position = run_position_for_run(is_first_run, false);
-            let representative_location =
-                representative_location_for_run(formatter_store, &current_run, string_table)?;
-
             let (replacement, warnings, run_changed) = process_formatter_run(
                 formatter_store,
                 &current_run,
                 run_position,
-                &representative_location,
                 pre_format_passes,
                 post_format_passes,
                 formatter,
@@ -720,14 +714,10 @@ fn format_tir_sequence(
 
     if !current_run.is_empty() {
         let run_position = run_position_for_run(is_first_run, true);
-        let representative_location =
-            representative_location_for_run(formatter_store, &current_run, string_table)?;
-
         let (replacement, warnings, run_changed) = process_formatter_run(
             formatter_store,
             &current_run,
             run_position,
-            &representative_location,
             pre_format_passes,
             post_format_passes,
             formatter,
@@ -749,7 +739,7 @@ fn format_tir_sequence(
                 TemplateIrNodeKind::Sequence {
                     children: new_children,
                 },
-                location,
+                span,
             ),
             None,
         )?
@@ -872,7 +862,6 @@ fn process_formatter_run(
     formatter_store: &mut FormatterStore<'_>,
     run: &[TemplateIrNodeId],
     run_position: TemplateBodyRunPosition,
-    representative_location: &SourceLocation,
     pre_format_passes: &[TemplateWhitespacePassProfile],
     post_format_passes: &[TemplateWhitespacePassProfile],
     formatter: Option<&crate::compiler_frontend::ast::templates::template::Formatter>,
@@ -881,6 +870,8 @@ fn process_formatter_run(
     if run.is_empty() {
         return Ok((Vec::new(), Vec::new(), false));
     }
+
+    let representative_span = representative_span_for_run(formatter_store, run, string_table)?;
 
     let mut input_pieces: Vec<FormatterInputPiece> = Vec::with_capacity(run.len());
     let mut anchor_side_table: Vec<TemplateIrNodeId> = Vec::with_capacity(run.len());
@@ -902,7 +893,7 @@ fn process_formatter_run(
 
                 input_pieces.push(FormatterInputPiece::Text(FormatterTextPiece {
                     text: *text,
-                    location: node.location.clone(),
+                    span: node.span,
                 }));
             }
 
@@ -931,7 +922,7 @@ fn process_formatter_run(
     let mut formatter_warnings = Vec::new();
 
     if let Some(fmt) = formatter {
-        let next_input = output_to_input(output, representative_location, string_table);
+        let next_input = output_to_input(output, representative_span, string_table);
         let formatter_result = fmt.formatter.format(next_input, string_table)?;
 
         formatter_warnings.extend(formatter_result.warnings);
@@ -940,7 +931,7 @@ fn process_formatter_run(
 
     // 3. Post-format whitespace passes.
     if !post_format_passes.is_empty() {
-        let post_input = output_to_input(output, representative_location, string_table);
+        let post_input = output_to_input(output, representative_span, string_table);
 
         output = apply_whitespace_passes_to_input(
             post_input,
@@ -954,8 +945,8 @@ fn process_formatter_run(
     let (replacement_nodes, content_changed) = output_to_tir_nodes(
         formatter_store,
         output,
-        representative_location,
         &anchor_side_table,
+        representative_span,
         run_reactive_subscription,
         string_table,
     )?;
@@ -971,19 +962,21 @@ fn process_formatter_run(
     Ok((replacement_nodes, formatter_warnings, run_changed))
 }
 
-/// Maps formatter output pieces back to TIR node IDs.
+/// Maps formatter output pieces back to TIR nodes.
 ///
-/// WHAT: text output becomes a new body `Text` node; ordinary opaque anchors
-///      look up the local side-table and reuse the original TIR node; a
-///      formatter-generated site-root anchor becomes a structural expression node.
-/// WHY: preserving original nodes for source anchors keeps child-template opacity
-///      and dynamic-expression metadata intact, while `$md` site-root links use
-///      the same structural string path as ordinary file values.
+/// WHAT: text output becomes a new body `Text` node with the formatter run's
+/// representative authored span; ordinary opaque anchors look up the local
+/// side-table and reuse the original TIR node; a formatter-generated site-root
+/// anchor becomes a structural expression node.
+/// WHY: preserving the representative span on transformed text keeps formatter
+/// output diagnosable without fabricating a new source range. Child-template
+/// opacity and dynamic-expression metadata remain attached to their original
+/// nodes.
 fn output_to_tir_nodes(
     formatter_store: &mut FormatterStore<'_>,
     output: crate::compiler_frontend::ast::templates::formatter_contract::FormatterOutput,
-    representative_location: &SourceLocation,
     anchor_side_table: &[TemplateIrNodeId],
+    representative_span: Option<SourceSpan>,
     run_reactive_subscription: Option<ReactiveSubscription>,
     string_table: &mut StringTable,
 ) -> Result<(Vec<TemplateIrNodeId>, bool), CompilerMessages> {
@@ -1004,7 +997,7 @@ fn output_to_tir_nodes(
                             byte_len,
                             origin: TemplateSegmentOrigin::Body,
                         },
-                        representative_location.clone(),
+                        representative_span,
                     ),
                     run_reactive_subscription.clone(),
                 )?);
@@ -1019,7 +1012,7 @@ fn output_to_tir_nodes(
                         ExpressionKind::StructuralString {
                             pieces: vec![ConstStringPiece::SiteRoot],
                         },
-                        representative_location.clone(),
+                        None,
                         builtin_type_ids::STRING,
                         DataType::StringSlice,
                         ValueMode::ImmutableOwned,
@@ -1033,7 +1026,7 @@ fn output_to_tir_nodes(
                                 reactive_subscription: None,
                                 site_id,
                             },
-                            representative_location.clone(),
+                            None,
                         ),
                         None,
                     )?);
@@ -1075,9 +1068,8 @@ fn push_formatter_node(
 
     Ok(node_id)
 }
-
 // -------------------------
-//  Source locations
+//  Source spans
 // -------------------------
 
 /// Chooses a `TemplateBodyRunPosition` for a run based on whether it is the
@@ -1091,82 +1083,24 @@ fn run_position_for_run(is_first_run: bool, is_last_run: bool) -> TemplateBodyRu
     }
 }
 
-/// Derives a coarse representative source location for a run of TIR nodes.
+/// Selects the first authored span in a formatter run for adapter diagnostics.
 ///
-/// WHAT: aggregates body-text node locations when possible; falls back to the
-/// location of the first text/child/dynamic node in the run. Both phases share
-/// a single pass to avoid reading each node twice.
-/// WHY: formatter output can rewrite arbitrary text, so exact per-character
-/// provenance is not feasible. A representative span preserves useful
-/// diagnostics locations without pretending to be precise.
-fn representative_location_for_run(
+/// Formatter output itself is synthetic and receives no durable TIR span, but
+/// intermediate formatter input retains the run's authored provenance.
+fn representative_span_for_run(
     formatter_store: &FormatterStore<'_>,
     run: &[TemplateIrNodeId],
     string_table: &StringTable,
-) -> Result<SourceLocation, CompilerMessages> {
-    let mut first_text_location: Option<SourceLocation> = None;
-    let mut last_text_location: Option<SourceLocation> = None;
-    let mut fallback_location: Option<SourceLocation> = None;
-
+) -> Result<Option<SourceSpan>, CompilerMessages> {
     for &node_id in run {
-        let node_ref = node_id;
         let node = formatter_store
-            .effective_node(node_ref)
+            .effective_node(node_id)
             .map_err(|error| compiler_error_messages(error, string_table))?;
-
-        match &node.kind {
-            TemplateIrNodeKind::Text { origin, .. } => {
-                if *origin == TemplateSegmentOrigin::Body {
-                    if first_text_location.is_none() {
-                        first_text_location = Some(node.location.clone());
-                    }
-                    last_text_location = Some(node.location.clone());
-                }
-
-                if fallback_location.is_none() {
-                    fallback_location = Some(node.location.clone());
-                }
-            }
-
-            TemplateIrNodeKind::ChildTemplate { .. }
-            | TemplateIrNodeKind::DynamicExpression { .. }
-                if fallback_location.is_none() =>
-            {
-                fallback_location = Some(node.location.clone());
-            }
-
-            _ => {}
+        if node.span.is_some() {
+            return Ok(node.span);
         }
     }
-
-    // Prefer the aggregated body-text span when body-text nodes exist.
-    if let (Some(start), Some(end)) = (first_text_location, last_text_location) {
-        if start.scope != end.scope {
-            return Ok(start);
-        }
-
-        return Ok(SourceLocation {
-            scope: start.scope,
-            start_pos: start.start_pos,
-            end_pos: end.end_pos,
-        });
-    }
-
-    // Fall back to the first text/child/dynamic node location.
-    Ok(fallback_location.unwrap_or_default())
-}
-
-/// Derives a representative location for a single body-eligible node.
-fn representative_location_for_single_node(
-    formatter_store: &FormatterStore<'_>,
-    node_ref: TemplateIrNodeId,
-    string_table: &StringTable,
-) -> Result<SourceLocation, CompilerMessages> {
-    representative_location_for_run(
-        formatter_store,
-        std::slice::from_ref(&node_ref),
-        string_table,
-    )
+    Ok(None)
 }
 
 // -------------------------

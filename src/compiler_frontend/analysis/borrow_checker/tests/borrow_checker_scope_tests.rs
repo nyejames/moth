@@ -89,7 +89,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
                 test_source_location(4),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -110,11 +110,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
     let y = symbol("y", &mut string_table);
 
     let arm = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(
-            1,
-            test_source_location(3),
-            ValueMode::ImmutableOwned,
-        )),
+        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
@@ -160,7 +156,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
                 test_source_location(5),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -220,7 +216,7 @@ fn while_body_local_alias_does_not_escape_exit() {
                 test_source_location(4),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -291,7 +287,7 @@ fn dead_local_access_reports_borrow_error() {
                 test_source_location(4),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let mut hir = lower_hir(
@@ -337,21 +333,22 @@ fn dead_local_access_reports_borrow_error() {
         ty: then_local.ty,
         value_kind: ValueKind::Place,
         region: hir.blocks[merge_block.0 as usize].region,
+        span: None,
     };
     let synthetic_statement = HirStatement {
         id: HirNodeId(77_000),
         kind: HirStatementKind::Expr(synthetic_value),
-        location: test_source_location(100),
+        span: None,
     };
     hir.blocks[merge_block.0 as usize]
         .statements
         .insert(0, synthetic_statement.clone());
     hir.side_table
-        .map_statement(&synthetic_statement.location, &synthetic_statement);
+        .map_statement(synthetic_statement.span, &synthetic_statement);
     hir.side_table.map_value(
-        &synthetic_statement.location,
+        synthetic_statement.span,
         HirValueId(77_001),
-        &synthetic_statement.location,
+        synthetic_statement.span,
     );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &string_table)

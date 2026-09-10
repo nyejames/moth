@@ -137,6 +137,14 @@ Config stops after the folded AST boundary. It produces no HIR or borrow facts.
 
 That sequence is compiler-owned. The build system is a client of the config compilation service: it supplies the one authored source and consumes folded values, authored key locations and diagnostics. It does not compose the stages itself, and config bootstrap is not a second build-owned frontend pipeline. Config schema definition, validation policy and application to the project record stay build-owned. See `docs/compiler-design-overview.md` > `Frontend stages > Stage 2: header syntax and interface binding > Project config compilation service`.
 
+The compiler service returns the config source's live span builder with its outcome. Bootstrap
+retains it through schema application and output validation on successful and diagnosed paths,
+then installs the finished table once before sharing the source database. This handoff moves
+source data and does not give build code access to the compiler's semantic stages. Config is one
+known-source inventory lane: its identity is registered upfront and final before the service
+tokenizes; only its table installation waits for the build-owned validation that can still
+produce spans.
+
 Allowed source includes:
 
 - one required open `project` const record
@@ -350,7 +358,7 @@ pub struct SourceBuildConfigContract {
     pub value_type: BuildInputType,
     pub required: bool,
     pub default: Option<PrimitiveBuildValue>,
-    pub location: SourceLocation,
+    pub span: SourceSpan,
 }
 ```
 
@@ -595,6 +603,19 @@ This distinction lets tooling diagnose abandoned or disconnected source without 
 
 Stage 0 asks the compiler to perform tokenization and header syntax preparation once for each selected source candidate.
 
+The compilation boundary keeps a `SourceDatabaseBuilder` beside immutable source lookup services.
+Tokenization borrows a source's original live span builder; each `SourcePreparationDelta` returns
+that builder outside its success or failure result. File workers and chunk merges return every
+builder before fallible aggregation, including discarded speculative preparations. Repeated
+canonical and check-only preparation appends to the same source-local table.
+
+Source identity finalization and span-table finalization are separate boundaries. The live source
+owner survives all canonical and check-only producers. Private AST lookup handles end before the
+owner consumes its transient `Arc<SourceDatabase>` via unwrap into owned lookup storage and
+installs each table once. Only then is the terminal publish `Arc` minted, and only then may
+outcomes retain that source context for rendering. Package interfaces can publish
+earlier; their source lookup context waits for the package's remaining check-only producers.
+
 Prepared syntax may contain:
 
 - tokens or source-kind payloads
@@ -673,6 +694,15 @@ Provider-backed discovery remains serial while it mutates shared package identit
 Stage 0 produces structure, resolved build-input contracts and compiler inputs. It does not type-check executable bodies, generate HIR or perform borrow validation.
 
 Provider-independent source preparation is Stage 0's only reach into the compiler before a module is ready. Stage 0 decides which source candidate to prepare, when to prepare it and how to schedule preparation work across threads. Tokenization and header-preparation semantics stay compiler-owned behind one preparation call, and the exception ends at prepared syntax: Stage 0 consumes structural provider and file references and does not parse expressions, bind source symbols, order declarations or enter AST, HIR or borrow stages.
+
+Direct-template discovery follows the same ownership split. A successful bundle moves its source
+database and live span builders into the named compiler service, which finalizes the tables after
+folding. A diagnosed discovery keeps the known source snapshots and finalizes at that terminal
+preparation boundary instead. Request aggregation keeps earlier documents' warning source contexts
+when a later document fails, without copying their warning vectors. Synthetic single-file traversal
+and recursive direct-template discovery normalize private provisional identities once before
+publishing success or diagnosis. See `docs/compiler-data-layout-design.md` > `Source identity and
+database > Private discovery finalization`. Directory/package inventories retain upfront final IDs.
 
 ## Project and package topology
 
@@ -999,10 +1029,12 @@ For each module job, Stage 0 calls one compiler-owned module compilation service
 ready module + completed provider interfaces
 -> build one compiler input value
 -> call the compiler module compilation service
--> Success / Diagnosed / CompilerError
+-> Success / Diagnosed (plain CompilerDiagnostic values) / CompilerError
 -> deterministic string-identity remap and atomic publication
 ```
 
+Diagnosed outcomes carry the compact plain user-diagnostic boundary. Typed `CompilerError` values
+remain the outer infrastructure/invariant failure lane and abort the owning project or package.
 The compiler's own local semantic sequence inside that call is interface binding, local declaration ordering, AST semantics, public-interface projection, HIR lowering and validation, borrow validation, generated semantic completion and lifetime facts. That sequence is compiler-owned. Stage 0 never invokes its steps individually, constructs a public-interface draft, mutates HIR or reruns a compiler analysis. See `docs/compiler-design-overview.md` > `Compiler input and result boundary > Canonical module compilation service`.
 
 Directory modules and synthetic single-file compilation use the same service after their own Stage 0 preparation path.

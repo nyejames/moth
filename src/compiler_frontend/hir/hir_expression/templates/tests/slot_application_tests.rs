@@ -15,7 +15,6 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::path::Path;
 
 fn fixture_resource_origin(relative_path: &str) -> StableResourceOriginId {
@@ -35,7 +34,7 @@ fn piece_bearing_text_node(pieces: Vec<OwnedFoldedStringPiece>) -> OwnedRuntimeT
     OwnedRuntimeTemplateNode::Text {
         text: OwnedFoldedString::Pieces(pieces),
         reactive_subscription: None,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -43,7 +42,7 @@ fn plain_text_node(text: &str) -> OwnedRuntimeTemplateNode {
     OwnedRuntimeTemplateNode::Text {
         text: OwnedFoldedString::Text(text.to_owned()),
         reactive_subscription: None,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 

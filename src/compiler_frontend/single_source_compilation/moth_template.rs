@@ -2,19 +2,20 @@
 //!
 //! WHAT: the compiler-owned stage sequence for one `.mtf` source — tokenization, synthetic
 //!       `content` header preparation, interface binding, local declaration ordering and AST
-//!       folding — returning the folded `content` value, the folded module's resource-identity
-//!       facts and the AST's warnings.
+//!       folding — returning folded `content`, resource-identity facts, ordered preparation/AST
+//!       warnings and the finalized source database.
 //!
 //! WHY:  tooling needs template content without artifact planning, HIR, borrow validation or
 //!       output writing. That shorter path is a named compiler service rather than a
-//!       project-owned stage sequence: project code supplies one source and receives one folded
-//!       result, and never prepares, binds, orders or folds the template itself.
+//!       project-owned stage sequence. Project code supplies source or a compiler-prepared bundle;
+//!       it never implements preparation semantics, binds, orders or folds the template itself.
 //!
 //! This is not a second Moth template parser or compiler mode. It uses the same owners as an
 //! integrated `.mtf` dependency and must never grow a parallel Markdown or template renderer.
-//! Physical file-reference resolution stays with the calling project: it supplies a prepared
-//! file-value bundle and this service folds settled Stage 0 facts without probing the
-//! filesystem. Source collection, scope policy and output packaging also stay with the caller.
+//! Physical file-reference resolution stays with the calling project. Its Stage 0 bundle retains
+//! the entry and content-source preparations with their original span builders, which this
+//! service consumes without preparing again or probing the filesystem. Source collection, scope
+//! policy and output packaging stay with the caller.
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
@@ -23,28 +24,34 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices, Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, FileFrontendPrepareOutput, HeaderParseOptions, bind_module_headers,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
     prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::module_compilation::FrontendOptions;
 use crate::compiler_frontend::module_dependencies::{
-    ContentSourceTargets, resolve_module_dependencies,
+    ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseBuilder, SourceId,
+    SourceKind, SourceRegistrationIndex,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::{
@@ -61,7 +68,8 @@ use std::sync::Arc;
 pub(crate) struct MothTemplateCompilationRequest<'a> {
     /// The canonical path of the template source, used for its file identity.
     pub(crate) source_path: &'a Path,
-    pub(crate) source_code: String,
+    /// Optional direct-request text. Bundle-bearing requests use retained database text.
+    pub(crate) source_code: Option<String>,
     /// The calling project's style directives, already merged.
     ///
     /// WHY: which directives a template may use is project vocabulary, so the caller owns the
@@ -73,21 +81,23 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
 
 /// Prepared file-value inputs one direct Moth template folds against.
 ///
-/// WHAT: the calling project's Stage 0 bundle for one template — its prepared content
+/// WHAT: the calling project's Stage 0 bundle for one template — its prepared entry and content
 ///       dependencies, the settled physical outcome of every prepared file-reference occurrence,
 ///       and the source identities of the template with all its dependencies.
-/// WHY:  physical file-reference resolution stays build-owned. The service consumes settled facts
-///       and never probes the filesystem, while route and output placement stay out of the
-///       compiler service entirely.
+/// WHY: physical file-reference resolution stays build-owned. The service consumes settled facts
+///      without filesystem probes, route placement or output placement.
 pub(crate) struct MothTemplateFileValueBundle {
-    /// Prepared content dependencies named by the template's file values, in discovery order.
+    /// Prepared entry source with its final identity and frozen path syntax.
+    pub(crate) prepared_entry: FileFrontendPrepareOutput,
+    /// Prepared content dependencies with frozen path syntax, in discovery order.
     pub(crate) prepared_content_sources: Vec<FileFrontendPrepareOutput>,
     /// One settled outcome per prepared file-reference occurrence across the template and its
     /// content dependencies, keyed by `source_files` identities.
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
-    /// Source identities of the template and all prepared content dependencies. The template's
-    /// own canonical path must be present.
-    pub(crate) source_files: SourceFileTable,
+    /// Exclusive owner of the template's and every content dependency's final identities. It
+    /// retains each source's original builder — discovery-prepared or standalone — until the
+    /// service installs every table after its last producer (folding or a diagnosed boundary).
+    pub(crate) source_files: SourceDatabaseBuilder,
     /// The owning module origin resource pieces intern against.
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
 }
@@ -101,6 +111,8 @@ pub(crate) struct FoldedMothTemplate {
     /// The folded module's resolved resource origins in interning order.
     pub(crate) module_resources: ModuleResourceTable,
     pub(crate) warnings: Vec<CompilerDiagnostic>,
+    /// The finalized source snapshots and extended spans used by this template's diagnostics.
+    pub(crate) source_database: Arc<SourceDatabase>,
 }
 
 /// Compile one Moth template source to its folded `content` value.
@@ -134,168 +146,478 @@ pub(crate) fn compile_moth_template_source(
     // A prepared bundle carries the module's Stage 0 identity facts; a plain request keeps one
     // self-contained in-memory source whose folds can never carry file values.
     let mut request = request;
+    let mut direct_source_code = request.source_code.take();
     let file_value_resolution = request.file_value_resolution.take();
-    let (mut prepared_content_sources, resolved_references, source_files, module_origin) =
+    let bundle_input = file_value_resolution.is_some();
+
+    let (mut all_prepared, resolved_references, mut source_builder, module_origin) =
         match file_value_resolution {
             Some(MothTemplateFileValueBundle {
+                prepared_entry,
                 prepared_content_sources,
                 resolved_file_references,
                 source_files,
                 module_origin,
             }) => {
-                if source_files
-                    .get_by_canonical_path(request.source_path)
-                    .is_none()
-                {
-                    return Err(CompilerMessages::from_error_ref(
-                        CompilerError::compiler_error(
-                            "Moth template file-value bundle does not contain its own source",
-                        ),
-                        string_table,
-                    ));
-                }
+                let mut prepared_sources = Vec::with_capacity(1 + prepared_content_sources.len());
+                prepared_sources.push(prepared_entry);
+                prepared_sources.extend(prepared_content_sources);
                 (
-                    prepared_content_sources,
+                    prepared_sources,
                     Some(resolved_file_references),
                     source_files,
                     module_origin,
                 )
             }
-            None => (
-                Vec::new(),
-                None,
-                SourceFileTable::build(
-                    [request.source_path],
+
+            None => {
+                // A request without a Stage 0 bundle compiles one in-memory source. The one-row
+                // inventory is registered here so this arm assigns `SourceId` through the same
+                // canonical-order constructor as the bundle-bearing arm, which registered its
+                // whole closure before this match.
+                let registration_index = SourceRegistrationIndex::from_rows(std::iter::once((
+                    request.source_path,
+                    SourceKind::Compiler(SourceFileKind::MothTemplate),
+                )));
+                let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+                    &registration_index,
                     request.source_path,
                     Some(&path_resolver),
                     string_table,
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                None,
-            ),
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                let source_builder = SourceDatabaseBuilder::new(source_files);
+                (Vec::new(), None, source_builder, None)
+            }
         };
-    let Some(source_identity) = source_files.get_by_canonical_path(request.source_path) else {
-        return Err(CompilerMessages::from_error_ref(
+
+    let mut preparation_warnings = Vec::new();
+    for prepared_source in &mut all_prepared {
+        preparation_warnings.append(&mut prepared_source.warnings);
+    }
+
+    if bundle_input && direct_source_code.is_some() {
+        let messages = CompilerMessages::from_error_with_warnings(
             CompilerError::compiler_error(
-                "Moth template source file table does not contain its own source",
+                "Moth template file-value bundle must own the retained source text",
             ),
+            preparation_warnings,
+            string_table,
+        );
+        return Err(attach_finalized_source_database(
+            messages,
+            source_builder,
             string_table,
         ));
-    };
-    let entry_file_id = Some(source_identity.file_id);
-    let entry_scope = source_identity.logical_path.clone();
-
-    // 1. Prepare the single source into retained syntax.
-    let mut prepared = prepare_template_source(
-        &source_files,
-        &path_resolver,
-        &request,
-        entry_file_id,
-        string_table,
-    )?;
-
-    // This service has one final string domain and one final source per file. Freeze every
-    // file-owned path table before header aggregation so AST parsing sees the same immutable
-    // prepared-file contract as directory and synthetic module compilation.
-    for content_source in &mut prepared_content_sources {
-        content_source
-            .freeze_path_syntax(string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     }
-    prepared
-        .freeze_path_syntax(string_table)
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
-    // 2. Aggregate retained syntax and bind it. A direct template resolves no provider.
-    let mut all_prepared = Vec::with_capacity(1 + prepared_content_sources.len());
-    all_prepared.push(prepared);
-    all_prepared.extend(prepared_content_sources);
-    let bound_headers = prepare_header_syntax(all_prepared, string_table)
-        .and_then(|prepared_syntax| {
-            bind_module_headers(
-                prepared_syntax,
-                &ExternalPackageRegistry::new(),
-                &ExternalImportResolutionTable::default(),
-                &SourceProviderDependencySet::default(),
-                Some(&path_resolver),
+    let entry_file_id = match source_builder
+        .sources()
+        .get_by_canonical_path(request.source_path)
+    {
+        Some(source_identity) => source_identity.id,
+        None => {
+            let messages = CompilerMessages::from_error_with_warnings(
+                CompilerError::compiler_error(
+                    "Moth template source file table does not contain its own source",
+                ),
+                preparation_warnings,
                 string_table,
-            )
-        })
-        .map_err(|bag| {
-            CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-        })?;
-
-    // 3. Order local declarations. Content-source ordering edges come from Stage 0's resolved
-    //    targets when a bundle is present and defer otherwise.
-    let content_source_targets = match &resolved_references {
-        Some(resolved_file_references) => ContentSourceTargets::from_resolved_references(
-            resolved_file_references,
-            &source_files,
-            string_table,
-        ),
-        None => ContentSourceTargets::empty(),
+            );
+            return Err(attach_finalized_source_database(
+                messages,
+                source_builder,
+                string_table,
+            ));
+        }
     };
-    let sorted = resolve_module_dependencies(bound_headers, &content_source_targets, string_table)
-        .map_err(|bag| {
-            CompilerMessages::from_diagnostics(bag.into_diagnostics(), string_table.clone())
-        })?;
+    if all_prepared
+        .first()
+        .is_some_and(|prepared_entry| prepared_entry.file_id != entry_file_id)
+    {
+        let messages = CompilerMessages::from_error_with_warnings(
+            CompilerError::compiler_error(
+                "Moth template bundle entry does not match its registered source identity",
+            ),
+            preparation_warnings,
+            string_table,
+        );
+        return Err(attach_finalized_source_database(
+            messages,
+            source_builder,
+            string_table,
+        ));
+    }
+    if !bundle_input {
+        let Some(source_code) = direct_source_code.take() else {
+            let messages = CompilerMessages::from_error_with_warnings(
+                CompilerError::compiler_error("Moth template source has no retained source text"),
+                preparation_warnings,
+                string_table,
+            );
+            return Err(attach_finalized_source_database(
+                messages,
+                source_builder,
+                string_table,
+            ));
+        };
+        source_builder
+            .sources_mut()
+            .retain_text(entry_file_id, source_code)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    } else if source_builder
+        .sources()
+        .retained_text(entry_file_id)
+        .is_none()
+    {
+        let messages = CompilerMessages::from_error_with_warnings(
+            CompilerError::compiler_error("Moth template source has no retained source text"),
+            preparation_warnings,
+            string_table,
+        );
+        return Err(attach_finalized_source_database(
+            messages,
+            source_builder,
+            string_table,
+        ));
+    }
+    let entry_scope = source_builder.sources().legacy_logical_path(entry_file_id);
 
-    // 4. Fold the ordered declarations and take the synthetic `content` constant. The bundle's
-    //    resolved rows and module origin drive AST value semantics exactly like an integrated
-    //    module fold; resource pieces intern into the table retained here.
-    let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
-    let file_value_resolution = resolved_references.map(|resolved_file_references| {
-        Rc::new(FileValueResolutionServices {
-            stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
-                resolved_file_references,
-                source_files.clone(),
-            ))),
-            module_resources: Rc::clone(&module_resources),
-            module_origin,
-        })
-    });
-    let mut ast = fold_template_ast(
+    // Consume Stage 0's retained entry syntax, or prepare the standalone source once.
+    if !bundle_input {
+        let outcome = {
+            let (sources, mut span_builders) = source_builder.split();
+            let source_code = sources
+                .retained_text(entry_file_id)
+                .expect("standalone entry text was retained immediately before preparation");
+            let delta = prepare_template_source(
+                sources,
+                &path_resolver,
+                &request,
+                source_code,
+                entry_file_id,
+                string_table,
+                span_builders.take_span_builder(entry_file_id),
+            );
+            span_builders.retain_span_builder(entry_file_id, delta.span_builder);
+            delta.result
+        };
+        let mut prepared = match outcome {
+            Ok(prepared) => prepared,
+            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+                let FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                    ..
+                } = error;
+                let messages = CompilerMessages::from_diagnostic_with_warnings(
+                    diagnostic,
+                    warnings,
+                    string_table,
+                );
+                return Err(attach_finalized_source_database(
+                    messages,
+                    source_builder,
+                    string_table,
+                ));
+            }
+            Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+                let messages = CompilerMessages::from_error(error, string_table.clone());
+                return Err(attach_finalized_source_database(
+                    messages,
+                    source_builder,
+                    string_table,
+                ));
+            }
+        };
+        let freeze_result = prepared.freeze_path_syntax(string_table);
+        preparation_warnings.append(&mut prepared.warnings);
+        all_prepared.push(prepared);
+        if let Err(error) = freeze_result {
+            let messages = CompilerMessages::from_error_with_warnings(
+                error,
+                preparation_warnings,
+                string_table,
+            );
+            return Err(attach_finalized_source_database(
+                messages,
+                source_builder,
+                string_table,
+            ));
+        }
+    }
+
+    // Bundle sources already passed whole-file validation before their final path tables froze.
+    // Check that boundary without traversing all retained tokens and path rows again.
+    if let Some(error) = all_prepared
+        .iter()
+        .find_map(|prepared_source| prepared_source.require_frozen_path_syntax().err())
+    {
+        let messages =
+            CompilerMessages::from_error_with_warnings(error, preparation_warnings, string_table);
+        return Err(attach_finalized_source_database(
+            messages,
+            source_builder,
+            string_table,
+        ));
+    }
+
+    let sorted = match order_template_headers(
+        &mut all_prepared,
+        &mut source_builder,
+        &path_resolver,
+        resolved_references.as_ref(),
+        string_table,
+    ) {
+        Ok(sorted) => sorted,
+        Err(failure) => {
+            let mut messages = failure.into_messages(string_table);
+            messages.prepend_diagnostics_preserving_context(preparation_warnings);
+            return Err(attach_finalized_source_database(
+                messages,
+                source_builder,
+                string_table,
+            ));
+        }
+    };
+
+    // Folding releases all AST/service readers before the outcome owner installs the span tables.
+    let semantic_result = fold_template_semantics(
         sorted,
-        entry_scope.clone(),
+        entry_scope,
         &request,
         string_table,
-        file_value_resolution,
-    )?;
-    let warnings = std::mem::take(&mut ast.warnings);
+        resolved_references,
+        source_builder,
+        module_origin,
+    );
 
-    // Bind the conversion result first: the read borrow must release before the source facts are
-    // moved out for the calling project.
-    let content =
-        extract_content_value(&ast, &entry_scope, &module_resources.borrow(), string_table);
-
-    match content {
-        Ok(content) => {
-            // Folding is complete and no fold stage holds the table's value, so the service moves
-            // its source facts out for the calling project.
-            let module_resources = std::mem::take(&mut *module_resources.borrow_mut());
+    match semantic_result {
+        TemplateSemanticOutcome::Success {
+            content,
+            module_resources,
+            mut warnings,
+            source_builder,
+        } => {
+            let mut source_database_warnings = preparation_warnings;
+            source_database_warnings.append(&mut warnings);
+            let source_database = match source_builder.finish() {
+                Ok(source_database) => Arc::new(source_database),
+                Err(error) => {
+                    return Err(CompilerMessages::from_error_with_warnings(
+                        error,
+                        source_database_warnings,
+                        string_table,
+                    ));
+                }
+            };
             Ok(FoldedMothTemplate {
                 content,
                 module_resources,
-                warnings,
+                warnings: source_database_warnings,
+                source_database,
             })
         }
-        Err(mut messages) => {
-            messages.prepend_diagnostics_preserving_context(warnings);
-            Err(messages)
+
+        TemplateSemanticOutcome::Diagnosed {
+            mut messages,
+            source_builder,
+        } => {
+            messages.prepend_diagnostics_preserving_context(preparation_warnings);
+            Err(attach_finalized_source_database(
+                messages,
+                source_builder,
+                string_table,
+            ))
         }
     }
 }
 
+enum TemplateSemanticOutcome {
+    Success {
+        content: OwnedFoldedString,
+        module_resources: ModuleResourceTable,
+        warnings: Vec<CompilerDiagnostic>,
+        source_builder: SourceDatabaseBuilder,
+    },
+    Diagnosed {
+        messages: CompilerMessages,
+        source_builder: SourceDatabaseBuilder,
+    },
+}
+
+/// Bind and order retained syntax without consuming the preparation owner's span builders.
+fn order_template_headers(
+    prepared_sources: &mut [FileFrontendPrepareOutput],
+    source_builder: &mut SourceDatabaseBuilder,
+    path_resolver: &ProjectPathResolver,
+    resolved_references: Option<&ResolvedFileReferenceTable>,
+    string_table: &mut StringTable,
+) -> Result<SortedHeaders, PremergeFailure> {
+    let (source_files, _) = source_builder.split();
+    let prepared_syntax =
+        prepare_header_syntax(prepared_sources, string_table, &mut |source, diagnostic| {
+            diagnostic.capture_preparation_span(source)
+        })
+        .map_err(|failure| match failure {
+            HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
+                PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
+            ),
+            HeaderPreparationFailure::Infrastructure(error) => {
+                PremergeFailure::Infrastructure(error)
+            }
+        })?;
+    let bound_headers = bind_module_headers(
+        prepared_syntax,
+        &ExternalPackageRegistry::new(),
+        &ExternalImportResolutionTable::default(),
+        &SourceProviderDependencySet::default(),
+        Some(path_resolver),
+        source_files,
+        string_table,
+    )
+    .map_err(|failure| match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => PremergeFailure::Diagnosed(
+            PremergeDiagnosticBatch::from_bag(bag, std::mem::take(string_table)),
+        ),
+        HeaderPreparationFailure::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+    })?;
+
+    // Stage 0 supplies content-source edges for bundles; standalone requests have none.
+    let content_source_targets = match resolved_references {
+        Some(references) => {
+            ContentSourceTargets::from_resolved_references(references, source_files, string_table)
+        }
+        None => ContentSourceTargets::empty(),
+    };
+    resolve_module_dependencies(bound_headers, &content_source_targets, string_table)
+}
+
+fn fold_template_semantics(
+    sorted: SortedHeaders,
+    entry_scope: InternedPath,
+    request: &MothTemplateCompilationRequest<'_>,
+    string_table: &mut StringTable,
+    resolved_references: Option<ResolvedFileReferenceTable>,
+    source_builder: SourceDatabaseBuilder,
+    module_origin: Option<StableModuleOriginIdentity>,
+) -> TemplateSemanticOutcome {
+    let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
+    let frozen_identity_handle = module_origin
+        .as_ref()
+        .map(|origin| FrozenIdentityHandle::for_domain(origin.package().clone()))
+        .unwrap_or_else(FrozenIdentityHandle::new);
+
+    // The owner shares its database with every AST reader. All of them end before the outcome
+    // returns, so the caller can regain exclusive access and install each span table once.
+    let source_database = source_builder.sources();
+    let ast_result = {
+        let file_value_resolution = resolved_references.map(|resolved_file_references| {
+            Rc::new(FileValueResolutionServices {
+                stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
+                    resolved_file_references,
+                    Arc::clone(source_database),
+                ))),
+                module_resources: Rc::clone(&module_resources),
+                module_origin,
+                frozen_identity_handle,
+            })
+        });
+        fold_template_ast(
+            sorted,
+            entry_scope.clone(),
+            request,
+            string_table,
+            file_value_resolution,
+        )
+    };
+
+    let mut ast = match ast_result {
+        Ok(ast) => ast,
+        Err(messages) => {
+            return TemplateSemanticOutcome::Diagnosed {
+                messages,
+                source_builder,
+            };
+        }
+    };
+    let warnings = std::mem::take(&mut ast.warnings);
+
+    // Release the resource-table borrow before consuming its owner.
+    let content = {
+        let resources = module_resources.borrow();
+        extract_content_value(&ast, &entry_scope, &resources, string_table)
+    };
+    drop(ast);
+
+    let module_resources = match Rc::try_unwrap(module_resources) {
+        Ok(resources) => resources.into_inner(),
+        Err(_) => {
+            return TemplateSemanticOutcome::Diagnosed {
+                messages: CompilerMessages::from_error_with_warnings(
+                    CompilerError::compiler_error(
+                        "Moth template resource table still has a live shared handle after AST folding",
+                    ),
+                    warnings,
+                    string_table,
+                ),
+                source_builder,
+            };
+        }
+    };
+
+    match content {
+        Ok(content) => TemplateSemanticOutcome::Success {
+            content,
+            module_resources,
+            warnings,
+            source_builder,
+        },
+        Err(mut messages) => {
+            messages.prepend_diagnostics_preserving_context(warnings);
+            TemplateSemanticOutcome::Diagnosed {
+                messages,
+                source_builder,
+            }
+        }
+    }
+}
+
+/// Finalize the private source database once its last span producer has finished.
+fn attach_finalized_source_database(
+    mut messages: CompilerMessages,
+    source_builder: SourceDatabaseBuilder,
+    string_table: &StringTable,
+) -> CompilerMessages {
+    match source_builder.finish() {
+        Ok(source_files) => {
+            messages.set_source_database(Arc::new(source_files));
+            messages
+        }
+        Err(error) => CompilerMessages::from_error_with_warnings(
+            error,
+            messages.into_diagnostics(),
+            string_table,
+        ),
+    }
+}
+
+/// Prepare the standalone template source exactly once.
+///
+/// The preparation owner lends its split database and span-builder view for this one call, so
+/// the delta's returned builder can be retained beside the immutable borrow that produced it.
 fn prepare_template_source(
-    source_files: &SourceFileTable,
+    source_files: &Arc<SourceDatabase>,
     path_resolver: &ProjectPathResolver,
     request: &MothTemplateCompilationRequest<'_>,
-    entry_file_id: Option<FileId>,
+    source_code: &str,
+    entry_file_id: SourceId,
     string_table: &mut StringTable,
-) -> Result<FileFrontendPrepareOutput, CompilerMessages> {
+    span_builder: ExtendedSpanBuilder,
+) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
-        entry_file_id,
-        project_path_resolver: Some(path_resolver.clone()),
+        entry_file_id: Some(entry_file_id),
+        project_path_resolver: Some(path_resolver),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -307,30 +629,20 @@ fn prepare_template_source(
     };
     let input = FrontendFilePrepareInput {
         source: FrontendFilePrepareSource::MothTemplate {
-            source_code: request.source_code.clone(),
+            source_code,
             source_path: request.source_path.to_path_buf(),
         },
+        source_id: entry_file_id,
+        span_builder,
         const_template_offset: 0,
         runtime_fragment_offset: 0,
     };
 
-    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table).map_err(|error| {
-        match error {
-            FileFrontendPrepareFailure::Diagnosed(error) => {
-                let mut messages =
-                    CompilerMessages::from_diagnostic(*error.diagnostic, string_table.clone());
-                messages.prepend_diagnostics_preserving_context(error.warnings);
-                messages
-            }
-            FileFrontendPrepareFailure::Infrastructure(error) => {
-                CompilerMessages::from_error(error, string_table.clone())
-            }
-        }
-    })
+    CompilerFrontend::prepare_file_frontend_local(&context, input, string_table)
 }
 
 fn fold_template_ast(
-    sorted: crate::compiler_frontend::module_dependencies::SortedHeaders,
+    sorted: SortedHeaders,
     entry_scope: InternedPath,
     request: &MothTemplateCompilationRequest<'_>,
     string_table: &mut StringTable,

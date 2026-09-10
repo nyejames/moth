@@ -15,8 +15,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 pub(super) fn parse_builtin_method_args_typed(
     token_stream: &mut FileTokens,
@@ -24,7 +25,7 @@ pub(super) fn parse_builtin_method_args_typed(
     expected_type_ids: &[TypeId],
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    member_location: &SourceLocation,
+    member_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
     let expectations = expected_type_ids
@@ -57,7 +58,7 @@ pub(super) fn parse_builtin_method_args_typed(
         CallDiagnosticContext::builtin_member(member_name),
         &parsed_arguments,
         &expectations,
-        member_location.to_owned(),
+        member_span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,

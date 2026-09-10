@@ -9,4 +9,4 @@ diagnostic_codes = ["MOTH-IMPORT-0011"]
 code = "MOTH-IMPORT-0011"
 path = "input/cards/@mod.moth"
 line = 2
-column = 13
+column = 12

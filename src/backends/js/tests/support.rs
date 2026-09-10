@@ -22,22 +22,40 @@ use crate::compiler_frontend::datatypes::ids::{
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
-use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, ChoiceId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{
+    BlockId, ChoiceId, FunctionId, HirNodeId, LocalId, RegionId,
+};
 use crate::compiler_frontend::hir::module::{HirChoice, HirModule};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-pub(super) use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
-    bool_expression, expression, int_expression, local, statement, string_expression,
-    unit_expression,
+    bool_expression, expression, int_expression, string_expression, unit_expression,
 };
+
+pub(super) fn statement(id: u32, kind: HirStatementKind) -> HirStatement {
+    HirStatement {
+        id: HirNodeId(id),
+        kind,
+        span: None,
+    }
+}
+
+pub(super) fn local(local_id: u32, ty: TypeId, region: RegionId) -> HirLocal {
+    HirLocal {
+        id: LocalId(local_id),
+        ty,
+        mutable: true,
+        region,
+        span: None,
+    }
+}
 
 pub(super) use crate::compiler_frontend::symbols::interned_path::InternedPath;
 pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -276,7 +294,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         id: BlockId(0),
         region,
         locals: vec![],
-        statements: vec![statement(1, HirStatementKind::Expr(map_expression), 1)],
+        statements: vec![statement(1, HirStatementKind::Expr(map_expression))],
         terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
     };
 
@@ -337,7 +355,7 @@ fn lower_minimal_module_with_cast(
         id: BlockId(0),
         region,
         locals: vec![],
-        statements: vec![statement(1, HirStatementKind::Expr(cast_call), 1)],
+        statements: vec![statement(1, HirStatementKind::Expr(cast_call))],
         terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
     };
 
@@ -434,7 +452,6 @@ pub(super) fn lower_minimal_module_with_io_call(
             args: vec![string_expression(2, "hello", types.string, region)],
             result: None,
         },
-        1,
     );
 
     let block = HirBlock {
@@ -511,7 +528,6 @@ pub(super) fn lower_minimal_module_with_io_input_call(
             args,
             result: None,
         },
-        1,
     );
 
     let block = HirBlock {

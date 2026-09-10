@@ -1186,10 +1186,14 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         &type_environment,
     )
     .expect_err("invalid request should produce a lowering diagnostic");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm lowering failure should be wrapped for rendering");
-    assert!(message.contains("missing stable export name for FunctionId(0)"));
+    assert!(
+        error
+            .msg
+            .contains("missing stable export name for FunctionId(0)")
+    );
 }
 
 #[test]
@@ -1237,10 +1241,10 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         &type_environment,
     )
     .expect_err("unsupported host call should produce diagnostic");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm lowering failure should be wrapped for rendering");
-    assert!(message.contains("<synthetic>"));
+    assert!(error.msg.contains("<synthetic>"));
 }
 
 #[test]
@@ -1356,10 +1360,10 @@ fn selected_function_policy_ignores_unselected_host_calls() {
         &type_environment,
     )
     .expect_err("an unselected function must not become a Wasm export");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("Wasm request validation should fail before lowering");
-    assert!(message.contains("absent from the selected function plan"));
+    assert!(error.msg.contains("absent from the selected function plan"));
 }
 
 #[test]

@@ -5,10 +5,9 @@
 //! but need caller-specific diagnostic wording. One classifier distinguishes non-place,
 //! immutable-place and mutable-place receivers so each source state gets distinct guidance.
 //!
-//! All validation results are boxed `CompilerDiagnostic` values so this owner boundary does not
-//! propagate large `Err` payloads through `Result<(), CompilerDiagnostic>` at every caller.
-//! Callers that already hold `ExpressionParseError::Diagnostic(Box<CompilerDiagnostic>)` reuse
-//! the boxed result directly via the `From<Box<CompilerDiagnostic>>` conversion.
+//! Validation results carry plain `CompilerDiagnostic` values on the diagnosed
+//! lane. Callers that already hold `ExpressionParseError::Diagnostic` preserve
+//! that value through the direct conversion.
 
 use super::ReceiverAccessMode;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
@@ -18,9 +17,8 @@ use crate::compiler_frontend::ast::place_access::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverCallReason, ReceiverCallKind,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 /// Which receiver-call surface owns a receiver-access diagnostic, plus the method name.
 ///
 /// WHAT: carries the method name and maps the access context to the `ReceiverCallKind` payload
@@ -58,7 +56,7 @@ pub(super) struct ReceiverAccessRequirement {
     pub diagnostic: ReceiverAccessDiagnostic,
 }
 
-type ReceiverAccessResult = Result<(), Box<CompilerDiagnostic>>;
+type ReceiverAccessResult = Result<(), CompilerDiagnostic>;
 
 // --------------------------
 //  Validation entry point
@@ -67,8 +65,8 @@ type ReceiverAccessResult = Result<(), Box<CompilerDiagnostic>>;
 pub(super) fn validate_receiver_access(
     receiver_node: &AstNode,
     access_mode: ReceiverAccessMode,
-    method_boundary: &SourceLocation,
-    authored_marker_location: Option<&SourceLocation>,
+    method_boundary_span: Option<SourceSpan>,
+    authored_marker_span: Option<SourceSpan>,
     access_requirement: ReceiverAccessRequirement,
 ) -> ReceiverAccessResult {
     // A call that does not require mutable access rejects an authored `~` at the marker, since
@@ -77,8 +75,8 @@ pub(super) fn validate_receiver_access(
         if access_mode == ReceiverAccessMode::Mutable {
             return reject_unneeded_mutable_access_marker(
                 &access_requirement.diagnostic,
-                authored_marker_location,
-                method_boundary,
+                authored_marker_span,
+                method_boundary_span,
             );
         }
         return Ok(());
@@ -94,7 +92,7 @@ pub(super) fn validate_receiver_access(
             reject_mutable_receiver_missing_marker(
                 &access_requirement.diagnostic,
                 binding_name,
-                method_boundary,
+                method_boundary_span,
             )
         }
         // An immutable existing place cannot be repaired by adding `~`: the binding itself must
@@ -103,7 +101,7 @@ pub(super) fn validate_receiver_access(
             reject_immutable_receiver_mutable_method(
                 &access_requirement.diagnostic,
                 binding_name,
-                method_boundary,
+                method_boundary_span,
             )
         }
         // A temporary or non-place receiver cannot be mutated through. No marker was authored,
@@ -111,7 +109,7 @@ pub(super) fn validate_receiver_access(
         (ReceiverAccessMode::Shared, ReceiverSourceState::Temporary) => {
             reject_non_place_receiver_mutable_method(
                 &access_requirement.diagnostic,
-                method_boundary,
+                method_boundary_span,
             )
         }
         // An existing mutable place with an authored `~` satisfies the call.
@@ -122,8 +120,8 @@ pub(super) fn validate_receiver_access(
             reject_mutable_marker_on_immutable_receiver(
                 &access_requirement.diagnostic,
                 binding_name,
-                authored_marker_location,
-                method_boundary,
+                authored_marker_span,
+                method_boundary_span,
             )
         }
         // `~` authored on a temporary or non-place value: the marker is invalid because `~`
@@ -131,8 +129,8 @@ pub(super) fn validate_receiver_access(
         (ReceiverAccessMode::Mutable, ReceiverSourceState::Temporary) => {
             reject_mutable_marker_on_non_place_receiver(
                 &access_requirement.diagnostic,
-                authored_marker_location,
-                method_boundary,
+                authored_marker_span,
+                method_boundary_span,
             )
         }
     }
@@ -145,82 +143,82 @@ pub(super) fn validate_receiver_access(
 fn reject_mutable_receiver_missing_marker(
     access_diagnostic: &ReceiverAccessDiagnostic,
     binding_name: Option<StringId>,
-    method_boundary: &SourceLocation,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::MutableReceiverMissingMarker,
         access_diagnostic,
         binding_name,
-        method_boundary,
+        method_boundary_span,
     )
 }
 
 fn reject_immutable_receiver_mutable_method(
     access_diagnostic: &ReceiverAccessDiagnostic,
     binding_name: Option<StringId>,
-    method_boundary: &SourceLocation,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
         access_diagnostic,
         binding_name,
-        method_boundary,
+        method_boundary_span,
     )
 }
 
 fn reject_non_place_receiver_mutable_method(
     access_diagnostic: &ReceiverAccessDiagnostic,
-    method_boundary: &SourceLocation,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::NonPlaceReceiverMutableMethod,
         access_diagnostic,
         None,
-        method_boundary,
+        method_boundary_span,
     )
 }
 
 fn reject_mutable_marker_on_immutable_receiver(
     access_diagnostic: &ReceiverAccessDiagnostic,
     binding_name: Option<StringId>,
-    authored_marker_location: Option<&SourceLocation>,
-    method_boundary: &SourceLocation,
+    authored_marker_span: Option<SourceSpan>,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::MutableMarkerOnImmutableReceiver,
         access_diagnostic,
         binding_name,
-        authored_marker_location.unwrap_or(method_boundary),
+        authored_marker_span.or(method_boundary_span),
     )
 }
 
 fn reject_mutable_marker_on_non_place_receiver(
     access_diagnostic: &ReceiverAccessDiagnostic,
-    authored_marker_location: Option<&SourceLocation>,
-    method_boundary: &SourceLocation,
+    authored_marker_span: Option<SourceSpan>,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::MutableMarkerOnNonPlaceReceiver,
         access_diagnostic,
         None,
-        authored_marker_location.unwrap_or(method_boundary),
+        authored_marker_span.or(method_boundary_span),
     )
 }
 
 fn reject_unneeded_mutable_access_marker(
     access_diagnostic: &ReceiverAccessDiagnostic,
-    authored_marker_location: Option<&SourceLocation>,
-    method_boundary: &SourceLocation,
+    authored_marker_span: Option<SourceSpan>,
+    method_boundary_span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
     reject(
         InvalidReceiverCallReason::UnneededMutableAccessMarker,
         access_diagnostic,
         None,
-        authored_marker_location.unwrap_or(method_boundary),
+        authored_marker_span.or(method_boundary_span),
     )
 }
 
-/// Builds the shared receiver-access diagnostic from the reason, access context and location.
+/// Builds the shared receiver-access diagnostic from the reason, access context and span.
 ///
 /// WHAT: threads the method name, receiver kind and optional simple receiver binding name into
 ///       the structured payload, and never repurposes the type field as a value name.
@@ -230,14 +228,14 @@ fn reject(
     reason: InvalidReceiverCallReason,
     access_diagnostic: &ReceiverAccessDiagnostic,
     receiver_binding_name: Option<StringId>,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> ReceiverAccessResult {
-    Err(Box::new(CompilerDiagnostic::invalid_receiver_call(
+    Err(CompilerDiagnostic::invalid_receiver_call(
         reason,
         None,
         Some(access_diagnostic.method_name()),
         Some(access_diagnostic.receiver_kind()),
         receiver_binding_name,
-        location.to_owned(),
-    )))
+        span,
+    ))
 }

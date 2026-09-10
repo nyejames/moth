@@ -21,12 +21,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,8 +34,9 @@ use std::sync::Arc;
 fn parse_template(
     source: &str,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut token_stream = template_tokens_from_source(source, string_table);
+    let mut token_stream = template_tokens_from_source(source, string_table, span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
     let template_ir_store = context.template_ir_store();
 
@@ -49,8 +49,9 @@ fn parse_template(
 fn parse_const_required_template(
     source: &str,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let mut token_stream = template_tokens_from_source(source, string_table);
+    let mut token_stream = template_tokens_from_source(source, string_table, span_builder);
     let context = new_constant_context(token_stream.src_path.to_owned());
     let template_ir_store = context.template_ir_store();
 
@@ -124,7 +125,9 @@ fn parser_tir_root_child_origins(
 #[test]
 fn parser_tir_owns_contiguous_literal_body_text() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[:\nalpha\nbeta]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[:\nalpha\nbeta]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     assert_eq!(
@@ -137,7 +140,12 @@ fn parser_tir_owns_contiguous_literal_body_text() {
 #[test]
 fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: \"quoted\" `raw` plain]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: \"quoted\" `raw` plain]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     assert_eq!(
@@ -149,7 +157,9 @@ fn parser_tir_records_quoted_and_raw_markers_as_body_text() {
 #[test]
 fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$doc:\n[: child]\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[$doc:\n[: child]\n]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     assert_eq!(
@@ -165,7 +175,12 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
     // because the TIR formatter is authoritative for child-template output. The
     // final folded output still matches the old linear-text result.
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: before [: child] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -203,8 +218,12 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
 #[test]
 fn parser_preserves_foldable_nested_child_as_template_boundary() {
     let mut string_table = StringTable::new();
-    let (template, store) =
-        parse_const_required_template("[:before[:child]after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_const_required_template(
+        "[:before[:child]after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     // The foldable nested child is now TIR-owned: it appears as a
@@ -303,9 +322,11 @@ fn tir_subtree_contains_aggregate_output(
 #[test]
 fn parser_tir_records_if_else_if_else_branch_chain() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[if true:\nfirst\n[else if false]\nsecond\n[else]\nthird\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -315,7 +336,9 @@ fn parser_tir_records_if_else_if_else_branch_chain() {
     assert!(parent_template.summary.has_control_flow);
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -340,11 +363,18 @@ fn parser_tir_records_if_else_if_else_branch_chain() {
 #[test]
 fn template_tir_records_child_template_in_branch_body() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[if true:before [:child] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[if true:before [:child] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -409,7 +439,9 @@ fn branch_chain_from_root(
         .expect("BranchChain node should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches.clone(), *fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches.clone(), *fallback),
         other => panic!("expected BranchChain node, found {other:?}"),
     }
 }
@@ -417,7 +449,12 @@ fn branch_chain_from_root(
 #[test]
 fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[\"prefix\", if true:body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[\"prefix\", if true:body]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let (branches, fallback) = branch_chain_from_root(&template, &store);
@@ -449,9 +486,11 @@ fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
 #[test]
 fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[\"prefix\", if false:\nbranch\n[else]\nfallback\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -483,9 +522,11 @@ fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
 #[test]
 fn parser_tir_trims_loop_control_boundary_whitespace() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    [continue]\n    visible\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -513,7 +554,9 @@ fn parser_tir_trims_loop_control_boundary_whitespace() {
 #[test]
 fn parser_tir_records_loop_node() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[loop true: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[loop true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     let parent_template = store
@@ -556,7 +599,12 @@ fn parser_tir_records_loop_node() {
 #[test]
 fn template_tir_records_child_template_in_loop_body() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[loop true:before [:child] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[loop true:before [:child] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
@@ -583,9 +631,11 @@ fn template_tir_records_child_template_in_loop_body() {
 #[test]
 fn parser_tir_records_loop_control_markers_inside_loop_body() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    before\n    [break]\n    after\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -614,9 +664,11 @@ fn parser_tir_records_loop_control_markers_inside_loop_body() {
 #[test]
 fn parser_tir_records_continue_marker_inside_loop_body() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[loop true:\n    before\n    [continue]\n    after\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -659,7 +711,12 @@ fn body_text(
 #[test]
 fn parser_tir_records_default_slot_placeholder() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: before [$slot] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: before [$slot] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -693,7 +750,12 @@ fn parser_tir_records_default_slot_placeholder() {
 #[test]
 fn parser_tir_records_named_slot_placeholder() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: before [$slot(\"name\")] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: before [$slot(\"name\")] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -715,7 +777,12 @@ fn parser_tir_records_named_slot_placeholder() {
 #[test]
 fn parser_tir_records_positional_slot_placeholder() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: before [$slot(1)] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: before [$slot(1)] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -736,7 +803,9 @@ fn parser_tir_records_positional_slot_placeholder() {
 #[test]
 fn parser_tir_records_string_literal_head_before_body_with_head_origin() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[\"head\": body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[\"head\": body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -752,7 +821,8 @@ fn parser_tir_records_string_literal_head_before_body_with_head_origin() {
 #[test]
 fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[42: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template("[42: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -774,20 +844,11 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
 #[test]
 fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let source_name = string_table.intern("source");
     let source_path = scope.append(source_name);
-    let source_location = SourceLocation {
-        scope: scope.clone(),
-        start_pos: CharPosition {
-            line_number: 1,
-            char_column: 0,
-        },
-        end_pos: CharPosition {
-            line_number: 1,
-            char_column: 120,
-        },
-    };
+    let source_span = None;
     let source = ReactiveSource {
         path: source_path.clone(),
         kind: ReactiveSourceKind::Declaration,
@@ -796,7 +857,7 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
         source_path.clone(),
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        source_location.clone(),
+        source_span,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
@@ -805,10 +866,12 @@ fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
     let declaration = Declaration {
         id: source_path.clone(),
         value: source_expression,
+        binding_span: None,
         config_qualifier: None,
     };
 
-    let mut token_stream = template_tokens_from_source("[$(source): body]", &mut string_table);
+    let mut token_stream =
+        template_tokens_from_source("[$(source): body]", &mut string_table, &mut span_builder);
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
         token_stream.src_path.to_owned(),
@@ -880,7 +943,12 @@ fn root_text_excluding_opaque_anchors(
 #[test]
 fn formatter_inline_code_literal_preserves_code_markup_in_parser_tir() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md: `literal code`]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md: `literal code`]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -904,30 +972,25 @@ fn formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor() {
     // `DynamicExpression` anchors, so markdown inline code can pair across the
     // inserted scalar string through the TIR formatter path.
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let value_name = string_table.intern("value");
     let declarations = vec![Declaration {
         id: scope.append(value_name),
         value: Expression::string_slice(
             string_table.intern("ANCHOR"),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120,
-                },
-            },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
-    let mut token_stream =
-        template_tokens_from_source("[$md: `before [value] after`]", &mut string_table);
+    let mut token_stream = template_tokens_from_source(
+        "[$md: `before [value] after`]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let context = constant_template_context(&token_stream.src_path, &declarations);
     let template = Template::new(&mut token_stream, &context, vec![], &mut string_table)
         .expect("markdown inline-code with body reference should parse");
@@ -974,8 +1037,12 @@ fn inline_code_head_insert_records_formatted_tir_phase() {
     // insert as a `DynamicExpression` anchor, so the formatted TIR root records
     // the inline-code span.
     let mut string_table = StringTable::new();
-    let (template, store) =
-        parse_template("[$md:\nLiteral syntax `[\"[slot]\"]`\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md:\nLiteral syntax `[\"[slot]\"]`\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -1007,7 +1074,12 @@ fn head_stringslice_records_formatted_tir_phase() {
     // Head-origin literal text is preserved unchanged by formatters, so the
     // module-local `Formatted` TIR root remains available.
     let mut string_table = StringTable::new();
-    let (template, _store) = parse_template("[\"prefix\", $md: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, _store) = parse_template(
+        "[\"prefix\", $md: body]",
+        &mut string_table,
+        &mut span_builder,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1027,9 +1099,11 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
     // A `$children(..)` style wrapper with no body child templates is a no-op
     // wrapper; the formatted TIR root remains available.
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): body text]",
         &mut string_table,
+        &mut span_builder,
     );
 
     let reference = &template.tir_reference;
@@ -1051,9 +1125,11 @@ fn style_child_wrapper_with_children_records_formatted_tir_phase() {
     // formatted TIR root remains available because the TIR formatter preserves
     // child-template boundaries for wrapper application.
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
         &mut string_table,
+        &mut span_builder,
     );
 
     let reference = &template.tir_reference;
@@ -1075,7 +1151,9 @@ fn head_only_literal_text_records_formatted_tir_phase() {
     // for the formatter to contextually alter, so the module-local `Formatted`
     // TIR root remains available.
     let mut string_table = StringTable::new();
-    let (template, _store) = parse_template("[\"head\", $md:]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, _store) =
+        parse_template("[\"head\", $md:]", &mut string_table, &mut span_builder);
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1102,7 +1180,7 @@ fn build_template_with_direct_tir_root(
     context: &ScopeContext,
     kind: TemplateType,
     style: Style,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     build_root: impl FnOnce(
         &mut TemplateIrStore,
         &mut StringTable,
@@ -1114,16 +1192,16 @@ fn build_template_with_direct_tir_root(
         let mut store = store.borrow_mut();
         let (root, summary) = build_root(&mut store, string_table);
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.finish_template(root, style.clone(), kind.clone(), summary, location.clone())
+        builder.finish_template(root, style.clone(), kind.clone(), summary, span)
     };
     let context = TemplateViewContext::default();
     Template {
-        location,
         tir_reference: TemplateTirReference {
             root: template_id,
             phase: TemplateTirPhase::Parsed,
             context,
         },
+        span,
     }
 }
 
@@ -1139,25 +1217,26 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
+    };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span,
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
-                Expression::int(42, location.clone(), ValueMode::ImmutableOwned),
+                Expression::int(42, span, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                location.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1168,7 +1247,6 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -1200,7 +1278,7 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
 
     let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
@@ -1211,35 +1289,36 @@ fn reactive_body_segment_records_formatted_tir_phase() {
     let subscription = ReactiveSubscription {
         source: source.clone(),
         type_id: builtin_type_ids::STRING,
-        location: location.clone(),
+        span: None,
     };
     let expression = Expression::reference_with_type_id(
         source_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        location.clone(),
+        span,
         ValueMode::ImmutableOwned,
         ConstRecordState::ConstRecord,
     )
     .with_reactive_source(source);
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
+    };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span,
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
                 expression,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                location.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 dynamic_expression_count: 1,
                 max_depth: 1,
@@ -1251,7 +1330,6 @@ fn reactive_body_segment_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -1308,7 +1386,7 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         "main.moth",
         &mut string_table,
     ));
-    let location = SourceLocation::default();
+    let span = None;
 
     let source_path = InternedPath::from_single_str("main.moth/#reactive0", &mut string_table);
     let expected_source_path = source_path.clone();
@@ -1318,17 +1396,18 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
             kind: ReactiveSourceKind::Declaration,
         },
         type_id: builtin_type_ids::STRING,
-        location: location.clone(),
+        span: None,
+    };
+    let style = Style {
+        formatter: Some(markdown_formatter()),
+        ..Style::default()
     };
 
     let mut template = build_template_with_direct_tir_root(
         &context,
         TemplateType::String,
-        Style {
-            formatter: Some(markdown_formatter()),
-            ..Style::default()
-        },
-        location.clone(),
+        style.clone(),
+        span,
         move |store, string_table| {
             let text = string_table.intern("reactive body");
             let byte_len = "reactive body".len();
@@ -1338,9 +1417,9 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
                 byte_len,
                 TemplateSegmentOrigin::Body,
                 Some(subscription),
-                location.clone(),
+                span,
             );
-            let root = builder.push_sequence_node(vec![body_node], location.clone());
+            let root = builder.push_sequence_node(vec![body_node], span);
             let summary = TemplateIrSummary {
                 estimated_output_bytes: byte_len,
                 text_node_count: 1,
@@ -1354,7 +1433,6 @@ fn reactive_literal_text_segment_records_formatted_tir_phase() {
         &mut string_table,
     );
 
-    let style = effective_tir_style(&template, &context);
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
         store
@@ -1399,7 +1477,8 @@ fn head_expression_folds_through_tir_formatter() {
     // The TIR formatter now owns that shape directly instead of rebuilding a
     // parser TIR.
     let mut string_table = StringTable::new();
-    let (template, _store) = parse_template("[42, $md:]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, _store) = parse_template("[42, $md:]", &mut string_table, &mut span_builder);
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -1425,7 +1504,12 @@ fn raw_directive_preserves_whitespace_and_advances_through_formatter_adapter() {
     // and advances the TIR reference to `Formatted`. The important behavior is
     // that the authored whitespace survives unchanged.
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$raw:\n    Hello\n    World\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$raw:\n    Hello\n    World\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let tir_reference = &template.tir_reference;
@@ -1481,7 +1565,12 @@ fn parent_formatter_does_not_leak_into_nested_child_without_formatter() {
     // A `$md` parent must not format the body of a nested child template
     // that has no formatter of its own.
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md: outer [: <b>inner</b> ]]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md: outer [: <b>inner</b> ]]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let parent_reference = &template.tir_reference;
@@ -1521,7 +1610,12 @@ fn nested_child_with_own_formatter_is_formatted_independently() {
     // A nested child that redeclares `$md` must be formatted independently
     // through the TIR formatter path, not inherit the parent formatter state.
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md: outer [$md: <b>inner</b>]]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md: outer [$md: <b>inner</b>]]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let parent_reference = &template.tir_reference;
@@ -1563,7 +1657,8 @@ fn nested_child_with_own_formatter_is_formatted_independently() {
 #[test]
 fn formatted_tir_reference_installs_formatted_output_for_simple_template() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template("[$md: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
     let tir_reference = &template.tir_reference;
 
@@ -1582,7 +1677,12 @@ fn formatted_tir_reference_installs_formatted_output_for_simple_template() {
 #[test]
 fn formatted_tir_reference_installs_with_opaque_body_child_template() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md: before [: child] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
     let tir_reference = &template.tir_reference;
 
@@ -1631,6 +1731,7 @@ fn formatted_tir_reference_installs_with_opaque_body_child_template() {
 #[test]
 fn formatter_head_chain_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
@@ -1638,8 +1739,11 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
-    let mut wrapper_tokens =
-        template_tokens_from_source("[:<article>[$slot]</article>]", &mut string_table);
+    let mut wrapper_tokens = template_tokens_from_source(
+        "[:<article>[$slot]</article>]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
     let wrapper = Template::new(
@@ -1653,10 +1757,12 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
-    let mut parent_tokens = template_tokens_from_source("[wrapper, $md: body]", &mut string_table);
+    let mut parent_tokens =
+        template_tokens_from_source("[wrapper, $md: body]", &mut string_table, &mut span_builder);
     let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration])
         .with_template_ir_store(Rc::clone(&shared_store));
     let template = Template::new(
@@ -1686,6 +1792,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
 #[test]
 fn positional_default_slot_children_preserve_separator_whitespace() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
@@ -1696,6 +1803,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let mut wrapper_tokens = template_tokens_from_source(
         "[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
@@ -1710,12 +1818,14 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
     let mut parent_tokens = template_tokens_from_source(
         "[wrapper:\n    [: First]\n    [: Second]\n    [: Third]\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let parent_context = constant_template_context(&parent_tokens.src_path, &[declaration])
         .with_template_ir_store(Rc::clone(&shared_store));
@@ -1739,9 +1849,11 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
 #[test]
 fn formatter_children_wrapper_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
         &mut string_table,
+        &mut span_builder,
     );
 
     let reference = &template.tir_reference;
@@ -1765,12 +1877,14 @@ fn formatter_children_wrapper_composition_keeps_formatted_reference() {
 #[test]
 fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
 
     let mut wrapper_tokens = template_tokens_from_source(
         "[$md:title[$slot(\"title\")]body[$slot]]",
         &mut string_table,
+        &mut span_builder,
     );
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
@@ -1789,8 +1903,11 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         "explicit formatter named-slot receivers can install formatted TIR"
     );
 
-    let mut insert_tokens =
-        template_tokens_from_source("[$md, $insert(\"title\"):Heading]", &mut string_table);
+    let mut insert_tokens = template_tokens_from_source(
+        "[$md, $insert(\"title\"):Heading]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let insert_context = new_constant_context(insert_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
     let insert = Template::new(
@@ -1812,17 +1929,22 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         Declaration {
             id: scope.append(string_table.intern("wrapper")),
             value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: scope.append(string_table.intern("heading")),
             value: Expression::template(insert, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
     ];
 
-    let mut parent_tokens =
-        template_tokens_from_source("[wrapper, heading:Body]", &mut string_table);
+    let mut parent_tokens = template_tokens_from_source(
+        "[wrapper, heading:Body]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let parent_context = constant_template_context(&parent_tokens.src_path, &declarations)
         .with_template_ir_store(Rc::clone(&shared_store));
     let template = Template::new(
@@ -1844,7 +1966,12 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
 #[test]
 fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
     let mut string_table = StringTable::new();
-    let (template, _store) = parse_template("[:before[$slot]after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, _store) = parse_template(
+        "[:before[$slot]after]",
+        &mut string_table,
+        &mut span_builder,
+    );
 
     let reference = &template.tir_reference;
 
@@ -1863,9 +1990,11 @@ fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
 #[test]
 fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, _store) = parse_template(
         "[$children([:<b>[$slot]</b>]): hello [:child] ]",
         &mut string_table,
+        &mut span_builder,
     );
 
     let reference = &template.tir_reference;
@@ -1884,7 +2013,9 @@ fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
 #[test]
 fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md, if true: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[$md, if true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     let parent_template = store
@@ -1897,7 +2028,9 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
     );
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -1915,9 +2048,11 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
 #[test]
 fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
         "[$md, if false:\nbody\n[else]\nfallback\n]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -1927,7 +2062,9 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
     assert!(parent_template.summary.has_control_flow);
 
     let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, fallback } => (branches, fallback),
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => (branches, fallback),
         other => panic!("expected parser TIR BranchChain node, found {other:?}"),
     };
 
@@ -1947,33 +2084,51 @@ fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
         "<p>fallback</p>"
     );
 
-    assert_ne!(
-        branches[0].location,
-        SourceLocation::default(),
-        "prepared branch should retain a concrete parser source location"
+    let branch_span = branches[0]
+        .span
+        .expect("prepared branch should retain an authored source span");
+    assert_eq!(branch_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        branch_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > branch_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared branch span should cover authored bytes"
     );
-    assert_ne!(
-        store
-            .get_node(branches[0].body)
-            .expect("prepared branch body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared branch body root should retain a concrete parser source location"
-    );
-    assert_ne!(
-        store
-            .get_node(fallback_body)
-            .expect("prepared fallback body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared fallback body root should retain a concrete parser source location"
+    let branch_body_span = store
+        .get_node(branches[0].body)
+        .expect("prepared branch body root should exist")
+        .span
+        .expect("prepared branch body root should retain an authored source span");
+    assert_eq!(branch_body_span.source(), SourceId::COMPILATION_ROOT);
+    let fallback_span = store
+        .get_node(fallback_body)
+        .expect("prepared fallback body root should exist")
+        .span
+        .expect("prepared fallback body root should retain an authored source span");
+    assert_eq!(fallback_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        fallback_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > fallback_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared fallback body span should cover authored bytes"
     );
 }
 
 #[test]
 fn formatted_tir_reference_installs_formatted_loop_body() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$md, loop true: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[$md, loop true: body]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let parent_template = store
@@ -2006,13 +2161,20 @@ fn formatted_tir_reference_installs_formatted_loop_body() {
     );
 
     assert_eq!(body_text(*body, &store, &string_table), "<p> body</p>");
-    assert_ne!(
-        store
-            .get_node(*body)
-            .expect("prepared loop body root should exist")
-            .location,
-        SourceLocation::default(),
-        "prepared loop body root should retain a concrete parser source location"
+    let body_span = store
+        .get_node(*body)
+        .expect("prepared loop body root should exist")
+        .span
+        .expect("prepared loop body root should retain an authored source span");
+    assert_eq!(body_span.source(), SourceId::COMPILATION_ROOT);
+    assert!(
+        body_span
+            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+            .end()
+            > body_span
+                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
+                .start(),
+        "prepared loop body span should cover authored bytes"
     );
 }
 
@@ -2023,8 +2185,10 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
     // / `$raw` preservation). Their owning TIR references should reach the
     // owning `Formatted` phase while preserving normalized body output.
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
 
-    let (branch_template, store) = parse_template("[if true: body]", &mut string_table);
+    let (branch_template, store) =
+        parse_template("[if true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
     let branch_chain = match parser_tir_control_flow_root_kind(&branch_template, &store) {
         TemplateIrNodeKind::BranchChain { branches, .. } => branches,
@@ -2041,8 +2205,11 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (fallback_template, store) =
-        parse_template("[if false:\nbranch\n[else]\nfallback\n]", &mut string_table);
+    let (fallback_template, store) = parse_template(
+        "[if false:\nbranch\n[else]\nfallback\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
     let (branches, fallback) = branch_chain_from_root(&fallback_template, &store);
     assert_eq!(branches.len(), 1);
@@ -2062,7 +2229,8 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (loop_template, store) = parse_template("[loop true: body]", &mut string_table);
+    let (loop_template, store) =
+        parse_template("[loop true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
     let loop_node = match parser_tir_control_flow_root_kind(&loop_template, &store) {
         TemplateIrNodeKind::Loop { body, .. } => body,
@@ -2078,7 +2246,11 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         TemplateTirPhase::Formatted,
     );
 
-    let (raw_template, store) = parse_template("[$raw, if true:\n    raw\n]", &mut string_table);
+    let (raw_template, store) = parse_template(
+        "[$raw, if true:\n    raw\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
     let raw_branch_chain = match parser_tir_control_flow_root_kind(&raw_template, &store) {
         TemplateIrNodeKind::BranchChain { branches, .. } => branches,
@@ -2105,7 +2277,12 @@ fn default_whitespace_linear_records_formatted_tir_phase() {
     // formatter adapter, so no-formatter linear bodies produce a formatted TIR
     // root.
     let mut string_table = StringTable::new();
-    let (template, _store) = parse_template("[:\n    Hello\n    World\n]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, _store) = parse_template(
+        "[:\n    Hello\n    World\n]",
+        &mut string_table,
+        &mut span_builder,
+    );
 
     let reference = &template.tir_reference;
     assert_eq!(
@@ -2123,8 +2300,12 @@ fn default_whitespace_linear_records_formatted_tir_phase() {
 #[test]
 fn parser_tir_records_finalized_child_template_as_child_template_node() {
     let mut string_table = StringTable::new();
-    let (template, store) =
-        parse_const_required_template("[:before[:child]after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_const_required_template(
+        "[:before[:child]after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     let children = tir_root_child_ids(&template, &store);
@@ -2165,6 +2346,7 @@ fn parser_tir_records_finalized_child_template_as_child_template_node() {
 #[test]
 fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
@@ -2172,7 +2354,8 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
-    let mut wrapper_tokens = template_tokens_from_source("[:head]", &mut string_table);
+    let mut wrapper_tokens =
+        template_tokens_from_source("[:head]", &mut string_table, &mut span_builder);
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
     let wrapper = Template::new(
@@ -2186,9 +2369,11 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper.clone(), ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
-    let mut parent_tokens = template_tokens_from_source("[wrapper: body]", &mut string_table);
+    let mut parent_tokens =
+        template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder);
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_tokens.src_path.to_owned(),
@@ -2204,7 +2389,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
     let mut build_state = TemplateBuildState::new();
     let mut construction_context = TemplateConstructionContext::new(
         Rc::clone(&shared_store),
-        parent_tokens.current_location(),
+        Some(parent_tokens.current_span()),
     );
 
     let _parsed_head = parse_template_head(
@@ -2241,6 +2426,7 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
 #[test]
 fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let wrapper_scope =
@@ -2248,7 +2434,8 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let wrapper_name = string_table.intern("wrapper");
     let wrapper_path = wrapper_scope.append(wrapper_name);
 
-    let mut wrapper_tokens = template_tokens_from_source("[:head]", &mut string_table);
+    let mut wrapper_tokens =
+        template_tokens_from_source("[:head]", &mut string_table, &mut span_builder);
     let wrapper_context = new_constant_context(wrapper_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(&shared_store));
     let wrapper = Template::new(
@@ -2262,10 +2449,12 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
     let declaration = Declaration {
         id: wrapper_path,
         value: Expression::template(wrapper, ValueMode::ImmutableOwned),
+        binding_span: None,
         config_qualifier: None,
     };
 
-    let mut parent_tokens = template_tokens_from_source("[wrapper: body]", &mut string_table);
+    let mut parent_tokens =
+        template_tokens_from_source("[wrapper: body]", &mut string_table, &mut span_builder);
     let parent_context = ScopeContext::new_for_tests(
         ContextKind::Constant,
         parent_tokens.src_path.to_owned(),
@@ -2316,9 +2505,11 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
 #[test]
 fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let (parent, store) = parse_template(
         "[$children([:wrap]): [$fresh, if true: body]]",
         &mut string_table,
+        &mut span_builder,
     );
     let store = store.borrow();
 
@@ -2353,7 +2544,9 @@ fn doc_comment_with_formatter_records_comment_kind() {
     // `$doc` applies markdown formatting automatically while retaining the
     // comment directive kind on the module-local TIR root.
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[$doc: doc body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[$doc: doc body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
     let template_kind = store
         .get_template(template.tir_reference.root)
@@ -2375,7 +2568,8 @@ fn doc_comment_with_formatter_records_comment_kind() {
 #[test]
 fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[if true: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template("[if true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     // After render-unit preparation refreshes every branch body, the owner
@@ -2392,7 +2586,9 @@ fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
 #[test]
 fn no_prefix_loop_finalizes_with_direct_loop_root() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[loop true: body]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) =
+        parse_template("[loop true: body]", &mut string_table, &mut span_builder);
     let store = store.borrow();
 
     // After render-unit preparation refreshes the loop body, the owner root is
@@ -2409,7 +2605,12 @@ fn no_prefix_loop_finalizes_with_direct_loop_root() {
 #[test]
 fn linear_template_preserves_sequence_root_shape() {
     let mut string_table = StringTable::new();
-    let (template, store) = parse_template("[: before [: child] after]", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (template, store) = parse_template(
+        "[: before [: child] after]",
+        &mut string_table,
+        &mut span_builder,
+    );
     let store = store.borrow();
 
     // Linear templates (no control flow) always finalize with a Sequence root,

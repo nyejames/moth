@@ -35,6 +35,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     BindingTargetSyntax, parse_binding_target_syntax,
 };
+use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -75,6 +76,10 @@ pub(crate) fn parse_multi_bind_statement(
 
     validate_unique_target_names(&parsed_targets, string_table)?;
     validate_multi_bind_target_identifiers(&parsed_targets, context, string_table)?;
+    let first_target = parsed_targets
+        .first()
+        .expect("a parsed multi-bind must contain at least one target");
+    let node_span = first_target.span;
     let target_names = parsed_targets
         .iter()
         .map(|target| target.name)
@@ -119,7 +124,7 @@ pub(crate) fn parse_multi_bind_statement(
                 found: rhs_slots.len(),
             },
             None,
-            rhs_expression.location.clone(),
+            rhs_expression.span,
         )
         .into());
     }
@@ -139,7 +144,7 @@ pub(crate) fn parse_multi_bind_statement(
             targets: resolved_targets.targets,
             value: rhs_expression,
         },
-        location: token_stream.current_location(),
+        span: node_span,
         scope: context.scope.clone(),
     }))
 }
@@ -152,11 +157,7 @@ fn validate_multi_bind_target_identifiers(
     string_table: &mut StringTable,
 ) -> MultiBindResult<()> {
     for target in parsed_targets {
-        ensure_not_keyword_shadow_identifier(
-            target.name,
-            target.location.to_owned(),
-            string_table,
-        )?;
+        ensure_not_keyword_shadow_identifier(target.name, target.span, string_table)?;
 
         if context.is_assignment_target_unavailable(target.name) {
             return Err(CompilerDiagnostic::invalid_assignment_target(
@@ -166,7 +167,7 @@ fn validate_multi_bind_target_identifiers(
                 None,
                 None,
                 None,
-                target.location.to_owned(),
+                target.span,
             )
             .into());
         }
@@ -174,7 +175,7 @@ fn validate_multi_bind_target_identifiers(
         if context.get_reference(&target.name).is_none()
             && let Some(warning) = naming_warning_for_identifier(
                 target.name,
-                target.location.to_owned(),
+                target.span,
                 IdentifierNamingKind::ValueLike,
                 string_table,
             )
@@ -194,6 +195,7 @@ fn parse_target_list(
     string_table: &mut StringTable,
 ) -> MultiBindResult<Option<Vec<BindingTargetSyntax>>> {
     let start_index = token_stream.index;
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut parsed_targets = Vec::new();
     let mut saw_comma = false;
     let mut continuation_comma = None;
@@ -202,7 +204,7 @@ fn parse_target_list(
         if token_stream.current_token_kind() == &TokenKind::This {
             return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                 InvalidMultiBindReason::ThisTargetReserved,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -214,20 +216,21 @@ fn parse_target_list(
                 } else {
                     InvalidMultiBindReason::ExpectedTargetName
                 },
-                continuation_comma.unwrap_or_else(|| token_stream.current_location()),
+                continuation_comma.unwrap_or_else(|| Some(token_stream.current_span())),
             )
             .into());
         };
         token_stream.advance();
-        let target_syntax = parse_binding_target_syntax(name, token_stream, string_table)?;
+        let target_syntax =
+            parse_binding_target_syntax(name, token_stream, string_table, &mut span_builder)?;
         validate_target_mutability(&target_syntax, string_table)?;
         parsed_targets.push(target_syntax);
 
         match token_stream.current_token_kind() {
             TokenKind::Comma => {
                 saw_comma = true;
-                let comma_location = token_stream.current_location();
-                continuation_comma = Some(comma_location.clone());
+                let comma_location = Some(token_stream.current_span());
+                continuation_comma = Some(comma_location);
                 token_stream.advance();
 
                 while token_stream.current_token_kind() == &TokenKind::Newline {
@@ -251,7 +254,7 @@ fn parse_target_list(
             TokenKind::Newline | TokenKind::End | TokenKind::Eof => {
                 return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::MissingAssignmentOperator,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -259,7 +262,7 @@ fn parse_target_list(
             _ => {
                 return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
                     InvalidMultiBindReason::InvalidTokenAfterTarget,
-                    token_stream.current_location(),
+                    Some(token_stream.current_span()),
                 )
                 .into());
             }
@@ -286,7 +289,7 @@ fn validate_target_mutability(
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::MutableTargetNeedsExplicitType,
             Some(target_syntax.name),
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -305,7 +308,7 @@ fn validate_unique_target_names(
             return Err(CompilerDiagnostic::invalid_multi_bind(
                 InvalidMultiBindReason::DuplicateTarget,
                 Some(target.name),
-                target.location.clone(),
+                target.span,
             )
             .into());
         }
@@ -327,7 +330,7 @@ fn parse_multi_bind_rhs_expression(
     ) {
         return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MissingRightHandExpression,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -346,7 +349,7 @@ fn parse_multi_bind_rhs_expression(
     if token_stream.current_token_kind() == &TokenKind::Comma {
         return Err(CompilerDiagnostic::invalid_multi_bind_syntax(
             InvalidMultiBindReason::MultipleRightHandExpressions,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -403,7 +406,7 @@ fn classify_multi_bind_rhs(
                 return Err(CompilerDiagnostic::invalid_multi_bind(
                     InvalidMultiBindReason::RhsNotMultiValue,
                     None,
-                    expression.location.clone(),
+                    expression.span,
                 )
                 .into());
             };
@@ -412,7 +415,7 @@ fn classify_multi_bind_rhs(
                 return Err(CompilerDiagnostic::invalid_multi_bind(
                     InvalidMultiBindReason::RhsNotMultiValue,
                     None,
-                    expression.location.clone(),
+                    expression.span,
                 )
                 .into());
             }
@@ -423,7 +426,7 @@ fn classify_multi_bind_rhs(
         _ => Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::UnsupportedRhs,
             None,
-            expression.location.clone(),
+            expression.span,
         )
         .into()),
     }
@@ -440,7 +443,7 @@ fn extract_rhs_slot_types(
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
-            rhs_expression.location.clone(),
+            rhs_expression.span,
         )
         .into());
     };
@@ -489,15 +492,18 @@ fn resolve_multi_bind_targets(
 
             // Build the declaration with the canonical slot TypeId directly.
             // diagnostic_type is display-only; semantic identity comes from type_id.
+            // The binding anchor is the target-name token, not the placeholder value span.
+            let target_span = target_syntax.span;
             new_declarations.push(Declaration {
                 id: target_id.to_owned(),
                 value: Expression::new(
                     ExpressionKind::NoValue,
-                    target_syntax.location.clone(),
+                    target_span,
                     *slot_type,
                     target_data_type.to_owned(),
                     target_ownership.to_owned(),
                 ),
+                binding_span: target_span,
                 config_qualifier: None,
             });
 
@@ -506,7 +512,7 @@ fn resolve_multi_bind_targets(
                 type_id: *slot_type,
                 value_mode: target_ownership,
                 kind: MultiBindTargetKind::Declaration,
-                location: target_syntax.location.clone(),
+                span: target_span,
             });
             continue;
         };
@@ -547,7 +553,7 @@ fn resolve_existing_target(
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetMutableMarker,
             Some(target_syntax.name),
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -556,7 +562,7 @@ fn resolve_existing_target(
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetImmutable,
             Some(target_syntax.name),
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -568,7 +574,7 @@ fn resolve_existing_target(
             existing_declaration.value.type_id,
             *explicit_type_id,
             TypeMismatchContext::General,
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -578,7 +584,7 @@ fn resolve_existing_target(
             existing_declaration.value.type_id,
             slot_type,
             TypeMismatchContext::General,
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -588,7 +594,7 @@ fn resolve_existing_target(
         type_id: slot_type,
         value_mode: existing_declaration.value.value_mode.to_owned(),
         kind: MultiBindTargetKind::Assignment,
-        location: target_syntax.location.clone(),
+        span: target_syntax.span,
     })
 }
 
@@ -614,7 +620,7 @@ fn resolve_new_target_data_type(
             explicit_type_id,
             slot_type,
             TypeMismatchContext::General,
-            target_syntax.location.clone(),
+            target_syntax.span,
         )
         .into());
     }
@@ -634,15 +640,13 @@ fn binding_target_ownership(target_syntax: &BindingTargetSyntax) -> ValueMode {
 /// Insert freshly resolved declarations into the current scope context.
 fn register_new_declarations(context: &mut ScopeContext, new_declarations: Vec<Declaration>) {
     for declaration in new_declarations {
-        let binding_location = declaration.value.location.clone();
-        context.add_var(declaration, binding_location);
+        let binding_span = declaration.value.span;
+        context.add_var(declaration, binding_span);
     }
 }
 
 // --------------------------
 //  Helpers
-// --------------------------
-
 fn resolve_target_explicit_type(
     target_syntax: &BindingTargetSyntax,
     context: &mut ScopeContext,
@@ -657,6 +661,7 @@ fn resolve_target_explicit_type(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
+                declaring_file_id: context.shared.declaring_file_id,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -689,7 +694,7 @@ fn resolve_target_explicit_type(
 
         resolve_parsed_type_annotation(
             target_syntax.type_annotation.clone(),
-            &target_syntax.location,
+            target_syntax.span,
             &mut type_resolution_context,
             string_table,
             Some(context),
@@ -703,7 +708,7 @@ fn resolve_target_explicit_type(
     let type_id = resolve_diagnostic_type_to_type_id_checked(
         &resolved_annotation.diagnostic_type,
         type_interner.environment_mut_for_derived_types(),
-        &target_syntax.location,
+        target_syntax.span,
     )?;
 
     Ok(Some((type_id, resolved_annotation.diagnostic_type)))

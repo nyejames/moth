@@ -14,7 +14,6 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Resolved declaration reference returned by `ScopeContext::get_reference`.
@@ -28,7 +27,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(crate) enum ScopeDeclarationRef<'a> {
     Local {
         declaration: Rc<Declaration>,
-        binding_location: SourceLocation,
+        binding_span: Option<SourceSpan>,
     },
     Shared(&'a Declaration),
 }
@@ -42,13 +41,11 @@ impl<'a> ScopeDeclarationRef<'a> {
         }
     }
 
-    /// Return the authored binding-name location for a local declaration, or None
+    /// Return the authored binding-name span for a local declaration, or None
     /// for shared (module-level) declarations.
-    pub(crate) fn binding_location(&self) -> Option<&SourceLocation> {
+    pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
         match self {
-            ScopeDeclarationRef::Local {
-                binding_location, ..
-            } => Some(binding_location),
+            ScopeDeclarationRef::Local { binding_span, .. } => *binding_span,
             ScopeDeclarationRef::Shared(_) => None,
         }
     }
@@ -80,15 +77,14 @@ impl ScopeContext {
     //  Symbol lookup
     // --------------------------
 
-    pub(crate) fn get_reference(&self, name: &StringId) -> Option<ScopeDeclarationRef<'_>> {
-        // 1. Locals (latest visible local wins). Parent-linked frames walk the chain
-        //    without copying ancestor declarations into the current scope.
-        if let Some((declaration, binding_location)) =
+    pub(crate) fn get_reference<'a>(&'a self, name: &StringId) -> Option<ScopeDeclarationRef<'a>> {
+        // 1. Body-local declarations shadow every source-visible declaration.
+        if let Some((declaration, binding_span)) =
             self.arena.borrow().lookup(self.current_frame_id, name)
         {
             return Some(ScopeDeclarationRef::Local {
                 declaration,
-                binding_location,
+                binding_span,
             });
         }
 
@@ -379,24 +375,6 @@ impl ScopeContext {
             .get_function_by_id(function_id)?;
 
         Some((function_id, definition))
-    }
-
-    /// Look up the authored source location that made an external symbol visible in this file.
-    ///
-    /// WHAT: returns the import-site location for an explicit external import. Prelude-injected
-    /// symbols have no authored source location, so this returns `None` for them.
-    /// WHY: AST duplicate-declaration diagnostics use the authored dependency location as the
-    /// secondary label. Returning `None` for prelude symbols lets the diagnostic omit the
-    /// secondary label instead of fabricating an empty `SourceLocation::default()`.
-    pub(crate) fn lookup_visible_external_function_location(
-        &self,
-        name: StringId,
-    ) -> Option<SourceLocation> {
-        let file_visibility = self.file_visibility.as_ref()?;
-        file_visibility
-            .visible_external_symbol_locations
-            .get(&name)
-            .cloned()
     }
 
     /// Look up a visible external type by its source-level name.

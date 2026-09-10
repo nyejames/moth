@@ -2,6 +2,7 @@
 name = "moth"
 version = "0.1.12"
 edition = "2024"
+default-run = "moth"
 
 [workspace]
 members = [".", "xtask"]
@@ -19,6 +20,7 @@ resolver = "2"
 timers = []
 detailed_timers = ["timers"]
 benchmark_counters = []
+data_layout_memory_probe = ["timers", "benchmark_counters"]
 show_tokens = []
 show_headers = []
 show_ast = []
@@ -36,6 +38,12 @@ async_blocks = []
 name = "moth"
 path = "src/main.rs"
 
+
+[[bin]]
+name = "data_layout_memory_probe"
+path = "src/bin/data_layout_memory_probe.rs"
+required-features = ["data_layout_memory_probe"]
+
 [dependencies]
 rayon = "1.12"
 rustc-hash = "2.1.1"
@@ -47,6 +55,7 @@ wasm-encoder = "0.247.0"
 wasmparser = "0.247.0"
 notify = "8.2.0"
 ryu = "1.0.23"
+unicode-width = "0.2"
 
 # For future release builds:
 # oxc_minifier = "0.115.0"

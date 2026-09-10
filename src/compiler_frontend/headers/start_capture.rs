@@ -13,7 +13,7 @@ pub(crate) fn push_runtime_template_tokens_to_start_function(
     token_stream: &mut FileTokens,
     start_function_body: &mut Vec<Token>,
     string_table: &mut StringTable,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), CompilerDiagnostic> {
     start_function_body.push(opening_template_token);
 
     // Mutation: EOF diagnostics for unclosed templates intern the expected closing delimiter
@@ -25,10 +25,7 @@ pub(crate) fn push_runtime_template_tokens_to_start_function(
             start_function_body.push(token);
         },
         |location| {
-            Box::new(CompilerDiagnostic::unexpected_end_of_file(
-                Some(closing_bracket),
-                location,
-            ))
+            CompilerDiagnostic::unexpected_end_of_file(Some(closing_bracket), Some(location))
         },
     )
 }

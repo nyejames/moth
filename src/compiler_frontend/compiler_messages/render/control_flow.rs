@@ -7,7 +7,7 @@
 use crate::compiler_frontend::compiler_messages::{
     InvalidControlFlowStatementReason, InvalidMatchPatternReason, NonExhaustiveMatchReason,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 use super::named_value_or_default;
 
@@ -87,7 +87,7 @@ pub(crate) fn invalid_control_flow_statement_message(
 pub(crate) fn invalid_match_pattern_message(
     reason: InvalidMatchPatternReason,
     variant_name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let variant_text = named_value_or_default(variant_name, string_table, "this variant");
 
@@ -180,7 +180,7 @@ pub(crate) fn invalid_match_pattern_message(
 pub(crate) fn non_exhaustive_match_message(
     reason: NonExhaustiveMatchReason,
     missing_variants: &[StringId],
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         NonExhaustiveMatchReason::MissingElseArm => {

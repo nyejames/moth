@@ -23,7 +23,7 @@ pub(crate) fn check_expression_common_mistake(
 ) -> Option<CompilerDiagnostic> {
     let current = token_stream.current_token_kind();
     let next = token_stream.peek_next_token();
-    let location = token_stream.current_location();
+    let location = token_stream.current_span();
 
     match current {
         // `==`  →  `is`

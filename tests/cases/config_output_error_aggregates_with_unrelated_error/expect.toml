@@ -17,4 +17,4 @@ code = "MOTH-CONFIG-0001"
 occurrence = 2
 reason = "invalid_config.invalid_output_folder.parent_directory_segment"
 path = "input/config.moth"
-line = 4
+line = 5

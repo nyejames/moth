@@ -7,7 +7,6 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 use crate::compiler_frontend::ast::templates::styles::markdown::render_markdown_stream;
 use crate::compiler_frontend::ast::templates::template::TemplateFormatter;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 fn child_anchor(id: usize) -> FormatterOpaquePiece {
     FormatterOpaquePiece {
@@ -26,7 +25,7 @@ fn dynamic_anchor(id: usize) -> FormatterOpaquePiece {
 fn formatter_text_piece(text: &str, string_table: &mut StringTable) -> FormatterInputPiece {
     FormatterInputPiece::Text(FormatterTextPiece {
         text: string_table.intern(text),
-        location: SourceLocation::default(),
+        span: None,
     })
 }
 

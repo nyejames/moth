@@ -8,11 +8,9 @@
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[test]
 fn typed_call_constructor_sets_expression_and_result_type_ids() {
-    let location = SourceLocation::default();
     let mut type_environment = TypeEnvironment::new();
     let int_type_id = type_environment.builtins().int;
 
@@ -21,7 +19,7 @@ fn typed_call_constructor_sets_expression_and_result_type_ids() {
         vec![],
         vec![int_type_id],
         &mut type_environment,
-        location,
+        None,
     );
 
     assert_eq!(expression.type_id, int_type_id);

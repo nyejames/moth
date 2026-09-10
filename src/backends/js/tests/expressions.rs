@@ -27,7 +27,6 @@ fn integer_division_binop_emits_zero_checked_truncation_path() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 10, types.int, region),
         },
-        1,
     );
     let assign_rhs = statement(
         2,
@@ -35,7 +34,6 @@ fn integer_division_binop_emits_zero_checked_truncation_path() {
             target: HirPlace::Local(LocalId(1)),
             value: int_expression(2, 3, types.int, region),
         },
-        2,
     );
     let int_div_expr = expression(
         3,
@@ -66,7 +64,6 @@ fn integer_division_binop_emits_zero_checked_truncation_path() {
             target: HirPlace::Local(LocalId(2)),
             value: int_div_expr,
         },
-        3,
     );
 
     let block = HirBlock {
@@ -139,7 +136,6 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
             target: HirPlace::Local(LocalId(0)),
             value: string_expression(1, "hello", types.string, RegionId(0)),
         },
-        1,
     );
 
     let copy_expr = expression(
@@ -156,7 +152,6 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
             target: HirPlace::Local(LocalId(1)),
             value: copy_expr,
         },
-        2,
     );
 
     let block = HirBlock {
@@ -229,7 +224,7 @@ fn lowers_option_construct_expression() {
         ValueKind::RValue,
     );
 
-    let option_statement = statement(1, HirStatementKind::Expr(option_value), 1);
+    let option_statement = statement(1, HirStatementKind::Expr(option_value));
 
     let block = HirBlock {
         id: BlockId(0),
@@ -286,7 +281,7 @@ fn growable_collection_expression_lowers_to_array() {
         ValueKind::RValue,
     );
 
-    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr), 1);
+    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
 
     let block = HirBlock {
         id: BlockId(0),
@@ -345,7 +340,7 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         ValueKind::RValue,
     );
 
-    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr), 1);
+    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
 
     let block = HirBlock {
         id: BlockId(0),
@@ -397,7 +392,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         ValueKind::RValue,
     );
 
-    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr), 1);
+    let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
 
     let block = HirBlock {
         id: BlockId(0),
@@ -457,7 +452,7 @@ fn map_literal_with_entries_lowers_to_map_new() {
         ValueKind::RValue,
     );
 
-    let map_statement = statement(1, HirStatementKind::Expr(map_expr), 1);
+    let map_statement = statement(1, HirStatementKind::Expr(map_expr));
 
     let block = HirBlock {
         id: BlockId(0),
@@ -507,7 +502,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         ValueKind::RValue,
     );
 
-    let map_statement = statement(1, HirStatementKind::Expr(map_expr), 1);
+    let map_statement = statement(1, HirStatementKind::Expr(map_expr));
 
     let block = HirBlock {
         id: BlockId(0),

@@ -16,9 +16,8 @@ use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 /// Unique slot targets declared by a wrapper tree.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TirSlotSchema {
@@ -105,7 +104,7 @@ impl TirSlotSchema {
 
 /// Occurrence facts needed by routing and runtime sites.
 ///
-/// Wrapper-set IDs and the slot node's location are enough. Callers must not
+/// Wrapper-set IDs and the slot node's source span are enough. Callers must not
 /// clone a complete `TirSlotPlaceholder` just to carry these fields.
 #[derive(Debug, Clone)]
 pub(crate) struct TirSlotPlaceholderRef {
@@ -118,7 +117,7 @@ pub(crate) struct TirSlotPlaceholderRef {
     pub(crate) child_wrapper_set: Option<TemplateWrapperSetId>,
     pub(crate) applied_child_wrapper_set: Option<TemplateWrapperSetId>,
     pub(crate) skip_parent_child_wrappers: bool,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Complete slot layout for one wrapper tree.
@@ -229,7 +228,7 @@ fn collect_from_node(
                 child_wrapper_set: placeholder.child_wrapper_set,
                 applied_child_wrapper_set: placeholder.applied_child_wrapper_set,
                 skip_parent_child_wrappers: placeholder.skip_parent_child_wrappers,
-                location: node.location.clone(),
+                span: node.span,
             });
             Ok(())
         }
@@ -242,7 +241,9 @@ fn collect_from_node(
             visiting_templates,
         ),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             for branch in branches {
                 collect_from_node(
                     store,

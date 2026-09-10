@@ -18,7 +18,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// One binding introduced by const template folding.
@@ -48,7 +47,7 @@ pub(crate) struct ConstRangeCursor {
     kind: ConstRangeCursorKind,
     emitted_iterations: usize,
     limit: usize,
-    location: SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 enum ConstRangeCursorKind {
@@ -76,7 +75,7 @@ impl ConstRangeCursor {
     pub(crate) fn new(
         range: &RangeLoopSpec,
         limit: usize,
-        location: SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<Self, TemplateError> {
         let start = const_numeric_expression(&range.start)?;
         let end = const_numeric_expression(&range.end)?;
@@ -85,10 +84,10 @@ impl ConstRangeCursor {
             .as_ref()
             .map(const_numeric_expression)
             .transpose()?;
-        let step_location = range
+        let step_span = range
             .step
             .as_ref()
-            .map(|step_expression| step_expression.location.clone());
+            .and_then(|step_expression| step_expression.span);
 
         match (start, end, step) {
             (ConstNumericValue::Int(start), ConstNumericValue::Int(end), None) => Ok(Self {
@@ -100,7 +99,7 @@ impl ConstRangeCursor {
                 },
                 emitted_iterations: 0,
                 limit,
-                location,
+                span,
             }),
 
             (
@@ -108,13 +107,12 @@ impl ConstRangeCursor {
                 ConstNumericValue::Int(end),
                 Some(ConstNumericValue::Int(step)),
             ) => {
-                let step_magnitude =
-                    int_step_magnitude(step, step_location.unwrap_or_else(|| location.clone()))?;
+                let step_magnitude = int_step_magnitude(step, step_span.or(span))?;
 
                 if step_magnitude == 0 {
                     return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        location.clone(),
+                        span,
                     )
                     .into());
                 }
@@ -132,7 +130,7 @@ impl ConstRangeCursor {
                     },
                     emitted_iterations: 0,
                     limit,
-                    location,
+                    span,
                 })
             }
 
@@ -143,7 +141,7 @@ impl ConstRangeCursor {
                 if !start.is_finite() || !end.is_finite() {
                     return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        location.clone(),
+                        span,
                     )
                     .into());
                 }
@@ -152,7 +150,7 @@ impl ConstRangeCursor {
                     None => {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                            location.clone(),
+                            span,
                         )
                         .into());
                     }
@@ -161,7 +159,7 @@ impl ConstRangeCursor {
                         if magnitude == 0.0 || !magnitude.is_finite() {
                             return Err(CompilerDiagnostic::invalid_template_structure(
                                 InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                                location.clone(),
+                                span,
                             )
                             .into());
                         }
@@ -178,7 +176,7 @@ impl ConstRangeCursor {
                 if start + step == start {
                     return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        location.clone(),
+                        span,
                     )
                     .into());
                 }
@@ -192,12 +190,11 @@ impl ConstRangeCursor {
                     },
                     emitted_iterations: 0,
                     limit,
-                    location,
+                    span,
                 })
             }
         }
     }
-
     pub(crate) fn iteration_count(&self) -> usize {
         self.emitted_iterations
     }
@@ -222,7 +219,7 @@ impl ConstRangeCursor {
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
-                        self.location.clone(),
+                        self.span,
                     )
                     .into());
                 }
@@ -233,7 +230,7 @@ impl ConstRangeCursor {
                 *current = current.checked_add(*step).ok_or_else(|| {
                     CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        self.location.clone(),
+                        self.span,
                     )
                 })?;
 
@@ -256,7 +253,7 @@ impl ConstRangeCursor {
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: self.limit,
                         },
-                        self.location.clone(),
+                        self.span,
                     )
                     .into());
                 }
@@ -270,7 +267,7 @@ impl ConstRangeCursor {
                 if !current.is_finite() || *current == previous {
                     return Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-                        self.location.clone(),
+                        self.span,
                     )
                     .into());
                 }
@@ -281,11 +278,14 @@ impl ConstRangeCursor {
     }
 }
 
-fn int_step_magnitude(step: i32, location: SourceLocation) -> Result<i32, TemplateError> {
+fn int_step_magnitude(
+    step: i32,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> Result<i32, TemplateError> {
     step.checked_abs().ok_or_else(|| {
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            location,
+            span,
         )
         .into()
     })
@@ -313,7 +313,7 @@ fn const_numeric_expression(expression: &Expression) -> Result<ConstNumericValue
         ExpressionKind::Coerced { value, .. } => const_numeric_expression(value),
         _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            expression.location.clone(),
+            expression.span,
         )
         .into()),
     }
@@ -349,7 +349,7 @@ pub(crate) fn const_collection_items(
         ExpressionKind::Coerced { value, .. } => const_collection_items(value),
         _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
-            iterable.location.clone(),
+            iterable.span,
         )
         .into()),
     }
@@ -369,16 +369,12 @@ pub(crate) fn build_range_iteration_bindings(
 
     if let Some(item) = &bindings.item {
         let value = match counter {
-            ConstRangeIterationValue::Int(value) => Expression::int(
-                value,
-                item.value.location.clone(),
-                ValueMode::ImmutableOwned,
-            ),
-            ConstRangeIterationValue::Float(value) => Expression::float(
-                value,
-                item.value.location.clone(),
-                ValueMode::ImmutableOwned,
-            ),
+            ConstRangeIterationValue::Int(value) => {
+                Expression::int(value, item.value.span, ValueMode::ImmutableOwned)
+            }
+            ConstRangeIterationValue::Float(value) => {
+                Expression::float(value, item.value.span, ValueMode::ImmutableOwned)
+            }
         }
         .with_synthetic_interface_provenance(range_provenance.clone());
         fold_bindings.push(TemplateFoldBinding {
@@ -392,7 +388,7 @@ pub(crate) fn build_range_iteration_bindings(
             path: index.id.clone(),
             value: Expression::int(
                 zero_based_index as i32,
-                index.value.location.clone(),
+                index.value.span,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(range_provenance.clone()),
@@ -412,7 +408,7 @@ pub(crate) fn build_collection_iteration_bindings(
 
     if let Some(item) = &bindings.item {
         let mut value = item_value.to_owned();
-        value.location = item.value.location.clone();
+        value.span = item.value.span;
         value.synthetic_interface_provenance = value
             .synthetic_interface_provenance
             .union(iterable_provenance);
@@ -427,7 +423,7 @@ pub(crate) fn build_collection_iteration_bindings(
             path: index.id.clone(),
             value: Expression::int(
                 zero_based_index as i32,
-                index.value.location.clone(),
+                index.value.span,
                 ValueMode::ImmutableOwned,
             )
             .with_synthetic_interface_provenance(iterable_provenance.clone()),

@@ -17,6 +17,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 /// Shared carrier tag for variant construction in HIR.
@@ -180,6 +181,8 @@ pub struct HirExpression {
     pub ty: TypeId,
     pub value_kind: ValueKind,
     pub region: RegionId,
+    /// Exact authored syntax span; compiler-generated HIR expressions are span-free.
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -14,16 +14,16 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, NamespaceRecord, NamespaceTypeMember, SourceDeclarationTarget,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-type GenericBoundValidationResult<T> = Result<T, Box<CompilerDiagnostic>>;
+type GenericBoundValidationResult<T> = Result<T, CompilerDiagnostic>;
 
 pub(crate) struct GenericBoundEvidenceContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
@@ -105,11 +105,11 @@ pub(crate) fn generated_evidence_pair_is_selected(
 
 pub(crate) fn validate_nominal_generic_bound_evidence(
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
 ) -> GenericBoundValidationResult<()> {
     let mut visited = FxHashSet::default();
-    validate_type_recursive(type_id, &location, context, &mut visited)
+    validate_type_recursive(type_id, span, context, &mut visited)
 }
 
 /// Resolve reusable evidence for one concrete type, including evidence declared on a generic
@@ -145,7 +145,7 @@ pub(crate) fn evidence_for_type(
 
 fn validate_type_recursive(
     type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
     visited: &mut FxHashSet<TypeId>,
 ) -> GenericBoundValidationResult<()> {
@@ -155,30 +155,30 @@ fn validate_type_recursive(
 
     match context.type_environment.get(type_id) {
         Some(TypeDefinition::GenericInstance(instance)) => {
-            validate_instance_bounds(type_id, location, context)?;
+            validate_instance_bounds(type_id, span, context)?;
 
             for argument in &instance.arguments {
-                validate_type_recursive(*argument, location, context, visited)?;
+                validate_type_recursive(*argument, span, context, visited)?;
             }
         }
 
         Some(TypeDefinition::Constructed(definition)) => {
             for argument in &definition.arguments {
-                validate_type_recursive(*argument, location, context, visited)?;
+                validate_type_recursive(*argument, span, context, visited)?;
             }
         }
 
         Some(TypeDefinition::Function(definition)) => {
             for parameter in &definition.parameters {
-                validate_type_recursive(parameter.type_id, location, context, visited)?;
+                validate_type_recursive(parameter.type_id, span, context, visited)?;
             }
 
             for return_type in &definition.returns {
-                validate_type_recursive(*return_type, location, context, visited)?;
+                validate_type_recursive(*return_type, span, context, visited)?;
             }
 
             if let Some(error_type) = definition.error_return {
-                validate_type_recursive(error_type, location, context, visited)?;
+                validate_type_recursive(error_type, span, context, visited)?;
             }
         }
 
@@ -198,7 +198,7 @@ fn validate_type_recursive(
 
 fn validate_instance_bounds(
     instance_type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
 ) -> GenericBoundValidationResult<()> {
     let Some(TypeDefinition::GenericInstance(instance)) =
@@ -227,7 +227,7 @@ fn validate_instance_bounds(
                 parameter.name,
                 *concrete_type_id,
                 *trait_id,
-                location,
+                span,
                 context,
             )?;
         }
@@ -241,7 +241,7 @@ fn validate_single_bound(
     parameter_name: StringId,
     concrete_type_id: TypeId,
     trait_id: TraitId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     context: &GenericBoundEvidenceContext<'_>,
 ) -> GenericBoundValidationResult<()> {
     let Some(trait_environment) = context.trait_environment else {
@@ -282,15 +282,15 @@ fn validate_single_bound(
         .nominal_path(instance_type_id)
         .and_then(|path| path.name());
 
-    Err(Box::new(CompilerDiagnostic::invalid_generic_instantiation(
+    Err(CompilerDiagnostic::invalid_generic_instantiation(
         instance_name,
         InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
             parameter_name,
             trait_name,
             concrete_type_id,
         },
-        location.clone(),
-    )))
+        span,
+    ))
 }
 
 pub(crate) fn evidence_target_is_visible(

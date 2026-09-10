@@ -207,6 +207,11 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid string escape",
             DiagnosticSeverity::Error,
         ),
+        SyntaxDiagnosticKind::SourceSpanCapacity => DiagnosticDescriptor::new(
+            "MOTH-SYNTAX-0036",
+            "Source span capacity exceeded",
+            DiagnosticSeverity::Error,
+        ),
     }
 }
 

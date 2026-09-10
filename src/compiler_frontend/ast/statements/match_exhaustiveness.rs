@@ -172,7 +172,7 @@ pub(crate) struct MatchExhaustivenessCheck<'a> {
 /// actionable diagnostics listing the specific missing variants.
 pub(crate) fn enforce_match_exhaustiveness(
     check: MatchExhaustivenessCheck<'_>,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), CompilerDiagnostic> {
     let is_choice = matches!(
         check.type_environment.type_kind(check.scrutinee.type_id),
         Some(TypeKind::Choice | TypeKind::GenericInstance)
@@ -185,11 +185,11 @@ pub(crate) fn enforce_match_exhaustiveness(
         }
 
         if check.facts.has_guarded_arms {
-            return Err(Box::new(CompilerDiagnostic::non_exhaustive_match(
+            return Err(CompilerDiagnostic::non_exhaustive_match(
                 NonExhaustiveMatchReason::GuardedArmsRequireElse,
                 vec![],
-                check.scrutinee.location.clone(),
-            )));
+                check.scrutinee.span,
+            ));
         }
 
         let missing_variants: Vec<StringId> = check
@@ -208,11 +208,11 @@ pub(crate) fn enforce_match_exhaustiveness(
             return Ok(());
         }
 
-        return Err(Box::new(CompilerDiagnostic::non_exhaustive_match(
+        return Err(CompilerDiagnostic::non_exhaustive_match(
             NonExhaustiveMatchReason::MissingVariants,
             missing_variants,
-            check.scrutinee.location.clone(),
-        )));
+            check.scrutinee.span,
+        ));
     }
 
     if check.has_default {
@@ -237,9 +237,9 @@ pub(crate) fn enforce_match_exhaustiveness(
         NonExhaustiveMatchReason::MissingElseArm
     };
 
-    Err(Box::new(CompilerDiagnostic::non_exhaustive_match(
+    Err(CompilerDiagnostic::non_exhaustive_match(
         reason,
         vec![],
-        check.scrutinee.location.clone(),
-    )))
+        check.scrutinee.span,
+    ))
 }

@@ -5,7 +5,6 @@
 //! WHY: the checked numeric path is new HIR surface; dedicated tests guard against regressions back
 //!      to plain `BinOp`/`UnaryOp` arithmetic and against wrong failure-mode wiring.
 
-use crate::compiler_frontend::ast::ast_nodes::SourceLocation;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -22,18 +21,21 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     inferred_type_reference_expr, runtime_expr, runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn int_expr(value: i32, location: SourceLocation) -> Expression {
-    Expression::int(value, location, ValueMode::ImmutableOwned)
+fn int_expr(value: i32, span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
+    Expression::int(value, span, ValueMode::ImmutableOwned)
 }
 
-fn float_expr(value: f64, location: SourceLocation) -> Expression {
-    Expression::float(value, location, ValueMode::ImmutableOwned)
+fn float_expr(
+    value: f64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> Expression {
+    Expression::float(value, span, ValueMode::ImmutableOwned)
 }
 
 fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, NumericFailureMode)> {
@@ -63,15 +65,15 @@ fn set_current_function_return_type(
 #[test]
 fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let x_name = symbol("x", &mut string_table);
     let x_ref = inferred_type_reference_expr(
         x_name.clone(),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
-    let two = int_expr(2, loc.clone());
+    let two = int_expr(2, loc);
 
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -79,17 +81,17 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
         x_name,
         LocalId(10),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
     );
 
     let expr = runtime_expr(
         vec![
             runtime_operand_item(x_ref),
             runtime_operand_item(two),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -116,15 +118,15 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
 #[test]
 fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(5, loc.clone())),
-            runtime_operand_item(int_expr(3, loc.clone())),
-            runtime_operator_item(Operator::Subtract, loc.clone()),
+            runtime_operand_item(int_expr(5, loc)),
+            runtime_operand_item(int_expr(3, loc)),
+            runtime_operator_item(Operator::Subtract, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -140,15 +142,15 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
 #[test]
 fn checked_regular_division_lowers_to_float_div_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(5, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Divide, loc.clone()),
+            runtime_operand_item(int_expr(5, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Divide, loc),
         ],
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -193,15 +195,15 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
 #[test]
 fn mixed_int_float_addition_converts_int_operand() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(float_expr(2.5, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(float_expr(2.5, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -237,12 +239,12 @@ fn mixed_int_float_addition_converts_int_operand() {
 #[test]
 fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let x_name = symbol("x", &mut string_table);
     let x_ref = inferred_type_reference_expr(
         x_name.clone(),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
 
@@ -252,16 +254,16 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
         x_name,
         LocalId(10),
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
     );
 
     let expr = runtime_expr(
         vec![
             runtime_operand_item(x_ref),
-            runtime_operator_item(Operator::Negate, loc.clone()),
+            runtime_operator_item(Operator::Negate, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -278,16 +280,16 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
 #[test]
 fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let fn_name = symbol("__test_fn_error", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -335,16 +337,16 @@ fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
 #[test]
 fn numeric_failure_mode_is_trap_for_custom_error_function() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let fn_name = symbol("__test_fn_string_error", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 
@@ -368,16 +370,16 @@ fn numeric_failure_mode_is_trap_for_custom_error_function() {
 #[test]
 fn numeric_failure_mode_is_trap_for_non_fallible_function() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let fn_name = symbol("__test_fn_non_fallible", &mut string_table);
     let expr = runtime_expr(
         vec![
-            runtime_operand_item(int_expr(1, loc.clone())),
-            runtime_operand_item(int_expr(2, loc.clone())),
-            runtime_operator_item(Operator::Add, loc.clone()),
+            runtime_operand_item(int_expr(1, loc)),
+            runtime_operand_item(int_expr(2, loc)),
+            runtime_operator_item(Operator::Add, loc),
         ],
         builtin_type_ids::INT,
-        loc.clone(),
+        loc,
         ValueMode::MutableOwned,
     );
 

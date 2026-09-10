@@ -17,13 +17,13 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 ///      operator policy and constant folding can stay diagnostic-first without losing the
 ///      ability to report internal failures.
 pub(crate) enum ExpressionTypingError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
 impl From<CompilerDiagnostic> for ExpressionTypingError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ExpressionTypingError::Diagnostic(Box::new(diagnostic))
+        ExpressionTypingError::Diagnostic(diagnostic)
     }
 }
 

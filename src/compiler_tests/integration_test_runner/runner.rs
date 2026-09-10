@@ -123,7 +123,8 @@ where
                 .into_par_iter()
                 .enumerate()
                 .map(|(index, case)| {
-                    let result = execute_case(&case);
+                    let mut result = execute_case(&case);
+                    result.finalize_build_result_report();
                     (index, case, result)
                 })
                 .collect::<Vec<_>>()
@@ -133,7 +134,8 @@ where
             .into_par_iter()
             .enumerate()
             .map(|(index, case)| {
-                let result = execute_case(&case);
+                let mut result = execute_case(&case);
+                result.finalize_build_result_report();
                 (index, case, result)
             })
             .collect::<Vec<_>>()

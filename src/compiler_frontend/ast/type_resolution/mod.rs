@@ -15,10 +15,10 @@
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
-pub(crate) type TypeResolutionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+pub(crate) type TypeResolutionResult<T> = Result<T, CompilerDiagnostic>;
 
 /// Function signature after resolving all named types and receiver metadata.
 #[derive(Clone)]
@@ -70,9 +70,9 @@ pub(crate) use struct_fields::{
 /// Resolve a declaration type with the shared type-resolution context.
 pub(crate) fn resolve_named_signature_type(
     data_type: &DataType,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_resolution_context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<DataType> {
-    resolve_type(data_type, location, type_resolution_context, string_table)
+    resolve_type(data_type, span, type_resolution_context, string_table)
 }

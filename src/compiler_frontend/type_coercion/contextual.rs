@@ -19,15 +19,11 @@ use crate::compiler_frontend::type_coercion::compatibility::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Boxed diagnostic result for the contextual coercion boundary.
+/// Result for the contextual coercion boundary.
 ///
-/// WHAT: keeps `coerce_expression_to_explicit_type_boundary` on a small error
-///       boundary so the large `CompilerDiagnostic` value does not inflate
-///       every successful coercion `Result`.
-/// WHY: every direct caller already returns `Box<CompilerDiagnostic>` (or a
-///      type that converts from it), so boxing here propagates directly
-///      without adapter changes.
-type ContextualCoercionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Coercion diagnostics remain plain `CompilerDiagnostic` values until the
+/// owning accumulation boundary.
+type ContextualCoercionResult<T> = Result<T, CompilerDiagnostic>;
 
 /// Validates and applies the contextual coercion policy for an explicit typed boundary.
 ///
@@ -54,12 +50,12 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
         ));
     }
 
-    Err(Box::new(CompilerDiagnostic::type_mismatch(
+    Err(CompilerDiagnostic::type_mismatch(
         expected_type_id,
         expression.type_id,
         mismatch_context,
-        expression.location.clone(),
-    )))
+        expression.span,
+    ))
 }
 
 /// Applies contextual coercion to `expr` if the target type requires it.
@@ -82,12 +78,8 @@ pub(crate) fn coerce_expression_to_declared_type(
 
     if is_numeric_coercible_by_id(expr.type_id, declared_type_id, type_environment) {
         if let ExpressionKind::Int(value) = &expr.kind {
-            return Expression::float(
-                *value as f64,
-                expr.location.clone(),
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
+            return Expression::float(*value as f64, expr.span, ValueMode::ImmutableOwned)
+                .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
         }
 
         return Expression::coerced(expr, declared_type_id);

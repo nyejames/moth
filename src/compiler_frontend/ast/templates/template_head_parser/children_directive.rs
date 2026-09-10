@@ -24,9 +24,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
-
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Typed result for the connected `$children` directive family.
 type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -58,16 +58,16 @@ pub(super) fn parse_children_style_directive(
                 ..
             }
         ) {
-            Box::new(CompilerDiagnostic::invalid_template_directive(
+            CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                diagnostic.primary_location.clone(),
-            ))
+                diagnostic.primary_span,
+            )
         } else {
             diagnostic
         }
     }))?;
-    let argument_location = directive_argument.location.clone();
+    let argument_span = directive_argument.span;
 
     // The wrapper must be fully known at compile time; runtime expressions
     // cannot determine how children are composed.
@@ -78,10 +78,13 @@ pub(super) fn parse_children_style_directive(
         .is_compile_time_value();
 
     if !argument_is_compile_time_constant {
-        return Err(CompilerDiagnostic::invalid_template_directive(
-            Some(string_table.intern("children")),
-            InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-            argument_location,
+        return Err(with_argument_span(
+            CompilerDiagnostic::invalid_template_directive(
+                Some(string_table.intern("children")),
+                InvalidTemplateDirectiveReason::InvalidChildrenArgument,
+                argument_span,
+            ),
+            argument_span,
         )
         .into());
     }
@@ -110,10 +113,13 @@ pub(super) fn parse_children_style_directive(
                     | TemplateType::SlotInsert(_)
                     | TemplateType::Comment(_)
             ) {
-                return Err(CompilerDiagnostic::invalid_template_directive(
-                    Some(string_table.intern("children")),
-                    InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                    argument_location,
+                return Err(with_argument_span(
+                    CompilerDiagnostic::invalid_template_directive(
+                        Some(string_table.intern("children")),
+                        InvalidTemplateDirectiveReason::InvalidChildrenArgument,
+                        argument_span,
+                    ),
+                    argument_span,
                 )
                 .into());
             }
@@ -126,18 +132,18 @@ pub(super) fn parse_children_style_directive(
                 .map_err(TemplateError::from)?
         }
 
-        ExpressionKind::StringSlice(value) => normalize_string_child_wrapper_reference(
-            value,
-            argument_location,
-            context,
-            string_table,
-        )?,
+        ExpressionKind::StringSlice(value) => {
+            normalize_string_child_wrapper_reference(value, argument_span, context, string_table)?
+        }
 
         _ => {
-            return Err(CompilerDiagnostic::invalid_template_directive(
-                Some(string_table.intern("children")),
-                InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                argument_location,
+            return Err(with_argument_span(
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(string_table.intern("children")),
+                    InvalidTemplateDirectiveReason::InvalidChildrenArgument,
+                    argument_span,
+                ),
+                argument_span,
             )
             .into());
         }
@@ -153,19 +159,14 @@ pub(super) fn parse_children_style_directive(
 /// parser TIR store and returns the durable module-local reference.
 fn normalize_string_child_wrapper_reference(
     value: StringId,
-    argument_location: SourceLocation,
+    argument_span: Option<SourceSpan>,
     context: &ScopeContext,
     string_table: &StringTable,
 ) -> Result<TemplateWrapperReference, TemplateError> {
-    let mut construction_context = TemplateConstructionContext::new(
-        context.template_ir_store.clone(),
-        argument_location.clone(),
-    );
-    construction_context.record_text(
-        value,
-        string_table.resolve(value).len(),
-        argument_location.clone(),
-    );
+    let mut construction_context =
+        TemplateConstructionContext::new(context.template_ir_store.clone(), argument_span);
+    construction_context.record_text(value, string_table.resolve(value).len(), argument_span);
+
     let reference = construction_context.finish(
         Style::default(),
         TemplateType::String,
@@ -177,4 +178,14 @@ fn normalize_string_child_wrapper_reference(
         reference.phase,
         reference.context,
     ))
+}
+
+fn with_argument_span(
+    mut diagnostic: CompilerDiagnostic,
+    argument_span: Option<SourceSpan>,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = argument_span;
+    }
+    diagnostic
 }

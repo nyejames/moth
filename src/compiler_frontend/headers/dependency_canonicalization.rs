@@ -5,14 +5,14 @@
 //! WHY: Stage 3 compares exact header graph keys, so retained hints must use the same canonical
 //! paths that dependency preparation exposes through file visibility. Same-file hints are preserved.
 
-use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedNamedTypeReference;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment, NamespaceMemberLookup, NamespaceTypeMember,
     lookup_namespace_member,
 };
-use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    HeaderPreparationFailure, RetainedDependencyClause,
+};
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin,
 };
@@ -109,16 +109,11 @@ pub(super) fn canonicalize_local_ordering_hints(
     file_dependency_clauses_by_source: &FxHashMap<InternedPath, Vec<RetainedDependencyClause>>,
     dependency_selections_by_source: &FxHashMap<InternedPath, Vec<DependencySelection>>,
     string_table: &mut StringTable,
-) -> Result<(), DiagnosticBag> {
-    let mut diagnostic_bag = DiagnosticBag::new();
-
+) -> Result<(), HeaderPreparationFailure> {
     for header in headers.iter_mut() {
         let visibility = match binding_environment.visibility_for(&header.source_file) {
             Ok(visibility) => visibility,
-            Err(error) => {
-                diagnostic_bag.push(compiler_error_to_diagnostic(&error));
-                continue;
-            }
+            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
         };
 
         let file_dependency_clauses = file_dependency_clauses_by_source
@@ -156,8 +151,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                 let selections = match dependency.selections(selection_table) {
                     Ok(selections) => selections,
                     Err(error) => {
-                        diagnostic_bag.push(compiler_error_to_diagnostic(&error));
-                        break;
+                        return Err(HeaderPreparationFailure::Infrastructure(error));
                     }
                 };
                 if dependency.dependency.path == *hint.path() && selections.is_empty() {
@@ -198,9 +192,5 @@ pub(super) fn canonicalize_local_ordering_hints(
         header.local_ordering_hints = canonical;
     }
 
-    if diagnostic_bag.has_errors() {
-        Err(diagnostic_bag)
-    } else {
-        Ok(())
-    }
+    Ok(())
 }

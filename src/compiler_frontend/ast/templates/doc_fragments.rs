@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -72,14 +73,8 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
         *body = retained;
     }
 
-    // Sort fragments deterministically by source location.
-    fragments.sort_by_key(|fragment| {
-        (
-            fragment.location.scope.to_string(context.string_table),
-            fragment.location.start_pos.line_number,
-            fragment.location.start_pos.char_column,
-        )
-    });
+    // Preserve AST traversal order. Source provenance is an exact span and
+    // must not be reconstructed into path/line/column ordering.
 
     Ok(fragments)
 }
@@ -151,7 +146,7 @@ fn collect_doc_fragments(
             _ => {
                 return Err(CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                    template.location.to_owned(),
+                    template.span,
                 )
                 .into());
             }
@@ -164,17 +159,13 @@ fn collect_doc_fragments(
         let rendered = match emission {
             TemplateEmission::Output(ConstStringValue::Text(value)) => value,
             TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => {
-                flatten_documentation_string(
-                    pieces,
-                    fold_context.string_table,
-                    template.location.to_owned(),
-                )?
+                flatten_documentation_string(pieces, fold_context.string_table, template.span)?
             }
             TemplateEmission::NoOutput => fold_context.string_table.intern(""),
             TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
                 return Err(CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                    template.location.to_owned(),
+                    template.span,
                 )
                 .into());
             }
@@ -183,7 +174,7 @@ fn collect_doc_fragments(
         fragments.push(AstDocFragment {
             kind: AstDocFragmentKind::Doc,
             value: rendered,
-            location: template.location.to_owned(),
+            span: template.span,
         });
     }
 
@@ -207,7 +198,7 @@ fn comment_kind_at_doc_fragment_boundary(
 fn flatten_documentation_string(
     pieces: Vec<ConstStringPiece>,
     string_table: &mut StringTable,
-    location: crate::compiler_frontend::compiler_messages::source_location::SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<crate::compiler_frontend::symbols::string_interning::StringId, TemplateError> {
     let mut text = String::new();
     for piece in pieces {
@@ -219,7 +210,7 @@ fn flatten_documentation_string(
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                     Some(operation),
-                    location,
+                    span,
                 )
                 .into());
             }

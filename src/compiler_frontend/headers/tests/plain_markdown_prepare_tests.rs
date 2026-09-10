@@ -11,6 +11,7 @@ use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
 };
 use crate::compiler_frontend::headers::types::{FileRole, HeaderExportMode, HeaderKind};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenKind;
@@ -28,7 +29,7 @@ fn prepare(
         PlainMarkdownPrepareInput {
             source_code: source,
             source_file: source_path,
-            file_id: None,
+            file_id: SourceId::COMPILATION_ROOT,
             canonical_os_path: None,
         },
         &mut string_table,
@@ -75,16 +76,20 @@ fn declaration_is_private_compile_time_string_constant() {
         panic!("expected constant header, got {:?}", header.kind);
     };
 
+    assert_eq!(
+        declaration.span, None,
+        "the generated Markdown declaration has no authored source span"
+    );
     assert!(matches!(
         declaration.binding_mode,
         BindingMode::CompileTimeConstant
     ));
-    assert!(
-        matches!(
-            declaration.type_annotation,
-            ParsedTypeRef::BuiltinString { .. }
-        ),
-        "expected builtin String annotation"
+    let ParsedTypeRef::BuiltinString { span } = &declaration.type_annotation else {
+        panic!("expected builtin String annotation");
+    };
+    assert_eq!(
+        *span, None,
+        "the generated Markdown type annotation has no authored source span"
     );
 }
 

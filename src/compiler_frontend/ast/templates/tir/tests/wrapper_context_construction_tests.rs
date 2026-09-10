@@ -20,7 +20,6 @@ use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -38,37 +37,28 @@ fn text_template(
         strings.intern(text),
         text.len(),
         TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
+        None,
     );
-    let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![text_node], None);
     builder.finish_template(
         root,
         style,
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     )
 }
 
 fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
-    let body = builder.push_text_node(
-        strings.intern("body"),
-        4,
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
+    let body = builder.push_text_node(strings.intern("body"), 4, TemplateSegmentOrigin::Body, None);
     let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(
-            false,
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        )),
+        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
         body,
-        SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -77,7 +67,7 @@ fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable)
             has_control_flow: true,
             ..TemplateIrSummary::empty()
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -90,22 +80,22 @@ fn wrapper_template(
         strings.intern("before"),
         6,
         TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
+        None,
     );
-    let slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+    let slot = builder.push_slot_node(SlotKey::Default, None);
     let after = builder.push_text_node(
         strings.intern("after"),
         5,
         TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
+        None,
     );
-    let root = builder.push_sequence_node(vec![before, slot, after], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![before, slot, after], None);
     let wrapper_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     );
     TemplateWrapperReference::new(
         wrapper_id,
@@ -122,20 +112,16 @@ fn parent_with_branch_body_child(
     let mut builder = TemplateIrBuilder::new(store);
     let child_node = builder.push_child_template_node_with_reference(
         TemplateTirChildReference::new(child, TemplateTirPhase::Composed, context),
-        SourceLocation::default(),
+        None,
     );
-    let body = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+    let body = builder.push_sequence_node(vec![child_node], None);
     let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(
-            true,
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        )),
+        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         body,
-        SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -144,7 +130,7 @@ fn parent_with_branch_body_child(
             has_control_flow: true,
             ..TemplateIrSummary::empty()
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -156,20 +142,16 @@ fn parent_with_loop_body_child(
     let mut builder = TemplateIrBuilder::new(store);
     let child_node = builder.push_child_template_node_with_reference(
         TemplateTirChildReference::new(child, TemplateTirPhase::Composed, context),
-        SourceLocation::default(),
+        None,
     );
-    let body = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+    let body = builder.push_sequence_node(vec![child_node], None);
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(Expression::bool(
-                true,
-                SourceLocation::default(),
-                ValueMode::ImmutableOwned,
-            )),
+            condition: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         },
         body,
         None,
-        SourceLocation::default(),
+        None,
     );
     builder.finish_template(
         root,
@@ -179,7 +161,7 @@ fn parent_with_loop_body_child(
             has_control_flow: true,
             ..TemplateIrSummary::empty()
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -191,15 +173,15 @@ fn parent_with_child(
     let mut builder = TemplateIrBuilder::new(store);
     let child_node = builder.push_child_template_node_with_reference(
         TemplateTirChildReference::new(child, TemplateTirPhase::Composed, context),
-        SourceLocation::default(),
+        None,
     );
-    let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+    let root = builder.push_sequence_node(vec![child_node], None);
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     )
 }
 

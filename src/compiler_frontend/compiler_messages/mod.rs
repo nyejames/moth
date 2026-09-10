@@ -1,6 +1,6 @@
 //! Compiler message models and render-boundary helpers.
 //!
-//! WHAT: owns typed user-facing diagnostics, internal/tooling error transport, source locations,
+//! WHAT: owns typed user-facing diagnostics, internal/tooling error transport, exact source spans,
 //! stage-local diagnostic bags, boundary aggregation, and final renderers.
 //! WHY: compiler stages should exchange structured facts while CLI, dev-server, test, and tool
 //! boundaries decide how those facts become user-visible text.
@@ -22,14 +22,14 @@ mod diagnostic_kind_descriptors;
 pub(crate) mod diagnostic_label;
 pub(crate) mod diagnostic_payload;
 pub(crate) mod diagnostic_severity;
+pub(crate) mod diagnostic_token;
 pub(crate) mod display_messages;
 pub(crate) mod module_diagnostics;
 pub(crate) mod render;
-pub(crate) mod source_location;
 pub(crate) mod trait_keyword_diagnostics;
 
 pub(crate) use compiler_diagnostic::CompilerDiagnostic;
-pub(crate) use diagnostic_bag::DiagnosticBag;
+pub(crate) use diagnostic_bag::{DiagnosticBag, PremergeDiagnosticBatch, PremergeFailure};
 pub(crate) use diagnostic_descriptor::DiagnosticDescriptor;
 pub(crate) use diagnostic_identity::{DiagnosticIdentity, is_well_formed_reason_key};
 pub(crate) use diagnostic_kind::{
@@ -63,10 +63,14 @@ pub(crate) use diagnostic_payload::{
     MissingWhitespace, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
     NonExhaustiveMatchReason, NumberLiteralErrorReason, OperatorOperandPosition, PathKind,
     ProjectContextEscapeReason, RangeOperandKind, ReceiverCallKind, ReservedNameOwner,
-    SymbolicSpacingConstruct, SymbolicSpacingError, TypeAnnotationContext, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    SourceSpanCapacityResource, SymbolicSpacingConstruct, SymbolicSpacingError,
+    TypeAnnotationContext, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory,
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
+#[cfg(test)]
+pub(crate) use diagnostic_token::TokenTag;
+pub(crate) use diagnostic_token::{DiagnosticToken, TokenDescriptorPayload};
 pub(crate) use module_diagnostics::ModuleDiagnostics;
 
 #[cfg(test)]

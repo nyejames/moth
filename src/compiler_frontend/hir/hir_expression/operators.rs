@@ -14,14 +14,14 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_bin_op(
         &self,
         op: &Operator,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<HirBinOp, CompilerError> {
         match op {
             Operator::Add => Ok(HirBinOp::Add),
@@ -42,19 +42,19 @@ impl<'a> HirBuilder<'a> {
             Operator::Not => {
                 return_hir_transformation_error!(
                     "'not' cannot be lowered as a binary operator",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
             Operator::Negate => {
                 return_hir_transformation_error!(
                     "Unary negation cannot be lowered as a binary operator",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
             Operator::Range => {
                 return_hir_transformation_error!(
                     "Range operator is lowered as HirExpressionKind::Range",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
         }
@@ -63,7 +63,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_unary_op(
         &self,
         op: &Operator,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<HirUnaryOp, CompilerError> {
         match op {
             Operator::Not => Ok(HirUnaryOp::Not),
@@ -71,7 +71,7 @@ impl<'a> HirBuilder<'a> {
             _ => {
                 return_hir_transformation_error!(
                     format!("Unsupported unary operator: {:?}", op),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
         }

@@ -1,8 +1,8 @@
 //! The frontend stage facade.
 //!
-//! WHAT: one value carrying the registries, options, string table and file identities every stage
-//!       needs, plus the thin per-stage calls that read them.
-//! WHY:  the stage owners each need a different slice of the same immutable context. Holding it
+//! WHAT: one value borrowing immutable build services while owning the string table, options and
+//!       the thin per-stage calls that read them.
+//! WHY: the stage owners each need a different slice of the same immutable context. Holding it
 //!       once keeps a service's flow readable as named stage calls instead of a growing argument
 //!       list threaded through each one.
 //!
@@ -17,7 +17,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows as run_borrow_checker,
+    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{
@@ -25,12 +25,12 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, FileFrontendPrepareError, FileFrontendPrepareFailure,
-    FileFrontendPrepareOutput, HeaderParseOptions, parse_file_headers_with_table,
+    BoundModuleHeaders, FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
+    parse_file_headers_with_table,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -48,9 +48,11 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
-use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenizerEntryMode};
@@ -71,7 +73,7 @@ static FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST: LazyLock<Mutex<HashMap<PathBuf, us
 static FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 #[cfg(test)]
-fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource) {
+fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource<'_>) {
     let source_path = match source {
         FrontendFilePrepareSource::Moth { source_path, .. }
         | FrontendFilePrepareSource::MothTemplate { source_path, .. }
@@ -113,13 +115,36 @@ pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usiz
         .unwrap_or(0)
 }
 
-pub(crate) struct CompilerFrontend {
-    pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    pub(crate) style_directives: StyleDirectiveRegistry,
+pub(crate) struct CompilerFrontend<'a> {
+    /// The shared registry handle remains owned by the enclosing compilation boundary.
+    pub(crate) external_package_registry: &'a Arc<ExternalPackageRegistry>,
+    pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) string_table: StringTable,
-    pub(crate) project_path_resolver: Option<ProjectPathResolver>,
+    pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     pub(crate) options: FrontendOptions,
-    pub(crate) source_files: SourceFileTable,
+    /// Immutable source identities registered once by the enclosing compilation boundary and
+    /// shared, never copied, by every module compiled inside it.
+    pub(crate) source_files: &'a Arc<SourceDatabase>,
+}
+
+impl<'a> CompilerFrontend<'a> {
+    pub(crate) fn new(
+        options: FrontendOptions,
+        string_table: StringTable,
+        style_directives: &'a StyleDirectiveRegistry,
+        external_package_registry: &'a Arc<ExternalPackageRegistry>,
+        project_path_resolver: Option<&'a ProjectPathResolver>,
+        source_files: &'a Arc<SourceDatabase>,
+    ) -> Self {
+        Self {
+            external_package_registry,
+            style_directives,
+            string_table,
+            project_path_resolver,
+            options,
+            source_files,
+        }
+    }
 }
 
 /// Shared immutable inputs used while one source file is prepared against a local string table.
@@ -129,33 +154,34 @@ pub(crate) struct CompilerFrontend {
 /// WHY: parallel file preparation passes this context by shared reference to Rayon workers without
 /// giving them mutable access to the module-global string table.
 pub(crate) struct FrontendFilePrepareContext<'a> {
-    pub(crate) source_files: &'a SourceFileTable,
+    pub(crate) source_files: &'a SourceDatabase,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) entry_file_path: &'a Path,
-    pub(crate) options: &'a HeaderParseOptions,
+    pub(crate) options: &'a HeaderParseOptions<'a>,
 }
 
-/// Owned per-file source payload for frontend preparation.
+/// Borrowed per-file source payload for frontend preparation.
 ///
 /// WHAT: one variant per source kind. Moth carries the retained `FileTokens` from the
-///       single Stage 0 lexical pass; Moth template and PlainMarkdown carry only raw source text.
+///       single Stage 0 lexical pass; Moth template and PlainMarkdown borrow the exact source
+///       snapshot retained by the compilation boundary.
 /// WHY: the variant makes the source-kind/token relationship unrepresentable as an invalid
 ///      state. The Moth preparation arm receives `FileTokens` by type, so it cannot panic
 ///      on absent tokens, and Moth template/PlainMarkdown cannot carry Moth tokens.
 ///
-/// The build system moves its source-kind handoff into this value; the frontend does not depend on
-/// build-system types and owns each payload for the duration of header preparation.
-pub(crate) enum FrontendFilePrepareSource {
+/// The build system borrows source text from the immutable source database for the duration of
+/// preparation. Direct single-source APIs can borrow their caller-owned request text as well.
+pub(crate) enum FrontendFilePrepareSource<'a> {
     Moth {
         source_path: PathBuf,
         tokens: Box<FileTokens>,
     },
     MothTemplate {
-        source_code: String,
+        source_code: &'a str,
         source_path: PathBuf,
     },
     PlainMarkdown {
-        source_code: String,
+        source_code: &'a str,
         source_path: PathBuf,
     },
 }
@@ -165,8 +191,10 @@ pub(crate) enum FrontendFilePrepareSource {
 /// WHAT: keeps the state-safe source variant and synthetic-fragment offsets together for one
 ///       worker item.
 /// WHY: grouping these inputs keeps the preparation API explicit without a broad argument list.
-pub(crate) struct FrontendFilePrepareInput {
-    pub(crate) source: FrontendFilePrepareSource,
+pub(crate) struct FrontendFilePrepareInput<'a> {
+    pub(crate) source: FrontendFilePrepareSource<'a>,
+    pub(crate) source_id: SourceId,
+    pub(crate) span_builder: ExtendedSpanBuilder,
     pub(crate) const_template_offset: usize,
     pub(crate) runtime_fragment_offset: usize,
 }
@@ -189,79 +217,36 @@ pub(crate) struct AstBuildRequest<'a> {
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
 
-/// Stable identity facts for one source file as seen by the frontend.
+/// Resolve the identity facts one prepared source stamps onto its token stream.
 ///
-/// WHAT: bundles the interned logical path, explicit file ID, and canonical OS path that
-///       tokenization and non-tokenized preparation both need.
-/// WHY: keeps source-identity lookup in one place so Markdown preparation can reuse the same
-///      identity path as tokenized files without duplicating the `SourceFileTable` fallback logic.
-struct FrontendSourceFileIdentity {
-    logical_path: InternedPath,
-    file_id: Option<FileId>,
-    canonical_os_path: Option<PathBuf>,
-}
-
-/// Look up frontend identity for a source path.
-///
-/// WHAT: returns the logical interned path, stable file ID, and canonical OS path for one file.
-/// WHY: tokenized Moth/Moth template files and non-tokenized Markdown files must share the same
-///      source identity so downstream stages treat them as ordinary module members.
-fn source_file_identity(
-    source_files: &SourceFileTable,
+/// WHAT: returns the registered logical path, source identity and canonical OS path for one
+///       source path.
+/// WHY: every production preparation owner registers its candidate before handing it to the
+///      frontend, so an unregistered source is a compiler invariant failure rather than a path
+///      that can receive a fabricated identity.
+fn source_identity_facts(
+    source_files: &SourceDatabase,
     source_path: &Path,
-    string_table: &mut StringTable,
-) -> Result<FrontendSourceFileIdentity, CompilerError> {
-    match source_files.get_by_canonical_path(source_path) {
-        Some(identity) => Ok(FrontendSourceFileIdentity {
-            logical_path: identity.logical_path.clone(),
-            file_id: Some(identity.file_id),
-            canonical_os_path: Some(identity.canonical_os_path.clone()),
-        }),
-        None => {
-            let logical_path =
-                InternedPath::try_from_filesystem_path(source_path, string_table).map_err(
-                    |NonUtf8PathComponent { path }| {
-                        CompilerError::file_error(
-                            &path,
-                            format!(
-                                "Source file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                            ),
-                            string_table,
-                        )
-                    },
-                )?;
-            Ok(FrontendSourceFileIdentity {
-                logical_path,
-                file_id: None,
-                canonical_os_path: Some(source_path.to_owned()),
-            })
-        }
-    }
+) -> Result<(InternedPath, SourceId, Option<PathBuf>), CompilerError> {
+    let record = source_files
+        .get_by_canonical_path(source_path)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source {source_path:?} was not registered before frontend preparation"
+            ))
+        })?;
+
+    Ok((
+        source_files.legacy_logical_path(record.id),
+        record.id,
+        record
+            .canonical_os_path
+            .clone()
+            .map(|canonical| canonical.into_path_buf()),
+    ))
 }
 
-impl CompilerFrontend {
-    pub(crate) fn new(
-        options: FrontendOptions,
-        string_table: StringTable,
-        style_directives: StyleDirectiveRegistry,
-        external_package_registry: Arc<ExternalPackageRegistry>,
-        project_path_resolver: Option<ProjectPathResolver>,
-    ) -> Self {
-        Self {
-            external_package_registry,
-            style_directives,
-            string_table,
-            project_path_resolver,
-            options,
-            source_files: SourceFileTable::empty(),
-        }
-    }
-
-    /// Attach per-module file identities built during Stage 0.
-    pub(crate) fn set_source_files(&mut self, source_files: SourceFileTable) {
-        self.source_files = source_files;
-    }
-
+impl CompilerFrontend<'static> {
     // -----------------------------
     //  TOKENIZER
     // -----------------------------
@@ -272,31 +257,28 @@ impl CompilerFrontend {
     /// WHY: parallel and fork-based frontend preparation need to tokenize independently before
     ///      merging deltas back into the module/global table.
     pub(crate) fn tokenize_source(
-        source_files: &SourceFileTable,
+        source_files: &SourceDatabase,
         style_directives: &StyleDirectiveRegistry,
         source_code: &str,
         module_path: &Path,
         tokenizer_entry_mode: TokenizerEntryMode,
         string_table: &mut StringTable,
+        span_builder: &mut ExtendedSpanBuilder,
     ) -> Result<FileTokens, FileFrontendPrepareFailure> {
-        let identity = source_file_identity(source_files, module_path, string_table)
-            .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
+        let (logical_path, source_id, canonical_os_path) =
+            source_identity_facts(source_files, module_path)
+                .map_err(FileFrontendPrepareFailure::Infrastructure)?;
         let mut tokens = tokenize(
             source_code,
-            &identity.logical_path,
+            &logical_path,
             tokenizer_entry_mode,
             style_directives,
             string_table,
-            identity.file_id,
+            source_id,
+            span_builder,
         )
-        .map_err(|diagnostic| {
-            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                warnings: Vec::new(),
-                diagnostic,
-            })
-        })?;
-        tokens.canonical_os_path = identity.canonical_os_path;
+        .map_err(FileFrontendPrepareFailure::from_tokenization)?;
+        tokens.canonical_os_path = canonical_os_path;
         Ok(tokens)
     }
 
@@ -306,30 +288,31 @@ impl CompilerFrontend {
     ///       Markdown without merge/remap so callers can run file work in parallel.
     /// WHY: parallel frontend preparation needs each worker to own its local table without shared
     ///      mutable access to the module-global table, while Stage 0 remains the sole tokenizer
-    ///      owner for discovered Moth source.
     pub(crate) fn prepare_file_frontend_local(
         context: &FrontendFilePrepareContext<'_>,
-        input: FrontendFilePrepareInput,
+        input: FrontendFilePrepareInput<'_>,
         local_string_table: &mut StringTable,
-    ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
+    ) -> SourcePreparationDelta {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
         #[cfg(test)]
         record_file_frontend_prepare_for_test(&input.source);
 
-        match input.source {
+        let file_id = input.source_id;
+        let mut span_builder = input.span_builder;
+        let result = (|| match input.source {
             FrontendFilePrepareSource::PlainMarkdown {
                 source_code,
                 source_path,
             } => {
-                let identity =
-                    source_file_identity(context.source_files, &source_path, local_string_table)
+                let (logical_path, source_id, canonical_os_path) =
+                    source_identity_facts(context.source_files, &source_path)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
                 Ok(prepare_plain_markdown_file(
                     PlainMarkdownPrepareInput {
-                        source_code: &source_code,
-                        source_file: identity.logical_path,
-                        file_id: identity.file_id,
-                        canonical_os_path: identity.canonical_os_path,
+                        source_code,
+                        source_file: logical_path,
+                        file_id: source_id,
+                        canonical_os_path,
                     },
                     local_string_table,
                 ))
@@ -341,18 +324,12 @@ impl CompilerFrontend {
                 // Moth files carry the exact token stream retained from the single Stage 0
                 // lexical pass. Rebind it to the module source identity and parse headers without
                 // re-tokenizing. `tokens` is present by type, so no absent-token panic is possible.
-                let identity =
-                    source_file_identity(context.source_files, &source_path, local_string_table)
+                let (logical_path, source_id, canonical_os_path) =
+                    source_identity_facts(context.source_files, &source_path)
                         .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
                 tokens
-                    .rebind_source_identity(
-                        identity.logical_path,
-                        identity.file_id,
-                        identity.canonical_os_path,
-                    )
+                    .rebind_source_identity(logical_path, source_id, canonical_os_path)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)?;
-
                 parse_file_headers_with_table(
                     &mut tokens,
                     context.entry_file_path,
@@ -360,6 +337,7 @@ impl CompilerFrontend {
                     local_string_table,
                     input.const_template_offset,
                     input.runtime_fragment_offset,
+                    &mut span_builder,
                 )
             }
             FrontendFilePrepareSource::MothTemplate {
@@ -372,22 +350,29 @@ impl CompilerFrontend {
                         Some(mode) => mode,
                         None => unreachable!("Moth template has a tokenizer entry mode"),
                     };
-
-                let file_tokens = Self::tokenize_source(
+                let tokenization = Self::tokenize_source(
                     context.source_files,
                     context.style_directives,
-                    &source_code,
+                    source_code,
                     &source_path,
                     tokenizer_entry_mode,
                     local_string_table,
+                    &mut span_builder,
                 )?;
 
-                prepare_moth_template_file(file_tokens, local_string_table)
+                prepare_moth_template_file(tokenization, local_string_table, &mut span_builder)
                     .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
+        })();
+        SourcePreparationDelta {
+            file_id,
+            span_builder,
+            result,
         }
     }
+}
 
+impl<'a> CompilerFrontend<'a> {
     // ---------------------------
     //  DEPENDENCY SORTING
     // ---------------------------
@@ -395,12 +380,12 @@ impl CompilerFrontend {
         &mut self,
         headers: BoundModuleHeaders,
         resolved_file_references: &ResolvedFileReferenceTable,
-    ) -> Result<SortedHeaders, DiagnosticBag> {
+    ) -> Result<SortedHeaders, PremergeFailure> {
         // Content-source ordering edges resolve through Stage 0's canonical targets, which this
         // compiler instance already retains as the module source identities.
         let content_source_targets = ContentSourceTargets::from_resolved_references(
             resolved_file_references,
-            &self.source_files,
+            self.source_files.as_ref(),
             &mut self.string_table,
         );
 
@@ -424,34 +409,28 @@ impl CompilerFrontend {
         } = request;
 
         let interned_entry_file = match self.source_files.get_by_canonical_path(entry_file_path) {
-            Some(identity) => identity.logical_path.clone(),
-            None => match InternedPath::try_from_filesystem_path(
-                entry_file_path,
-                &mut self.string_table,
-            ) {
-                Ok(path) => path,
-                Err(NonUtf8PathComponent { path }) => {
-                    let error = CompilerError::file_error(
-                        &path,
-                        format!(
-                            "Entry file path {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                        ),
-                        &mut self.string_table,
-                    );
-                    return Err(CompilerMessages::from_error_ref(error, &self.string_table));
-                }
-            },
+            Some(identity) => self.source_files.legacy_logical_path(identity.id),
+            None => {
+                let error = CompilerError::compiler_error(format!(
+                    "entry file {entry_file_path:?} was not registered before AST construction"
+                ));
+                return Err(CompilerMessages::from_error_ref(error, &self.string_table));
+            }
         };
 
+        let frozen_identity_handle = module_origin
+            .as_ref()
+            .map(|origin| FrozenIdentityHandle::for_domain(origin.package().clone()))
+            .unwrap_or_else(FrozenIdentityHandle::new);
         let file_value_resolution = Some(Rc::new(FileValueResolutionServices {
             stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
                 resolved_file_references,
-                self.source_files.clone(),
+                Arc::clone(self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
+            frozen_identity_handle,
         }));
-
         Ast::new(
             AstBuildInput {
                 source_build_config_contract_names: Arc::new(
@@ -467,8 +446,8 @@ impl CompilerFrontend {
                 top_level_const_fragments: sorted.top_level_const_fragments,
             },
             AstBuildContext {
-                external_package_registry: Arc::clone(&self.external_package_registry),
-                style_directives: &self.style_directives,
+                external_package_registry: Arc::clone(self.external_package_registry),
+                style_directives: self.style_directives,
                 string_table: &mut self.string_table,
                 entry_dir: interned_entry_file,
                 root_role,
@@ -538,6 +517,32 @@ impl CompilerFrontend {
     // ------------------------------
     //  BORROW CHECKING AND ANALYSIS
     // ------------------------------
+    pub(in crate::compiler_frontend) fn check_borrows_premerge(
+        &mut self,
+        hir_module: &HirModule,
+        frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    ) -> Result<BorrowCheckReport, PremergeFailure> {
+        match run_borrow_checker(
+            hir_module,
+            self.external_package_registry.as_ref(),
+            &self.string_table,
+        ) {
+            Ok(report) => Ok(report),
+            Err(BorrowCheckError::Diagnostic(diagnostic)) => {
+                let mut batch = PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
+                    diagnostic,
+                    std::mem::take(&mut self.string_table),
+                ));
+                if let Some(handle) = frozen_identity_handle {
+                    batch.set_frozen_identity_handle_if_missing(handle.clone());
+                }
+                Err(batch)
+            }
+            Err(BorrowCheckError::Infrastructure(error)) => Err(PremergeFailure::from(*error)),
+        }
+    }
+
+    #[cfg(test)]
     pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,

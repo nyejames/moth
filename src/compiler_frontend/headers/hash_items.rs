@@ -11,25 +11,19 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::find_co
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::types::{
-    FileRole, HeaderBuildContext, HeaderParseContext, TopLevelConstFragment,
+    FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
-
-/// Boxed diagnostic result for hash-item handling.
-///
-/// WHAT: gives the hash-item family one small error boundary.
-/// WHY: hash-item parsing passes structured diagnostics through to the file-parser loop
-///      without carrying the large value inline at every return.
-type HashItemsResult<T> = Result<T, Box<CompilerDiagnostic>>;
+use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 
 pub(super) fn handle_hash_item(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     current_token: Token,
-    current_location: SourceLocation,
+    current_span: SourceSpan,
     at_statement_boundary: bool,
-) -> HashItemsResult<()> {
+) -> Result<(), HeaderParseFailure> {
     if !at_statement_boundary {
         state.push_start_body_token(current_token);
         return Ok(());
@@ -38,12 +32,10 @@ pub(super) fn handle_hash_item(
     match token_stream.current_token_kind() {
         TokenKind::TemplateHead => {
             if state.export_mode.is_public() {
-                return Err(Box::new(CompilerDiagnostic::invalid_export_target(
-                    current_location,
-                )));
+                return Err(CompilerDiagnostic::invalid_export_target(Some(current_span)).into());
             }
 
-            handle_top_level_const_template(token_stream, state, context, current_location)
+            handle_top_level_const_template(token_stream, state, context, current_span)
         }
 
         _ => {
@@ -57,15 +49,16 @@ fn handle_top_level_const_template(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    current_location: SourceLocation,
-) -> HashItemsResult<()> {
+    current_span: SourceSpan,
+) -> Result<(), HeaderParseFailure> {
     if context.file_role == FileRole::Normal {
-        return Err(Box::new(CompilerDiagnostic::deferred_feature(
+        return Err(CompilerDiagnostic::deferred_feature(
             context
                 .string_table
                 .intern("top-level const templates in ordinary source files"),
-            current_location,
-        )));
+            Some(current_span),
+        )
+        .into());
     }
 
     if context.file_role == FileRole::ImportedModuleRoot {
@@ -79,36 +72,40 @@ fn handle_top_level_const_template(
             &mut discarded_body,
             context.string_table,
         )?;
-        if let Some((location, adjacent)) =
-            find_config_qualifier_marker(&discarded_body, context.string_table)
-        {
+        if let Some((marker_span, adjacent)) = find_config_qualifier_marker(
+            &discarded_body,
+            context.string_table,
+            token_stream.file_id,
+            context.span_builder,
+        ) {
             let diagnostic = if adjacent {
                 CompilerDiagnostic::invalid_config_reason(
                     None,
                     InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                    location,
+                    Some(marker_span),
                 )
             } else {
                 CompilerDiagnostic::common_syntax_mistake(
                     CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                    location,
+                    Some(marker_span),
                 )
             };
-            return Err(Box::new(diagnostic));
+            return Err(diagnostic.into());
         }
         return Ok(());
     }
 
     if context.file_role == FileRole::ActiveApiOnlyModuleRoot {
-        return Err(Box::new(
-            CompilerDiagnostic::invalid_top_level_runtime_statement(current_location),
-        ));
+        return Err(
+            CompilerDiagnostic::invalid_top_level_runtime_statement(Some(current_span)).into(),
+        );
     }
 
     let template_token = token_stream.current_token();
     token_stream.advance();
 
     let source_file = token_stream.src_path.to_owned();
+
     let mut build_context = HeaderBuildContext {
         warnings: &mut state.warnings,
         source_file: &source_file,
@@ -123,6 +120,7 @@ fn handle_top_level_const_template(
         context.const_template_offset + state.const_template_count,
         token_stream,
         &mut build_context,
+        context.span_builder,
     )?;
 
     state.const_template_count += 1;
@@ -131,7 +129,9 @@ fn handle_top_level_const_template(
     // seen before this const fragment in source order.
     let fragment = TopLevelConstFragment {
         runtime_insertion_index: context.runtime_fragment_offset + state.runtime_fragment_count,
-        location: header.name_location.clone(),
+        span: header
+            .name_span
+            .expect("authored const-template headers carry a source span"),
         header_path: header.tokens.src_path.clone(),
     };
     state.register_top_level_const_fragment(fragment, header);

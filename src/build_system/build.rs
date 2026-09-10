@@ -32,8 +32,9 @@ use crate::build_system::resource_unions::{
 
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::source_location::{CharPosition, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, RenderSourceContext,
+};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ProjectContextEscapeReason};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
@@ -42,16 +43,15 @@ use crate::compiler_frontend::hir::reachability::{
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionCategory,
-    PublicSemanticInterface,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginDeclarationId,
-    OriginFunctionId, StableModuleOriginIdentity,
+    OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
+use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -66,6 +66,60 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const FILE_MIN_UNIQUE_SYMBOLS_CAPACITY: usize = 32;
+
+fn attach_source_database(
+    messages: &mut CompilerMessages,
+    source_database: Option<&Arc<SourceDatabase>>,
+) {
+    let Some(source_database) = source_database else {
+        return;
+    };
+
+    // A frontend aggregate can already contain package-specific ranges. Attach the project
+    // database only as a fallback for diagnostics that have no retained source owner. The guard
+    // avoids a redundant whole-set association when every diagnostic already has an owner;
+    // source_database_for_diagnostic takes the first matching association, so earlier package
+    // ranges still win whenever this fallback is attached.
+    if messages
+        .diagnostics()
+        .enumerate()
+        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
+    {
+        messages.set_source_database(Arc::clone(source_database));
+    }
+}
+
+fn attach_owned_source_database(
+    messages: &mut CompilerMessages,
+    source_database: &mut Option<SourceDatabase>,
+) {
+    if let Some(source_database) = source_database.take() {
+        let source_database = Arc::new(source_database);
+        attach_source_database(messages, Some(&source_database));
+    }
+}
+
+fn finalize_backend_failure_messages(
+    backend_messages: CompilerMessages,
+    warnings: Vec<CompilerDiagnostic>,
+    string_table: StringTable,
+    warning_source_contexts: Vec<RenderSourceContext>,
+    project_source_database: Option<Arc<SourceDatabase>>,
+) -> CompilerMessages {
+    let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
+    messages.install_source_contexts(warning_source_contexts, 0);
+    messages.append_messages_preserving_context(backend_messages);
+    if let Some(source_database) = project_source_database {
+        messages.set_source_database(source_database);
+    }
+    match messages.freeze_source_contexts() {
+        Ok(messages) => messages,
+        Err(error) => CompilerMessages::from_error(
+            error,
+            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+        ),
+    }
+}
 
 // -------------------------
 //  Project Aggregation
@@ -137,7 +191,7 @@ pub struct ProjectCompilation {
 #[derive(Debug)]
 pub(crate) enum ProjectAssemblyError {
     Diagnostic {
-        diagnostic: Box<CompilerDiagnostic>,
+        diagnostic: CompilerDiagnostic,
         string_table: StringTable,
     },
     Infrastructure(CompilerError),
@@ -152,11 +206,11 @@ impl From<CompilerError> for ProjectAssemblyError {
 impl ProjectAssemblyError {
     fn project_context_escape(
         reason: ProjectContextEscapeReason,
-        location: SourceLocation,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
         string_table: StringTable,
     ) -> Self {
         Self::Diagnostic {
-            diagnostic: Box::new(CompilerDiagnostic::project_context_escape(reason, location)),
+            diagnostic: CompilerDiagnostic::project_context_escape(reason, span),
             string_table,
         }
     }
@@ -169,11 +223,20 @@ impl ProjectAssemblyError {
             } => {
                 let remap = string_table.merge_from(&diagnostic_table);
                 diagnostic.remap_string_ids(&remap);
-                CompilerMessages::from_diagnostics(vec![*diagnostic], string_table.clone())
+                CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
             }
             Self::Infrastructure(error) => {
                 CompilerMessages::from_error(error, string_table.clone())
             }
+        }
+    }
+    pub(crate) fn into_owned_messages(self) -> CompilerMessages {
+        match self {
+            Self::Diagnostic {
+                diagnostic,
+                string_table,
+            } => CompilerMessages::from_diagnostics(vec![diagnostic], string_table),
+            Self::Infrastructure(error) => CompilerMessages::from_error(error, StringTable::new()),
         }
     }
 }
@@ -191,7 +254,8 @@ impl ProjectCompilation {
             project,
             source_packages,
             resource_inputs,
-            transient_messages: _,
+            transient_batches: _,
+            project_source_database: _,
         } = frontend;
         Self::from_successful_boundaries(project, source_packages, resource_inputs)
     }
@@ -533,6 +597,7 @@ impl ProjectCompilation {
             entries.push(ProjectEntry {
                 resource_union: &entry.resource_union,
                 module,
+                source_domain: self.source_domain_for_module_ref(entry.module_ref),
                 reachability: &entry.reachability,
                 external_imports: &entry.external_imports,
                 linked_modules: entry
@@ -540,6 +605,7 @@ impl ProjectCompilation {
                     .iter()
                     .map(|linked| ProjectLinkedModule {
                         module: self.module_at(linked.module_ref),
+                        source_domain: self.source_domain_for_module_ref(linked.module_ref),
                         reachability: &linked.reachability,
 
                         generated_function_names: self
@@ -554,6 +620,28 @@ impl ProjectCompilation {
         }
 
         entries
+    }
+
+    /// Resolve the stable source domain for one linked module boundary.
+    ///
+    /// Project modules intentionally return `None`: their backend diagnostics use the
+    /// domain-less project source fallback. Source-package modules return their exact package
+    /// identity so a related package site can only resolve through that package's source row.
+    fn source_domain_for_module_ref(
+        &self,
+        module_ref: CompiledModuleRef,
+    ) -> Option<&StablePackageIdentity> {
+        match module_ref {
+            CompiledModuleRef::Project(_) | CompiledModuleRef::GeneratedProject(_) => None,
+            CompiledModuleRef::SourcePackage { package_id, .. }
+            | CompiledModuleRef::GeneratedSourcePackage { package_id, .. } => Some(
+                &self
+                    .source_packages
+                    .package(package_id)
+                    .expect("validated linked module must reference a retained source package")
+                    .package_identity,
+            ),
+        }
     }
 
     /// Move the build-only resource registry into the output-emission owner.
@@ -1035,8 +1123,7 @@ fn plan_project_package_facade(
     };
     let facade_module_ref = CompiledModuleRef::Project(facade_module_id);
     let facade_interface = boundary_interface_at(project, source_packages, facade_module_ref)?;
-    let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
-    validate_facade_declaration_provenance(facade_interface, facade_module)?;
+    validate_facade_declaration_provenance(facade_interface)?;
     let FacadeRootPlan {
         selected_base_modules,
         roots_by_module,
@@ -1086,17 +1173,10 @@ fn collect_facade_reachability(
             &roots,
         )?;
         if let Some(offending_function) = reachability.first_project_context_function() {
-            let mut string_table = StringTable::new();
-            let location = offending_function
-                .diagnostic_location()
-                .map(|location| location.to_source_location(&mut string_table))
-                .unwrap_or_else(|| {
-                    project_context_location_for_module(reachable_module, &mut string_table)
-                });
             return Err(ProjectAssemblyError::project_context_escape(
                 ProjectContextEscapeReason::ReachableExecutable,
-                location,
-                string_table,
+                offending_function.declaration_span(),
+                StringTable::new(),
             ));
         }
 
@@ -1170,90 +1250,34 @@ fn collect_facade_reachability(
 
 fn validate_facade_declaration_provenance(
     facade_interface: &PublicSemanticInterface,
-    facade_module: &Module,
 ) -> Result<(), ProjectAssemblyError> {
     for declaration in &facade_interface.declarations {
         if declaration
             .synthetic_interface_provenance
             .contains_class(SyntheticInterfaceClass::ProjectContext)
         {
-            let (location, string_table) = project_context_location_for_declaration(
-                facade_interface,
-                declaration,
-                facade_module,
-            );
+            let span = facade_interface
+                .export_bindings
+                .iter()
+                .find(|binding| binding.origin() == &declaration.origin)
+                .map(|binding| binding.public_name())
+                .and_then(|public_name| {
+                    facade_interface
+                        .export_diagnostic_provenance
+                        .iter()
+                        .find(|provenance| provenance.public_name == public_name)
+                        .and_then(|provenance| provenance.span)
+                });
             return Err(ProjectAssemblyError::project_context_escape(
                 ProjectContextEscapeReason::ExportedDeclaration,
-                location,
-                string_table,
+                span,
+                StringTable::new(),
             ));
         }
     }
     Ok(())
 }
 
-fn project_context_location_for_declaration(
-    facade_interface: &PublicSemanticInterface,
-    declaration: &PublicDeclarationRecord,
-    facade_module: &Module,
-) -> (SourceLocation, StringTable) {
-    let mut string_table = StringTable::new();
-    let public_name = facade_interface
-        .export_bindings
-        .iter()
-        .find(|binding| binding.origin() == &declaration.origin)
-        .map(|binding| binding.public_name());
-
-    if let Some(public_name) = public_name
-        && let Some(provenance) = facade_interface
-            .export_diagnostic_provenance
-            .iter()
-            .find(|provenance| provenance.public_name == public_name)
-    {
-        let location = &provenance.location;
-        let scope = InternedPath::from_components(
-            location
-                .scope_components
-                .iter()
-                .map(|component| string_table.intern(component))
-                .collect(),
-        );
-        return (
-            SourceLocation::new(
-                scope,
-                CharPosition {
-                    line_number: location.start_line,
-                    char_column: location.start_column,
-                },
-                CharPosition {
-                    line_number: location.end_line,
-                    char_column: location.end_column,
-                },
-            ),
-            string_table,
-        );
-    }
-
-    (
-        project_context_location_for_module(facade_module, &mut string_table),
-        string_table,
-    )
-}
-
-fn project_context_location_for_module(
-    module: &Module,
-    string_table: &mut StringTable,
-) -> SourceLocation {
-    if module.metadata.entry_point.as_os_str().is_empty() {
-        return SourceLocation::new(
-            InternedPath::from_single_str("<package-facade>", string_table),
-            CharPosition::default(),
-            CharPosition::default(),
-        );
-    }
-
-    SourceLocation::from_path(&module.metadata.entry_point, string_table)
-}
 fn build_module_owner_by_origin(
     project: &CompiledGraphBoundary,
     source_packages: &CompletedSourcePackageRegistry,
@@ -1309,9 +1333,8 @@ fn validate_source_package_facades(
             module_id: package.root_module_id,
         };
         let facade_interface = package.root_interface()?;
-        let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
         let label = format!("Source package @{} facade", package.package_prefix());
-        validate_facade_declaration_provenance(facade_interface, facade_module)?;
+        validate_facade_declaration_provenance(facade_interface)?;
         let FacadeRootPlan {
             roots_by_module, ..
         } = plan_facade_roots(
@@ -1399,6 +1422,8 @@ impl PackageAssembly {
 #[derive(Clone)]
 pub(crate) struct ProjectLinkedModule<'a> {
     pub(crate) module: &'a Module,
+    /// Stable source-package domain for this linked boundary, or `None` for project modules.
+    pub(crate) source_domain: Option<&'a StablePackageIdentity>,
     pub(crate) reachability: &'a HirReachability,
     /// Generated symbol lookup for the linked module's own boundary.
     pub(crate) generated_function_names: Arc<
@@ -1413,6 +1438,8 @@ pub(crate) struct ProjectLinkedModule<'a> {
 #[derive(Clone)]
 pub(crate) struct ProjectEntry<'a> {
     pub(crate) module: &'a Module,
+    /// Stable source-package domain for this entry boundary, or `None` for project modules.
+    pub(crate) source_domain: Option<&'a StablePackageIdentity>,
     /// Exact stable-origin union consumed by the HTML resource planner.
     pub(crate) resource_union: &'a ResourceOriginUnion,
     pub(crate) reachability: &'a HirReachability,
@@ -1503,6 +1530,11 @@ pub(crate) struct BuildBootstrap {
     pub(crate) string_table: StringTable,
     pub(crate) frontend_surface: BuilderSurface,
     pub(crate) validated_directory_output_settings: Option<ValidatedDirectoryOutputSettings>,
+    /// The project boundary's source identities, with config registered before Stage 0 discovery.
+    ///
+    /// Single-file and config-free callers leave this absent so their own frontend database stays
+    /// the sole identity context for source compilation.
+    pub(crate) project_source_files: Option<Arc<SourceDatabase>>,
     /// The typed explicit build inputs this bootstrap was started with.
     ///
     /// WHAT: the `BuildConfigInputSet` the command layer parsed or the programmatic caller
@@ -1584,8 +1616,93 @@ pub struct BuildResult {
     pub config: Config,
     pub warnings: Vec<CompilerDiagnostic>,
     pub string_table: StringTable,
+    /// Per-warning source snapshot associations, indexed against `warnings`.
+    ///
+    /// Package ranges are collected before backend warnings are appended, so the final append
+    /// leaves their indexes unchanged. Empty package rows remain available for explicitly owned
+    /// generated spans without widening a diagnostic's default source range.
+    pub(crate) warning_source_contexts: Vec<RenderSourceContext>,
+    /// The retained source snapshots used by this build's diagnostics and warning renderers.
+    ///
+    /// This keeps the build-lifetime source database alive for as long as its result is retained;
+    /// the eventual frozen render context owns that lifetime more narrowly.
+    pub(crate) source_database: Option<Arc<SourceDatabase>>,
     pub output_owner: OutputOwner,
     pub directory_output_plan: Option<ValidatedOutputPlan>,
+}
+
+impl BuildResult {
+    /// Move successful-build warnings into a mutable report owner without freezing it yet.
+    /// WHAT: transfers warnings, their aggregate string table and all source contexts as one
+    ///       move-only `CompilerMessages` value, retaining empty package rows for explicitly
+    ///       owned generated spans.
+    /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
+    ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
+    pub(crate) fn take_warning_messages_before_freeze(
+        &mut self,
+    ) -> Result<Option<CompilerMessages>, CompilerError> {
+        if self.warnings.is_empty() {
+            let _ = std::mem::take(&mut self.string_table);
+            self.warning_source_contexts.clear();
+            self.source_database.take();
+            return Ok(None);
+        }
+
+        let warnings = std::mem::take(&mut self.warnings);
+        let string_table = std::mem::take(&mut self.string_table);
+        let source_contexts = std::mem::take(&mut self.warning_source_contexts);
+        let source_database = self.source_database.take();
+        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
+        messages.install_source_contexts(source_contexts, 0);
+        if let Some(source_database) = source_database {
+            messages.set_source_database(source_database);
+        }
+        Ok(Some(messages))
+    }
+
+    /// Move successful-build warnings into their one final frozen render owner.
+    ///
+    /// The output writer consumes the mutable build table first; this method is the terminal
+    /// report publication point. Clean builds release the table and source snapshots immediately.
+    pub(crate) fn take_warning_messages(
+        &mut self,
+    ) -> Result<Option<CompilerMessages>, CompilerError> {
+        self.take_warning_messages_before_freeze()?
+            .map(|messages| messages.freeze_source_contexts())
+            .transpose()
+    }
+    /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
+    ///
+    /// Clean builds still retain the project source database until output succeeds or fails. A
+    /// late failure therefore receives the same source table/range owner as authored warnings
+    /// instead of falling back to an empty table after clean-success cleanup.
+    pub(crate) fn take_output_failure_messages(
+        &mut self,
+        late_messages: CompilerMessages,
+    ) -> Result<CompilerMessages, CompilerError> {
+        let mut messages = if self.warnings.is_empty() {
+            let string_table = std::mem::take(&mut self.string_table);
+            let source_contexts = std::mem::take(&mut self.warning_source_contexts);
+            let source_database = self.source_database.take();
+            let mut messages = CompilerMessages::from_diagnostics(Vec::new(), string_table);
+            messages.install_source_contexts(source_contexts, 0);
+            messages.append_messages_preserving_context(late_messages);
+            if let Some(source_database) = source_database {
+                messages.set_source_database(source_database);
+            }
+            messages
+        } else {
+            let mut messages = self.take_warning_messages_before_freeze()?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "warning report owner disappeared during output failure handoff",
+                )
+            })?;
+            messages.append_messages_preserving_context(late_messages);
+            messages
+        };
+        messages.extend_project_source_context_to_diagnostics();
+        messages.freeze_source_contexts()
+    }
 }
 
 // -------------------------
@@ -1603,11 +1720,10 @@ pub fn build_project(
     build_config_inputs: &BuildConfigInputSet,
 ) -> Result<BuildResult, CompilerMessages> {
     let build_profile = BuildProfile::from_flags(flags);
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(entry_path, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, path_string_table));
+            return Err(CompilerMessages::from_error(error, StringTable::new()));
         }
     };
 
@@ -1622,6 +1738,7 @@ pub fn build_project(
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
+        mut project_source_files,
         build_config_inputs,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
@@ -1637,23 +1754,37 @@ pub fn build_project(
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
         Ok(frontend_compilation) => frontend_compilation,
-        Err(messages) => {
+        Err(mut messages) => {
+            attach_source_database(&mut messages, project_source_files.as_ref());
             return Err(messages);
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
-        return Err(frontend_compilation.into_render_messages(&mut string_table));
+        let messages = frontend_compilation
+            .into_render_messages_with_frozen_identity(
+                &mut string_table,
+                project_source_files.take(),
+                None,
+            )
+            .map_err(|error| {
+                CompilerMessages::from_error(error, std::mem::take(&mut string_table))
+            })?;
+        return Err(messages);
     }
-    let project_compilation = ProjectCompilation::from_frontend(frontend_compilation)
-        .map_err(|error| error.into_messages(&mut string_table))?;
-    let mut warnings: Vec<CompilerDiagnostic> = project_compilation
-        .modules()
-        .flat_map(collect_module_warnings)
-        .collect();
+    let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
+        Ok(project_compilation) => project_compilation,
+        Err(error) => {
+            let mut messages = error.into_messages(&mut string_table);
+            attach_source_database(&mut messages, project_source_files.as_ref());
+            return Err(messages);
+        }
+    };
+    let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
@@ -1671,12 +1802,20 @@ pub fn build_project(
     );
     let project = match project_result {
         Ok(project) => project,
-        Err(mut compiler_messages) => {
-            compiler_messages.string_table = string_table;
-            return Err(compiler_messages);
+        Err(compiler_messages) => {
+            let messages = finalize_backend_failure_messages(
+                compiler_messages,
+                warnings,
+                string_table,
+                warning_source_contexts,
+                project_source_files.take(),
+            );
+            return Err(messages);
         }
     };
 
+    // Backend warnings are project-owned and appended after all frontend/package warnings; this
+    // does not shift the already-recorded package ranges.
     warnings.extend(project.warnings.iter().cloned());
 
     let output_owner = OutputOwner {
@@ -1688,7 +1827,16 @@ pub fn build_project(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            return Err(CompilerMessages::from_error(error, string_table));
+            return Err(finalize_backend_failure_messages(
+                CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                ),
+                warnings,
+                string_table,
+                warning_source_contexts,
+                project_source_files.take(),
+            ));
         };
 
         Some(validated_output_settings.select(
@@ -1699,16 +1847,17 @@ pub fn build_project(
     } else {
         None
     };
-    // Direct-project resolution records are a bootstrap-to-frontend handoff. No current build or
-    // dev consumer retains them after the semantic boundary has consumed their values and
-    // provenance; persistent retention belongs to the deferred incremental artefact owner.
+    // Direct-project resolution records are consumed by the semantic boundary and are not
+    // retained in the successful build result.
     config.config_resolution_records.clear();
-
+    let source_database = project_source_files;
     Ok(BuildResult {
         project,
         config,
         warnings,
         string_table,
+        warning_source_contexts,
+        source_database,
         output_owner,
         directory_output_plan,
     })
@@ -1734,6 +1883,8 @@ pub(crate) fn bootstrap_project_build(
 
     let mut config = Config::new(entry_path);
 
+    let mut project_source_files = config.entry_dir.is_dir().then(SourceDatabase::empty);
+
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
     // also need as a stable prefix once file preparation becomes independent.
     let preseeded = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
@@ -1750,7 +1901,9 @@ pub(crate) fn bootstrap_project_build(
     let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
         Ok(style_directives) => style_directives,
         Err(error) => {
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+            let mut messages = CompilerMessages::from_error(error, string_table.clone());
+            attach_owned_source_database(&mut messages, &mut project_source_files);
+            return Err(messages);
         }
     };
     // WHAT: Load and validate project config before compilation begins (Stage 0).
@@ -1760,20 +1913,27 @@ pub(crate) fn bootstrap_project_build(
         frontend_surface: &frontend_surface,
         build_config_inputs,
     };
-    let validated_directory_output_settings =
-        match load_project_config(&mut config, &config_services, &mut string_table) {
-            Ok(settings) => settings,
-            Err(messages) => {
-                return Err(messages);
-            }
-        };
+    let validated_directory_output_settings = match load_project_config(
+        &mut config,
+        &config_services,
+        &mut string_table,
+        project_source_files.as_mut(),
+    ) {
+        Ok(settings) => settings,
+        Err(mut messages) => {
+            attach_owned_source_database(&mut messages, &mut project_source_files);
+            return Err(messages);
+        }
+    };
     // WHAT: Validate backend-specific config requirements before compilation.
     // WHY: Backends should reject unsupported settings before frontend compilation does work.
     if let Err(error) = project_builder
         .backend
         .validate_project_config(&config, &mut string_table)
     {
-        return Err(error.into_messages(string_table.clone()));
+        let mut messages = error.into_messages(string_table.clone());
+        attach_owned_source_database(&mut messages, &mut project_source_files);
+        return Err(messages);
     }
 
     Ok(BuildBootstrap {
@@ -1782,12 +1942,48 @@ pub(crate) fn bootstrap_project_build(
         string_table,
         frontend_surface,
         validated_directory_output_settings,
+        project_source_files: project_source_files.map(Arc::new),
         build_config_inputs: build_config_inputs.clone(),
     })
 }
 
 fn collect_module_warnings(module: &Module) -> Vec<CompilerDiagnostic> {
     module.metadata.warnings.clone()
+}
+
+fn collect_success_warnings(
+    project_compilation: &ProjectCompilation,
+) -> (Vec<CompilerDiagnostic>, Vec<RenderSourceContext>) {
+    let mut warnings = project_compilation
+        .project
+        .successful_module_views()
+        .flat_map(collect_module_warnings)
+        .collect::<Vec<_>>();
+    let mut warning_source_contexts = Vec::new();
+
+    for (package_index, package) in project_compilation.source_packages.iter().enumerate() {
+        let warning_start = warnings.len();
+        warnings.extend(
+            package
+                .boundary
+                .successful_module_views()
+                .flat_map(collect_module_warnings),
+        );
+        let warning_end = warnings.len();
+
+        if let Some(source_database) = project_compilation
+            .source_packages
+            .source_database(PackageBoundaryId::from_index(package_index))
+        {
+            warning_source_contexts.push(RenderSourceContext {
+                diagnostic_range: warning_start..warning_end,
+                source_database: Arc::clone(source_database),
+                domain: Some(package.package_identity.clone()),
+            });
+        }
+    }
+
+    (warnings, warning_source_contexts)
 }
 
 #[cfg(test)]

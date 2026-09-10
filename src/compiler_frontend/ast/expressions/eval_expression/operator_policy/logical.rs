@@ -7,10 +7,10 @@
 use super::diagnostics::diagnostic_operator_from_ast;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 pub(super) fn is_logical_operator(op: &Operator) -> bool {
     matches!(op, Operator::And | Operator::Or)
@@ -20,7 +20,7 @@ pub(super) fn resolve_logical_operator_type(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
     let bool_type_id = type_environment.builtins().bool;
@@ -34,7 +34,7 @@ pub(super) fn resolve_logical_operator_type(
         diagnostic_operator_from_ast(op),
         lhs,
         Some(rhs),
-        location.clone(),
+        span,
     )
     .into())
 }

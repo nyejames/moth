@@ -1,14 +1,13 @@
 //! Test-only TIR fixture constructors and inspection helpers.
 //!
 //! Production TIR files keep parser and reducer APIs. Fixture constructors,
-//! view location lookups and mutation walkers live here so test builds do not
+//! view span lookups and mutation walkers live here so test builds do not
 //! grow extra semantic states or convenience methods on the compiler path.
 
 use super::super::slot_composition::child_wrappers::wrap_tir_node_in_wrappers_into;
 use super::super::slot_composition::schema::expand_tir_slot_placeholders_into;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
@@ -18,7 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateSlotPlanId, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites, TirSlotPlaceholder,
+    TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirWrapperApplicationMode, TirWrapperContext,
@@ -28,19 +27,9 @@ use crate::compiler_frontend::ast::templates::tir::slot_plan::runtime_slot_plan_
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 use std::collections::HashSet;
-
-impl TirSlotPlaceholder {
-    pub(crate) fn new(
-        key: SlotKey,
-        occurrence_id: SlotOccurrenceId,
-        location: SourceLocation,
-    ) -> Self {
-        Self::with_wrapper_sets(key, occurrence_id, location, None, None, false)
-    }
-}
 
 impl TirWrapperContext {
     pub(crate) fn empty() -> Self {
@@ -81,55 +70,55 @@ impl<'a> TirView<'a> {
         self.effective_expression_for_site(site_id)
     }
 
-    pub(crate) fn source_location_for_slot_occurrence(
+    pub(crate) fn source_span_for_slot_occurrence(
         &self,
         occurrence_id: SlotOccurrenceId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, CompilerError> {
         let root_node_ref = self.root_template()?.root;
-        find_location_in_subtree(self, root_node_ref, &|kind, location| match kind {
+        find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::Slot { placeholder }
                 if placeholder.occurrence_id == occurrence_id =>
             {
-                Some(location.clone())
+                span
             }
             _ => None,
         })
     }
 
-    pub(crate) fn source_location_for_child_template_occurrence(
+    pub(crate) fn source_span_for_child_template_occurrence(
         &self,
         occurrence_id: ChildTemplateOccurrenceId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, CompilerError> {
         let root_node_ref = self.root_template()?.root;
-        find_location_in_subtree(self, root_node_ref, &|kind, location| match kind {
+        find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::ChildTemplate {
                 occurrence_id: child_id,
                 ..
-            } if *child_id == occurrence_id => Some(location.clone()),
+            } if *child_id == occurrence_id => span,
             _ => None,
         })
     }
 
-    pub(crate) fn source_location_for_expression_site(
+    pub(crate) fn source_span_for_expression_site(
         &self,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<SourceLocation>, CompilerError> {
+    ) -> Result<Option<SourceSpan>, CompilerError> {
         let root_node_ref = self.root_template()?.root;
-        find_location_in_subtree(self, root_node_ref, &|kind, location| match kind {
+        find_span_in_subtree(self, root_node_ref, &|kind, span| match kind {
             TemplateIrNodeKind::DynamicExpression {
                 site_id: expr_site_id,
                 ..
-            } if *expr_site_id == site_id => Some(location.clone()),
+            } if *expr_site_id == site_id => span,
 
             TemplateIrNodeKind::BranchChain { branches, .. } => branches
                 .iter()
                 .find(|branch| branch.selector_site_id == site_id)
-                .map(|branch| branch.location.clone()),
+                .and_then(|branch| branch.span),
 
             TemplateIrNodeKind::Loop { header_sites, .. }
                 if expression_site_in_header(header_sites, site_id) =>
             {
-                Some(location.clone())
+                span
             }
 
             _ => None,
@@ -137,25 +126,25 @@ impl<'a> TirView<'a> {
     }
 }
 
-fn find_location_in_subtree(
+fn find_span_in_subtree(
     view: &TirView<'_>,
     node_ref: TemplateIrNodeId,
-    matches: &impl Fn(&TemplateIrNodeKind, &SourceLocation) -> Option<SourceLocation>,
-) -> Result<Option<SourceLocation>, CompilerError> {
+    matches: &impl Fn(&TemplateIrNodeKind, Option<SourceSpan>) -> Option<SourceSpan>,
+) -> Result<Option<SourceSpan>, CompilerError> {
     let (found, children) = {
         let node = view.effective_node(node_ref)?;
-        let found = matches(&node.kind, &node.location);
+        let found = matches(&node.kind, node.span);
         let children = child_node_ids(&node.kind);
         (found, children)
     };
 
-    if let Some(location) = found {
-        return Ok(Some(location));
+    if let Some(span) = found {
+        return Ok(Some(span));
     }
 
     for child_node_id in children {
-        if let Some(location) = find_location_in_subtree(view, child_node_id, matches)? {
-            return Ok(Some(location));
+        if let Some(span) = find_span_in_subtree(view, child_node_id, matches)? {
+            return Ok(Some(span));
         }
     }
 
@@ -166,7 +155,9 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
     match kind {
         TemplateIrNodeKind::Sequence { children } => children.clone(),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             let mut ids: Vec<TemplateIrNodeId> =
                 branches.iter().map(|branch| branch.body).collect();
             if let Some(fallback) = fallback {
@@ -470,7 +461,9 @@ where
                 Ok(Vec::new())
             }
 
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 let mut children =
                     Vec::with_capacity(branches.len() + usize::from(fallback.is_some()));
                 for branch in branches.iter_mut() {

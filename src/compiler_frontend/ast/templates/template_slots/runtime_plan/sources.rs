@@ -14,7 +14,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     TirSlotSchema, classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
     tir_node_is_const_evaluable_value,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runtime(
     schema: &TirSlotSchema,
@@ -53,7 +52,6 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
 pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contribution_sources(
     schema: &TirSlotSchema,
     contributions: &TirSlotContributions,
-    location: &SourceLocation,
     string_table: &StringTable,
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
@@ -63,6 +61,14 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
     for target in schema.ordered_slot_keys(string_table) {
         for node_id in contributions.nodes_for_slot(&target) {
             let id = RuntimeSlotContributionSourceId(sources.len());
+            let source_span = store
+                .get_node(*node_id)
+                .map(|node| node.span)
+                .ok_or_else(|| {
+                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                        "TIR runtime slot planning: contribution node was not present in the store.",
+                    )
+                })?;
 
             // Deep-copy the contribution node so it becomes an independent
             // render root. No active slot plan is passed: the contribution's
@@ -82,7 +88,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                     target: target.clone(),
                     render_root,
                     renders_wrapper_unconditionally,
-                    location: location.clone(),
+                    span: source_span,
                 },
                 shape,
             });

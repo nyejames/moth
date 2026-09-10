@@ -12,7 +12,7 @@ use crate::compiler_frontend::compiler_messages::{
     NumberLiteralErrorReason, OperatorOperandPosition, SymbolicSpacingConstruct,
     SymbolicSpacingError,
 };
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_string_escape_message(reason: InvalidStringEscapeReason) -> String {
     match reason {
@@ -43,7 +43,7 @@ fn invalid_escape_source_visible(escaped: char) -> String {
 pub(crate) fn invalid_number_literal_message(
     literal_text: StringId,
     reason: NumberLiteralErrorReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let literal = string_table.resolve(literal_text);
 
@@ -96,7 +96,7 @@ pub(crate) fn invalid_number_literal_message(
 pub(crate) fn invalid_style_directive_message(
     directive_name: StringId,
     supported_directives: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(directive_name);
     let supported = string_table.resolve(supported_directives);
@@ -106,7 +106,7 @@ pub(crate) fn invalid_style_directive_message(
 
 pub(crate) fn invalid_type_annotation_message(
     reason: &InvalidTypeAnnotationReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         InvalidTypeAnnotationReason::NoneNotAllowed => {
@@ -154,7 +154,7 @@ pub(crate) fn invalid_type_annotation_message(
 
 pub(crate) fn common_syntax_mistake_message(
     reason: &CommonSyntaxMistakeReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         CommonSyntaxMistakeReason::EqualityOperator => {
@@ -333,7 +333,7 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
 pub(crate) fn missing_operator_operand_message(
     operator: StringId,
     position: OperatorOperandPosition,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let op_str = string_table.resolve(operator);
     match position {
@@ -514,7 +514,7 @@ pub(crate) fn invalid_statement_position_message(reason: InvalidStatementPositio
 
 pub(crate) fn invalid_this_usage_message(
     reason: InvalidThisUsageReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         InvalidThisUsageReason::NotInReceiverMethod => {

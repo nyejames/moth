@@ -13,12 +13,14 @@ just bench-ci
 just bench-validate
 just bench-check
 just bench-frontend-check
+just bench-data-layout-check
 just bench-scaling
 just bench
 just bench-frontend
+just bench-data-layout
 ```
 
-`just bench-ci` runs the bounded development gate used by `just validate`. It preflights every manifest case once, then measures the quick subset with three iterations. The command never writes local history or tracked summaries.
+`just bench-ci` runs the bounded development gate used by `just validate`. It preflights every standard manifest case once, then measures the quick subset with three iterations. The command never writes local history or tracked summaries.
 
 `just bench-validate` preflights every case without measuring it. Use this when you only need to check the benchmark inventory and execution contracts.
 
@@ -28,19 +30,23 @@ just bench-frontend
 
 `just bench-frontend-check` runs the focused in-process frontend suite without writing local history or tracked summaries. Use it when compiler-stage changes are too small to read through subprocess noise.
 
+`just bench-data-layout-check` runs the diagnostic data-layout suite read-only. It uses the same in-process frontend engine as `bench-frontend-check`, but selects only cases whose expected outcome is a warning or user diagnostic.
+
 `just bench` records an end-to-end CLI run, updates local raw history under `benchmarks/local-data/`, and updates the current monthly summary under `benchmarks/summaries/`.
 
 `just bench-frontend` records the focused frontend suite through the same local history and monthly summary flow, but under a separate suite kind.
 
-Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 68 cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
+`just bench-data-layout` records the diagnostic data-layout suite under its own history section. Benchmark fixtures in this suite are evidence for compiler memory and timing measurements, not correctness coverage.
+
+Every mode preflights its selected cases before measurement. That successful preflight provides the one warmup. Full check and recording modes then run ten measured iterations per case. `bench-ci` preflights all 74 standard cases before it selects 8 quick CLI cases and 10 quick frontend cases for three measured iterations.
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
-Recorded runs (`just bench` and `just bench-frontend`) require a clean committed worktree. The command rejects a dirty or uncommitted repository before fingerprint traversal, compiler construction or history access. Read-only commands (`bench-ci`, `bench-validate`, `bench-check` and `bench-frontend-check`) permit a dirty worktree as long as it stays unchanged during the run.
+Recorded runs (`just bench`, `just bench-frontend` and `just bench-data-layout`) require a clean committed worktree. The command rejects a dirty or uncommitted repository before fingerprint traversal, compiler construction or history access. Read-only commands (`bench-ci`, `bench-validate`, `bench-check`, `bench-frontend-check` and `bench-data-layout-check`) permit a dirty worktree as long as it stays unchanged during the run.
 
 ## Manifest And Stable Identity
 
-`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 40 workloads, 74 cases and 2 scaling series.
+`benchmarks/manifest.toml` owns the ordered workload and case inventory. It currently declares 46 workloads, 76 cases and 2 scaling series.
 
 A workload names the source inputs that determine one compilation workload:
 
@@ -194,7 +200,7 @@ Comparison output distinguishes four states for each matching case ID:
 - **measurement changed**: source and timing schema match but measurement fingerprint differs — no speed delta is reported.
 - **timing comparable**: both match — speed deltas and stage movement are computed.
 
-Schema 4 accepts only `expectation = "clean"`. A clean case must compile without errors or warnings. Negative diagnostic coverage belongs under `tests/cases/`, not in this manifest.
+Schema 4 accepts `expectation = "clean"`, `"warned"` or `"diagnosed"`. A clean case must compile without errors or warnings. A warned case must compile successfully and emit at least one warning. A diagnosed case must produce one or more user-facing diagnostic errors; infrastructure failures still fail the run. The `data_layout` group is reserved for in-process frontend cases with the latter two expectations.
 
 ## Execution Contract
 
@@ -624,12 +630,10 @@ Add cases through `benchmarks/manifest.toml`:
 2. Give the workload and case descriptive lowercase IDs with underscores. Treat both IDs as persistent history keys.
 3. List every source or config input under `fingerprint_roots`. Exclude only generated paths inside those roots. Never exclude authored assets.
 4. Choose the typed CLI `check` or `build` runner, or the frontend `dev` profile. Keep runner arguments explicit and ordered.
-5. Set `expectation = "clean"`. Add the case to the quick subset only when it gives useful bounded coverage for normal development validation.
+5. Set the expectation that matches the workload: `clean` for a successful warning-free compile, `warned` for a successful compile with warnings, or `diagnosed` for expected user-facing diagnostic errors. Add the case to the quick subset only when it gives useful bounded coverage for normal development validation.
 6. Run `just bench-validate`, then `just bench-ci`. Run the matching full non-recording suite when the case affects performance work.
 
-New fixtures must compile successfully and exercise a distinct compiler or build-system path. Prefer one representative fixture over near-duplicates. If a fixture exposes a compiler bug, fix the compiler and add canonical coverage under `tests/cases/`. Don't weaken, annotate or reshape the benchmark source to hide the failure.
-
-Negative diagnostic cases belong under `tests/cases/`, where their stable codes and source context can be asserted. Project fixtures commit source inputs only. Generated `dev` and `release` directories stay untracked.
+New normal-suite fixtures must compile successfully and exercise a distinct compiler or build-system path. Prefer one representative fixture over near-duplicates. If a fixture exposes a compiler bug, fix the compiler and add canonical coverage under `tests/cases/`. Data-layout fixtures are the exception: they are evidence for diagnostic memory/timing measurements, never correctness coverage, and must not move or duplicate `tests/cases/` assertions. Don't weaken, annotate or reshape any benchmark source to hide an infrastructure failure.
 
 Keep the public group list short. Reuse an existing group unless a new group makes summaries clearer.
 

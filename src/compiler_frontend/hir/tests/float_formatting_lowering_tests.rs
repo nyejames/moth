@@ -35,27 +35,23 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+
 use crate::compiler_frontend::tests::type_id_fixture_support::inferred_type_reference_expr;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn float_expr(
     value: f64,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Expression {
-    Expression::float(value, location, ValueMode::ImmutableOwned)
+    Expression::float(value, span, ValueMode::ImmutableOwned)
 }
 
 fn string_expr(
     value: &str,
     string_table: &mut StringTable,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Expression {
-    Expression::string_slice(
-        string_table.intern(value),
-        location,
-        ValueMode::ImmutableOwned,
-    )
+    Expression::string_slice(string_table.intern(value), span, ValueMode::ImmutableOwned)
 }
 
 fn find_format_float_statements(
@@ -76,7 +72,7 @@ fn find_format_float_statements(
                 ..
             } => {
                 let result_type = builder
-                    .local_type_id_or_error(*result, &statement.location)
+                    .local_type_id_or_error(*result, &statement.span)
                     .ok();
                 result_type.map(|ty| (*failure_mode, ty))
             }
@@ -138,7 +134,7 @@ fn expression_contains_float_to_string_cast(expression: &HirExpression) -> bool 
 
 fn make_float_to_string_cast(
     source: Expression,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> Expression {
     let cast = ResolvedCastExpression {
         source: Box::new(source),
@@ -150,7 +146,7 @@ fn make_float_to_string_cast(
             policy: BuiltinCastPolicyId::FloatToString,
         },
         handling: CastHandling::Infallible,
-        location: location.clone(),
+        span,
     };
 
     Expression::cast(cast, builtin_type_ids::STRING, &TypeEnvironment::new())
@@ -159,11 +155,11 @@ fn make_float_to_string_cast(
 #[test]
 fn cast_float_to_string_lowers_to_format_float_statement() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
-    let source = float_expr(1.5, loc.clone());
+    let loc = None;
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -187,7 +183,7 @@ fn cast_float_to_string_lowers_to_format_float_statement() {
 #[test]
 fn cast_float_to_string_flushes_source_prelude_before_formatting() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let source_name = symbol("source_float", &mut string_table);
 
     let mut builder = setup_builder(&mut string_table);
@@ -198,9 +194,9 @@ fn cast_float_to_string_flushes_source_prelude_before_formatting() {
         vec![],
         vec![builtin_type_ids::FLOAT],
         &mut builder.type_environment,
-        loc.clone(),
+        loc,
     );
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -237,9 +233,9 @@ fn cast_float_to_string_flushes_source_prelude_before_formatting() {
 #[test]
 fn cast_float_to_string_return_error_in_builtin_error_function() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let fn_name = symbol("__test_fn_error", &mut string_table);
-    let source = float_expr(1.5, loc.clone());
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
     let error_type_id = builder.test_register_builtin_error_type();
@@ -249,7 +245,7 @@ fn cast_float_to_string_return_error_in_builtin_error_function() {
     builder.test_register_function_with_return_type(fn_name, FunctionId(1), return_type);
     builder.test_set_current_function(FunctionId(1));
 
-    let expr = make_float_to_string_cast(source, loc.clone());
+    let expr = make_float_to_string_cast(source, loc);
     let lowered = builder
         .lower_expression(&expr)
         .expect("Float -> String cast lowering in Error! function should succeed");
@@ -288,16 +284,16 @@ fn cast_float_to_string_return_error_in_builtin_error_function() {
 #[test]
 fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let value_name = symbol("value", &mut string_table);
     let value_ref = inferred_type_reference_expr(
         value_name.clone(),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     );
 
-    let expr = runtime_template_expression(loc.clone(), vec![value_ref], &string_table);
+    let expr = runtime_template_expression(loc, vec![value_ref], &string_table);
 
     let mut builder = setup_builder(&mut string_table);
     register_local(
@@ -305,7 +301,7 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
         value_name,
         LocalId(10),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
     );
 
     let _lowered = builder
@@ -324,10 +320,10 @@ fn runtime_float_template_interpolation_lowers_to_format_float_statement() {
 #[test]
 fn runtime_string_template_chunk_does_not_emit_format_float() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
-    let text = string_expr("hello", &mut string_table, loc.clone());
+    let loc = None;
+    let text = string_expr("hello", &mut string_table, loc);
 
-    let expr = runtime_template_expression(loc.clone(), vec![text], &string_table);
+    let expr = runtime_template_expression(loc, vec![text], &string_table);
 
     let mut builder = setup_builder(&mut string_table);
     let _lowered = builder
@@ -344,7 +340,7 @@ fn runtime_string_template_chunk_does_not_emit_format_float() {
 #[test]
 fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
+    let loc = None;
     let value_path = symbol("value", &mut string_table);
     let value_local = LocalId(20);
     let source = ReactiveSource {
@@ -355,23 +351,25 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
     let value_ref = inferred_type_reference_expr(
         value_path.clone(),
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
         ValueMode::ImmutableReference,
     )
     .with_reactive_source(source.clone());
     let subscription = ReactiveSubscription {
         source,
         type_id: builtin_type_ids::FLOAT,
-        location: loc.clone(),
+        span: loc,
     };
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
             children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
                 expression: Box::new(value_ref),
                 reactive_subscription: Some(subscription),
+                span: loc,
             }],
+            span: loc,
         }),
-        location: loc.clone(),
+        span: loc,
     };
 
     let mut builder = setup_builder(&mut string_table);
@@ -380,7 +378,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
         value_path.clone(),
         value_local,
         builtin_type_ids::FLOAT,
-        loc.clone(),
+        loc,
     );
     builder.side_table.bind_reactive_source(HirReactiveSource {
         id: ReactiveSourceId(0),
@@ -388,7 +386,7 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
         path: value_path.clone(),
         kind: HirReactiveSourceKind::Declaration,
         type_id: builtin_type_ids::FLOAT,
-        location: loc.clone(),
+        span: loc,
     });
 
     let expr = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
@@ -409,8 +407,8 @@ fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
 #[test]
 fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
     let mut string_table = StringTable::new();
-    let loc = test_source_location(1);
-    let source = float_expr(1.5, loc.clone());
+    let loc = None;
+    let source = float_expr(1.5, loc);
 
     let mut builder = setup_builder(&mut string_table);
     let optional_string_type = builder
@@ -427,7 +425,7 @@ fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
             policy: BuiltinCastPolicyId::FloatToString,
         },
         handling: CastHandling::Infallible,
-        location: loc.clone(),
+        span: loc,
     };
 
     let expr = Expression::cast(cast, optional_string_type, &builder.type_environment);

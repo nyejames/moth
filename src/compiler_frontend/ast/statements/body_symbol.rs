@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -44,12 +45,11 @@ fn push_accessed_symbol_statement(
     token_stream: &FileTokens,
     _symbol_id: StringId,
     _string_table: &StringTable,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), CompilerDiagnostic> {
     if is_expression_statement(&accessed_expression) {
-        let location = accessed_expression.location.clone();
         ast.push(AstNode {
+            span: accessed_expression.span,
             kind: NodeKind::ExpressionStatement(accessed_expression),
-            location,
             scope: context.scope.clone(),
         });
         return Ok(());
@@ -57,17 +57,17 @@ fn push_accessed_symbol_statement(
 
     // A bare field read (e.g., `obj.field`) does nothing, so it is rejected.
     if matches!(accessed_expression.kind, ExpressionKind::FieldAccess { .. }) {
-        return Err(Box::new(CompilerDiagnostic::invalid_standalone_statement(
+        return Err(CompilerDiagnostic::invalid_standalone_statement(
             InvalidStandaloneStatementReason::FieldRead,
-            token_stream.current_location(),
-        )));
+            Some(token_stream.current_span()),
+        ));
     }
 
     // Any other accessed expression is also not a valid standalone statement.
-    Err(Box::new(CompilerDiagnostic::invalid_standalone_statement(
+    Err(CompilerDiagnostic::invalid_standalone_statement(
         InvalidStandaloneStatementReason::Expression,
-        token_stream.current_location(),
-    )))
+        Some(token_stream.current_span()),
+    ))
 }
 
 // --------------------------
@@ -92,7 +92,7 @@ pub(crate) fn parse_this_statement(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -100,7 +100,7 @@ pub(crate) fn parse_this_statement(
     let Some(this_reference) = context.get_reference(&this_id) else {
         return Err(CompilerDiagnostic::invalid_this_usage(
             InvalidThisUsageReason::NotInReceiverMethod,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     };
@@ -110,7 +110,7 @@ pub(crate) fn parse_this_statement(
         Some(next_token) if next_token.is_assignment_operator() => {
             Err(CompilerDiagnostic::invalid_this_usage(
                 InvalidThisUsageReason::Reassignment,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into())
         }
@@ -136,7 +136,7 @@ pub(crate) fn parse_this_statement(
                         None,
                         None,
                         None,
-                        token_stream.current_location(),
+                        Some(token_stream.current_span()),
                     )
                     .into());
                 };
@@ -145,7 +145,7 @@ pub(crate) fn parse_this_statement(
                     token_stream,
                     this_reference.as_declaration(),
                     target,
-                    this_reference.binding_location().cloned(),
+                    this_reference.binding_span(),
                     context,
                     type_interner,
                     string_table,
@@ -176,9 +176,10 @@ pub(crate) fn parse_this_statement(
                 string_table,
             )?;
 
+            let span = expression.span;
             ast.push(AstNode {
                 kind: NodeKind::ExpressionStatement(expression),
-                location: token_stream.current_location(),
+                span,
                 scope: context.scope.clone(),
             });
             Ok(())
@@ -199,9 +200,10 @@ pub(crate) fn parse_symbol_statement(
     string_table: &mut StringTable,
 ) -> Result<(), ExpressionParseError> {
     let TokenKind::Symbol(symbol_id) = token_stream.current_token_kind().to_owned() else {
-        return Err(
-            CompilerDiagnostic::expected_symbol_statement(token_stream.current_location()).into(),
-        );
+        return Err(CompilerDiagnostic::expected_symbol_statement(Some(
+            token_stream.current_span(),
+        ))
+        .into());
     };
 
     // Reject symbols that look like keywords in statement position.
@@ -214,7 +216,7 @@ pub(crate) fn parse_symbol_statement(
         return Err(CompilerDiagnostic::reserved_name_collision(
             symbol_id,
             ReservedNameOwner::BuiltinType,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -228,7 +230,7 @@ pub(crate) fn parse_symbol_statement(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -251,7 +253,7 @@ pub(crate) fn parse_symbol_statement(
                 let mutation_node = handle_mutation(
                     token_stream,
                     existing_reference.as_declaration(),
-                    existing_reference.binding_location().cloned(),
+                    existing_reference.binding_span(),
                     context,
                     type_interner,
                     string_table,
@@ -281,7 +283,7 @@ pub(crate) fn parse_symbol_statement(
                             None,
                             None,
                             None,
-                            token_stream.current_location(),
+                            Some(token_stream.current_span()),
                         )
                         .into());
                     };
@@ -290,7 +292,7 @@ pub(crate) fn parse_symbol_statement(
                         token_stream,
                         existing_reference.as_declaration(),
                         target,
-                        existing_reference.binding_location().cloned(),
+                        existing_reference.binding_span(),
                         context,
                         type_interner,
                         string_table,
@@ -319,12 +321,16 @@ pub(crate) fn parse_symbol_statement(
             | Some(TokenKind::DatatypeString)
             | Some(TokenKind::DatatypeChar)
             | Some(TokenKind::Mutable) => {
-                return Err(CompilerDiagnostic::shadowed_name(
+                let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
-                    existing_reference.value.location.clone(),
-                    token_stream.current_location(),
-                )
-                .into());
+                    existing_reference.value.span,
+                    Some(token_stream.current_span()),
+                );
+                diagnostic.primary_span = Some(SourceSpan::new(
+                    token_stream.file_id,
+                    token_stream.tokens[token_stream.index].span,
+                ));
+                return Err(diagnostic.into());
             }
 
             // Otherwise, parse the symbol as the start of a general expression statement.
@@ -337,9 +343,10 @@ pub(crate) fn parse_symbol_statement(
                     string_table,
                 )?;
 
+                let span = expression.span;
                 ast.push(AstNode {
                     kind: NodeKind::ExpressionStatement(expression),
-                    location: token_stream.current_location(),
+                    span,
                     scope: context.scope.clone(),
                 });
                 return Ok(());
@@ -352,26 +359,32 @@ pub(crate) fn parse_symbol_statement(
         context.lookup_visible_external_function(symbol_id)
     {
         if token_stream.peek_next_token() == Some(&TokenKind::TypeParameterBracket) {
-            // The previous location is the authored dependency site for an explicit binding,
-            // or `None` for a prelude-injected symbol. `None` omits the secondary label so
-            // no fabricated empty location reaches the user-facing diagnostic.
-            let previous_location = context.lookup_visible_external_function_location(symbol_id);
+            // Explicit external imports retain the authored dependency span; prelude-injected
+            // symbols intentionally have no source span to attach.
+            let previous_span = context
+                .shared
+                .file_visibility
+                .as_ref()
+                .and_then(|visibility| visibility.visible_external_symbol_spans.get(&symbol_id))
+                .copied();
             return Err(CompilerDiagnostic::duplicate_declaration(
                 symbol_id,
-                previous_location,
-                token_stream.current_location(),
+                previous_span,
+                Some(token_stream.current_span()),
             )
             .into());
         }
 
-        let call_location = token_stream.current_location();
+        let call_span = Some(token_stream.current_span());
+        // Shared host-call parsing starts at `(` while this statement dispatcher still points at
+        // the external function name.
         token_stream.advance();
         let external_call_expression =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
                 token_stream,
                 external_function_id,
                 external_function: external_function_def,
-                call_location,
+                call_span,
                 context,
                 value_required: false,
                 allow_boundary_catch: true,
@@ -379,9 +392,10 @@ pub(crate) fn parse_symbol_statement(
                 type_interner,
                 string_table,
             })?;
+        let external_call_span = external_call_expression.span;
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(external_call_expression),
-            location: token_stream.current_location(),
+            span: external_call_span,
             scope: context.scope.clone(),
         });
         return Ok(());
@@ -396,7 +410,7 @@ pub(crate) fn parse_symbol_statement(
             return Err(free_function_receiver_method_call_error(
                 symbol_id,
                 receiver_method_entry,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
                 string_table,
             )
             .into());
@@ -406,14 +420,14 @@ pub(crate) fn parse_symbol_statement(
             return Err(CompilerDiagnostic::invalid_declaration(
                 InvalidDeclarationReason::ExternalTypeLiteralConstruction,
                 Some(symbol_id),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
 
         return Err(CompilerDiagnostic::unknown_value_name(
             symbol_id,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -430,10 +444,10 @@ pub(crate) fn parse_symbol_statement(
             type_interner,
             string_table,
         )?;
-
+        let span = expression.span;
         ast.push(AstNode {
             kind: NodeKind::ExpressionStatement(expression),
-            location: token_stream.current_location(),
+            span,
             scope: context.scope.clone(),
         });
         return Ok(());
@@ -451,6 +465,7 @@ pub(crate) fn parse_symbol_statement(
     let declaration = resolved_declaration.declaration;
     let statement_kind = resolved_declaration.statement_kind;
     let is_compile_time_binding = resolved_declaration.is_compile_time_binding;
+    let declaration_span = resolved_declaration.binding_span;
 
     // Lift struct definitions and functions to the AST statement level;
     // everything else becomes a local variable declaration.
@@ -458,7 +473,7 @@ pub(crate) fn parse_symbol_statement(
         ResolvedDeclarationStatementKind::StructDefinition(params) => {
             ast.push(AstNode {
                 kind: NodeKind::StructDefinition(declaration.id.to_owned(), params.to_owned()),
-                location: token_stream.current_location(),
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }
@@ -470,7 +485,7 @@ pub(crate) fn parse_symbol_statement(
                     signature.to_owned(),
                     body.to_owned(),
                 ),
-                location: token_stream.current_location(),
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }
@@ -478,16 +493,16 @@ pub(crate) fn parse_symbol_statement(
         ResolvedDeclarationStatementKind::Variable => {
             ast.push(AstNode {
                 kind: NodeKind::VariableDeclaration(declaration.to_owned()),
-                location: token_stream.current_location(),
+                span: declaration_span,
                 scope: context.scope.clone(),
             });
         }
     }
 
     if is_compile_time_binding {
-        context.add_compile_time_var(declaration, resolved_declaration.binding_location);
+        context.add_compile_time_var(declaration, declaration_span);
     } else {
-        context.add_var(declaration, resolved_declaration.binding_location);
+        context.add_var(declaration, declaration_span);
     }
     Ok(())
 }

@@ -19,17 +19,21 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::return_compiler_error;
-
-pub(crate) use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
     pub id: InternedPath,
     pub value: Expression,
+    /// Span of the declaration name/binding token when authored.
+    ///
+    /// WHAT: exact source span of the binding-name token for authored declarations.
+    /// WHY: HIR lowering must attribute locals to their binding site without guessing
+    /// from initializer value spans; synthetic/materialised declarations use `None`.
+    pub binding_span: Option<SourceSpan>,
     /// Declaration-owned `#Config of T` syntax metadata, consumed by config resolution when
     /// applicable and otherwise retained for source-contract header consumers.
     pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
@@ -54,13 +58,15 @@ pub struct MultiBindTarget {
     pub type_id: TypeId,
     pub value_mode: ValueMode,
     pub kind: MultiBindTargetKind,
-    pub location: SourceLocation,
+    /// Exact source span of the authored binding, or `None` for generated targets.
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AstNode {
     pub kind: NodeKind,
-    pub location: SourceLocation,
+    /// Exact source span of the authored node, or `None` for generated nodes.
+    pub span: Option<SourceSpan>,
     pub scope: InternedPath,
 }
 

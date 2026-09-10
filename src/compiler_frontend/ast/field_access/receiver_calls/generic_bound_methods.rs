@@ -19,8 +19,8 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidRec
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement,
 };
@@ -141,7 +141,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
     receiver_node: &AstNode,
     receiver_type_id: TypeId,
     member_name: StringId,
-    member_location: &SourceLocation,
+    member_span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
 ) -> Result<Option<TraitSurfaceReceiverMethod>, ExpressionParseError> {
@@ -182,7 +182,7 @@ pub(super) fn lookup_generic_bound_receiver_method(
             Some(member_name),
             None,
             None,
-            member_location.clone(),
+            member_span,
         )
         .into()),
         [candidate] => {

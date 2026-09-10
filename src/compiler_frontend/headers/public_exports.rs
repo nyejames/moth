@@ -17,7 +17,7 @@
 //! - Pass 2 resolves public dependencies against the completed authored export maps.
 
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ImportPublicSurfaceType, InvalidDependencyClauseReason,
     InvalidReceiverDeclarationReason, ReservedNameOwner,
@@ -34,23 +34,27 @@ use crate::compiler_frontend::headers::binding_environment::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::types::{DependencySelection, Header, HeaderExportMode};
+use crate::compiler_frontend::headers::types::{
+    DependencySelection, Header, HeaderExportMode, HeaderParseFailure,
+};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
-/// Boxed diagnostic result for public export and membership construction.
+/// Two-lane result for public export and membership construction.
 ///
-/// WHAT: keeps the public export build/pass family on one small error boundary.
+/// WHAT: keeps the public export build/pass family on one small error boundary that separates
+///       authored-source diagnostics from internal compiler-state failures.
 /// WHY: public export construction carries structured diagnostics through many successful
-///      build steps without inlining the large diagnostic value at every return.
-type PublicExportDataResult<T> = Result<T, Box<CompilerDiagnostic>>;
+///      build steps without inlining the large diagnostic value at every return, while
+///      infrastructure failures abort through the typed lane.
+type PublicExportDataResult<T> = Result<T, HeaderParseFailure>;
 
 /// Context for resolving one public dependency selection.
 ///
@@ -80,13 +84,12 @@ fn intern_public_surface_path(
 ) -> PublicExportDataResult<InternedPath> {
     InternedPath::try_from_filesystem_path(path, string_table).map_err(
         |NonUtf8PathComponent { path }| {
-            Box::new(compiler_error_to_diagnostic(&CompilerError::file_error(
+            HeaderParseFailure::Infrastructure(CompilerError::file_error(
                 &path,
                 format!(
                     "{path_role} {path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
                 ),
-                string_table,
-            )))
+            ))
         },
     )
 }
@@ -110,6 +113,7 @@ pub(super) fn build_public_exports(
     module_symbols: &mut ModuleSymbols,
     headers: &[Header],
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
@@ -117,12 +121,17 @@ pub(super) fn build_public_exports(
     // Pass 1: collect public authored declarations for all root files.
     let source_package_locations =
         build_source_package_public_exports(module_symbols, headers, resolver, string_table)?;
-    let module_root_locations =
-        build_module_root_public_exports_pass1(module_symbols, headers, resolver, string_table)?;
+    let module_root_locations = build_module_root_public_exports_pass1(
+        module_symbols,
+        headers,
+        resolver,
+        source_files,
+        string_table,
+    )?;
 
     // Membership does not depend on dependency resolution.
-    build_source_package_membership(module_symbols, resolver, string_table)?;
-    build_module_root_membership(module_symbols, resolver, string_table)?;
+    build_source_package_membership(module_symbols, resolver, source_files, string_table)?;
+    build_module_root_membership(module_symbols, resolver, source_files, string_table)?;
 
     // Pass 2: resolve strict `export:` dependencies against the completed authored export maps.
     build_source_package_public_dependencies(
@@ -137,6 +146,7 @@ pub(super) fn build_public_exports(
         module_symbols,
         &module_root_locations,
         resolver,
+        source_files,
         external_package_registry,
         source_provider_dependencies,
         string_table,
@@ -154,12 +164,10 @@ fn build_source_package_public_exports(
     headers: &[Header],
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-) -> PublicExportDataResult<FxHashMap<String, FxHashMap<StringId, SourceLocation>>> {
+) -> PublicExportDataResult<FxHashMap<String, FxHashMap<StringId, SourceSpan>>> {
     let mut export_locations = FxHashMap::default();
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
-        let root_file_logical = resolver
-            .logical_path_for_canonical_file(root_file, string_table)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let root_file_logical = resolver.logical_path_for_canonical_file(root_file)?;
         let root_file_interned = intern_public_surface_path(
             &root_file_logical,
             "Source package root file logical path",
@@ -184,22 +192,23 @@ fn build_source_package_public_exports(
             if !is_authored_public_export(header) {
                 continue;
             }
-
-            if let Some(export_name) = header.tokens.src_path.name() {
+            if let Some(export_name) = header.tokens.src_path.name()
+                && let Some(name_span) = header.name_span
+            {
                 reject_source_receiver_method_export(
                     module_symbols,
                     &header.tokens.src_path,
-                    header.name_location.clone(),
+                    Some(name_span),
                 )?;
                 collector.insert(
                     export_name,
                     PublicExportTarget::SourceDeclaration {
                         path: header.tokens.src_path.clone(),
                     },
-                    header.name_location.clone(),
+                    Some(name_span),
                     string_table,
                 )?;
-                root_locations.insert(export_name, header.name_location.clone());
+                root_locations.insert(export_name, name_span);
             }
         }
 
@@ -214,16 +223,14 @@ fn build_source_package_public_exports(
 
 fn build_source_package_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<String, FxHashMap<StringId, SourceLocation>>,
+    export_locations: &FxHashMap<String, FxHashMap<StringId, SourceSpan>>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
     for (prefix, root_file) in resolver.source_package_public_surface_files() {
-        let root_file_logical = resolver
-            .logical_path_for_canonical_file(root_file, string_table)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let root_file_logical = resolver.logical_path_for_canonical_file(root_file)?;
         let root_file_interned = intern_public_surface_path(
             &root_file_logical,
             "Source package root file logical path",
@@ -247,9 +254,8 @@ fn build_source_package_public_dependencies(
                     continue;
                 }
 
-                let selections = module_symbols
-                    .selections_for_clause(&root_file_interned, dependency)
-                    .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+                let selections =
+                    module_symbols.selections_for_clause(&root_file_interned, dependency)?;
                 for (selection_index, selection) in selections.iter().enumerate() {
                     let export_name = public_export_name(selection);
                     let target = resolve_public_export_dependency_or_provider(
@@ -268,15 +274,16 @@ fn build_source_package_public_dependencies(
                     reject_public_export_target_if_source_receiver_method(
                         module_symbols,
                         &target,
-                        selection.source_location.clone(),
+                        Some(selection.source_span),
                     )?;
                     collector.insert(
                         export_name,
                         target,
-                        selection
-                            .local_alias()
-                            .map_or(&selection.source_location, |alias| &alias.location)
-                            .clone(),
+                        Some(
+                            selection
+                                .local_alias()
+                                .map_or(selection.source_span, |alias| alias.span),
+                        ),
                         string_table,
                     )?;
                 }
@@ -294,13 +301,13 @@ fn build_source_package_public_dependencies(
 // --------------------------
 //  Module-root public exports
 // --------------------------
-
 fn build_module_root_public_exports_pass1(
     module_symbols: &mut ModuleSymbols,
     headers: &[Header],
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
-) -> PublicExportDataResult<FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>> {
+) -> PublicExportDataResult<FxHashMap<InternedPath, FxHashMap<StringId, SourceSpan>>> {
     let mut export_locations = FxHashMap::default();
     let mut module_root_boundaries =
         build_module_root_boundaries(module_symbols, resolver, string_table)?;
@@ -309,7 +316,10 @@ fn build_module_root_public_exports_pass1(
     module_symbols.module_root_boundaries = module_root_boundaries;
 
     for header in headers {
-        let Some(canonical_path) = &header.tokens.canonical_os_path else {
+        let Some(canonical_path) = module_symbols
+            .source_record(&header.source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_deref())
+        else {
             continue;
         };
         let Some(module_root) = resolver.module_root_for_file(canonical_path) else {
@@ -318,8 +328,11 @@ fn build_module_root_public_exports_pass1(
 
         let module_root_interned =
             intern_public_surface_path(&module_root, "Module root path", string_table)?;
+        let is_module_root_file = resolver
+            .module_root_file_for_directory(&module_root)
+            .is_some_and(|root_file| canonical_path == root_file.as_path());
         let logical = header.source_file.clone();
-        let canonical = header.canonical_source_file(string_table);
+        let canonical = header.source_file.clone();
 
         module_symbols
             .file_module_membership
@@ -328,16 +341,15 @@ fn build_module_root_public_exports_pass1(
             .file_module_membership
             .insert(canonical, module_root_interned.clone());
 
-        if resolver
-            .module_root_file_for_directory(&module_root)
-            .is_some_and(|root_file| canonical_path.as_path() == root_file.as_path())
+        if is_module_root_file
             && is_authored_public_export(header)
             && let Some(export_name) = header.tokens.src_path.name()
+            && let Some(name_span) = header.name_span
         {
             reject_source_receiver_method_export(
                 module_symbols,
                 &header.tokens.src_path,
-                header.name_location.clone(),
+                Some(name_span),
             )?;
             let exports = module_symbols
                 .module_root_public_exports
@@ -352,7 +364,7 @@ fn build_module_root_public_exports_pass1(
             export_locations
                 .entry(module_root_interned)
                 .or_insert_with(FxHashMap::default)
-                .insert(export_name, header.name_location.clone());
+                .insert(export_name, name_span);
         }
     }
 
@@ -361,8 +373,9 @@ fn build_module_root_public_exports_pass1(
 
 fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
-    export_locations: &FxHashMap<InternedPath, FxHashMap<StringId, SourceLocation>>,
+    export_locations: &FxHashMap<InternedPath, FxHashMap<StringId, SourceSpan>>,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     string_table: &mut StringTable,
@@ -392,15 +405,18 @@ fn build_module_root_public_dependencies(
                 continue;
             }
             let clause_kind = dependency.binding.clause_kind();
-            return Err(Box::new(CompilerDiagnostic::invalid_dependency_clause(
-                clause_kind,
-                InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed,
-                dependency.location.clone(),
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::invalid_dependency_clause(
+                    clause_kind,
+                    InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed,
+                    Some(dependency.dependency.span),
+                ),
+            ));
         }
 
-        let Some(canonical_export_path) =
-            module_symbols.canonical_os_path_by_source.get(&root_source)
+        let Some(canonical_export_path) = module_symbols
+            .source_record(&root_source, source_files)
+            .and_then(|record| record.canonical_os_path.as_deref())
         else {
             continue;
         };
@@ -411,7 +427,7 @@ fn build_module_root_public_dependencies(
             continue;
         };
 
-        if module_root_path != *canonical_export_path {
+        if module_root_path != canonical_export_path {
             continue;
         }
 
@@ -433,9 +449,7 @@ fn build_module_root_public_dependencies(
                 continue;
             }
 
-            let selections = module_symbols
-                .selections_for_clause(&root_source, dependency)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+            let selections = module_symbols.selections_for_clause(&root_source, dependency)?;
             for (selection_index, selection) in selections.iter().enumerate() {
                 let export_name = public_export_name(selection);
                 let target = resolve_public_export_dependency_or_provider(
@@ -454,15 +468,16 @@ fn build_module_root_public_dependencies(
                 reject_public_export_target_if_source_receiver_method(
                     module_symbols,
                     &target,
-                    selection.source_location.clone(),
+                    Some(selection.source_span),
                 )?;
                 collector.insert(
                     export_name,
                     target,
-                    selection
-                        .local_alias()
-                        .map_or(&selection.source_location, |alias| &alias.location)
-                        .clone(),
+                    Some(
+                        selection
+                            .local_alias()
+                            .map_or(selection.source_span, |alias| alias.span),
+                    ),
                     string_table,
                 )?;
             }
@@ -495,36 +510,32 @@ fn resolve_public_export_dependency_or_provider(
     {
         let provider_id = resolved_clause.provider;
         let provider_name = string_table.resolve(selection.source_name);
-        let provider_view = source_provider_dependencies
-            .binding_view(provider_id)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let provider_view = source_provider_dependencies.binding_view(provider_id)?;
         let diagnostic_path = dependency.dependency.path.append(selection.source_name);
 
         if provider_view.exported_origin(provider_name).is_none()
             && provider_view.binding_export(provider_name).is_none()
         {
-            let interface = source_provider_dependencies
-                .interface(provider_id)
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
-            return Err(Box::new(provider_public_surface_diagnostic(
-                &diagnostic_path,
-                interface,
-                selection.source_location.clone(),
-                string_table,
-            )));
+            let interface = source_provider_dependencies.interface(provider_id)?;
+            return Err(HeaderParseFailure::Diagnostic(
+                provider_public_surface_diagnostic(
+                    &diagnostic_path,
+                    interface,
+                    Some(selection.source_span),
+                    string_table,
+                ),
+            ));
         }
 
         return Ok(PublicExportTarget::ProviderSelection {
-            selection: dependency
-                .selection_id(
-                    module_symbols
-                        .dependency_selections_by_source
-                        .get(exporting_source)
-                        .map(Vec::as_slice)
-                        .unwrap_or(&[]),
-                    selection_index,
-                )
-                .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?,
+            selection: dependency.selection_id(
+                module_symbols
+                    .dependency_selections_by_source
+                    .get(exporting_source)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+                selection_index,
+            )?,
             source_name: selection.source_name,
             diagnostic_path,
         });
@@ -539,15 +550,14 @@ fn resolve_public_export_dependency_or_provider(
         string_table,
     )
 }
-
 fn reject_public_export_target_if_source_receiver_method(
     module_symbols: &ModuleSymbols,
     target: &PublicExportTarget,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> PublicExportDataResult<()> {
     match target {
         PublicExportTarget::SourceDeclaration { path } => {
-            reject_source_receiver_method_export(module_symbols, path, location)
+            reject_source_receiver_method_export(module_symbols, path, span)
         }
         // Provider selections are validated before their tagged target is retained. The later
         // namespace consumer repeats the member check as an internal invariant at its binding
@@ -560,13 +570,15 @@ fn reject_public_export_target_if_source_receiver_method(
 fn reject_source_receiver_method_export(
     module_symbols: &ModuleSymbols,
     method_path: &InternedPath,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> PublicExportDataResult<()> {
     if module_symbols.receiver_method_paths.contains(method_path) {
-        return Err(Box::new(CompilerDiagnostic::invalid_receiver_declaration(
-            InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
-            location,
-        )));
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_receiver_declaration(
+                InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
+                span,
+            ),
+        ));
     }
 
     Ok(())
@@ -611,11 +623,13 @@ fn resolve_public_export_dependency(
             package_path,
             symbol_name,
         } => {
-            return Err(Box::new(CompilerDiagnostic::missing_package_symbol(
-                symbol_name,
-                package_path,
-                selection.source_location.clone(),
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::missing_package_symbol(
+                    symbol_name,
+                    package_path,
+                    Some(selection.source_span),
+                ),
+            ));
         }
         ExternalPackageSymbolLookup::NoMatch => {}
     }
@@ -674,12 +688,12 @@ fn resolve_public_export_dependency(
                         }
                         PublicExportSurfaceType::ModuleRoot => ImportPublicSurfaceType::ModuleRoot,
                     };
-                    return Err(Box::new(
+                    return Err(HeaderParseFailure::Diagnostic(
                         CompilerDiagnostic::not_exported_by_public_surface(
                             selected_path.clone(),
                             public_surface_name_id,
                             diagnostic_public_surface_type,
-                            selection.source_location.clone(),
+                            Some(selection.source_span),
                         ),
                     ));
                 }
@@ -693,7 +707,7 @@ fn resolve_public_export_dependency(
     // 3. Direct source resolution.
     let target = resolve_dependency_target(DependencyTargetResolutionInput {
         dependency_path: &selected_path,
-        location: &selection.source_location,
+        span: Some(selection.source_span),
         module_file_paths: &module_symbols.module_file_paths,
         dependency_bindable_symbol_paths: &module_symbols.dependency_bindable_source_symbol_paths,
         external_package_registry,
@@ -710,7 +724,7 @@ fn resolve_public_export_dependency(
                     consumer_file: root_file,
                     target_file,
                     requested_path: &selected_path,
-                    location: selection.source_location.clone(),
+                    span: Some(selection.source_span),
                     file_package_membership: &module_symbols.file_package_membership,
                     source_package_root_files: &module_symbols.source_package_root_files,
                     string_table,
@@ -719,7 +733,7 @@ fn resolve_public_export_dependency(
                     consumer_file: root_file,
                     target_file,
                     symbol_path: &symbol_path,
-                    location: selection.source_location.clone(),
+                    span: Some(selection.source_span),
                     file_module_membership: &module_symbols.file_module_membership,
                     module_root_public_exports: &module_symbols.module_root_public_exports,
                 })?;
@@ -741,23 +755,21 @@ fn resolve_public_export_dependency(
 #[derive(Default)]
 struct PublicExportCollector {
     exports: FxHashSet<PublicExportEntry>,
-    seen_names: FxHashMap<StringId, SourceLocation>,
+    seen_names: FxHashMap<StringId, SourceSpan>,
 }
 
 impl PublicExportCollector {
     fn from_existing(
         exports: &FxHashSet<PublicExportEntry>,
-        existing_locations: Option<&FxHashMap<StringId, SourceLocation>>,
+        existing_locations: Option<&FxHashMap<StringId, SourceSpan>>,
     ) -> Self {
         let mut seen_names = FxHashMap::default();
         for entry in exports {
-            seen_names.insert(
-                entry.export_name,
-                existing_locations
-                    .and_then(|locations| locations.get(&entry.export_name))
-                    .cloned()
-                    .unwrap_or_default(),
-            );
+            if let Some(span) =
+                existing_locations.and_then(|locations| locations.get(&entry.export_name))
+            {
+                seen_names.insert(entry.export_name, *span);
+            }
         }
         Self {
             exports: exports.clone(),
@@ -769,26 +781,28 @@ impl PublicExportCollector {
         &mut self,
         export_name: StringId,
         target: PublicExportTarget,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         string_table: &StringTable,
     ) -> PublicExportDataResult<()> {
         let export_name_text = string_table.resolve(export_name);
         if is_core_cast_trait_name(export_name_text) {
-            return Err(Box::new(CompilerDiagnostic::reserved_name_collision(
-                export_name,
-                ReservedNameOwner::CoreTrait,
-                location,
-            )));
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::reserved_name_collision(
+                    export_name,
+                    ReservedNameOwner::CoreTrait,
+                    span,
+                ),
+            ));
         }
 
-        if let Some(first_location) = self.seen_names.get(&export_name) {
-            return Err(Box::new(CompilerDiagnostic::duplicate_public_export(
-                export_name,
-                first_location.clone(),
-                location,
-            )));
+        if let Some(first_span) = self.seen_names.get(&export_name) {
+            return Err(HeaderParseFailure::Diagnostic(
+                CompilerDiagnostic::duplicate_public_export(export_name, Some(*first_span), span),
+            ));
         }
-        self.seen_names.insert(export_name, location);
+        if let Some(span) = span {
+            self.seen_names.insert(export_name, span);
+        }
         self.exports.insert(PublicExportEntry {
             export_name,
             target,
@@ -804,15 +818,28 @@ impl PublicExportCollector {
 fn build_source_package_membership(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
-    for (source_file, canonical_path) in module_symbols.canonical_os_path_by_source.clone() {
-        let Some((membership_prefix, _)) = resolver.source_package_for_file(&canonical_path) else {
+    let membership_sources: Vec<_> = module_symbols
+        .source_ids_by_source
+        .keys()
+        .cloned()
+        .collect();
+
+    for source_file in membership_sources {
+        let Some(canonical_path) = module_symbols
+            .source_record(&source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+        else {
+            continue;
+        };
+        let Some((membership_prefix, _)) = resolver.source_package_for_file(canonical_path) else {
             continue;
         };
 
         let canonical_source =
-            intern_public_surface_path(&canonical_path, "Canonical source path", string_table)?;
+            intern_public_surface_path(canonical_path, "Canonical source path", string_table)?;
         module_symbols
             .file_package_membership
             .insert(source_file.clone(), membership_prefix.to_owned());
@@ -827,17 +854,30 @@ fn build_source_package_membership(
 fn build_module_root_membership(
     module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
+    source_files: &SourceDatabase,
     string_table: &mut StringTable,
 ) -> PublicExportDataResult<()> {
-    for (source_file, canonical_path) in module_symbols.canonical_os_path_by_source.clone() {
-        let Some(module_root) = resolver.module_root_for_file(&canonical_path) else {
+    let membership_sources: Vec<_> = module_symbols
+        .source_ids_by_source
+        .keys()
+        .cloned()
+        .collect();
+
+    for source_file in membership_sources {
+        let Some(canonical_path) = module_symbols
+            .source_record(&source_file, source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+        else {
+            continue;
+        };
+        let Some(module_root) = resolver.module_root_for_file(canonical_path) else {
             continue;
         };
 
         let module_root_interned =
             intern_public_surface_path(&module_root, "Module root path", string_table)?;
         let canonical_source =
-            intern_public_surface_path(&canonical_path, "Canonical source path", string_table)?;
+            intern_public_surface_path(canonical_path, "Canonical source path", string_table)?;
 
         module_symbols
             .file_module_membership
@@ -868,9 +908,7 @@ fn build_module_root_boundaries(
             .module_root_public_exports
             .entry(root_interned.clone())
             .or_default();
-        let root_file = resolver
-            .logical_path_for_canonical_file(&root_file, string_table)
-            .map_err(|error| Box::new(compiler_error_to_diagnostic(&error)))?;
+        let root_file = resolver.logical_path_for_canonical_file(&root_file)?;
         let root_file =
             intern_public_surface_path(&root_file, "Module root file logical path", string_table)?;
 

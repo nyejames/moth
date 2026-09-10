@@ -7,7 +7,7 @@
 //! Only EntryStart (for the entry-file implicit start) and Normal (for all other functions)
 //! remain after Phase 1.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind, SourceLocation};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::hir::functions::{
     FunctionOriginSeed, HirFunctionOrigin, HirFunctionOriginLookup,
@@ -19,18 +19,21 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
+
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
-fn node(kind: NodeKind, location: SourceLocation) -> AstNode {
+fn node(kind: NodeKind, span: Option<crate::compiler_frontend::source::SourceSpan>) -> AstNode {
     AstNode {
         kind,
-        location,
+        span,
         scope: InternedPath::new(),
     }
 }
 
-fn function_node(name: InternedPath, location: SourceLocation) -> AstNode {
+fn function_node(
+    name: InternedPath,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> AstNode {
     node(
         NodeKind::Function(
             name,
@@ -38,9 +41,9 @@ fn function_node(name: InternedPath, location: SourceLocation) -> AstNode {
                 parameters: vec![],
                 returns: vec![],
             },
-            vec![node(NodeKind::Return(vec![]), location.clone())],
+            vec![node(NodeKind::Return(vec![]), span)],
         ),
-        location,
+        span,
     )
 }
 
@@ -66,8 +69,8 @@ fn classifies_entry_start_and_normal_functions() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, test_source_location(1)),
-            function_node(normal_fn.clone(), test_source_location(2)),
+            function_node(entry_start, None),
+            function_node(normal_fn.clone(), None),
         ],
         entry_path,
     );
@@ -119,8 +122,8 @@ fn lowers_exact_stable_origin_to_local_function_id() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, test_source_location(1)),
-            function_node(normal_fn.clone(), test_source_location(2)),
+            function_node(entry_start, None),
+            function_node(normal_fn.clone(), None),
         ],
         entry_path,
     );
@@ -190,8 +193,8 @@ fn rejects_unused_concrete_origin_seed() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, test_source_location(1)),
-            function_node(normal_fn.clone(), test_source_location(2)),
+            function_node(entry_start, None),
+            function_node(normal_fn.clone(), None),
         ],
         entry_path,
     );
@@ -243,8 +246,8 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, test_source_location(1)),
-            function_node(normal_fn.clone(), test_source_location(2)),
+            function_node(entry_start, None),
+            function_node(normal_fn.clone(), None),
         ],
         entry_path.clone(),
     );

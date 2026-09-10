@@ -24,7 +24,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_source_location,
+    function_node, make_test_variable, node,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     inferred_type_reference_expr, param_with_type_id,
@@ -47,12 +47,11 @@ fn reactive_declaration_metadata_is_bound_to_local() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 count_path.clone(),
-                Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
-                    .with_reactive_source(source),
+                Expression::int(1, None, ValueMode::MutableOwned).with_reactive_source(source),
             )),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -80,12 +79,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = super::entry_path_and_start_name(&mut string_table);
     let count_path = super::symbol("count", &mut string_table);
-    let mut parameter = param_with_type_id(
-        count_path.clone(),
-        builtin_type_ids::INT,
-        false,
-        test_source_location(2),
-    );
+    let mut parameter = param_with_type_id(count_path.clone(), builtin_type_ids::INT, false, None);
     parameter.value.reactive_source = Some(reactive_source(
         count_path.clone(),
         ReactiveSourceKind::Parameter,
@@ -98,7 +92,7 @@ fn reactive_parameter_metadata_is_bound_to_function_param() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -128,8 +122,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata =
-        metadata_with_subscription(count_source.clone(), test_source_location(4));
+    let template_metadata = metadata_with_subscription(count_source.clone(), None);
 
     let start_function = function_node(
         start_name,
@@ -141,36 +134,36 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, None, ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_source_location(3),
+                None,
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
                     inferred_type_reference_expr(
                         view_path,
                         builtin_type_ids::STRING,
-                        test_source_location(4),
+                        None,
                         ValueMode::ImmutableReference,
                     )
                     .with_reactive_template_metadata(template_metadata),
                 ),
-                test_source_location(4),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -201,14 +194,13 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
     let count_path = super::symbol("count", &mut string_table);
     let view_path = super::symbol("view", &mut string_table);
     let count_source = reactive_source(count_path.clone(), ReactiveSourceKind::Declaration);
-    let template_metadata =
-        metadata_with_subscription(count_source.clone(), test_source_location(5));
+    let template_metadata = metadata_with_subscription(count_source.clone(), None);
 
     let reactive_view_reference = || {
         inferred_type_reference_expr(
             view_path.clone(),
             builtin_type_ids::STRING,
-            test_source_location(5),
+            None,
             ValueMode::ImmutableReference,
         )
         .with_reactive_template_metadata(template_metadata.clone())
@@ -224,25 +216,25 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     count_path,
-                    Expression::int(1, test_source_location(2), ValueMode::MutableOwned)
+                    Expression::int(1, None, ValueMode::MutableOwned)
                         .with_reactive_source(count_source),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     view_path.clone(),
                     Expression::string_slice(
                         string_table.intern("<p>count</p>"),
-                        test_source_location(3),
+                        None,
                         ValueMode::ImmutableOwned,
                     ),
                 )),
-                test_source_location(3),
+                None,
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(reactive_view_reference()),
-                test_source_location(5),
+                None,
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
@@ -250,15 +242,15 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
                     vec![CallArgument::positional(
                         reactive_view_reference(),
                         CallAccessMode::Shared,
-                        test_source_location(6),
+                        None,
                     )],
                     vec![],
-                    test_source_location(6),
+                    None,
                 )),
-                test_source_location(6),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -313,13 +305,13 @@ fn collect_test_reachability(
 
 fn metadata_with_subscription(
     source: ReactiveSource,
-    location: crate::compiler_frontend::ast::ast_nodes::SourceLocation,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
 ) -> ReactiveTemplateMetadata {
     let mut metadata = ReactiveTemplateMetadata::template_backed();
     metadata.push_subscription(ReactiveSubscription {
         source,
         type_id: builtin_type_ids::INT,
-        location,
+        span,
     });
     metadata
 }

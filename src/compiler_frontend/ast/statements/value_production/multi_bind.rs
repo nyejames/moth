@@ -25,8 +25,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 
 /// Value-producing multi-bind bodies recurse into the AST body parser, so they preserve the
@@ -62,51 +63,56 @@ pub fn try_parse_multi_bind_value_block(
 
     Some(parsed.and_then(|parsed| match parsed {
         ParsedReceiverValue::Complete(expression) => Ok(expression),
-        ParsedReceiverValue::NeedsSlotInference(block) => {
-            finalize_inferred_value_block(block, known_slot_types, target_count, type_interner)
-        }
+        ParsedReceiverValue::NeedsSlotInference { block, span } => finalize_inferred_value_block(
+            block,
+            span,
+            known_slot_types,
+            target_count,
+            type_interner,
+        ),
     }))
 }
 
 fn finalize_inferred_value_block(
     block: ValueBlock,
+    span: Option<SourceSpan>,
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
 ) -> MultiBindValueResult<Expression> {
     match block {
         ValueBlock::If(mut value_if) => {
-            let location = value_if.location.clone();
             let result_type_ids = infer_and_coerce_if_slots(
                 &mut value_if.then_body,
                 &mut value_if.else_body,
                 known_slot_types,
                 target_count,
                 type_interner,
-                &location,
+                value_if.span,
             )?;
             value_if.result_type_ids = result_type_ids.clone();
             let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
             Ok(build_value_if_expression(
                 value_if,
+                span,
                 result_type_id,
                 type_interner.environment(),
             ))
         }
         ValueBlock::Match(mut value_match) => {
-            let location = value_match.location.clone();
             let result_type_ids = infer_and_coerce_match_slots(
                 &mut value_match.arms,
                 value_match.default.as_deref_mut(),
                 known_slot_types,
                 target_count,
                 type_interner,
-                &location,
+                value_match.span,
             )?;
             value_match.result_type_ids = result_type_ids.clone();
             let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
             Ok(build_value_match_expression(
                 value_match,
+                span,
                 result_type_id,
                 type_interner.environment(),
             ))
@@ -126,14 +132,14 @@ fn infer_and_coerce_if_slots(
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     let result_type_ids = infer_slots_from_bodies(
         &[then_body, else_body],
         known_slot_types,
         target_count,
         type_interner.environment(),
-        location,
+        span,
     )?;
     coerce_produced_values_in_body(then_body, &result_type_ids, type_interner.environment())?;
     coerce_produced_values_in_body(else_body, &result_type_ids, type_interner.environment())?;
@@ -146,7 +152,7 @@ fn infer_and_coerce_match_slots(
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     let mut slot_types = known_slot_types.to_vec();
     let mut saw_producing_path = false;
@@ -172,7 +178,7 @@ fn infer_and_coerce_match_slots(
         )?;
     }
 
-    let result_type_ids = finish_inferred_slots(slot_types, saw_producing_path, location)?;
+    let result_type_ids = finish_inferred_slots(slot_types, saw_producing_path, span)?;
 
     for arm in arms {
         coerce_produced_values_in_body(
@@ -197,7 +203,7 @@ fn infer_slots_from_bodies(
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_environment: &TypeEnvironment,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     let mut slot_types = known_slot_types.to_vec();
     let mut saw_producing_path = false;
@@ -213,7 +219,7 @@ fn infer_slots_from_bodies(
         )?;
     }
 
-    finish_inferred_slots(slot_types, saw_producing_path, location)
+    finish_inferred_slots(slot_types, saw_producing_path, span)
 }
 
 fn accumulate_slots_from_body(
@@ -246,7 +252,7 @@ fn accumulate_produced_group(
     validate_optional_produced_arity(
         Some(&produced_values.expressions),
         target_count,
-        &produced_values.location,
+        produced_values.span,
     )?;
 
     for (slot_index, expression) in produced_values.expressions.iter().enumerate() {
@@ -262,7 +268,7 @@ fn accumulate_produced_group(
                     existing,
                     expression.type_id,
                     TypeMismatchContext::Assignment,
-                    expression.location.clone(),
+                    expression.span,
                 )
                 .into());
             }
@@ -277,12 +283,12 @@ fn accumulate_produced_group(
 fn finish_inferred_slots(
     slot_types: Vec<Option<TypeId>>,
     saw_producing_path: bool,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     if !saw_producing_path {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -293,7 +299,7 @@ fn finish_inferred_slots(
             slot_type.ok_or_else(|| {
                 CompilerDiagnostic::invalid_control_flow_statement(
                     InvalidControlFlowStatementReason::ValueIfNoProducingPath,
-                    location.clone(),
+                    span,
                 )
                 .into()
             })
@@ -316,7 +322,7 @@ fn validate_expression_against_slot(
         expected_type,
         expression.type_id,
         TypeMismatchContext::Assignment,
-        expression.location.clone(),
+        expression.span,
     )
     .into())
 }
@@ -324,7 +330,7 @@ fn validate_expression_against_slot(
 fn validate_optional_produced_arity(
     values: Option<&[Expression]>,
     target_count: usize,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindValueResult<()> {
     let Some(values) = values else {
         return Ok(());
@@ -339,7 +345,7 @@ fn validate_optional_produced_arity(
             InvalidReturnShapeReason::TooManyReturnValues {
                 expected_count: target_count,
             },
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -349,7 +355,7 @@ fn validate_optional_produced_arity(
             expected_count: target_count,
             provided_count: values.len(),
         },
-        location.clone(),
+        span,
     )
     .into())
 }
@@ -365,7 +371,7 @@ fn coerce_produced_values_in_body(
             return validate_optional_produced_arity(
                 Some(&produced_values.expressions),
                 expected_types.len(),
-                &produced_values.location,
+                produced_values.span,
             );
         }
 
@@ -383,7 +389,7 @@ fn coerce_produced_values_in_body(
                     *expected_type,
                     expr.type_id,
                     TypeMismatchContext::Assignment,
-                    expr.location.clone(),
+                    expr.span,
                 )
                 .into());
             }

@@ -12,7 +12,9 @@ use std::rc::Rc;
 fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     let mut string_table = StringTable::new();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let declarations = docs_style_table_and_data_declarations(&mut string_table, &shared_store);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let declarations =
+        docs_style_table_and_data_declarations(&mut string_table, &shared_store, &mut span_builder);
 
     let row_count = 48usize;
     let mut source =
@@ -24,7 +26,8 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
     }
     source.push(']');
 
-    let mut token_stream = template_tokens_from_source(&source, &mut string_table);
+    let mut token_stream =
+        template_tokens_from_source(&source, &mut string_table, &mut span_builder);
     let context = constant_template_context(&token_stream.src_path, &declarations)
         .with_template_ir_store(shared_store);
 
@@ -56,12 +59,14 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
 fn docs_style_table_and_data_declarations(
     string_table: &mut StringTable,
     shared_store: &Rc<RefCell<TemplateIrStore>>,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Vec<Declaration> {
     let wrapper_scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
 
     let mut header_row_tokens = template_tokens_from_source(
         "[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",
         string_table,
+        span_builder,
     );
     let header_row_context = new_constant_context(header_row_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
@@ -76,6 +81,7 @@ fn docs_style_table_and_data_declarations(
     let mut table_tokens = template_tokens_from_source(
         "[:\n    <table style=\"[$slot(\"style\") ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot(1)]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
         string_table,
+        span_builder,
     );
     let table_context = new_constant_context(table_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
@@ -85,6 +91,7 @@ fn docs_style_table_and_data_declarations(
     let mut data_tokens = template_tokens_from_source(
         "[$children([: <td style=\"padding: 0.2em 0.5em;\">[$slot]</td>]):\n    [$slot]\n]",
         string_table,
+        span_builder,
     );
     let data_context = new_constant_context(data_tokens.src_path.to_owned())
         .with_template_ir_store(Rc::clone(shared_store));
@@ -95,16 +102,19 @@ fn docs_style_table_and_data_declarations(
         Declaration {
             id: wrapper_scope.append(string_table.intern("header_row")),
             value: Expression::template(header_row, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: wrapper_scope.append(string_table.intern("table")),
             value: Expression::template(table, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: wrapper_scope.append(string_table.intern("data")),
             value: Expression::template(data, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         },
     ]
@@ -113,9 +123,11 @@ fn docs_style_table_and_data_declarations(
 #[test]
 fn child_wrapper_composition_marks_template_tir_reference_composed() {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source(
         "[$children([:<b>[$slot]</b>]): hello [:child] ]",
         &mut string_table,
+        &mut span_builder,
     );
     let context = new_constant_context(token_stream.src_path.to_owned());
 

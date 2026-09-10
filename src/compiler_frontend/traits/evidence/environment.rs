@@ -6,8 +6,8 @@
 //!      generic bounds checking. It is not runtime dispatch metadata or backend method-table state.
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId, TraitRequirementId};
 use rustc_hash::FxHashMap;
 
@@ -41,7 +41,7 @@ pub(crate) struct TraitEvidenceDefinition {
     pub(crate) target_type_id: TypeId,
     pub(crate) trait_id: TraitId,
     pub(crate) source_file: InternedPath,
-    pub(crate) declaration_location: SourceLocation,
+    pub(crate) declaration_span: Option<SourceSpan>,
     pub(crate) requirements: Vec<TraitRequirementEvidence>,
 }
 

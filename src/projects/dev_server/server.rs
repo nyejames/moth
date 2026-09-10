@@ -194,9 +194,11 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
             )
         })?
     } else {
-        let mut string_table = StringTable::new();
-        check_if_valid_path(entry_path, &mut string_table).map_err(|error| {
-            CompilerMessages::from_error(error.with_error_type(ErrorType::DevServer), string_table)
+        check_if_valid_path(entry_path).map_err(|error| {
+            CompilerMessages::from_error(
+                error.with_error_type(ErrorType::DevServer),
+                StringTable::new(),
+            )
         })?
     };
 
@@ -204,15 +206,13 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
         return match resolved_path.canonicalize() {
             Ok(canonical_path) => Ok(canonical_path),
             Err(error) => {
-                let mut string_table = StringTable::new();
                 let error = CompilerError::file_error(
                     &resolved_path,
                     format!("Failed to canonicalize dev entry path: {error}"),
-                    &mut string_table,
                 )
                 .with_error_type(ErrorType::DevServer);
 
-                Err(CompilerMessages::from_error(error, string_table))
+                Err(CompilerMessages::from_error(error, StringTable::new()))
             }
         };
     }
@@ -238,15 +238,13 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
     match resolved_path.canonicalize() {
         Ok(canonical_path) => Ok(canonical_path),
         Err(error) => {
-            let mut string_table = StringTable::new();
             let error = CompilerError::file_error(
                 &resolved_path,
                 format!("Failed to canonicalize dev entry path: {error}"),
-                &mut string_table,
             )
             .with_error_type(ErrorType::DevServer);
 
-            Err(CompilerMessages::from_error(error, string_table))
+            Err(CompilerMessages::from_error(error, StringTable::new()))
         }
     }
 }

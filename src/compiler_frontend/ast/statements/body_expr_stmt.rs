@@ -85,7 +85,7 @@ fn rejects_discarded_fallible_success(expression: &Expression) -> Option<Compile
     if is_handled_fallible && expression.type_id != builtin_type_ids::NONE {
         return Some(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::SuccessValueDiscarded,
-            expression.location.clone(),
+            expression.span,
         ));
     }
 
@@ -120,7 +120,7 @@ fn parse_and_validate_statement_expression(
     if !is_expression_statement(&expression) {
         return Err(CompilerDiagnostic::unexpected_token(
             token_stream.current_token_kind().to_owned(),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }

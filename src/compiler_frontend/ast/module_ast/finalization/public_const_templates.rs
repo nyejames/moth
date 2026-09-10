@@ -220,7 +220,7 @@ pub(super) fn const_template_value_from_projection(
     let Some(public) = projected.public else {
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
-            template.location.clone(),
+            template.span,
         )
         .into());
     };

@@ -32,9 +32,6 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
@@ -167,10 +164,6 @@ pub(crate) fn facts(name: &str) -> GeneratedRequestFacts {
     GeneratedRequestFacts {
         identity: generated_identity(name),
         display_name: name.to_owned(),
-        diagnostic_location: SourceLocation::new(
-            InternedPath::from_single_str("src/@page.moth", &mut StringTable::new()),
-            CharPosition::default(),
-            CharPosition::default(),
-        ),
+        call_span: None,
     }
 }

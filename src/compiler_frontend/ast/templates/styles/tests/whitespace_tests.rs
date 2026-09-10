@@ -5,7 +5,6 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutputPiece, FormatterTextPiece,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 fn apply_default_template_body_whitespace(input: &str) -> String {
     let mut string_table = StringTable::new();
@@ -14,7 +13,7 @@ fn apply_default_template_body_whitespace(input: &str) -> String {
         FormatterInput {
             pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
                 text: input_id,
-                location: SourceLocation::default(),
+                span: None,
             })],
         },
         &[TemplateWhitespacePassProfile::default_template_body()],

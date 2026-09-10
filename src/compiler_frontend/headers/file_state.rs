@@ -12,8 +12,9 @@ use crate::compiler_frontend::headers::types::{
     HeaderExportMode, HeaderKind, PreparedFilePathSyntax, RetainedDependencyClause,
     TopLevelConstFragment,
 };
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::projects::settings::{
     MINIMUM_LIKELY_DECLARATIONS, TOKEN_TO_DECLARATION_RATIO, TOKEN_TO_HEADER_RATIO,
 };
@@ -27,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 pub(super) struct HeaderFileParseState {
     pub(super) warnings: Vec<CompilerDiagnostic>,
     pub(super) headers: Vec<Header>,
-    pub(super) encountered_symbols: HashMap<StringId, SourceLocation>,
+    pub(super) encountered_symbols: HashMap<StringId, SourceSpan>,
     pub(super) start_body_symbols: HashSet<StringId>,
     pub(super) start_function_body: Vec<Token>,
     pub(super) file_dependency_clauses: Vec<RetainedDependencyClause>,
@@ -40,12 +41,12 @@ pub(super) struct HeaderFileParseState {
     pub(super) top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub(super) runtime_fragment_count: usize,
     pub(super) const_template_count: usize,
-    /// The first `export:` block location, if this file has one.
+    /// The first `export:` block span, if this file has one.
     ///
     /// WHAT: enforces one public section per module-root file.
     /// WHY: public visibility is a file-level parser mode, not a lexical scope or a declaration
     /// prefix that can be reopened for a later group of items.
-    pub(super) seen_export_block: Option<SourceLocation>,
+    pub(super) seen_export_block: Option<SourceSpan>,
     /// Current visibility mode while the top-level parser walks an `export:` block.
     pub(super) export_mode: HeaderExportMode,
     pub(super) export_block_item_count: usize,
@@ -97,10 +98,15 @@ impl HeaderFileParseState {
     }
 
     pub(super) fn has_non_trivial_start_body(&self) -> bool {
-        self.first_executable_start_body_location().is_some()
+        self.start_function_body.iter().any(|token| {
+            !matches!(
+                token.kind,
+                TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
+            )
+        })
     }
 
-    pub(super) fn first_executable_start_body_location(&self) -> Option<SourceLocation> {
+    pub(super) fn first_executable_start_body_span(&self, file_id: SourceId) -> Option<SourceSpan> {
         self.start_function_body
             .iter()
             .find(|token| {
@@ -109,7 +115,7 @@ impl HeaderFileParseState {
                     TokenKind::Eof | TokenKind::Newline | TokenKind::ModuleStart
                 )
             })
-            .map(|token| token.location.clone())
+            .map(|token| SourceSpan::new(file_id, token.span))
     }
 
     pub(super) fn into_non_entry_output(
@@ -117,12 +123,13 @@ impl HeaderFileParseState {
         token_stream: &mut FileTokens,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+        let file_id = token_stream.file_id;
         let has_non_trivial_root_body =
             file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let path_syntax = PreparedFilePathSyntax::from_file_tokens(token_stream)?;
         Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
-            file_id: token_stream.file_id,
+            file_id,
             path_syntax,
             token_count: self.token_count,
             token_stats: token_stream.token_stats,
@@ -145,6 +152,7 @@ impl HeaderFileParseState {
         token_stream: &mut FileTokens,
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, CompilerError> {
+        let file_id = token_stream.file_id;
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
@@ -153,7 +161,7 @@ impl HeaderFileParseState {
         let start_tokens = FileTokens::new_substream(
             token_stream,
             token_stream.src_path.to_owned(),
-            token_stream.file_id,
+            file_id,
             self.start_function_body,
         );
 
@@ -162,11 +170,7 @@ impl HeaderFileParseState {
             file_role,
             export_mode: HeaderExportMode::Private,
             local_ordering_hints: HashSet::new(),
-            name_location: SourceLocation::new(
-                token_stream.src_path.to_owned(),
-                Default::default(),
-                Default::default(),
-            ),
+            name_span: None,
             tokens: start_tokens,
             source_file: token_stream.src_path.to_owned(),
             capacity_references: Vec::new(),
@@ -176,7 +180,7 @@ impl HeaderFileParseState {
 
         Ok(FileFrontendPrepareOutput {
             source_file: token_stream.src_path.to_owned(),
-            file_id: token_stream.file_id,
+            file_id,
             path_syntax,
             token_count: self.token_count,
             token_stats: token_stream.token_stats,
@@ -197,7 +201,7 @@ impl HeaderFileParseState {
     pub(super) fn into_error(self, diagnostic: CompilerDiagnostic) -> FileFrontendPrepareError {
         FileFrontendPrepareError {
             warnings: self.warnings,
-            diagnostic: Box::new(diagnostic),
+            diagnostic,
         }
     }
 }

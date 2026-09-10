@@ -374,7 +374,6 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
             ],
             result: Some(LocalId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -448,7 +447,6 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
             )],
             result: Some(LocalId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -573,7 +571,6 @@ fn cast_float_to_int_uses_i32_range_helper() {
             source: source_expr,
             result: Some(LocalId(0)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -1039,7 +1036,7 @@ fn lower_minimal_module_with_float_helper(
         ),
     };
 
-    let float_statement = statement(1, statement_kind, 1);
+    let float_statement = statement(1, statement_kind);
 
     let block = HirBlock {
         id: BlockId(0),

@@ -19,30 +19,26 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext,
 };
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidFieldAccessReason,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidFieldAccessReason};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, FileTokens, SourceLocation, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn slot_template(store: &mut TemplateIrStore) -> Template {
-    let location = SourceLocation::default();
     let mut builder = TemplateIrBuilder::new(store);
-    let slot = builder.push_slot_node(SlotKey::Default, location.clone());
+    let slot = builder.push_slot_node(SlotKey::Default, None);
     let template_id = builder.finish_template(
         slot,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
-        location.clone(),
+        None,
     );
 
     Template {
@@ -51,7 +47,7 @@ fn slot_template(store: &mut TemplateIrStore) -> Template {
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location,
+        span: None,
     }
 }
 
@@ -72,9 +68,10 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }],
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
         true,
         None,
@@ -82,7 +79,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
     );
     let receiver = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_value),
-        location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::from_single_str("scope", &mut string_table),
     };
 
@@ -98,35 +95,34 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
 fn missing_member_name_after_dot_points_at_offending_token_boundary() {
     // A non-EOF token after the dot is the immediate missing-member boundary. The diagnostic
     // must point at that offending token, not the authored dot or the receiver start. This
-    // complements the integration case, which pins the EOF location at the authored dot.
+    // complements the integration case, which pins the EOF span at the authored dot.
     let mut string_table = StringTable::new();
     let scope = InternedPath::from_single_str("test.moth", &mut string_table);
-
-    let offending_position = CharPosition {
-        line_number: 4,
-        char_column: 12,
-    };
-    let offending_location =
-        SourceLocation::new(scope.clone(), offending_position, offending_position);
-    let end_location = SourceLocation::new(
-        scope.clone(),
-        CharPosition::default(),
-        CharPosition::default(),
-    );
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let offending_span =
+        LocalSpan::exact(12, 1, &mut span_builder).expect("offending token span should fit");
 
     let stream = FileTokens::new(
         scope,
+        SourceId::COMPILATION_ROOT,
         vec![
-            Token::new(TokenKind::Comma, offending_location.clone()),
-            Token::new(TokenKind::Eof, end_location),
+            Token::new(TokenKind::Comma, offending_span),
+            Token::new(TokenKind::Eof, LocalSpan::source_start()),
         ],
     );
 
     let error = super::parse_member_name_typed(&stream, &string_table)
         .expect_err("a non-name token after '.' must be rejected as a missing member name");
-
-    let diagnostic = CompilerDiagnostic::from(error);
-    assert_eq!(diagnostic.primary_location, offending_location);
+    let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(
+        diagnostic,
+    ) = error
+    else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, offending_span))
+    );
 
     match diagnostic.payload {
         DiagnosticPayload::InvalidFieldAccess {
@@ -151,7 +147,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         fields: vec![FieldDefinition {
             name: field_path.clone(),
             type_id: type_environment.builtins().string,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -162,17 +158,20 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
+            binding_span: None,
             config_qualifier: None,
         }],
     )]);
     let receiver = AstNode {
-        kind: NodeKind::ExpressionStatement(Expression::reference(
+        kind: NodeKind::ExpressionStatement(Expression::reference_with_type_id(
             InternedPath::from_single_str("card", &mut string_table),
             DataType::const_struct_record(struct_path, struct_type_id),
-            SourceLocation::default(),
+            struct_type_id,
+            None,
             ValueMode::ImmutableReference,
+            crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::ConstRecord,
         )),
-        location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::from_single_str("scope", &mut string_table),
     };
 

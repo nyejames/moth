@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
+    with_generic_primary_span,
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -20,9 +21,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidGenericInstantiationReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Input bundle for source callable member parsing.
 ///
@@ -36,7 +38,7 @@ pub(super) struct SourceCallableMemberInput<'a, 'env> {
     pub(super) signature: &'a FunctionSignature,
     pub(super) generic_template: Option<&'a GenericFunctionTemplate>,
     pub(super) visible_name: StringId,
-    pub(super) call_location: SourceLocation,
+    pub(super) call_span: Option<SourceSpan>,
     pub(super) context: &'a ScopeContext,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
@@ -62,7 +64,7 @@ pub(super) fn parse_source_callable_member(
         signature,
         generic_template,
         visible_name,
-        call_location,
+        call_span,
         context,
         expression,
         allow_boundary_catch,
@@ -85,15 +87,15 @@ pub(super) fn parse_source_callable_member(
             // Reject the known foreign spellings before they can be interpreted as
             // generic function values, comparisons, or templates.
             Some(TokenKind::Of | TokenKind::LessThan | TokenKind::TemplateHead) => {
-                let explicit_syntax_location = token_stream
+                let explicit_syntax_span = token_stream
                     .tokens
                     .get(token_stream.index + 1)
-                    .map(|token| token.location.clone())
-                    .unwrap_or_else(|| call_location.clone());
+                    .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+                    .or(call_span);
 
-                return Err(explicit_generic_call_type_arguments_error(
-                    visible_name,
-                    explicit_syntax_location,
+                return Err(with_generic_primary_span(
+                    explicit_generic_call_type_arguments_error(visible_name, explicit_syntax_span),
+                    explicit_syntax_span,
                 )
                 .into());
             }
@@ -103,10 +105,13 @@ pub(super) fn parse_source_callable_member(
             Some(TokenKind::OpenParenthesis) => {}
 
             _ => {
-                return Err(CompilerDiagnostic::invalid_generic_instantiation(
-                    Some(visible_name),
-                    InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
-                    call_location,
+                return Err(with_generic_primary_span(
+                    CompilerDiagnostic::invalid_generic_instantiation(
+                        Some(visible_name),
+                        InvalidGenericInstantiationReason::GenericFunctionValueDeferred,
+                        call_span,
+                    ),
+                    call_span,
                 )
                 .into());
             }
@@ -131,7 +136,7 @@ pub(super) fn parse_source_callable_member(
             expected_context,
             value_required: true,
             allow_boundary_catch: allow_call_boundary_catch,
-            call_location,
+            call_span,
             warnings: None,
             type_interner,
             string_table,
@@ -164,7 +169,7 @@ pub(super) fn parse_source_callable_member(
     let function_call_expression = parse_function_call_expression(FunctionCallParseInput {
         token_stream,
         id: function_path,
-        call_location,
+        call_span,
         context,
         signature,
         value_required: true,
@@ -189,11 +194,11 @@ pub(super) fn parse_source_callable_member(
 
 fn explicit_generic_call_type_arguments_error(
     function_name: StringId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_generic_instantiation(
         Some(function_name),
         InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported,
-        location,
+        span,
     )
 }

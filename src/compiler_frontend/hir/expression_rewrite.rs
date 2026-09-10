@@ -138,6 +138,7 @@ pub(crate) fn rewrite_expression_bottom_up(
         ty: expression.ty,
         value_kind: expression.value_kind,
         region: expression.region,
+        span: expression.span,
     };
 
     rewrite(&rewritten).unwrap_or(rewritten)

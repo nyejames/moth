@@ -21,8 +21,11 @@ use crate::builder_surface::config_schema::{
 };
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;
@@ -58,6 +61,29 @@ use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+fn generated_source_identity_handle(
+    hir: &HirModule,
+    source_domain: Option<&StablePackageIdentity>,
+) -> Option<FrozenIdentityHandle> {
+    hir.function_ids_by_generated
+        .keys()
+        .next()
+        .map(|_| match source_domain {
+            Some(domain) => FrozenIdentityHandle::for_domain(domain.clone()),
+            None => FrozenIdentityHandle::new(),
+        })
+}
+
+fn attach_module_source_identity(
+    messages: &mut CompilerMessages,
+    hir: &HirModule,
+    source_domain: Option<&StablePackageIdentity>,
+) {
+    if let Some(handle) = generated_source_identity_handle(hir, source_domain) {
+        messages.set_frozen_identity_handle_if_missing(handle);
+    }
+}
 
 const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 
@@ -134,7 +160,6 @@ impl BackendBuilder for HtmlProjectBuilder {
             let logical_html_output_path = html_output_path(
                 &module.metadata.entry_point,
                 entry_paths.resolved_entry_root.as_deref(),
-                string_table,
             )
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
             let wasm_route_plan = if wasm_enabled {
@@ -155,15 +180,35 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .hir
                 .require_start_function("HTML page metadata extraction")
                 .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-            let page_metadata_plan = extract_html_page_metadata(
+            let page_metadata_plan = match extract_html_page_metadata(
                 &module.executable.hir,
                 start_function,
                 &module.executable.resource_table,
                 string_table,
-            )
-            .map_err(|diagnostic| {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
-            })?;
+            ) {
+                Ok(plan) => plan,
+                Err(
+                    crate::projects::html_project::page_metadata::PageMetadataError::Diagnostic(
+                        diagnostic,
+                    ),
+                ) => {
+                    let mut messages =
+                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+                    attach_module_source_identity(
+                        &mut messages,
+                        &module.executable.hir,
+                        entry.source_domain,
+                    );
+                    return Err(messages);
+                }
+                Err(
+                    crate::projects::html_project::page_metadata::PageMetadataError::Infrastructure(
+                        error,
+                    ),
+                ) => {
+                    return Err(CompilerMessages::from_error_ref(error, string_table));
+                }
+            };
             resource_output_plan.plan_entry(
                 &entry,
                 planned_html_output_path,
@@ -263,7 +308,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         for asset in runtime_emission_plan.js_assets().values() {
             resource_output_plan.plan_provider_runtime_asset(
                 asset.origin.clone(),
-                asset.authored_import_location.clone(),
+                asset.source_span,
                 string_table,
             )?;
         }
@@ -446,6 +491,7 @@ impl HtmlProjectBuilder {
         let HtmlModuleCompileContext {
             entry:
                 ProjectEntry {
+                    source_domain,
                     module,
                     reachability,
                     external_imports,
@@ -479,7 +525,11 @@ impl HtmlProjectBuilder {
             backend_target,
             string_table,
         )
-        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(*diagnostic, string_table))?;
+        .map_err(|diagnostic| {
+            let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+            attach_module_source_identity(&mut messages, &module.executable.hir, source_domain);
+            messages
+        })?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -492,16 +542,17 @@ impl HtmlProjectBuilder {
         )
         .map_err(|error| match error {
             BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
                     .with_type_context_for_all_diagnostics(
                         module.executable.type_environment.clone(),
-                    )
+                    );
+                attach_module_source_identity(&mut messages, &module.executable.hir, source_domain);
+                messages
             }
             BackendFeatureValidationError::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(*error, string_table)
             }
         })?;
-
         for linked in &linked_modules {
             validate_hir_external_package_support(
                 linked.reachability,
@@ -510,7 +561,13 @@ impl HtmlProjectBuilder {
                 string_table,
             )
             .map_err(|diagnostic| {
-                CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
+                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+                attach_module_source_identity(
+                    &mut messages,
+                    &linked.module.executable.hir,
+                    linked.source_domain,
+                );
+                messages
             })?;
             validate_hir_backend_feature_support(
                 BackendFeatureValidationInput {
@@ -523,10 +580,17 @@ impl HtmlProjectBuilder {
             )
             .map_err(|error| match error {
                 BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                    CompilerMessages::from_diagnostic_ref(*diagnostic, string_table)
-                        .with_type_context_for_all_diagnostics(
-                            linked.module.executable.type_environment.clone(),
-                        )
+                    let mut messages =
+                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                            .with_type_context_for_all_diagnostics(
+                                linked.module.executable.type_environment.clone(),
+                            );
+                    attach_module_source_identity(
+                        &mut messages,
+                        &linked.module.executable.hir,
+                        linked.source_domain,
+                    );
+                    messages
                 }
                 BackendFeatureValidationError::Infrastructure(error) => {
                     CompilerMessages::from_error_ref(*error, string_table)
@@ -607,15 +671,10 @@ fn emit_planned_resource_outputs(
                 "module-owned"
             };
 
-            let error = CompilerError::new(
-                format!(
-                    "planned {owner_kind} resource origin {:?} has no registered source \
-                     attachment",
-                    record.origin
-                ),
-                record.first_authored_location.clone(),
-                ErrorType::Compiler,
-            );
+            let error = CompilerError::compiler_error(format!(
+                "planned {owner_kind} resource origin {:?} has no registered source attachment",
+                record.origin
+            ));
             return Err(CompilerMessages::from_error_ref(error, string_table));
         };
         if output_paths.contains(&record.output_path)
@@ -635,7 +694,7 @@ fn emit_planned_resource_outputs(
                 &record.output_path,
                 &display_origin(&record.origin),
                 artefact_kind,
-                &record.first_authored_location,
+                record.first_authored_span,
                 string_table,
             ));
         }

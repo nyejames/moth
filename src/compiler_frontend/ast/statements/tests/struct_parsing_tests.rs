@@ -22,12 +22,12 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -42,10 +42,11 @@ fn body_local_struct_default_preserves_missing_template_authority() {
                     phase: TemplateTirPhase::Composed,
                     context: TemplateViewContext::default(),
                 },
-                location: SourceLocation::default(),
+                span: None,
             },
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -64,10 +65,11 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
             InternedPath::new(),
             DataType::Bool,
             builtin_type_ids::BOOL,
-            SourceLocation::default(),
+            Option::<SourceSpan>::default(),
             ValueMode::ImmutableReference,
             ConstRecordState::RuntimeValue,
         ),
+        binding_span: None,
         config_qualifier: None,
     }];
 
@@ -194,7 +196,7 @@ fn rejects_removed_builtin_error_fields() {
 }
 
 #[test]
-fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations() {
+fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_labels() {
     let diagnostic = parse_single_file_ast_diagnostic(
         "Pair type T = |\n\
              left T,\n\
@@ -204,13 +206,7 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations()
     );
 
     let DiagnosticPayload::InvalidGenericInstantiation {
-        reason:
-            InvalidGenericInstantiationReason::ConflictingInference {
-                subject,
-                current_evidence_location,
-                previous_evidence_location,
-                ..
-            },
+        reason: InvalidGenericInstantiationReason::ConflictingInference { subject, .. },
         ..
     } = &diagnostic.payload
     else {
@@ -219,24 +215,14 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_locations()
             diagnostic.payload
         );
     };
-    let previous_evidence_location = previous_evidence_location
-        .as_ref()
-        .expect("expected type evidence should be retained");
-
     assert_eq!(*subject, GenericInferenceSubject::NominalType);
-    assert_eq!(diagnostic.primary_location, *current_evidence_location);
+    assert_eq!(diagnostic.labels.len(), 1);
+    let previous_evidence_span = diagnostic.labels[0].span;
+
+    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
     assert_eq!(
-        current_evidence_location.start_pos.line_number,
-        previous_evidence_location.start_pos.line_number
+        diagnostic.labels[0].message,
+        Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
     );
-    assert!(
-        current_evidence_location.start_pos.char_column
-            > previous_evidence_location.start_pos.char_column,
-        "the argument evidence should follow the receiving-boundary evidence"
-    );
-    assert!(diagnostic.labels.iter().any(|label| {
-        label.style == DiagnosticLabelStyle::Secondary
-            && label.location == *previous_evidence_location
-            && label.message == Some(DiagnosticLabelMessage::GenericInferencePreviousEvidence)
-    }));
+    assert_ne!(diagnostic.primary_span, previous_evidence_span);
 }

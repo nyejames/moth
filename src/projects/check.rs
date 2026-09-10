@@ -7,7 +7,8 @@
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    BuildBootstrap, ProjectBuilder, bootstrap_project_build, validate_frontend_facade_boundaries,
+    BuildBootstrap, ProjectAssemblyError, ProjectBuilder, bootstrap_project_build,
+    validate_frontend_facade_boundaries,
 };
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -27,6 +28,7 @@ use crate::projects::command_status::{
 };
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use saying::say;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -39,6 +41,21 @@ pub struct CheckOptions {
 struct CheckOutcome {
     messages: CompilerMessages,
     status: CommandStatus,
+}
+fn attach_source_database_if_missing(
+    messages: &mut CompilerMessages,
+    source_database: Option<&Arc<crate::compiler_frontend::source::SourceDatabase>>,
+) {
+    let Some(source_database) = source_database else {
+        return;
+    };
+    if messages
+        .diagnostics()
+        .enumerate()
+        .any(|(index, _)| messages.source_database_for_diagnostic(index).is_none())
+    {
+        messages.set_source_database(Arc::clone(source_database));
+    }
 }
 
 pub(crate) fn run_check(path: &str, options: CheckOptions) -> CommandStatus {
@@ -125,12 +142,11 @@ fn run_check_for_tests(
 fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> CheckOutcome {
     let normalized_path = normalize_entry_path(path);
 
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(normalized_path, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(normalized_path) {
         Ok(path) => path,
         Err(error) => {
             return CheckOutcome {
-                messages: CompilerMessages::from_error(error, path_string_table),
+                messages: CompilerMessages::from_error(error, StringTable::new()),
                 status: CommandStatus::Failure,
             };
         }
@@ -143,6 +159,7 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
+        mut project_source_files,
         build_config_inputs,
     } = match bootstrap_project_build(&project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
@@ -161,20 +178,35 @@ fn execute_check(path: &str, build_config_inputs: &BuildConfigInputSet) -> Check
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Check,
     ) {
         Ok(frontend) => {
-            let facade_validation = validate_frontend_facade_boundaries(&frontend);
-            let mut messages = frontend.into_render_messages(&mut string_table);
-            if let Err(error) = facade_validation {
-                let facade_messages = error.into_messages(&mut string_table);
-                messages.string_table = string_table.clone();
-                messages.append_messages_preserving_context(facade_messages);
+            let facade_messages = validate_frontend_facade_boundaries(&frontend)
+                .err()
+                .map(ProjectAssemblyError::into_owned_messages);
+            match frontend.into_render_messages_with_frozen_identity(
+                &mut string_table,
+                project_source_files.take(),
+                facade_messages,
+            ) {
+                Ok(messages) => messages,
+                Err(error) => {
+                    return CheckOutcome {
+                        messages: CompilerMessages::from_error(
+                            error,
+                            std::mem::take(&mut string_table),
+                        ),
+                        status: CommandStatus::Failure,
+                    };
+                }
             }
+        }
+        Err(mut messages) => {
+            attach_source_database_if_missing(&mut messages, project_source_files.as_ref());
             messages
         }
-        Err(messages) => messages,
     };
 
     let status = if messages.error_count() > 0 {

@@ -263,7 +263,7 @@ fn render_error_page_shell(
 fn render_compiler_diagnostics(messages: &CompilerMessages, project_root: &Path) -> String {
     let mut diagnostics_html = String::from("<section class=\"diagnostics\">");
 
-    if messages.diagnostic_slice().is_empty() {
+    if messages.diagnostic_slice().is_empty() && messages.infrastructure_error().is_none() {
         diagnostics_html.push_str(
             "<div class=\"empty-state\">No compiler diagnostics were available for this failed build.</div>",
         );

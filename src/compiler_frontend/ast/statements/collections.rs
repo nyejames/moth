@@ -27,9 +27,10 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedMapContext,
@@ -109,7 +110,7 @@ fn parse_collection_literal(
 ) -> CollectionParseResult<Expression> {
     let mut items: Vec<Expression> = Vec::new();
     let mut inner_type_spelling = None;
-    let collection_location = token_stream.current_location();
+    let collection_span = Some(token_stream.current_span());
     let mut consumed_close_curly = false;
 
     let (mut inferred_inner_type_id, explicit_collection_type_id, fixed_capacity) =
@@ -145,8 +146,8 @@ fn parse_collection_literal(
 
             TokenKind::Comma => {
                 if awaiting_item {
-                    return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                        token_stream.current_location(),
+                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                        token_stream.current_span(),
                     ))
                     .into());
                 }
@@ -157,8 +158,8 @@ fn parse_collection_literal(
 
             _ => {
                 if !awaiting_item {
-                    return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                        token_stream.current_location(),
+                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                        token_stream.current_span(),
                     ))
                     .into());
                 }
@@ -227,28 +228,25 @@ fn parse_collection_literal(
     }
 
     if !consumed_close_curly {
-        return Err(Box::new(CompilerDiagnostic::missing_closing_delimiter(
+        return Err(CompilerDiagnostic::missing_closing_delimiter(
             string_table.get_or_intern("}".to_owned()),
-            token_stream.current_location(),
-        ))
+            Some(token_stream.current_span()),
+        )
         .into());
     }
 
     let Some(inner_type_id) = inferred_inner_type_id else {
         match collection_context {
             ExpectedCollectionContext::CapacityOnlyShorthand { .. } => {
-                return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
+                return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::ShorthandEmptyLiteralAmbiguous,
-                    collection_location,
-                ))
+                    collection_span,
+                )
                 .into());
             }
             _ => {
                 return Err(
-                    Box::new(CompilerDiagnostic::empty_collection_type_ambiguity(
-                        collection_location,
-                    ))
-                    .into(),
+                    CompilerDiagnostic::empty_collection_type_ambiguity(collection_span).into(),
                 );
             }
         }
@@ -257,13 +255,13 @@ fn parse_collection_literal(
     if let Some(capacity) = fixed_capacity
         && items.len() > capacity
     {
-        return Err(Box::new(CompilerDiagnostic::invalid_collection_type(
+        return Err(CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::InitializerExceedsFixedCapacity {
                 capacity,
                 length: items.len(),
             },
-            collection_location,
-        ))
+            collection_span,
+        )
         .into());
     }
 
@@ -281,7 +279,7 @@ fn parse_collection_literal(
             collection_type_id: explicit_collection_type_id,
         },
         type_interner.environment_mut_for_derived_types(),
-        token_stream.current_location(),
+        collection_span,
         value_mode.to_owned(),
     ))
 }
@@ -301,7 +299,7 @@ enum KnownMapKey {
 
 /// Tracks scalar literal keys that have already appeared so duplicate keys
 /// can be diagnosed at parse time.
-type KnownMapKeys = HashMap<KnownMapKey, SourceLocation>;
+type KnownMapKeys = HashMap<KnownMapKey, Option<SourceSpan>>;
 
 /// Attempt to extract a `KnownMapKey` from a coerced key expression so
 /// duplicate-key detection can run for literal scalars.
@@ -366,11 +364,11 @@ fn record_known_map_key(
         return Ok(());
     };
 
-    if known_keys.insert(known_key, key.location.clone()).is_some() {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
+    if known_keys.insert(known_key, key.span).is_some() {
+        return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::DuplicateKnownKey,
-            key.location.clone(),
-        ))
+            key.span,
+        )
         .into());
     }
 
@@ -414,16 +412,16 @@ fn mixed_collection_entry_error(token_stream: &FileTokens) -> Option<CompilerDia
 
     Some(CompilerDiagnostic::invalid_map_literal(
         InvalidMapLiteralReason::MixedCollectionMapEntries,
-        token_stream.current_location(),
+        Some(token_stream.current_span()),
     ))
 }
 
 fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParseResult<()> {
     if token_stream.current_token_kind() != &TokenKind::Assign {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
+        return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MixedCollectionMapEntries,
-            token_stream.current_location(),
-        ))
+            Some(token_stream.current_span()),
+        )
         .into());
     }
 
@@ -439,10 +437,10 @@ fn consume_map_entry_separator(token_stream: &mut FileTokens) -> CollectionParse
 
 fn reject_missing_map_key_expression(token_stream: &FileTokens) -> CollectionParseResult<()> {
     if token_stream.current_token_kind() == &TokenKind::Assign {
-        return Err(Box::new(CompilerDiagnostic::invalid_map_literal(
+        return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::MissingKeyExpression,
-            token_stream.current_location(),
-        ))
+            Some(token_stream.current_span()),
+        )
         .into());
     }
 
@@ -455,13 +453,11 @@ fn reject_missing_map_value_expression(token_stream: &mut FileTokens) -> Collect
     }
 
     match token_stream.current_token_kind() {
-        TokenKind::CloseCurly | TokenKind::Comma => {
-            Err(Box::new(CompilerDiagnostic::invalid_map_literal(
-                InvalidMapLiteralReason::MissingValueExpression,
-                token_stream.current_location(),
-            ))
-            .into())
-        }
+        TokenKind::CloseCurly | TokenKind::Comma => Err(CompilerDiagnostic::invalid_map_literal(
+            InvalidMapLiteralReason::MissingValueExpression,
+            Some(token_stream.current_span()),
+        )
+        .into()),
         _ => Ok(()),
     }
 }
@@ -484,6 +480,7 @@ fn parse_map_literal(
     let mut entries: Vec<MapLiteralEntry> = Vec::new();
     let mut known_keys: KnownMapKeys = HashMap::new();
     let mut consumed_close_curly = false;
+    let map_span = Some(token_stream.current_span());
 
     // The current token is an open curly brace; skip to the first entry.
     token_stream.advance();
@@ -506,8 +503,8 @@ fn parse_map_literal(
 
             TokenKind::Comma => {
                 if awaiting_entry {
-                    return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                        token_stream.current_location(),
+                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                        token_stream.current_span(),
                     ))
                     .into());
                 }
@@ -518,8 +515,8 @@ fn parse_map_literal(
 
             _ => {
                 if !awaiting_entry {
-                    return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                        token_stream.current_location(),
+                    return Err(CompilerDiagnostic::missing_collection_item(Some(
+                        token_stream.current_span(),
                     ))
                     .into());
                 }
@@ -592,11 +589,7 @@ fn parse_map_literal(
                 )?;
 
                 // Enforce the scalar-key policy once the key type is known.
-                validate_map_key_type(
-                    key_type_id,
-                    type_interner.environment(),
-                    &coerced_key.location,
-                )?;
+                validate_map_key_type(key_type_id, type_interner.environment(), coerced_key.span)?;
                 validate_compile_time_map_key(&coerced_key, context, string_table)?;
 
                 // Detect duplicate known keys after coercion where cheaply knowable.
@@ -613,10 +606,10 @@ fn parse_map_literal(
     }
 
     if !consumed_close_curly {
-        return Err(Box::new(CompilerDiagnostic::missing_closing_delimiter(
+        return Err(CompilerDiagnostic::missing_closing_delimiter(
             string_table.get_or_intern("}".to_owned()),
-            token_stream.current_location(),
-        ))
+            Some(token_stream.current_span()),
+        )
         .into());
     }
 
@@ -636,7 +629,7 @@ fn parse_map_literal(
             map_type_id: Some(map_type_id),
         },
         type_interner.environment_mut_for_derived_types(),
-        token_stream.current_location(),
+        map_span,
         value_mode.to_owned(),
     ))
 }
@@ -652,7 +645,7 @@ fn parse_inferred_curly_literal(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> CollectionParseResult<Expression> {
-    let literal_location = token_stream.current_location();
+    let literal_span = Some(token_stream.current_span());
 
     // Collection delimiters own intervening newlines; normalize them before the bounded
     // expression parser sees the first entry as a possible statement terminator.
@@ -662,16 +655,10 @@ fn parse_inferred_curly_literal(
     // Empty inferred `{}` keeps existing collection ambiguity behavior.
     if token_stream.current_token_kind() == &TokenKind::CloseCurly {
         token_stream.advance();
-        return Err(
-            Box::new(CompilerDiagnostic::empty_collection_type_ambiguity(
-                literal_location,
-            ))
-            .into(),
-        );
+        return Err(CompilerDiagnostic::empty_collection_type_ambiguity(literal_span).into());
     }
     reject_missing_map_key_expression(token_stream)?;
 
-    // Parse the first expression to classify the literal shape.
     let mut first_expression_type = ExpectedType::Infer;
     let mut first_cast_target_context = CastTargetContext::None;
     let first_expected_types: Vec<TypeId> = Vec::new();
@@ -729,11 +716,7 @@ fn parse_inferred_curly_literal(
                 TypeMismatchContext::CollectionElement,
             )?;
 
-            validate_map_key_type(
-                key_type_id,
-                type_interner.environment(),
-                &coerced_key.location,
-            )?;
+            validate_map_key_type(key_type_id, type_interner.environment(), coerced_key.span)?;
             validate_compile_time_map_key(&coerced_key, context, string_table)?;
 
             let mut entries = vec![MapLiteralEntry {
@@ -755,8 +738,8 @@ fn parse_inferred_curly_literal(
                     }
                     TokenKind::Comma => {
                         if awaiting_entry {
-                            return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                                token_stream.current_location(),
+                            return Err(CompilerDiagnostic::missing_collection_item(Some(
+                                token_stream.current_span(),
                             ))
                             .into());
                         }
@@ -765,8 +748,8 @@ fn parse_inferred_curly_literal(
                     }
                     _ => {
                         if !awaiting_entry {
-                            return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                                token_stream.current_location(),
+                            return Err(CompilerDiagnostic::missing_collection_item(Some(
+                                token_stream.current_span(),
                             ))
                             .into());
                         }
@@ -841,10 +824,9 @@ fn parse_inferred_curly_literal(
                         validate_map_key_type(
                             key_type_id,
                             type_interner.environment(),
-                            &coerced_key.location,
+                            coerced_key.span,
                         )?;
                         validate_compile_time_map_key(&coerced_key, context, string_table)?;
-
                         record_known_map_key(&mut known_keys, &coerced_key, string_table)?;
 
                         entries.push(MapLiteralEntry {
@@ -877,11 +859,10 @@ fn parse_inferred_curly_literal(
                     map_type_id: Some(map_type_id),
                 },
                 type_interner.environment_mut_for_derived_types(),
-                token_stream.current_location(),
+                literal_span,
                 value_mode.to_owned(),
             ))
         }
-
         // First expression is followed by `,` or `}`  =>  collection literal.
         TokenKind::Comma | TokenKind::CloseCurly => {
             // Infer element type from the first expression and treat the rest as collection items.
@@ -908,8 +889,8 @@ fn parse_inferred_curly_literal(
                     }
                     TokenKind::Comma => {
                         if awaiting_item {
-                            return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                                token_stream.current_location(),
+                            return Err(CompilerDiagnostic::missing_collection_item(Some(
+                                token_stream.current_span(),
                             ))
                             .into());
                         }
@@ -918,8 +899,8 @@ fn parse_inferred_curly_literal(
                     }
                     _ => {
                         if !awaiting_item {
-                            return Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                                token_stream.current_location(),
+                            return Err(CompilerDiagnostic::missing_collection_item(Some(
+                                token_stream.current_span(),
                             ))
                             .into());
                         }
@@ -978,17 +959,17 @@ fn parse_inferred_curly_literal(
                     collection_type_id: Some(collection_type_id),
                 },
                 type_interner.environment_mut_for_derived_types(),
-                token_stream.current_location(),
+                literal_span,
                 value_mode.to_owned(),
             ))
         }
 
         _ => {
             // Any other token after the first expression is invalid in both shapes.
-            Err(Box::new(CompilerDiagnostic::missing_collection_item(
-                token_stream.current_location(),
-            ))
-            .into())
+            Err(
+                CompilerDiagnostic::missing_collection_item(Some(token_stream.current_span()))
+                    .into(),
+            )
         }
     }
 }

@@ -8,8 +8,8 @@
 //! Receiver methods are attached to their owning struct or choice record, not stored as a
 //! top-level parallel vector. Direct and re-exported [`ExportBinding`] values remain distinct
 //! from declaration records so a public alias can change the consumer-facing name without
-//! changing the donor-owned semantic origin. Exported-name diagnostic provenance is carried in
-//! its own portable side table for cross-module remapping.
+//! changing the donor-owned semantic origin. Exported-name diagnostic spans are carried in
+//! their own side table and remain exact across module boundaries.
 //!
 //! The builder internalizes the projection components as private builder steps:
 //! - the pre-AST direct-export seed ([`DirectExportSeed`]) carrying the module origin, export
@@ -23,7 +23,7 @@
 //! - the direct reusable-evidence projection ([`project_reusable_evidence`]).
 //!
 //! These intermediates are consumed before the draft boundary: the draft stores only `Public*`
-//! semantic leaf types, stable export bindings and portable exported-name diagnostic provenance.
+//! semantic leaf types, stable export bindings and exact exported-name diagnostic spans.
 //! The transient projection indexes and the seed are destructured and dropped before the draft.
 //! No `DefinedPublic*` aggregate surface crosses orchestration.
 //!
@@ -85,7 +85,6 @@ pub(in crate::compiler_frontend) use direct_projection::{
 };
 #[cfg(test)]
 pub(crate) use export_projection::DirectExportSeed;
-pub(crate) use export_projection::portable_source_location;
 pub(in crate::compiler_frontend) use export_projection::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
@@ -96,11 +95,11 @@ pub(crate) use model::LocalPublicInterface;
 pub(crate) use model::PublicExportDiagnosticProvenance;
 pub(crate) use model::{
     PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationRecord,
-    PublicDeclarationSemantics, PublicDiagnosticLocation, PublicEvidenceRecord,
-    PublicFunctionCategory, PublicGenericParameterSurface, PublicInterfaceDraft,
-    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
-    PublicReturnTypeSlot, PublicSemanticInterface, PublicStructSemantics,
-    PublicTraitReceiverAccess, PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
+    PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,
+    PublicGenericParameterSurface, PublicInterfaceDraft, PublicParameterTypeSlot,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicReturnTypeSlot,
+    PublicSemanticInterface, PublicStructSemantics, PublicTraitReceiverAccess,
+    PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
 };
 pub(crate) use receiver_projection::CallableSeed;
 

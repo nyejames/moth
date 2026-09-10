@@ -9,9 +9,8 @@ use super::*;
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::symbols::identity::{
-    DependencySelectionId, DependencyShellId, FileId,
-};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -183,7 +182,8 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
     let export_name = string_table.intern("public_name");
     let source_name = string_table.intern("provider_name");
     let diagnostic_path = intern_path(&["child", "provider_name"], &mut string_table);
-    let selection = DependencySelectionId::new(DependencyShellId::new(FileId(4), 9), 3);
+    let selection =
+        DependencySelectionId::new(DependencyShellId::new(SourceId::from_index(4), 9), 3);
 
     let mut file_module_membership = FxHashMap::default();
     file_module_membership.insert(page_file.clone(), entry_root);

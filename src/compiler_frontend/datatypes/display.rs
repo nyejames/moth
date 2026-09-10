@@ -1,13 +1,14 @@
-//! Type name rendering through `StringTable`.
+//! Type name rendering through `StringTableResolver`.
 //!
 //! WHAT: converts `TypeId` into human-readable strings for diagnostics and debug.
 //! WHY: type identity is numeric; display is a separate concern that needs
-//!      the shared `StringTable` to resolve interned names.
+//!      a string resolver to map interned names, whether from a mutable
+//!      `StringTable` or a frozen `FrozenStringTable`.
 //!
 //! Diagnostics should keep semantic `TypeId`s in their payloads and call these helpers only at the
 //! render boundary through `DiagnosticRenderContext`.
 
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableResolver};
 
 use super::definitions::{ChoiceVariantPayloadDefinition, TypeDefinition};
 use super::environment::TypeEnvironment;
@@ -18,7 +19,17 @@ use super::ids::{BuiltinTypeConstructor, TypeConstructor, TypeId};
 // -----------------------------------------------------------
 
 /// Renders a `TypeId` to a human-readable string.
+#[allow(dead_code)] // Used by feature/test-gated HIR display and diagnostics tests.
 pub fn display_type(type_id: TypeId, env: &TypeEnvironment, table: &StringTable) -> String {
+    display_type_with_resolver(type_id, env, table)
+}
+
+/// Renders a `TypeId` through any string resolver (mutable or frozen table).
+pub(crate) fn display_type_with_resolver(
+    type_id: TypeId,
+    env: &TypeEnvironment,
+    table: &dyn StringTableResolver,
+) -> String {
     match env.get(type_id) {
         None => "<unknown type>".to_owned(),
         Some(definition) => display_definition(definition, env, table),
@@ -46,7 +57,7 @@ pub(crate) fn format_fallible_signature_parts(
 fn display_definition(
     definition: &TypeDefinition,
     env: &TypeEnvironment,
-    table: &StringTable,
+    table: &dyn StringTableResolver,
 ) -> String {
     match definition {
         TypeDefinition::Builtin(builtin) => match builtin.key {
@@ -95,7 +106,7 @@ fn display_definition(
             let param_types: Vec<String> = function
                 .parameters
                 .iter()
-                .map(|p| display_type(p.type_id, env, table))
+                .map(|p| display_type_with_resolver(p.type_id, env, table))
                 .collect();
 
             let return_display = display_return_signature(
@@ -119,7 +130,7 @@ fn display_definition(
             let args: Vec<String> = instance
                 .arguments
                 .iter()
-                .map(|arg| display_type(*arg, env, table))
+                .map(|arg| display_type_with_resolver(*arg, env, table))
                 .collect();
             format!("{base_name} of {}", args.join(", "))
         }
@@ -133,14 +144,17 @@ fn display_definition(
 fn display_constructed(
     constructed: &super::definitions::ConstructedTypeDefinition,
     env: &TypeEnvironment,
-    table: &StringTable,
+    table: &dyn StringTableResolver,
 ) -> String {
     match &constructed.constructor {
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
             if let Some(element) = constructed.arguments.first() {
                 match fixed_capacity {
-                    Some(cap) => format!("{{{cap} {}}}", display_type(*element, env, table)),
-                    None => format!("{{{}}}", display_type(*element, env, table)),
+                    Some(cap) => format!(
+                        "{{{cap} {}}}",
+                        display_type_with_resolver(*element, env, table)
+                    ),
+                    None => format!("{{{}}}", display_type_with_resolver(*element, env, table)),
                 }
             } else {
                 "Collection".to_owned()
@@ -150,8 +164,8 @@ fn display_constructed(
             if let [key, value] = constructed.arguments.as_ref() {
                 format!(
                     "{{{key_type} = {value_type}}}",
-                    key_type = display_type(*key, env, table),
-                    value_type = display_type(*value, env, table)
+                    key_type = display_type_with_resolver(*key, env, table),
+                    value_type = display_type_with_resolver(*value, env, table)
                 )
             } else {
                 "Map".to_owned()
@@ -159,7 +173,7 @@ fn display_constructed(
         }
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => {
             if let Some(inner) = constructed.arguments.first() {
-                format!("{}?", display_type(*inner, env, table))
+                format!("{}?", display_type_with_resolver(*inner, env, table))
             } else {
                 "Option".to_owned()
             }
@@ -175,7 +189,7 @@ fn display_constructed(
             let fields: Vec<String> = constructed
                 .arguments
                 .iter()
-                .map(|arg| display_type(*arg, env, table))
+                .map(|arg| display_type_with_resolver(*arg, env, table))
                 .collect();
             format!("({})", fields.join(", "))
         }
@@ -186,7 +200,7 @@ fn display_fallible_carrier(
     success_type: TypeId,
     error_type: TypeId,
     env: &TypeEnvironment,
-    table: &StringTable,
+    table: &dyn StringTableResolver,
 ) -> String {
     let success_types = if success_type == env.builtins().none {
         Vec::new()
@@ -203,13 +217,13 @@ fn display_return_signature(
     success_types: &[TypeId],
     error_type: Option<TypeId>,
     env: &TypeEnvironment,
-    table: &StringTable,
+    table: &dyn StringTableResolver,
 ) -> String {
     match error_type {
         Some(error_type) => display_fallible_signature(success_types, error_type, env, table),
         None => success_types
             .iter()
-            .map(|success_type| display_type(*success_type, env, table))
+            .map(|success_type| display_type_with_resolver(*success_type, env, table))
             .collect::<Vec<_>>()
             .join(", "),
     }
@@ -219,13 +233,13 @@ fn display_fallible_signature(
     success_types: &[TypeId],
     error_type: TypeId,
     env: &TypeEnvironment,
-    table: &StringTable,
+    table: &dyn StringTableResolver,
 ) -> String {
     let success_parts = success_types
         .iter()
-        .map(|success_type| display_type(*success_type, env, table))
+        .map(|success_type| display_type_with_resolver(*success_type, env, table))
         .collect::<Vec<_>>();
-    let error_part = display_type(error_type, env, table);
+    let error_part = display_type_with_resolver(error_type, env, table);
 
     format_fallible_signature_parts(success_parts, error_part)
 }

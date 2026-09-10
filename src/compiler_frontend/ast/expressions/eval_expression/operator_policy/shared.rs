@@ -7,12 +7,12 @@
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleOperandReason, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Rejects binary operators applied to unwrapped fallible `Error!` carriers.
 ///
@@ -24,7 +24,7 @@ pub(super) fn reject_fallible_operands(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<(), ExpressionTypingError> {
     if type_environment.is_fallible_carrier(lhs) || type_environment.is_fallible_carrier(rhs) {
@@ -63,7 +63,7 @@ pub(super) fn reject_fallible_operands(
             InvalidFallibleOperandReason::FallibleValueNotHandled,
             category,
             operand_type_id,
-            location.clone(),
+            span,
         )
         .into());
     }

@@ -55,8 +55,9 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
 use crate::compiler_frontend::type_coercion::parse_context::{
@@ -82,7 +83,7 @@ fn validate_assignment_value_type(
         expected_type_id,
         actual_value.type_id,
         TypeMismatchContext::Assignment,
-        actual_value.location.clone(),
+        actual_value.span,
     )
     .into())
 }
@@ -140,7 +141,6 @@ fn evaluate_compound_assignment_value(
         target_type_id,
         operator,
     } = input;
-    let location = target.location.clone();
     let mut expr_type = ExpectedType::Infer;
 
     // -----------------------
@@ -166,9 +166,12 @@ fn evaluate_compound_assignment_value(
     //  Build `target op rhs` and validate the
     //  result type against the declared type
     // -------------------------------------------
-
     let target_expression = expression_from_place_expression(target);
-    let operator_item = ExpressionRpnItem::Operator { operator, location };
+
+    let operator_item = ExpressionRpnItem::Operator {
+        operator,
+        span: target.span,
+    };
     let mut inferred = ExpectedType::Infer;
     let value = evaluate_expression(
         context,
@@ -200,12 +203,15 @@ fn build_mutation_from_target(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,
     target: PlaceExpression,
-    declaration_location: Option<SourceLocation>,
+    declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<AstNode, ExpressionParseError> {
-    let location = token_stream.current_location();
+    let span = Some(SourceSpan::new(
+        token_stream.file_id,
+        token_stream.current_token().span,
+    ));
     let target_type_id = target.type_id;
 
     ast_log!(
@@ -233,16 +239,16 @@ fn build_mutation_from_target(
             }
         };
 
-        return Err(CompilerDiagnostic::invalid_assignment_target(
+        let diagnostic = CompilerDiagnostic::invalid_assignment_target(
             reason,
             variable_declaration.id.name(),
             Some(target_type_id),
             field_name,
             root_binding_name,
-            declaration_location,
-            location,
-        )
-        .into());
+            declaration_span,
+            span,
+        );
+        return Err(diagnostic.into());
     }
 
     // -----------------------
@@ -307,7 +313,10 @@ fn build_mutation_from_target(
             {
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
                     InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
-                    token_stream.current_location(),
+                    Some(SourceSpan::new(
+                        token_stream.file_id,
+                        token_stream.current_token().span,
+                    )),
                 )
                 .into());
             }
@@ -326,7 +335,7 @@ fn build_mutation_from_target(
                     None,
                     None,
                     None,
-                    location,
+                    span,
                 )
                 .into());
             };
@@ -350,7 +359,7 @@ fn build_mutation_from_target(
 
     Ok(AstNode {
         kind: NodeKind::Assignment { target, value },
-        location: location.clone(),
+        span,
         scope: context.scope.clone(),
     })
 }
@@ -365,7 +374,7 @@ pub(crate) fn handle_mutation_target(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,
     target: PlaceExpression,
-    declaration_location: Option<SourceLocation>,
+    declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -374,7 +383,7 @@ pub(crate) fn handle_mutation_target(
         token_stream,
         variable_declaration,
         target,
-        declaration_location,
+        declaration_span,
         context,
         type_interner,
         string_table,
@@ -390,7 +399,7 @@ pub(crate) fn handle_mutation_target(
 pub fn handle_mutation(
     token_stream: &mut FileTokens,
     variable_declaration: &Declaration,
-    declaration_location: Option<SourceLocation>,
+    declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -411,7 +420,10 @@ pub fn handle_mutation(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(SourceSpan::new(
+                token_stream.file_id,
+                token_stream.current_token().span,
+            )),
         )
         .into());
     };
@@ -420,7 +432,7 @@ pub fn handle_mutation(
         token_stream,
         variable_declaration,
         target,
-        declaration_location,
+        declaration_span,
         context,
         type_interner,
         string_table,

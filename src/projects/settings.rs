@@ -7,12 +7,13 @@
 
 use crate::compiler_frontend::build_config::ConfigResolutionRecord;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, SourceLocation};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
     DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -95,20 +96,20 @@ impl HtmlSectionConfig {
 
 /// One additional authored `project` field retained after compiler-owned fields are applied.
 ///
-/// WHAT: the field's folded value plus the canonical type and initializer location needed
-///       later by `@project`. Nested record values keep field types on `PublicFoldedField`;
-///       exact nested field-name spans stay deferred.
+/// WHAT: the field's folded value plus the canonical type and exact authored span needed later by
+///       `@project`. Nested record values keep field types on `PublicFoldedField`; exact nested
+///       field-name spans stay deferred.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectMetadataField {
     pub name: String,
     pub type_identity: CanonicalTypeIdentity,
     pub value: PublicFoldedValue,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 /// WHAT: project configuration loaded from config.moth that controls build behavior.
 /// WHY: config is the control plane for the build system; it must be validated early
-///      and provide precise error locations for all settings.
+///      and retain exact authored spans for source-backed settings.
 #[derive(Clone)]
 pub struct Config {
     pub project_name: String,
@@ -119,9 +120,11 @@ pub struct Config {
     pub version: Option<String>,
     pub author: Option<String>,
     pub license: Option<String>,
-
-    /// Source locations for each config key, used for precise error reporting
-    pub setting_locations: HashMap<String, SourceLocation>,
+    /// Exact authored source spans for config keys when the key came from retained source.
+    ///
+    /// Path-only and synthetic settings deliberately have no entry here rather than acquiring
+    /// a fabricated span from their display path.
+    pub setting_spans: HashMap<String, SourceSpan>,
 
     /// Validated results of the grouped `html` builder section when one was authored.
     pub html_section: HtmlSectionConfig,
@@ -146,7 +149,7 @@ impl Config {
             version: None,
             author: None,
             license: None,
-            setting_locations: HashMap::new(),
+            setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,
@@ -164,27 +167,14 @@ impl Config {
         }
     }
 
-    /// Resolve the most specific location for a config key, falling back to `config.moth`.
-    ///
-    /// WHAT: uses the recorded setting location when available, otherwise creates a file-level
-    /// location for the config file itself.
-    /// WHY: config parsers should not duplicate fallback logic every time they report a bad value.
-    pub fn setting_location_or_config_file(
-        &self,
-        key: &str,
-        string_table: &mut StringTable,
-    ) -> SourceLocation {
-        self.setting_locations
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| SourceLocation::from_path(&self.config_file_path(), string_table))
+    /// Return the exact authored span for a config key, if the setting came from retained source.
+    pub fn setting_span(&self, key: &str) -> Option<SourceSpan> {
+        self.setting_spans.get(key).copied()
     }
 
-    /// Build a typed project-config diagnostic with the standard setting location.
+    /// Build a typed project-config diagnostic with the setting's authored span, when available.
     ///
-    /// WHAT: centralizes config-setting diagnostics on `Config`.
-    /// WHY: parsers for routing/document/html settings should only define value semantics, not
-    /// duplicate location lookup or boundary aggregation.
+    /// Path-only and synthetic config values intentionally produce span-less diagnostics.
     pub fn config_diagnostic(
         &self,
         key: &str,
@@ -192,11 +182,7 @@ impl Config {
         string_table: &mut StringTable,
     ) -> CompilerDiagnostic {
         let key_id = string_table.intern(key);
-        CompilerDiagnostic::invalid_config_reason(
-            Some(key_id),
-            reason,
-            self.setting_location_or_config_file(key, string_table),
-        )
+        CompilerDiagnostic::invalid_config_reason(Some(key_id), reason, self.setting_span(key))
     }
 
     pub fn config_file_path(&self) -> PathBuf {
@@ -212,7 +198,7 @@ impl Config {
 /// type that can still distinguish normal user config feedback from internal failures.
 #[derive(Debug, Clone)]
 pub enum ProjectConfigError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(Box<CompilerError>),
 }
 
@@ -220,7 +206,7 @@ impl ProjectConfigError {
     pub fn into_messages(self, string_table: StringTable) -> CompilerMessages {
         match self {
             ProjectConfigError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic(*diagnostic, string_table)
+                CompilerMessages::from_diagnostic(diagnostic, string_table)
             }
             ProjectConfigError::Infrastructure(error) => {
                 CompilerMessages::from_error(*error, string_table)
@@ -231,7 +217,7 @@ impl ProjectConfigError {
     #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> Option<&CompilerDiagnostic> {
         match self {
-            ProjectConfigError::Diagnostic(diagnostic) => Some(diagnostic.as_ref()),
+            ProjectConfigError::Diagnostic(diagnostic) => Some(diagnostic),
             ProjectConfigError::Infrastructure(_) => None,
         }
     }
@@ -239,7 +225,7 @@ impl ProjectConfigError {
 
 impl From<CompilerDiagnostic> for ProjectConfigError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
-        ProjectConfigError::Diagnostic(Box::new(diagnostic))
+        ProjectConfigError::Diagnostic(diagnostic)
     }
 }
 
@@ -259,8 +245,7 @@ impl Default for Config {
             version: None,
             author: None,
             license: None,
-
-            setting_locations: HashMap::new(),
+            setting_spans: HashMap::new(),
             html_section: HtmlSectionConfig::default(),
             extra_project_fields: Vec::new(),
             project_config_loaded: false,

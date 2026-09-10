@@ -50,7 +50,7 @@ use crate::compiler_frontend::datatypes::environment::{
     RegisteredGenericParameterList, TypeEnvironment,
 };
 use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, GenericParameterScope, TypeParameterId,
+    GenericParameterList, GenericParameterScope, TypeParameterId,
 };
 use crate::compiler_frontend::datatypes::ids::{
     FunctionTypeKey, GenericParameterId, NominalTypeId, TypeId, builtin_type_ids,
@@ -65,7 +65,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment,
 };
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols, OrderedSemanticDeclaration,
+    GenericDeclarationKind, ModuleSymbols, OrderedSemanticDeclaration,
     OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -76,6 +76,7 @@ use crate::compiler_frontend::public_interface::{
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -83,7 +84,6 @@ use crate::compiler_frontend::traits::evidence::{
     TraitEvidenceEnvironment, ValidateTraitEvidenceInput, validate_trait_evidence,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
-use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -329,12 +329,11 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) resolved_struct_fields_by_path: Rc<FxHashMap<InternedPath, Vec<Declaration>>>,
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<InternedPath, Vec<ChoiceVariant>>>,
     pub(crate) resolved_type_aliases_by_path: Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    /// Generic declaration metadata, moved out of `module_symbols` when the builder starts.
+    /// Generic declaration kinds, moved out of `module_symbols` when the builder starts.
     ///
-    /// WHY: it is read by every environment pass and written by none of them, so the builder owns
-    /// the single shared handle rather than copying the map out of `module_symbols` per header.
-    pub(crate) generic_declarations_by_path:
-        Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    /// Import projection adds imported nominal kinds before the environment passes consume the
+    /// shared map, avoiding a separate copy for each header.
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
 
     pub(crate) struct_source_by_path: FxHashMap<InternedPath, InternedPath>,
     pub(crate) choice_source_by_path: FxHashMap<InternedPath, InternedPath>,
@@ -422,7 +421,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_struct_fields_by_path =
             std::mem::take(&mut module_symbols.resolved_struct_fields_by_path);
         let struct_source_by_path = std::mem::take(&mut module_symbols.struct_source_by_path);
-        // Generic declaration metadata has one owner from here on. Import projection adds imported
+        // Generic declaration kinds have one owner from here on. Import projection adds imported
         // generic nominals to it and every environment pass reads it, so taking it now keeps one
         // map behind one handle: the per-header scopes borrow it instead of copying it, and no
         // writer is left holding a different map from the readers.
@@ -620,7 +619,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             },
             &mut trait_evidence_environment,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         // -----------------------------------------
         //  Validate bounded nominal instantiations
@@ -721,7 +720,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )
         .map_err(|error| match error {
             TemplateError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         })?;
@@ -787,20 +786,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHAT: names every generic parameter the declaration introduces, gated by the file's
     /// visibility so a parameter cannot shadow a visible declaration.
-    /// WHY: six environment passes were spelling out the same eight-field input, differing only in
+    /// WHY: six environment passes were spelling out the same nine-field input, differing only in
     /// which parameter list and canonical map they pass. The five fields they always agree on -
-    /// the three visibility maps, the declaration table and the generic metadata - belong to the
-    /// builder, so it supplies them.
+    /// the three visibility maps, the declaration table and the generic declaration kinds - belong
+    /// to the builder, so it supplies them.
     pub(crate) fn generic_parameter_scope(
         &self,
         generic_parameters: &GenericParameterList,
         canonical_by_local: Option<&FxHashMap<TypeParameterId, GenericParameterId>>,
+        source_id: Option<SourceId>,
         visibility: &FileVisibility,
         string_table: &StringTable,
     ) -> Result<Option<GenericParameterScope>, CompilerMessages> {
         build_generic_parameter_scope(GenericParameterScopeBuildInput {
             generic_parameters,
             canonical_by_local,
+            source_id,
             visible_source_bindings: &visibility.visible_source_names,
             visible_type_aliases: &visibility.visible_type_alias_names,
             visible_external_symbols: &visibility.visible_external_symbols,
@@ -808,7 +809,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_declarations_by_path: &self.generic_declarations_by_path,
             string_table,
         })
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
     }
 
     /// The same scope, taking the canonical parameter map from the header's registered list.
@@ -827,6 +828,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             self.generic_parameter_lists_by_path
                 .get(&header.tokens.src_path)
                 .map(|registered| &registered.canonical_by_local),
+            Some(header.tokens.file_id),
             visibility,
             string_table,
         )
@@ -848,9 +850,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn environment_header_scope(
         &self,
         header: &Header,
-        string_table: &mut StringTable,
+        _string_table: &mut StringTable,
     ) -> ScopeContext {
-        let source_file_scope = header.canonical_source_file(string_table);
+        let source_file_scope = header.source_file.clone();
 
         let mut context = ScopeContext::new(
             ContextKind::ConstantHeader,
@@ -945,12 +947,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?;
             Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(path.clone(), struct_type_id);
 
-            // Build a placeholder declaration so the builtin struct is reachable
+            // Build a synthetic placeholder declaration so the builtin struct is reachable
             // through the declaration table during body parsing.
-            let declaration_location = fields
-                .first()
-                .map(|field| field.value.location.clone())
-                .unwrap_or_default();
 
             let declaration_id = self
                 .declaration_table
@@ -969,11 +967,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     id: path.clone(),
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        declaration_location,
+                        None,
                         struct_type_id,
                         DataType::runtime_struct(path.clone(), struct_type_id),
                         ValueMode::ImmutableReference,
                     ),
+                    binding_span: None,
                     config_qualifier: None,
                 },
             )
@@ -987,23 +986,31 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHAT: centralizes the repeated `TypeResolutionContext::from_inputs(...)` construction
     /// across type alias, struct field, choice variant, and function signature resolution.
-    /// WHY: avoids duplicating the same 8-field initialization in four different files.
+    /// WHY: avoids duplicating the same context initialization in four different files.
     pub(crate) fn type_resolution_context_for<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
+        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
     ) -> TypeResolutionContext<'a> {
-        self.type_resolution_context_for_with_traits(visibility, generic_parameters, None)
+        self.type_resolution_context_for_with_traits(
+            visibility,
+            declaring_file_id,
+            generic_parameters,
+            None,
+        )
     }
 
     pub(crate) fn type_resolution_context_for_with_traits<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
+        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
         trait_environment: Option<&'a TraitEnvironment>,
     ) -> TypeResolutionContext<'a> {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
+            declaring_file_id,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
             visible_external_symbols: Some(&visibility.visible_external_symbols),
             visible_source_bindings: Some(&visibility.visible_source_names),
@@ -1039,12 +1046,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             let mut resolved_bounds = Vec::with_capacity(parameter.trait_bounds.len());
             for trait_bound in &parameter.trait_bounds {
-                let trait_ref = TraitReferenceSyntax {
-                    name: trait_bound.trait_name,
-                    location: trait_bound.location.clone(),
-                };
-                let trait_id = self.resolve_visible_trait_reference(
-                    &trait_ref,
+                let trait_id = self.resolve_visible_trait_name(
+                    trait_bound.trait_name,
+                    trait_bound.span,
                     visibility,
                     trait_environment,
                     string_table,
@@ -1096,7 +1100,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     CompilerDiagnostic::generic_bound_private_surface_leak(
                         owner_name,
                         trait_definition.name,
-                        trait_bound.location.clone(),
+                        trait_bound.span,
                     ),
                     string_table,
                 ));
@@ -1111,7 +1115,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
     /// then written into `TypeEnvironment` as compact semantic member definitions.
     /// WHY: keeping the conversion on the environment builder centralizes diagnostic mapping
-    /// at the AST environment boundary and avoids repeated large-error iterator closures.
+    /// at the AST environment boundary without closure-specific error conversions.
     pub(crate) fn field_definitions_from_declarations(
         &mut self,
         fields: &[Declaration],
@@ -1123,18 +1127,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let type_id = match resolve_diagnostic_type_to_type_id_checked(
                 &field.value.diagnostic_type,
                 &mut self.type_environment,
-                &field.value.location,
+                field.value.span,
             ) {
                 Ok(type_id) => type_id,
                 Err(diagnostic) => {
-                    return Err(self.diagnostic_messages(*diagnostic, string_table));
+                    return Err(self.diagnostic_messages(diagnostic, string_table));
                 }
             };
 
             definitions.push(FieldDefinition {
                 name: field.id.clone(),
                 type_id,
-                location: field.value.location.clone(),
+                span: field.value.span,
             });
         }
 
@@ -1171,7 +1175,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> CompilerMessages {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             ExpressionParseError::Infrastructure(error) => {
                 self.error_messages(*error, string_table)

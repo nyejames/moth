@@ -16,7 +16,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, test_source_location,
+    assignment_target, function_node, make_test_variable, node,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -58,25 +58,20 @@ fn allocates_parameter_locals_and_binds_names() {
         NodeKind::Return(vec![inferred_type_reference_expr(
             x.clone(),
             builtin_type_ids::INT,
-            test_source_location(3),
+            None,
             ValueMode::ImmutableReference,
         )]),
-        test_source_location(3),
+        None,
     )];
 
     let start_function = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(
-                x,
-                builtin_type_ids::INT,
-                false,
-                test_source_location(2),
-            )],
+            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         body,
-        test_source_location(2),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -129,11 +124,11 @@ fn variable_declaration_emits_local_and_assign_statement() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(42, test_source_location(4), ValueMode::ImmutableOwned),
+                Expression::int(42, None, ValueMode::ImmutableOwned),
             )),
-            test_source_location(4),
+            None,
         )],
-        test_source_location(3),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -200,27 +195,31 @@ fn duplicate_local_declarations_in_same_scope_fail() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    Expression::int(1, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name.clone(),
-                    Expression::int(2, test_source_location(3), ValueMode::ImmutableOwned),
+                    Expression::int(2, None, ValueMode::ImmutableOwned),
                 )),
-                test_source_location(3),
+                None,
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let error = lower_ast(ast, &mut string_table).expect_err("duplicate symbol should fail");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(message.contains("Local 'my_var' is already declared in this function scope"));
+    assert!(
+        error
+            .msg
+            .contains("Local 'my_var' is already declared in this function scope")
+    );
 }
 
 #[test]
@@ -237,47 +236,28 @@ fn assignment_lowers_value_prelude_before_assign() {
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
-                1,
-                test_source_location(1),
-                ValueMode::ImmutableOwned,
-            )]),
-            test_source_location(1),
+            NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let assignment = node(
         NodeKind::Assignment {
-            target: assignment_target(
-                x.clone(),
-                DataType::Int,
-                builtin_type_ids::INT,
-                test_source_location(5),
-            ),
-            value: Expression::function_call(
-                helper,
-                vec![],
-                vec![builtin_type_ids::INT],
-                test_source_location(5),
-            ),
+            target: assignment_target(x.clone(), DataType::Int, builtin_type_ids::INT, None),
+            value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
         },
-        test_source_location(5),
+        None,
     );
 
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(
-                x,
-                builtin_type_ids::INT,
-                true,
-                test_source_location(4),
-            )],
+            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, true, None)],
             returns: vec![],
         },
         vec![assignment],
-        test_source_location(4),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
@@ -328,14 +308,10 @@ fn call_expression_statements_materialize_result_values() {
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
-                9,
-                test_source_location(1),
-                ValueMode::ImmutableOwned,
-            )]),
-            test_source_location(1),
+            NodeKind::Return(vec![Expression::int(9, None, ValueMode::ImmutableOwned)]),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let start_fn = function_node(
@@ -350,25 +326,25 @@ fn call_expression_statements_materialize_result_values() {
                     callee,
                     vec![],
                     vec![builtin_type_ids::INT],
-                    test_source_location(2),
+                    None,
                 )),
-                test_source_location(2),
+                None,
             ),
             node(
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
                     alloc_id,
                     vec![CallArgument::positional(
-                        Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
+                        Expression::int(1, None, ValueMode::ImmutableOwned),
                         CallAccessMode::Shared,
-                        test_source_location(3),
+                        None,
                     )],
                     vec![builtin_type_ids::INT],
-                    test_source_location(3),
+                    None,
                 )),
-                test_source_location(3),
+                None,
             ),
         ],
-        test_source_location(2),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
@@ -410,8 +386,8 @@ fn return_lowering_handles_zero_one_and_many_values() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![node(NodeKind::Return(vec![]), test_source_location(1))],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
     );
 
     let one_fn = function_node(
@@ -421,14 +397,10 @@ fn return_lowering_handles_zero_one_and_many_values() {
             returns: fresh_success_returns(vec![builtin_type_ids::INT]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
-                8,
-                test_source_location(2),
-                ValueMode::ImmutableOwned,
-            )]),
-            test_source_location(2),
+            NodeKind::Return(vec![Expression::int(8, None, ValueMode::ImmutableOwned)]),
+            None,
         )],
-        test_source_location(2),
+        None,
     );
 
     let many_fn = function_node(
@@ -439,12 +411,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, test_source_location(3), ValueMode::ImmutableOwned),
-                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
+                Expression::int(1, None, ValueMode::ImmutableOwned),
+                Expression::bool(true, None, ValueMode::ImmutableOwned),
             ]),
-            test_source_location(3),
+            None,
         )],
-        test_source_location(3),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);

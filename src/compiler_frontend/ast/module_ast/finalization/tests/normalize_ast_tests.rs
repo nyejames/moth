@@ -65,14 +65,14 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node as fixture_function_node, node, test_if_branch_metadata, test_source_location,
+    function_node as fixture_function_node, node, test_if_branch_metadata,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
@@ -98,11 +98,9 @@ impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
     fn intern_resource_origin(
         &mut self,
         origin: &StableResourceOriginId,
-        location: &SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Result<ResourceId, CompilerError> {
-        Ok(self
-            .module_resources
-            .intern_origin(origin.clone(), location.clone()))
+        Ok(self.module_resources.intern_origin(origin.clone(), span))
     }
 
     fn intern_canonical_type(
@@ -139,10 +137,10 @@ fn finalized_folded(value: FinalizedTemplateValue) -> StringId {
 }
 
 /// Constructs a `Template` directly from a real module-local TIR reference.
-fn template_with_reference(reference: TemplateTirReference, location: SourceLocation) -> Template {
+fn template_with_reference(reference: TemplateTirReference, span: Option<SourceSpan>) -> Template {
     Template {
         tir_reference: reference,
-        location,
+        span,
     }
 }
 
@@ -159,19 +157,14 @@ fn registered_text_template(
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let text_node = builder.push_text_node(
-            text,
-            byte_len,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
-        let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+        let text_node = builder.push_text_node(text, byte_len, TemplateSegmentOrigin::Body, None);
+        let root = builder.push_sequence_node(vec![text_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
     template_with_reference(
@@ -180,7 +173,7 @@ fn registered_text_template(
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -207,38 +200,30 @@ fn nested_wrapper_finalization_fixture(
         let child_template_id = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             let text = string_table.intern("parent");
-            let text_node = builder.push_text_node(
-                text,
-                "parent".len(),
-                TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
-            );
-            let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+            let text_node =
+                builder.push_text_node(text, "parent".len(), TemplateSegmentOrigin::Body, None);
+            let root = builder.push_sequence_node(vec![text_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             )
         };
 
         let nested_child_template_id = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             let text = string_table.intern("nested");
-            let text_node = builder.push_text_node(
-                text,
-                "nested".len(),
-                TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
-            );
-            let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+            let text_node =
+                builder.push_text_node(text, "nested".len(), TemplateSegmentOrigin::Body, None);
+            let root = builder.push_sequence_node(vec![text_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             )
         };
 
@@ -250,33 +235,30 @@ fn nested_wrapper_finalization_fixture(
                 before,
                 "inner-before".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
-            let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+            let slot_node = builder.push_slot_node(SlotKey::Default, None);
             let after_node = builder.push_text_node(
                 after,
                 "inner-after".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
-            let root = builder.push_sequence_node(
-                vec![before_node, slot_node, after_node],
-                SourceLocation::default(),
-            );
+            let root = builder.push_sequence_node(vec![before_node, slot_node, after_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             )
         };
 
         if unsafe_nested_wrapper {
             let runtime_slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-                location: SourceLocation::default(),
                 contribution_sources: Vec::new(),
                 slot_sites: Vec::new(),
+                span: None,
             });
             store
                 .attach_runtime_slot_plan(inner_wrapper_template_id, runtime_slot_plan_id)
@@ -296,14 +278,10 @@ fn nested_wrapper_finalization_fixture(
             let mut builder = TemplateIrBuilder::new(&mut store);
             let outer_dynamic_text = string_table.intern("outer-structural");
             let outer_dynamic_node = builder.push_dynamic_expression_node(
-                Expression::string_slice(
-                    outer_dynamic_text,
-                    SourceLocation::default(),
-                    ValueMode::ImmutableOwned,
-                ),
+                Expression::string_slice(outer_dynamic_text, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                SourceLocation::default(),
+                None,
             );
             let nested_child_node = builder.push_child_template_node_with_reference(
                 TemplateTirChildReference::new(
@@ -311,26 +289,26 @@ fn nested_wrapper_finalization_fixture(
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+            let slot_node = builder.push_slot_node(SlotKey::Default, None);
             let after = string_table.intern("outer-after");
             let after_node = builder.push_text_node(
                 after,
                 "outer-after".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
             let root = builder.push_sequence_node(
                 vec![outer_dynamic_node, nested_child_node, slot_node, after_node],
-                SourceLocation::default(),
+                None,
             );
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
             (template_id, nested_child_node, outer_dynamic_node)
         };
@@ -367,7 +345,7 @@ fn nested_wrapper_finalization_fixture(
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                SourceLocation::default(),
+                None,
             )
         };
         let parent_occurrence_id = match &store
@@ -380,14 +358,13 @@ fn nested_wrapper_finalization_fixture(
         };
         let parent_template_id = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            let root =
-                builder.push_sequence_node(vec![parent_child_node], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![parent_child_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             )
         };
 
@@ -420,7 +397,7 @@ fn nested_wrapper_finalization_fixture(
                 outer_expression_site_id,
                 Box::new(Expression::string_slice(
                     string_table.intern("outer-overlay"),
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -460,41 +437,10 @@ fn nested_wrapper_finalization_fixture(
             phase: TemplateTirPhase::Finalized,
             context: parent_context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     (template, template_ir_store)
-}
-
-fn location_at(line: i32, column: i32) -> SourceLocation {
-    use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
-
-    SourceLocation::new(
-        InternedPath::default(),
-        CharPosition {
-            line_number: line,
-            char_column: column,
-        },
-        CharPosition {
-            line_number: line,
-            char_column: column,
-        },
-    )
-}
-
-fn assert_expression_site_location(
-    view: &TirView<'_>,
-    site_id: ExpressionSiteId,
-    line: i32,
-    column: i32,
-) {
-    let location = view
-        .source_location_for_expression_site(site_id)
-        .expect("source-location lookup should succeed")
-        .expect("source location should be present");
-
-    assert_eq!(location.start_pos.line_number, line);
-    assert_eq!(location.start_pos.char_column, column);
 }
 
 #[test]
@@ -538,7 +484,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
         registered_text_template(normalized_text, context, &template_ir_store, &string_table),
         ValueMode::ImmutableOwned,
     );
-    let expression_location = location_at(31, 7);
     let (template_id, dynamic_node_id, site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let (template_id, dynamic_node_id) = {
@@ -547,14 +492,14 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
                 dynamic_expression,
                 TemplateSegmentOrigin::Body,
                 None,
-                expression_location.clone(),
+                None,
             );
             let template_id = builder.finish_template(
                 dynamic_node_id,
                 Style::default(),
                 TemplateType::StringFunction,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
             (template_id, dynamic_node_id)
         };
@@ -577,7 +522,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -619,7 +564,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     assert!(
         matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
     );
-    assert_expression_site_location(&view, site_id, 31, 7);
 
     let expression_by_node = view
         .effective_expression_for_node(dynamic_node_id)
@@ -654,17 +598,17 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+            Expression::int(1, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
         builder.finish_template(
             dynamic_node,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
     let site_id = {
@@ -683,11 +627,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         .allocate_expression_overlay(TirExpressionOverlay {
             overrides: vec![(
                 site_id,
-                Box::new(Expression::int(
-                    2,
-                    SourceLocation::default(),
-                    ValueMode::ImmutableOwned,
-                )),
+                Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
             )],
         })
         .expect("test overlay allocation");
@@ -702,7 +642,7 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
             phase: TemplateTirPhase::Composed,
             context: initial_context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -751,14 +691,14 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
             dynamic_expression,
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
         builder.finish_template(
             dynamic_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -768,7 +708,7 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
             phase: TemplateTirPhase::Parsed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -803,10 +743,10 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         let child_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_dynamic_expression_node(
-                Expression::int(1, SourceLocation::default(), ValueMode::ImmutableOwned),
+                Expression::int(1, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                SourceLocation::default(),
+                None,
             )
         };
         let child_site_id = match &store
@@ -822,17 +762,13 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         ));
         let child_expression_overlay = store
             .allocate_expression_overlay(TirExpressionOverlay {
                 overrides: vec![(
                     child_site_id,
-                    Box::new(Expression::int(
-                        2,
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
+                    Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
                 )],
             })
             .expect("child expression overlay should allocate");
@@ -852,21 +788,21 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
                     ),
                     occurrence_id,
                 },
-                SourceLocation::default(),
+                None,
             ))
         };
         let root = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence {
                 children: vec![child_node],
             },
-            SourceLocation::default(),
+            None,
         ));
         let root_template_id = store.push_template(TemplateIr::new(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         ));
 
         (
@@ -881,7 +817,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             phase: TemplateTirPhase::Parsed,
             context: root_context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -922,33 +858,33 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
         registered_text_template(normalized_text, context, &template_ir_store, &string_table),
         ValueMode::ImmutableOwned,
     );
-    let selector_location = location_at(41, 9);
     let (template_id, branch_chain_node_id, selector_site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let branch_body = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: vec![] },
-            SourceLocation::default(),
+            None,
         ));
         let selector_site_id = store.next_expression_site_id();
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(selector_expression),
             branch_body,
-            selector_location.clone(),
+            None,
             selector_site_id,
         );
         let branch_chain_node_id = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::BranchChain {
                 branches: vec![branch],
                 fallback: None,
+                else_marker: None,
             },
-            SourceLocation::default(),
+            None,
         ));
         let template_id = store.push_template(TemplateIr::new(
             branch_chain_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         ));
 
         (template_id, branch_chain_node_id, selector_site_id)
@@ -960,7 +896,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -1002,7 +938,6 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     assert!(
         matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
     );
-    assert_expression_site_location(&view, selector_site_id, 41, 9);
 
     let structural_selector_is_unchanged = {
         let store = template_ir_store.borrow();
@@ -1033,12 +968,11 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
         registered_text_template(normalized_text, context, &template_ir_store, &string_table),
         ValueMode::ImmutableOwned,
     );
-    let loop_location = location_at(51, 11);
     let (template_id, loop_node_id, condition_site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let loop_body = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: vec![] },
-            SourceLocation::default(),
+            None,
         ));
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(header_expression),
@@ -1055,14 +989,14 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
                 body: loop_body,
                 aggregate_wrapper: None,
             },
-            loop_location.clone(),
+            None,
         ));
         let template_id = store.push_template(TemplateIr::new(
             loop_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         ));
 
         (template_id, loop_node_id, condition_site_id)
@@ -1074,7 +1008,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut context = TemplateNormalizationContext {
@@ -1116,7 +1050,6 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     assert!(
         matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
     );
-    assert_expression_site_location(&view, condition_site_id, 51, 11);
 
     let structural_header_is_unchanged = {
         let store = template_ir_store.borrow();
@@ -1153,22 +1086,18 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                structural_text,
-                SourceLocation::default(),
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![dynamic_node], None);
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
 
         (template_id, dynamic_node)
@@ -1193,7 +1122,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
                 site_id,
                 Box::new(Expression::string_slice(
                     overlay_text,
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -1212,7 +1141,7 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
             phase: TemplateTirPhase::Finalized,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     #[cfg(feature = "benchmark_counters")]
@@ -1257,19 +1186,19 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     InternedPath::from_single_str("nested_dynamic", &mut string_table),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableReference,
                     ConstRecordState::RuntimeValue,
                 ),
                 TemplateSegmentOrigin::Body,
                 None,
-                SourceLocation::default(),
+                None,
             );
             let branch_text_node = builder.push_text_node(
                 branch_text,
                 "root-overlay-branch".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
             let nested_selector_site = builder.store.next_expression_site_id();
             let branch_node = builder.push_branch_chain_node(
@@ -1278,22 +1207,23 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                         InternedPath::from_single_str("nested_selector", &mut string_table),
                         DataType::Bool,
                         builtin_type_ids::BOOL,
-                        SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableReference,
                         ConstRecordState::RuntimeValue,
                     )),
                     branch_text_node,
-                    SourceLocation::default(),
+                    None,
                     nested_selector_site,
                 )],
                 None,
-                SourceLocation::default(),
+                None,
+                None,
             );
             let loop_text_node = builder.push_text_node(
                 loop_text,
                 "root-overlay-loop".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
             let loop_node = builder.push_loop_node(
                 TemplateLoopHeader::Conditional {
@@ -1301,25 +1231,23 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                         InternedPath::from_single_str("nested_loop", &mut string_table),
                         DataType::Bool,
                         builtin_type_ids::BOOL,
-                        SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableReference,
                         ConstRecordState::RuntimeValue,
                     )),
                 },
                 loop_text_node,
                 None,
-                SourceLocation::default(),
+                None,
             );
-            let leaf_root = builder.push_sequence_node(
-                vec![dynamic_node, branch_node, loop_node],
-                SourceLocation::default(),
-            );
+            let leaf_root =
+                builder.push_sequence_node(vec![dynamic_node, branch_node, loop_node], None);
             let leaf_template_id = builder.finish_template(
                 leaf_root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
             (leaf_template_id, dynamic_node, branch_node, loop_node)
         };
@@ -1363,17 +1291,14 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 TemplateTirPhase::Composed,
                 empty_context,
             );
-            let child_node = builder.push_child_template_node_with_reference(
-                child_reference,
-                SourceLocation::default(),
-            );
-            let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+            let child_node = builder.push_child_template_node_with_reference(child_reference, None);
+            let root = builder.push_sequence_node(vec![child_node], None);
             descendant_template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
         }
 
@@ -1393,25 +1318,17 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     dynamic_site_id,
                     Box::new(Expression::string_slice(
                         dynamic_text,
-                        SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )),
                 ),
                 (
                     selector_site_id,
-                    Box::new(Expression::bool(
-                        true,
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
+                    Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
                 ),
                 (
                     loop_site_id,
-                    Box::new(Expression::bool(
-                        false,
-                        SourceLocation::default(),
-                        ValueMode::ImmutableOwned,
-                    )),
+                    Box::new(Expression::bool(false, None, ValueMode::ImmutableOwned)),
                 ),
             ],
         })
@@ -1428,7 +1345,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             phase: TemplateTirPhase::Finalized,
             context: root_context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let folded = finalized_folded(
@@ -1469,22 +1386,18 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
         let (descendant_template_id, descendant_site_id) = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             let dynamic_node = builder.push_dynamic_expression_node(
-                Expression::string_slice(
-                    structural_text,
-                    SourceLocation::default(),
-                    ValueMode::ImmutableOwned,
-                ),
+                Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                SourceLocation::default(),
+                None,
             );
-            let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![dynamic_node], None);
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             );
             let site_id = match &store
                 .get_node(dynamic_node)
@@ -1505,15 +1418,15 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![child_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::default(),
-                SourceLocation::default(),
+                None,
             )
         };
 
@@ -1524,15 +1437,15 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                 TemplateTirPhase::Parsed,
                 missing_context,
             ),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![child_node], None);
         let root_template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
 
         (root_template_id, descendant_site_id)
@@ -1545,7 +1458,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
                 descendant_site_id,
                 Box::new(Expression::string_slice(
                     override_text,
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -1562,7 +1475,7 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
             phase: TemplateTirPhase::Finalized,
             context: root_context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let folded = finalized_folded(
@@ -1619,9 +1532,9 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
     {
         let mut store = template_ir_store.borrow_mut();
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1666,9 +1579,9 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
     {
         let mut store = template_ir_store.borrow_mut();
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1717,9 +1630,9 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
     {
         let mut store = template_ir_store.borrow_mut();
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1777,9 +1690,9 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
     {
         let mut store = template_ir_store.borrow_mut();
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1813,10 +1726,6 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
             reason: InvalidTemplateStructureReason::NonFoldableConstTemplate,
         }
     ));
-    assert_eq!(
-        diagnostic.primary_location, expression.location,
-        "the established const diagnostic must retain the template source location"
-    );
 }
 
 #[test]
@@ -1861,15 +1770,15 @@ fn finalization_fold_uses_resolved_slot_view_context() {
             fill_text,
             "filled".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
-        let fill_root = fill_builder.push_sequence_node(vec![fill_node], SourceLocation::default());
+        let fill_root = fill_builder.push_sequence_node(vec![fill_node], None);
         let fill_template_id = fill_builder.finish_template(
             fill_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
 
         let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
@@ -1877,25 +1786,23 @@ fn finalization_fold_uses_resolved_slot_view_context() {
             before_text,
             "before".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
-        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, None);
         let after_node = wrapper_builder.push_text_node(
             after_text,
             "after".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
-        let wrapper_root = wrapper_builder.push_sequence_node(
-            vec![before_node, slot_node, after_node],
-            SourceLocation::default(),
-        );
+        let wrapper_root =
+            wrapper_builder.push_sequence_node(vec![before_node, slot_node, after_node], None);
         let wrapper_template_id = wrapper_builder.finish_template(
             wrapper_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
 
         let slot_occurrence_id = match &store
@@ -1932,7 +1839,7 @@ fn finalization_fold_uses_resolved_slot_view_context() {
         }
     };
 
-    let template = template_with_reference(reference, SourceLocation::default());
+    let template = template_with_reference(reference, None);
 
     let folded = finalized_folded(
         finalize_template_value(
@@ -1965,17 +1872,17 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
     // An unfilled slot contributes no output. Finalization folds that rule
     // directly from the composed TIR root.
     let reference = {
-        let location = SourceLocation::default();
+        let location = None;
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text_node = builder.push_text_node(
             text_id,
             "text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let root = builder.push_sequence_node(vec![text_node, slot_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let root = builder.push_sequence_node(vec![text_node, slot_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -1991,7 +1898,7 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
         }
     };
 
-    let template = template_with_reference(reference, SourceLocation::default());
+    let template = template_with_reference(reference, None);
 
     let folded = finalized_folded(
         finalize_template_value(
@@ -2024,17 +1931,17 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
     let context = TemplateViewContext::default();
 
     let reference = {
-        let location = SourceLocation::default();
+        let location = None;
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let text_node = builder.push_text_node(
             text_id,
             "formatted text before unfilled slot".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let slot_node = builder.push_slot_node(SlotKey::Default, location.clone());
-        let root = builder.push_sequence_node(vec![text_node, slot_node], location.clone());
+        let slot_node = builder.push_slot_node(SlotKey::Default, location);
+        let root = builder.push_sequence_node(vec![text_node, slot_node], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -2053,7 +1960,7 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
         }
     };
 
-    let template = template_with_reference(reference, SourceLocation::default());
+    let template = template_with_reference(reference, None);
 
     #[cfg(feature = "benchmark_counters")]
     reset_ast_counters();
@@ -2102,7 +2009,7 @@ fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRunt
 #[test]
 fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
-    let location = SourceLocation::default();
+    let location = None;
     let branch_text = string_table.intern("branch body");
     let fallback_text = string_table.intern("fallback body");
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -2114,29 +2021,29 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
             branch_text,
             "branch body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let fallback_body = builder.push_text_node(
             fallback_text,
             "fallback body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::reference_with_type_id(
                 InternedPath::from_single_str("show_branch", &mut string_table),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
             branch_body,
-            location.clone(),
+            location,
             builder.store.next_expression_site_id(),
         );
         let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_body), location.clone());
+            builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, location);
         builder.finish_template(
             root,
             Style::default(),
@@ -2152,7 +2059,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -2185,7 +2092,7 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
 #[test]
 fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
-    let location = SourceLocation::default();
+    let location = None;
     let loop_text = string_table.intern("loop body");
     let open_text = string_table.intern("[");
     let close_text = string_table.intern("]");
@@ -2195,32 +2102,30 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         let mut store = template_ir_store.borrow_mut();
         let aggregate_output = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::AggregateOutput,
-            location.clone(),
+            location,
         ));
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
             loop_text,
             "loop body".len(),
             TemplateSegmentOrigin::Body,
-            location.clone(),
+            location,
         );
-        let open =
-            builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location.clone());
-        let close =
-            builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location.clone());
+        let open = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location);
+        let close = builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location);
         let aggregate_wrapper =
-            builder.push_sequence_node(vec![open, aggregate_output, close], location.clone());
+            builder.push_sequence_node(vec![open, aggregate_output, close], location);
         let header = TemplateLoopHeader::Conditional {
             condition: Box::new(Expression::reference_with_type_id(
                 InternedPath::from_single_str("keep_looping", &mut string_table),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
-                location.clone(),
+                location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
         };
-        let root = builder.push_loop_node(header, body, Some(aggregate_wrapper), location.clone());
+        let root = builder.push_loop_node(header, body, Some(aggregate_wrapper), location);
         builder.finish_template(
             root,
             Style::default(),
@@ -2236,7 +2141,7 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -2355,33 +2260,27 @@ fn registered_runtime_template(
         reference_path,
         DataType::StringSlice,
         builtin_type_ids::STRING,
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let text_node = builder.push_text_node(
-            text,
-            byte_len,
-            TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
-        );
+        let text_node = builder.push_text_node(text, byte_len, TemplateSegmentOrigin::Body, None);
         let dynamic_node = builder.push_dynamic_expression_node(
             reference_expression,
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
-        let root =
-            builder.push_sequence_node(vec![text_node, dynamic_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![text_node, dynamic_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
     template_with_reference(
@@ -2390,7 +2289,7 @@ fn registered_runtime_template(
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -2430,7 +2329,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let unselected_text = string_table.intern("unselected");
     let selected_structural_text = string_table.intern("selected structural");
     let selected_effective_text = string_table.intern("selected effective");
-    let location = SourceLocation::default();
+    let location = None;
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let unselected_member = SyntheticInterfaceMemberIdentity::new(
@@ -2448,41 +2347,42 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let unselected_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(unselected_text, location.clone(), ValueMode::ImmutableOwned)
+            Expression::string_slice(unselected_text, location, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                     unselected_member,
                 )),
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
         let selected_node = builder.push_dynamic_expression_node(
             Expression::string_slice(
                 selected_structural_text,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
-                location.clone(),
+                location,
                 ValueMode::ImmutableOwned,
             )),
             unselected_node,
-            location.clone(),
+            location,
             builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], Some(selected_node), location);
+        let root =
+            builder.push_branch_chain_node(vec![branch], Some(selected_node), None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
         let selected_site_id = match store
             .get_node(selected_node)
@@ -2503,7 +2403,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
                 Box::new(
                     Expression::string_slice(
                         selected_effective_text,
-                        SourceLocation::default(),
+                        None,
                         ValueMode::ImmutableOwned,
                     )
                     .with_synthetic_interface_provenance(
@@ -2522,7 +2422,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
                 ..TemplateViewContext::default()
             },
         },
-        SourceLocation::default(),
+        None,
     );
     let constant_expression = Expression::template(template.clone(), ValueMode::ImmutableOwned);
     assert!(
@@ -2651,31 +2551,29 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
             nested_template_expression,
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
         let runtime_dynamic_node = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
                 runtime_path,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
-                SourceLocation::default(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(
-            vec![normalized_dynamic_node, runtime_dynamic_node],
-            SourceLocation::default(),
-        );
+        let root =
+            builder.push_sequence_node(vec![normalized_dynamic_node, runtime_dynamic_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -2685,7 +2583,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
             phase: TemplateTirPhase::Composed,
             context: empty_context,
         },
-        SourceLocation::default(),
+        None,
     );
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
@@ -2743,15 +2641,15 @@ fn nested_runtime_template_normalizes_through_final_view() {
             Expression::template(nested_template, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![dynamic_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -2761,7 +2659,7 @@ fn nested_runtime_template_normalizes_through_final_view() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
@@ -2858,25 +2756,24 @@ fn nested_const_template_folds_through_final_view() {
             child_text,
             child_byte_len,
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
         let child_id = builder.finish_template(
             child_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
 
-        let child_ref_node = builder.push_child_template_node(child_id, SourceLocation::default());
-        let outer_root =
-            builder.push_sequence_node(vec![child_ref_node], SourceLocation::default());
+        let child_ref_node = builder.push_child_template_node(child_id, None);
+        let outer_root = builder.push_sequence_node(vec![child_ref_node], None);
         builder.finish_template(
             outer_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -2886,7 +2783,7 @@ fn nested_const_template_folds_through_final_view() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let folded = finalized_folded(
@@ -2930,7 +2827,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
                 kind: ReactiveSourceKind::Declaration,
             },
             type_id: builtin_type_ids::STRING,
-            location: SourceLocation::default(),
+            span: None,
         };
 
         let dynamic_node = builder.push_dynamic_expression_node(
@@ -2938,21 +2835,21 @@ fn reactive_metadata_derived_from_nested_final_view() {
                 reactive_path.clone(),
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
-                SourceLocation::default(),
+                None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             ),
             TemplateSegmentOrigin::Body,
             Some(subscription),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![dynamic_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -2962,7 +2859,7 @@ fn reactive_metadata_derived_from_nested_final_view() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
 
@@ -3011,21 +2908,21 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         |store: &mut TemplateIrStore,
          expression: Expression,
          subscription: Option<ReactiveSubscription>| {
-            let location = test_source_location(2);
+            let location = None;
             let mut builder = TemplateIrBuilder::new(store);
             let dynamic = builder.push_dynamic_expression_node(
                 expression,
                 TemplateSegmentOrigin::Body,
                 subscription,
-                location.clone(),
+                location,
             );
-            let root = builder.push_sequence_node(vec![dynamic], location.clone());
+            let root = builder.push_sequence_node(vec![dynamic], location);
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                location.clone(),
+                location,
             );
             Expression::template(
                 template_with_reference(
@@ -3043,11 +2940,12 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
     let mut parameter = Declaration {
         id: parameter_path.clone(),
         value: Expression::no_value_with_type_id(
-            test_source_location(1),
+            None,
             DataType::Int,
             builtin_type_ids::INT,
             ValueMode::ImmutableReference,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     parameter.value.reactive_source = Some(ReactiveSource {
@@ -3059,7 +2957,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         parameter_path.clone(),
         DataType::Int,
         builtin_type_ids::INT,
-        test_source_location(2),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -3076,7 +2974,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
                 kind: ReactiveSourceKind::Parameter,
             },
             type_id: builtin_type_ids::INT,
-            location: test_source_location(2),
+            span: None,
         }),
     );
     let function = fixture_function_node(
@@ -3090,18 +2988,15 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
                 channel: ReturnChannel::Success,
             }],
         },
-        vec![node(
-            NodeKind::Return(vec![function_template]),
-            test_source_location(2),
-        )],
-        test_source_location(1),
+        vec![node(NodeKind::Return(vec![function_template]), None)],
+        None,
     );
 
     let active_argument = Expression::reference_with_type_id(
         active_source_path.clone(),
         DataType::Int,
         builtin_type_ids::INT,
-        test_source_location(3),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     )
@@ -3115,11 +3010,11 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         vec![CallArgument::positional(
             active_argument,
             CallAccessMode::Shared,
-            test_source_location(3),
+            None,
         )],
         vec![builtin_type_ids::STRING],
         &mut type_environment,
-        test_source_location(3),
+        None,
     );
     let active_template =
         template_expression(&mut template_ir_store.borrow_mut(), active_call, None);
@@ -3128,7 +3023,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         inactive_source_path.clone(),
         DataType::Int,
         builtin_type_ids::INT,
-        test_source_location(4),
+        None,
         ValueMode::ImmutableReference,
         ConstRecordState::RuntimeValue,
     );
@@ -3141,7 +3036,7 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
                 kind: ReactiveSourceKind::Declaration,
             },
             type_id: builtin_type_ids::INT,
-            location: test_source_location(4),
+            span: None,
         }),
     );
 
@@ -3149,18 +3044,15 @@ fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
         function,
         node(
             NodeKind::If(
-                Expression::bool(true, test_source_location(3), ValueMode::ImmutableOwned),
-                vec![node(
-                    NodeKind::ExpressionStatement(active_template),
-                    test_source_location(3),
-                )],
+                Expression::bool(true, None, ValueMode::ImmutableOwned),
+                vec![node(NodeKind::ExpressionStatement(active_template), None)],
                 Some(vec![node(
                     NodeKind::ExpressionStatement(inactive_template),
-                    test_source_location(4),
+                    None,
                 )]),
                 test_if_branch_metadata(true),
             ),
-            test_source_location(3),
+            None,
         ),
     ];
 
@@ -3237,15 +3129,15 @@ fn helper_artifact_rejected_after_final_view_traversal() {
             text,
             "slot insert content".len(),
             TemplateSegmentOrigin::Body,
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![text_node], None);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::SlotInsert(SlotKey::Default),
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         )
     };
 
@@ -3255,7 +3147,7 @@ fn helper_artifact_rejected_after_final_view_traversal() {
             phase: TemplateTirPhase::Composed,
             context,
         },
-        SourceLocation::default(),
+        None,
     );
 
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
@@ -3282,7 +3174,7 @@ fn helper_artifact_rejected_after_final_view_traversal() {
     };
     assert!(
         matches!(
-            diagnostic.as_ref().payload,
+            diagnostic.payload,
             DiagnosticPayload::InvalidTemplateStructure {
                 reason: InvalidTemplateStructureReason::HelperOutsideWrapperSlot
             }
@@ -3310,6 +3202,7 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
         parameters: vec![Declaration {
             id: InternedPath::new(),
             value: parameter_default,
+            binding_span: None,
             config_qualifier: None,
         }],
         returns: Vec::new(),
@@ -3353,17 +3246,17 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
             value: Box::new(template_expression),
             to_type: option_string_type_id,
         },
-        SourceLocation::default(),
+        None,
         option_string_type_id,
         DataType::Option(Box::new(DataType::StringSlice)),
         ValueMode::ImmutableOwned,
     );
     let mut node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, SourceLocation::default(), ValueMode::ImmutableOwned),
+            condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
             message,
         },
-        location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     };
     let mut context = TemplateNormalizationContext {
@@ -3411,7 +3304,7 @@ fn function_node(path: InternedPath) -> AstNode {
             },
             Vec::new(),
         ),
-        location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -3419,7 +3312,7 @@ fn function_node(path: InternedPath) -> AstNode {
 fn struct_node(path: InternedPath) -> AstNode {
     AstNode {
         kind: NodeKind::StructDefinition(path, Vec::new()),
-        location: SourceLocation::default(),
+        span: None,
         scope: InternedPath::new(),
     }
 }
@@ -3429,11 +3322,8 @@ fn marker_signature(parameter_count: usize) -> FunctionSignature {
         parameters: (0..parameter_count)
             .map(|_| Declaration {
                 id: InternedPath::new(),
-                value: Expression::no_value(
-                    SourceLocation::default(),
-                    DataType::Inferred,
-                    ValueMode::default(),
-                ),
+                value: Expression::no_value(None, DataType::Inferred, ValueMode::default()),
+                binding_span: None,
                 config_qualifier: None,
             })
             .collect(),
@@ -3830,30 +3720,30 @@ fn synchronize_receiver_secondary_indexes_rejects_extra_secondary_entry() {
 /// WHY: const-fact classification must preserve the overlay-backed wrapper
 ///      category rather than reading only the structural root.
 fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore>>) {
-    let location = SourceLocation::default();
+    let location = None;
     let store_handle = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let (template_id, fill_template_id) = {
         let mut store = store_handle.borrow_mut();
 
         let mut fill_builder = TemplateIrBuilder::new(&mut store);
-        let fill_root = fill_builder.push_sequence_node(Vec::new(), location.clone());
+        let fill_root = fill_builder.push_sequence_node(Vec::new(), location);
         let fill_template_id = fill_builder.finish_template(
             fill_root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
 
         let mut wrapper_builder = TemplateIrBuilder::new(&mut store);
-        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location.clone());
+        let slot_node = wrapper_builder.push_slot_node(SlotKey::Default, location);
         let template_id = wrapper_builder.finish_template(
             slot_node,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         );
 
         (template_id, fill_template_id)
@@ -3880,7 +3770,7 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
             phase: TemplateTirPhase::Finalized,
             context,
         },
-        location,
+        span: None,
     };
 
     (template, store_handle)
@@ -3924,7 +3814,7 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
 
 #[test]
 fn const_template_projection_round_trips_structural_resource_and_site_root() {
-    let location = SourceLocation::default();
+    let location = None;
     let mut producer_strings = StringTable::new();
     let mut producer_resources = ModuleResourceTable::new();
     let module_origin = StableModuleOriginIdentity::from_portable_path(
@@ -3937,7 +3827,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
         PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
             .expect("test resource path should be portable"),
     );
-    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location.clone());
+    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location);
     let before = producer_strings.intern("before");
     let after = producer_strings.intern("after");
     let structural_expression = Expression::new(
@@ -3949,7 +3839,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
                 ConstStringPiece::Text(after),
             ],
         },
-        location.clone(),
+        location,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -3962,15 +3852,15 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
             structural_expression,
             TemplateSegmentOrigin::Body,
             None,
-            location.clone(),
+            location,
         );
-        let root = builder.push_sequence_node(vec![dynamic_node], location.clone());
+        let root = builder.push_sequence_node(vec![dynamic_node], location);
         builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::default(),
-            location.clone(),
+            location,
         )
     };
     let template = template_with_reference(
@@ -3979,7 +3869,7 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
             phase: TemplateTirPhase::Composed,
             context: TemplateViewContext::default(),
         },
-        location.clone(),
+        location,
     );
 
     let projected = project_const_template_value(

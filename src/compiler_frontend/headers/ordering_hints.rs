@@ -272,14 +272,15 @@ fn content_source_targets(
         }
 
         let authored_path = &path_syntax
-            .try_path_for_token(reference.path_syntax, &reference.location)?
+            .try_path_for_token(reference.path_syntax, reference.span)?
             .root;
         targets.insert(
             reference.path_syntax,
             LocalDeclarationOrderingHint::content_source(
                 content_constant_path(authored_path, string_table),
                 reference.path_syntax,
-            ),
+            )
+            .with_occurrence_span(reference.span),
         );
     }
 

@@ -18,13 +18,12 @@ use crate::compiler_frontend::compiler_messages::render::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, FileTokens, SourceLocation, TemplateBodyMode, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TemplateBodyMode, Token, TokenKind};
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
@@ -37,21 +36,8 @@ fn html_project_test_style_directives() -> StyleDirectiveRegistry {
         .expect("html project style directives should merge with core directives")
 }
 
-fn token(kind: TokenKind, line: i32) -> Token {
-    Token::new(
-        kind,
-        SourceLocation {
-            scope: InternedPath::new(),
-            start_pos: CharPosition {
-                line_number: line,
-                char_column: 0,
-            },
-            end_pos: CharPosition {
-                line_number: line,
-                char_column: 120, // Arbitrary number
-            },
-        },
-    )
+fn token(kind: TokenKind, _line: i32) -> Token {
+    Token::new(kind, LocalSpan::source_start())
 }
 
 fn numeric_token(value: &str, line: i32, string_table: &mut StringTable) -> Token {
@@ -61,15 +47,25 @@ fn numeric_token(value: &str, line: i32, string_table: &mut StringTable) -> Toke
     )
 }
 
-fn template_tokens_from_source(source: &str, string_table: &mut StringTable) -> FileTokens {
+fn template_tokens_from_source(
+    source: &str,
+    string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> FileTokens {
     let style_directives = frontend_test_style_directives();
-    template_tokens_from_source_with_style_directives(source, &style_directives, string_table)
+    template_tokens_from_source_with_style_directives(
+        source,
+        &style_directives,
+        string_table,
+        span_builder,
+    )
 }
 
 fn template_tokens_from_source_with_style_directives(
     source: &str,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
     let scope = InternedPath::from_single_str("main.moth/#const_template0", string_table);
     let mut tokens = tokenize(
@@ -78,7 +74,8 @@ fn template_tokens_from_source_with_style_directives(
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         style_directives,
         string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -100,11 +97,16 @@ fn template_tokens_from_source_with_directives(
     source: &str,
     directives: &[StyleDirectiveSpec],
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> FileTokens {
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
-    let mut tokens =
-        template_tokens_from_source_with_style_directives(source, &registry, string_table);
+    let mut tokens = template_tokens_from_source_with_style_directives(
+        source,
+        &registry,
+        string_table,
+        span_builder,
+    );
 
     tokens.index = tokens
         .tokens
@@ -239,19 +241,10 @@ fn runtime_template_context_with_style_directives(
         id: scope.append(value_name),
         value: Expression::string_slice(
             string_table.intern("dynamic"),
-            SourceLocation {
-                scope: InternedPath::new(),
-                start_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 0,
-                },
-                end_pos: CharPosition {
-                    line_number: 1,
-                    char_column: 120, // Arbitrary number
-                },
-            },
+            None,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
 
@@ -303,10 +296,12 @@ fn folded_template_output_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = new_constant_context_with_style_directives(
         token_stream.src_path.to_owned(),
@@ -329,6 +324,7 @@ fn template_parse_rendered_error_with_style_directives(
     source: &str,
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let scope = InternedPath::from_single_str("main.moth/#const_template0", &mut string_table);
     let mut token_stream = match tokenize(
@@ -337,11 +333,15 @@ fn template_parse_rendered_error_with_style_directives(
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     ) {
         Ok(tokens) => tokens,
-        Err(error) => {
-            return render_test_diagnostic(&error, &string_table);
+        Err(TokenizeFailure::Diagnosed(diagnostic)) => {
+            return render_test_diagnostic(&diagnostic, &string_table);
+        }
+        Err(TokenizeFailure::Infrastructure(error)) => {
+            panic!("template fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
     token_stream.index = token_stream
@@ -371,7 +371,7 @@ fn expect_template_diagnostic(
     error: TemplateError,
 ) -> crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     match error {
-        TemplateError::Diagnostic(diagnostic) => *diagnostic,
+        TemplateError::Diagnostic(diagnostic) => diagnostic,
         TemplateError::Infrastructure(error) => {
             panic!("expected a template source diagnostic, got infrastructure failure: {error:?}")
         }
@@ -407,10 +407,12 @@ fn template_warnings_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
     let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
         &mut string_table,
+        &mut span_builder,
     );
     let context = if runtime_context {
         runtime_template_context_with_style_directives(
@@ -504,16 +506,8 @@ fn tir_root_has_head_dynamic_expression(
     }
 }
 
-fn is_default_text_location(location: &SourceLocation) -> bool {
-    location.scope == InternedPath::new()
-        && location.start_pos == CharPosition::default()
-        && location.end_pos == CharPosition::default()
-}
-
-fn is_default_error_location(location: &SourceLocation) -> bool {
-    location.scope == InternedPath::new()
-        && location.start_pos == CharPosition::default()
-        && location.end_pos == CharPosition::default()
+fn is_default_error_span(span: Option<crate::compiler_frontend::source::SourceSpan>) -> bool {
+    span.is_none()
 }
 
 mod builder_tests;

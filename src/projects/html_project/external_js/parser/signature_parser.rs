@@ -18,13 +18,10 @@ use super::parsed_js_module::{
 
 /// Input to the signature parser.
 ///
-/// WHAT: carries the raw signature text plus the JS-file position where it starts
-///       so diagnostics can point back to source.
+/// WHAT: carries the raw signature text plus the JS-file byte where it starts.
 pub struct SignatureParseInput {
     pub text: String,
     pub base_byte: usize,
-    pub base_line: usize,
-    pub base_column: usize,
 }
 
 /// Result of parsing one signature body.
@@ -51,8 +48,6 @@ struct SignatureScanner {
     text: Vec<char>,
     pos: usize,
     base_byte: usize,
-    base_line: usize,
-    base_column: usize,
     diagnostics: Vec<JsParserDiagnostic>,
 }
 
@@ -62,8 +57,6 @@ impl SignatureScanner {
             text: input.text.chars().collect(),
             pos: 0,
             base_byte: input.base_byte,
-            base_line: input.base_line,
-            base_column: input.base_column,
             diagnostics: Vec::new(),
         }
     }
@@ -507,7 +500,7 @@ impl SignatureScanner {
     fn emit_diagnostic(&mut self, message: impl Into<String>, kind: JsDiagnosticKind) {
         self.diagnostics.push(JsParserDiagnostic {
             message: message.into(),
-            span: JsSourceSpan::at(self.base_byte, self.base_line, self.base_column),
+            span: JsSourceSpan::at(self.base_byte),
             kind,
         });
     }

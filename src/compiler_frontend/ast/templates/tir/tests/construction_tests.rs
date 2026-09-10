@@ -7,7 +7,6 @@ use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrBranch;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,31 +15,28 @@ use std::rc::Rc;
 fn finish_consumes_the_construction_context_and_records_real_depth() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut string_table = StringTable::new();
-    let mut construction =
-        TemplateConstructionContext::new(Rc::clone(&store), SourceLocation::default());
+    let mut construction = TemplateConstructionContext::new(Rc::clone(&store), None);
 
     let body_text = string_table.intern("leaf");
-    construction.record_text(body_text, 4, SourceLocation::default());
+    construction.record_text(body_text, 4, None);
     let body_id = *construction
         .root_children()
         .first()
         .expect("recorded text child");
 
-    let selector = TemplateBranchSelector::Bool(Expression::bool(
-        true,
-        SourceLocation::default(),
-        ValueMode::ImmutableOwned,
-    ));
+    let selector =
+        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned));
     let selector_site_id = construction.next_expression_site_id();
     construction.record_branch_chain(
         vec![TemplateIrBranch::new(
             selector,
             body_id,
-            SourceLocation::default(),
+            None,
             selector_site_id,
         )],
         None,
-        SourceLocation::default(),
+        None,
+        None,
     );
 
     assert!(construction.control_flow_node_id().is_some());

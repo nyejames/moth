@@ -40,13 +40,13 @@ pub fn validate_hir_external_package_support(
     registry: &ExternalPackageRegistry,
     target: BackendTarget,
     string_table: &mut StringTable,
-) -> Result<(), Box<CompilerDiagnostic>> {
+) -> Result<(), CompilerDiagnostic> {
     for call in &reachability.reachable_external_calls {
         if !has_backend_lowering(registry, call.function_id, &target) {
             let diagnostic =
                 unsupported_external_function_diagnostic(registry, call, &target, string_table);
 
-            return Err(Box::new(diagnostic));
+            return Err(diagnostic);
         }
     }
 
@@ -98,6 +98,6 @@ fn unsupported_external_function_diagnostic(
         string_table.intern(&function_name),
         package_path.map(|path| string_table.intern(path)),
         string_table.intern(target.as_str()),
-        call.location.clone(),
+        call.span,
     )
 }

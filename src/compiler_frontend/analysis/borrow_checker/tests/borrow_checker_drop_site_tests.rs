@@ -42,7 +42,7 @@ fn emits_advisory_return_drop_sites() {
             )),
             test_source_location(1),
         )],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -150,7 +150,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                 test_source_location(5),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(

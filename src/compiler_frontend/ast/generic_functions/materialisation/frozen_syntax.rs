@@ -8,27 +8,43 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token};
 use std::sync::Arc;
 
 /// Owned frozen token buffer retained by one generic declaration artefact.
 ///
 /// WHAT: preserves the already-tokenized body as canonical [`Token`] values whose `StringId`
-///       payloads index one context-local immutable frozen string pool.
-/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, `FileId`, filesystem
-///      paths, or a mutable string table. Freezing remaps donor IDs into the pool once.
-///      Materialisation merges the pool into the fresh generated-local table once and remaps every
-///      token payload through that single pool remap, without running tokenization again.
+///       payloads index one context-local immutable frozen string pool, plus the exact donor
+///       `SourceId` that owns the body's spans and path rows.
+/// WHY: successful metadata must not retain donor `StringId`, `InternedPath`, filesystem paths,
+///      or a mutable string table. Freezing remaps donor string IDs into the pool once, while the
+///      donor `SourceId` is retained verbatim as the materialised owner. Materialisation merges
+///      the pool into the fresh generated-local table once and remaps every token payload through
+///      that single pool remap, without running tokenization again.
+/// OWNERSHIP: every materialised token stream carries this donor identity via
+///      `FileTokens::new_frozen(..., donor_file_id, ...)`, the frozen facts owner and the
+///      late-bound `FrozenIdentityHandle`. The final render boundary installs the matching
+///      project/package context before resolving labels; donor ranges are never silently
+///      remapped onto the requester call-site source, and no magic identity or `None` fallback
+///      is fabricated.
 #[derive(Clone)]
 pub(super) struct StableBodySyntax {
     /// Declaration-qualified stream path, such as `file/generic_function`.
     ///
     /// This path names the token stream's semantic declaration context. The owning source-file
-    /// identity deliberately remains on `GenericTemplateArtefact`, because token and path-row
-    /// locations are file-scoped rather than declaration-scoped.
+    /// identity lives in `donor_file_id`, because token and path-row locations are file-scoped
+    /// rather than declaration-scoped.
     pub(super) declaration_path: Box<[String]>,
+    /// Exact owning source identity captured from `FileTokens::file_id`.
+    ///
+    /// Retained verbatim so materialisation can restore a concrete `FileTokens::file_id` and a
+    /// matching frozen-facts owner.
+    pub(super) donor_file_id: crate::compiler_frontend::source::SourceId,
+    /// Required late-bound frozen identity for the donor source domain.
+    pub(super) frozen_identity_handle: FrozenIdentityHandle,
     pub(super) pool: Box<[String]>,
     pub(super) tokens: Box<[Token]>,
     /// Canonical table vocabulary retained only for the path rows referenced by this body.
@@ -41,11 +57,16 @@ pub(super) struct StableBodySyntax {
 pub(super) struct MaterialisedBody {
     pub(super) file_tokens: FileTokens,
     pub(super) resolution_facts: Arc<Stage0ResolutionFacts>,
+    pub(super) frozen_identity_handle: FrozenIdentityHandle,
 }
 
 impl MaterialisedBody {
     pub(super) fn into_generic_body(self) -> GenericFunctionBody {
-        GenericFunctionBody::materialised(self.file_tokens, self.resolution_facts)
+        GenericFunctionBody::materialised(
+            self.file_tokens,
+            self.resolution_facts,
+            self.frozen_identity_handle,
+        )
     }
 }
 
@@ -63,6 +84,7 @@ impl StableBodySyntax {
         source_file: &InternedPath,
         string_table: &StringTable,
         stage0_resolution_facts: Option<&Stage0ResolutionFacts>,
+        frozen_identity_handle: FrozenIdentityHandle,
         content_value_at_path: &impl Fn(
             &InternedPath,
         ) -> Result<
@@ -77,10 +99,10 @@ impl StableBodySyntax {
         }
 
         let source_path_syntax = tokens.path_syntax_table()?;
-        source_path_syntax.validate_file_owned_locations(source_file)?;
+        source_path_syntax.validate_file_owned_locations(tokens.file_id)?;
         source_path_syntax.validate_file_tokens(
             &tokens.tokens,
-            source_file,
+            tokens.file_id,
             "generic body capture",
         )?;
 
@@ -127,6 +149,8 @@ impl StableBodySyntax {
 
         Ok(Self {
             declaration_path: stable_path(&tokens.src_path, string_table),
+            donor_file_id: tokens.file_id,
+            frozen_identity_handle,
             pool: pool.finish(),
             tokens: frozen_tokens.into_boxed_slice(),
             path_syntax,
@@ -165,8 +189,8 @@ impl StableBodySyntax {
         }
         let mut path_syntax = self.path_syntax.clone();
         path_syntax.try_remap_string_ids(&mut |id| pool_remap(id, &remap))?;
-        path_syntax.validate_file_owned_locations(source_file)?;
-        path_syntax.validate_file_tokens(&tokens, source_file, "frozen generic body")?;
+        path_syntax.validate_file_owned_locations(self.donor_file_id)?;
+        path_syntax.validate_file_tokens(&tokens, self.donor_file_id, "frozen generic body")?;
 
         let resolved_file_references = self
             .resolved_file_references
@@ -174,74 +198,25 @@ impl StableBodySyntax {
             .map(|reference| reference.materialise(&remap, string_table))
             .collect::<Result<Vec<_>, CompilerError>>()?;
         let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
+            self.donor_file_id,
             resolved_file_references,
         )?);
 
+        // Retain the captured donor identity as the explicit materialised owner. The final
+        // boundary installs its domain-specific frozen context before labels render, so donor
+        // ranges stay distinct from the requester call-site source without any rebinding, magic
+        // identity or `None` fallback.
         Ok(MaterialisedBody {
-            file_tokens: FileTokens::new_frozen_with_identity(
+            file_tokens: FileTokens::new_frozen(
                 declaration_path,
-                None,
+                self.donor_file_id,
                 None,
                 tokens,
                 path_syntax,
             ),
             resolution_facts,
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(super) struct StableSourceLocation {
-    pub(super) scope: Box<[String]>,
-    pub(super) start: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-    pub(super) end: crate::compiler_frontend::tokenizer::tokens::CharPosition,
-}
-
-impl StableSourceLocation {
-    pub(super) fn capture(location: &SourceLocation, string_table: &StringTable) -> Self {
-        Self {
-            scope: stable_path(&location.scope, string_table),
-            start: location.start_pos,
-            end: location.end_pos,
-        }
-    }
-
-    pub(super) fn materialise(&self, string_table: &mut StringTable) -> SourceLocation {
-        SourceLocation::new(
-            materialise_path(&self.scope, string_table),
-            self.start,
-            self.end,
-        )
-    }
-
-    fn is_default(&self) -> bool {
-        self.scope.is_empty() && self.start == Default::default() && self.end == Default::default()
-    }
-
-    /// Select a stable diagnostic location while combining semantically equal blueprints.
-    ///
-    /// WHY: imported public projections have no authored range, so their default must not erase
-    /// source provenance; when both ranges exist, lexical ordering makes lane order invariant.
-    pub(super) fn preferred_with(&self, other: &Self) -> Self {
-        match (self.is_default(), other.is_default()) {
-            (true, false) => other.clone(),
-            (false, true) => self.clone(),
-            _ => {
-                let ordering = self
-                    .scope
-                    .as_ref()
-                    .cmp(other.scope.as_ref())
-                    .then_with(|| self.start.line_number.cmp(&other.start.line_number))
-                    .then_with(|| self.start.char_column.cmp(&other.start.char_column))
-                    .then_with(|| self.end.line_number.cmp(&other.end.line_number))
-                    .then_with(|| self.end.char_column.cmp(&other.end.char_column));
-                if ordering == std::cmp::Ordering::Greater {
-                    other.clone()
-                } else {
-                    self.clone()
-                }
-            }
-        }
     }
 }
 

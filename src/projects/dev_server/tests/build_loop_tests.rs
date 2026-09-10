@@ -18,9 +18,7 @@ use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigValueLocation,
     BuildInputName, PrimitiveBuildValue,
 };
-use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType, SourceLocation,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
@@ -35,11 +33,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn unused_variable_warning(name: StringId, location: SourceLocation) -> CompilerDiagnostic {
+fn unused_variable_warning(name: StringId) -> CompilerDiagnostic {
     CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
         DiagnosticSeverity::Warning,
-        location,
+        None,
         DiagnosticPayload::UnusedName { name },
     )
 }
@@ -67,6 +65,8 @@ fn html_build_result() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -105,6 +105,8 @@ fn multi_page_html_build_result() -> BuildResult {
         config: Config::new(PathBuf::from("project")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -126,6 +128,8 @@ fn html_build_result_without_entry_page() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
@@ -133,10 +137,7 @@ fn html_build_result_without_entry_page() -> BuildResult {
 
 fn html_build_result_with_warning() -> BuildResult {
     let mut string_table = StringTable::new();
-    let warning = unused_variable_warning(
-        string_table.get_or_intern("dev_warning".to_string()),
-        SourceLocation::default(),
-    );
+    let warning = unused_variable_warning(string_table.get_or_intern("dev_warning".to_string()));
 
     BuildResult {
         project: Project {
@@ -153,9 +154,17 @@ fn html_build_result_with_warning() -> BuildResult {
         config: Config::new(PathBuf::from("main.moth")),
         warnings: vec![warning],
         string_table,
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: test_build_output_owner(),
         directory_output_plan: None,
     }
+}
+
+fn html_build_result_with_invalid_page_url_style() -> BuildResult {
+    let mut build_result = html_build_result();
+    build_result.config.html_section.page_url_style = Some(String::from("bad_style"));
+    build_result
 }
 
 fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResult {
@@ -175,13 +184,15 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
         config: Config::new(project_root.to_path_buf()),
         warnings: vec![],
         string_table: StringTable::new(),
+        source_database: None,
+        warning_source_contexts: Vec::new(),
         output_owner: owner,
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
             project_root: project_root.to_path_buf(),
             entry_root: project_root.to_path_buf(),
             owner,
-            setting_location: SourceLocation::default(),
+            setting_span: None,
         }),
     }
 }
@@ -243,7 +254,7 @@ impl DevBuildExecutor for FakeExecutor {
                         output_root: project_root.join("dev"),
                         project_root: Some(project_root),
                         owner: build_result.output_owner,
-                        setting_location: SourceLocation::default(),
+                        setting_span: None,
                     })
                 };
                 write_project_outputs(
@@ -267,7 +278,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
     fn build_backend(
         &self,
         _project_compilation: crate::build_system::build::ProjectCompilation,
-        config: &Config,
+        _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[crate::compiler_frontend::Flag],
         string_table: &mut StringTable,
@@ -281,7 +292,6 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
             cleanup_policy: CleanupPolicy::generic([".js"]),
             warnings: vec![unused_variable_warning(
                 string_table.get_or_intern("x".to_string()),
-                SourceLocation::from_path(&config.entry_dir, string_table),
             )],
             deferred_resources: Vec::new(),
             resource_inputs: ResourceInputRegistry::new(),
@@ -430,6 +440,34 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
 }
 
 #[test]
+fn invalid_site_config_preserves_interned_diagnostic_values() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_with_invalid_page_url_style())]);
+
+    let report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
+    assert!(!report.build_ok);
+
+    let build_state = state
+        .build_state
+        .lock()
+        .expect("build state should not be poisoned");
+    assert!(
+        build_state
+            .last_build_messages_summary
+            .contains("bad_style")
+    );
+    assert!(
+        build_state
+            .last_build_messages_summary
+            .contains("'trailing_slash', 'no_trailing_slash', or 'ignore'")
+    );
+}
+
+#[test]
 fn build_version_increments_on_each_attempt() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -538,10 +576,10 @@ fn dev_server_error_messages_use_dev_server_error_type() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let messages = dev_server_error_messages(Path::new("x.moth"), "oops");
     assert_eq!(messages.error_count(), 1);
-    let (error_type, _message, _location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("dev-server failure should be wrapped for rendering");
-    assert_eq!(error_type, &ErrorType::DevServer);
+    assert_eq!(&error.error_type, &ErrorType::DevServer);
 }
 
 #[test]
@@ -662,19 +700,21 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     assert_eq!(messages.error_count(), 1);
     let warnings: Vec<_> = messages.warnings().collect();
     assert_eq!(warnings.len(), 1);
-    let (_error_type, _message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("output write failure should be wrapped for rendering");
     assert_eq!(
-        location.scope.to_path_buf(&messages.string_table),
-        PathBuf::from("../escape.js")
+        error.host_path.as_deref(),
+        Some(Path::new("../escape.js")),
+        "output path failures should retain the rejected host path"
     );
-    assert_eq!(
-        warnings[0]
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        entry_file
+    assert!(
+        error.source_span.is_none(),
+        "path-only output failures must not fabricate a source excerpt"
+    );
+    assert!(
+        warnings[0].primary_span.is_none(),
+        "synthetic warnings must not fabricate a source span"
     );
 }
 

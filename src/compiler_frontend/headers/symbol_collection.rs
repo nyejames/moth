@@ -1,7 +1,7 @@
 //! Order-independent header symbol collection.
 //!
-//! WHAT: validates declared names, builds per-file dependency/export maps, records generic declaration
-//! metadata, and stages builtin declarations during header parsing.
+//! WHAT: validates declared names, builds per-file dependency/export maps, records generic
+//! declaration kinds, and stages builtin declarations during header parsing.
 //! WHY: this work depends only on parsed headers, not dependency order. Keeping it separate lets
 //! `prepare_header_syntax` stay orchestration-first and leaves dependency sorting as the owner of
 //! declaration ordering.
@@ -10,6 +10,7 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, register_builtin_error_types,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticBag, ReservedNameOwner,
 };
@@ -17,11 +18,13 @@ use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterLis
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::FunctionSignatureSyntax;
 use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationKind, GenericDeclarationMetadata, ModuleSymbols, register_declared_symbol,
+    GenericDeclarationKind, ModuleSymbols, register_declared_symbol,
 };
+use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
     FileFrontendPrepareOutput, FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -34,7 +37,8 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 pub(super) fn build_module_symbols(
     prepared_files: &mut [FileFrontendPrepareOutput],
     string_table: &mut StringTable,
-) -> Result<ModuleSymbols, DiagnosticBag> {
+    capture: &mut impl FnMut(SourceId, &mut CompilerDiagnostic) -> Result<(), CompilerError>,
+) -> Result<ModuleSymbols, HeaderPreparationFailure> {
     let mut module_symbols = ModuleSymbols::empty();
     let mut diagnostic_bag = DiagnosticBag::new();
 
@@ -45,36 +49,36 @@ pub(super) fn build_module_symbols(
         module_symbols
             .file_roles_by_source
             .insert(file_output.source_file.to_owned(), file_output.file_role);
-
-        if let Some(canonical_os_path) = &file_output.canonical_os_path {
-            module_symbols.canonical_os_path_by_source.insert(
-                file_output.source_file.to_owned(),
-                canonical_os_path.to_owned(),
-            );
-        }
+        module_symbols
+            .source_ids_by_source
+            .insert(file_output.source_file.to_owned(), file_output.file_id);
 
         for header in &file_output.headers {
-            if !validate_declared_name(header, string_table, &mut diagnostic_bag) {
+            if let Some(mut diagnostic) = validate_declared_name(header, string_table) {
+                capture(file_output.file_id, &mut diagnostic)
+                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                diagnostic_bag.push(diagnostic);
                 continue;
             }
 
-            // Mutation: canonical OS paths are project-derived inputs that must be interned
-            // before downstream stages can use them as InternedPath values.
+            // Header source paths are already the compiler's logical source identity. Keep that
+            // identity in the module map instead of deriving a second filesystem path spelling.
             module_symbols.canonical_source_by_symbol_path.insert(
                 header.tokens.src_path.to_owned(),
-                header.canonical_source_file(string_table),
+                header.source_file.clone(),
             );
-            module_symbols.declaration_locations_by_symbol_path.insert(
-                header.tokens.src_path.to_owned(),
-                header.name_location.to_owned(),
-            );
+            if let Some(name_span) = header.name_span {
+                module_symbols
+                    .declaration_spans_by_symbol_path
+                    .insert(header.tokens.src_path.to_owned(), name_span);
+            }
 
             register_header_symbol(&mut module_symbols, header, string_table);
         }
     }
 
     if diagnostic_bag.has_errors() {
-        return Err(diagnostic_bag);
+        return Err(HeaderPreparationFailure::Diagnosed(diagnostic_bag));
     }
 
     // The retained clause and selection tables have completed validation above. Move them into
@@ -103,41 +107,33 @@ pub(super) fn build_module_symbols(
 fn validate_declared_name(
     header: &Header,
     string_table: &StringTable,
-    diagnostic_bag: &mut DiagnosticBag,
-) -> bool {
-    let Some(symbol_name) = header.tokens.src_path.name() else {
-        return true;
-    };
+) -> Option<CompilerDiagnostic> {
+    let symbol_name = header.tokens.src_path.name()?;
 
     let symbol_name_text = string_table.resolve(symbol_name).to_owned();
 
-    if let Err(diagnostic) = ensure_not_keyword_shadow_identifier(
-        symbol_name,
-        header.name_location.to_owned(),
-        string_table,
-    ) {
-        diagnostic_bag.push(*diagnostic);
-        return false;
+    if let Err(diagnostic) =
+        ensure_not_keyword_shadow_identifier(symbol_name, header.name_span, string_table)
+    {
+        return Some(diagnostic);
     }
 
     if is_reserved_builtin_symbol(&symbol_name_text) {
-        diagnostic_bag.push(CompilerDiagnostic::reserved_builtin_name(
+        return Some(CompilerDiagnostic::reserved_builtin_name(
             symbol_name,
-            header.name_location.to_owned(),
+            header.name_span,
         ));
-        return false;
     }
 
     if is_core_cast_trait_name(&symbol_name_text) {
-        diagnostic_bag.push(CompilerDiagnostic::reserved_name_collision(
+        return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
-            header.name_location.to_owned(),
+            header.name_span,
         ));
-        return false;
     }
 
-    true
+    None
 }
 
 /// Detect whether a parsed function signature is a receiver method candidate.
@@ -224,7 +220,7 @@ fn register_header_symbol(
                 &header.source_file,
                 is_dependency_bindable_for_symbol_collection(header),
             );
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -256,7 +252,7 @@ fn register_header_symbol(
             module_symbols
                 .nominal_type_paths
                 .insert(header.tokens.src_path.to_owned());
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -276,7 +272,7 @@ fn register_header_symbol(
             module_symbols
                 .nominal_type_paths
                 .insert(header.tokens.src_path.to_owned());
-            register_generic_declaration_metadata(
+            register_generic_declaration_kind(
                 module_symbols,
                 header,
                 generic_parameters,
@@ -361,7 +357,7 @@ fn register_builtin_symbols(module_symbols: &mut ModuleSymbols, string_table: &m
         .extend(builtin_manifest.ast_struct_nodes);
 }
 
-fn register_generic_declaration_metadata(
+fn register_generic_declaration_kind(
     module_symbols: &mut ModuleSymbols,
     header: &Header,
     generic_parameters: &GenericParameterList,
@@ -371,14 +367,9 @@ fn register_generic_declaration_metadata(
         return;
     }
 
-    // Semantic generic behavior belongs to the generics implementation plan; this header-stage
-    // metadata only preserves parsed declaration facts for later AST work.
-    module_symbols.generic_declarations_by_path.insert(
-        header.tokens.src_path.to_owned(),
-        GenericDeclarationMetadata {
-            kind,
-            parameters: generic_parameters.to_owned(),
-            declaration_location: header.name_location.to_owned(),
-        },
-    );
+    // Header classification records only the declaration kind. Canonical parameter names and
+    // arity are owned by TypeEnvironment once AST registers the declaration.
+    module_symbols
+        .generic_declarations_by_path
+        .insert(header.tokens.src_path.to_owned(), kind);
 }

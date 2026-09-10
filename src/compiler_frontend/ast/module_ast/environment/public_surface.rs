@@ -18,9 +18,9 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeConstructor, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitIncompatibilitySyntax;
@@ -78,7 +78,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         exported_name,
                         &resolved_signature.signature,
                         &header.source_file,
-                        header.name_location.clone(),
+                        header_name_span(header),
                         trait_environment,
                         string_table,
                     )?;
@@ -97,7 +97,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             exported_name,
                             field.value.type_id,
                             &header.source_file,
-                            field.value.location.clone(),
+                            field.value.span,
                             trait_environment,
                             string_table,
                         )?;
@@ -125,7 +125,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 exported_name,
                                 field.value.type_id,
                                 &header.source_file,
-                                field.value.location.clone(),
+                                field.value.span,
                                 trait_environment,
                                 string_table,
                             )?;
@@ -145,7 +145,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         exported_name,
                         alias.target_type_id,
                         &header.source_file,
-                        header.name_location.clone(),
+                        header_name_span(header),
                         trait_environment,
                         string_table,
                     )?;
@@ -162,7 +162,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         exported_name,
                         resolved_declaration.value.type_id,
                         &header.source_file,
-                        declaration.location.clone(),
+                        declaration.span,
                         trait_environment,
                         string_table,
                     )?;
@@ -185,7 +185,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         exported_name: StringId,
         signature: &FunctionSignature,
         public_root_file: &InternedPath,
-        return_location: SourceLocation,
+        return_span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -194,7 +194,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 exported_name,
                 parameter.value.type_id,
                 public_root_file,
-                parameter.value.location.clone(),
+                parameter.value.span,
                 trait_environment,
                 string_table,
             )?;
@@ -209,7 +209,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 exported_name,
                 type_id,
                 public_root_file,
-                return_location.clone(),
+                return_span,
                 trait_environment,
                 string_table,
             )?;
@@ -223,7 +223,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         exported_name: StringId,
         type_id: TypeId,
         public_root_file: &InternedPath,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         trait_environment: &TraitEnvironment,
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -240,7 +240,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         Err(self.diagnostic_messages(
-            CompilerDiagnostic::private_type_in_exported_api(exported_name, type_id, location),
+            CompilerDiagnostic::private_type_in_exported_api(exported_name, type_id, span),
             string_table,
         ))
     }
@@ -427,8 +427,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .map_err(|error| self.error_messages(error, string_table))?,
         );
 
-        let subject_id = self.resolve_visible_trait_reference(
-            &incompatibility.subject,
+        let subject_id = self.resolve_visible_trait_name(
+            incompatibility.subject.name,
+            Some(incompatibility.subject.span),
             &visibility,
             trait_environment,
             string_table,
@@ -443,8 +444,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         });
 
         for incompatible_trait in &incompatibility.incompatible_traits {
-            let incompatible_id = self.resolve_visible_trait_reference(
-                incompatible_trait,
+            let incompatible_id = self.resolve_visible_trait_name(
+                incompatible_trait.name,
+                Some(incompatible_trait.span),
                 &visibility,
                 trait_environment,
                 string_table,
@@ -467,7 +469,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         incompatibility.subject.name,
                         Some(incompatible_trait.name),
                         InvalidTraitIncompatibilityReason::PrivateTraitSurfaceLeak,
-                        incompatible_trait.location.clone(),
+                        Some(incompatible_trait.span),
                     ),
                     string_table,
                 ));
@@ -496,4 +498,8 @@ fn is_public_export_trait_incompatibility_header(header: &Header) -> bool {
     header.file_role.is_export_capable()
         && header.export_mode.is_public()
         && matches!(header.kind, HeaderKind::TraitIncompatibility { .. })
+}
+
+fn header_name_span(header: &Header) -> Option<SourceSpan> {
+    header.name_span
 }

@@ -83,9 +83,9 @@ pub(super) fn parse_collection_builtin_member_typed(
         receiver_node,
         receiver_type_id,
         member_name,
-        member_location,
+        member_span,
         receiver_access_mode,
-        authored_marker_location,
+        authored_marker_span,
         scope_context,
     } = context;
 
@@ -113,7 +113,7 @@ pub(super) fn parse_collection_builtin_member_typed(
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::MissingParentheses,
             Some(member_name),
-            member_location,
+            member_span,
         )
         .into());
     }
@@ -123,8 +123,8 @@ pub(super) fn parse_collection_builtin_member_typed(
     validate_receiver_access(
         receiver_node,
         receiver_access_mode,
-        &member_location,
-        authored_marker_location.as_ref(),
+        member_span,
+        authored_marker_span,
         ReceiverAccessRequirement {
             requires_mutable: mutating_receiver_required,
             diagnostic: ReceiverAccessDiagnostic::CollectionBuiltin {
@@ -144,11 +144,11 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expected_type_ids,
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             let error_type =
-                resolve_builtin_error_type_typed(scope_context, &member_location, string_table)?;
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
             let result_type_ids =
                 fallible_collection_result(element_type_id, error_type, type_interner);
             (args, result_type_ids)
@@ -162,11 +162,11 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expected_type_ids,
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             let error_type =
-                resolve_builtin_error_type_typed(scope_context, &member_location, string_table)?;
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
             let result_type_ids =
                 fallible_collection_result(none_type_id, error_type, type_interner);
             (args, result_type_ids)
@@ -180,7 +180,7 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expected_type_ids,
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             // Growable push has no recoverable source-visible `Error!` path: it needs no error
@@ -197,13 +197,13 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expected_type_ids,
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             // Fixed push can fail recoverably at capacity, so it keeps the existing fallible
             // carrier bridge.
             let error_type =
-                resolve_builtin_error_type_typed(scope_context, &member_location, string_table)?;
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
             let result_type_ids =
                 fallible_collection_result(none_type_id, error_type, type_interner);
             (args, result_type_ids)
@@ -217,11 +217,11 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expected_type_ids,
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             let error_type =
-                resolve_builtin_error_type_typed(scope_context, &member_location, string_table)?;
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
             let result_type_ids =
                 fallible_collection_result(element_type_id, error_type, type_interner);
             (args, result_type_ids)
@@ -234,7 +234,7 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &[],
                 scope_context,
                 type_interner,
-                &member_location,
+                member_span,
                 string_table,
             )?;
             (args, vec![int_type_id])
@@ -251,7 +251,7 @@ pub(super) fn parse_collection_builtin_member_typed(
             None,
             None,
             None,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -264,7 +264,7 @@ pub(super) fn parse_collection_builtin_member_typed(
         return Err(CompilerDiagnostic::invalid_builtin_call(
             InvalidBuiltinCallReason::UnhandledFallibleCall,
             Some(member_name),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -278,12 +278,12 @@ pub(super) fn parse_collection_builtin_member_typed(
         args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
-        member_location.clone(),
+        member_span,
     );
 
     Ok(Some(AstNode {
         kind: NodeKind::ExpressionStatement(builtin_expression),
         scope: scope_context.scope.to_owned(),
-        location: member_location,
+        span: member_span,
     }))
 }

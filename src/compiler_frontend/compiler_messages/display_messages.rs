@@ -7,21 +7,34 @@ use crate::backends::error_types::BackendErrorType;
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
 };
-use crate::compiler_frontend::compiler_messages::render::{
-    resolve_source_file_path, resolved_display_path,
-};
+use crate::compiler_frontend::compiler_messages::render::relative_display_path_from_root;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use saying::say;
 
 pub fn print_compiler_messages(messages: CompilerMessages) {
-    let display_order = messages.diagnostic_display_order();
-    for diagnostic_index in display_order {
+    // The outer infrastructure failure prints as a standalone error beside the diagnostics,
+    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
+    // display order without fabricating a user diagnostic.
+    let mut outer_emitted = messages.infrastructure_error().is_none();
+    for diagnostic_index in messages.diagnostic_display_order() {
         let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
+        if !outer_emitted
+            && diagnostic.severity
+                != crate::compiler_frontend::compiler_messages::DiagnosticSeverity::Error
+        {
+            if let Some(error) = messages.infrastructure_error() {
+                print_formatted_error(error.clone(), &messages.string_table);
+            }
+            outer_emitted = true;
+        }
         let render_context = messages.diagnostic_render_context(diagnostic_index);
         crate::compiler_frontend::compiler_messages::render::terminal::print_diagnostic_with_context(
             diagnostic,
             render_context,
         );
+    }
+    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
+        print_formatted_error(error.clone(), &messages.string_table);
     }
 }
 
@@ -37,25 +50,13 @@ pub fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec<String
     )
 }
 
-pub fn print_formatted_error(e: CompilerError, string_table: &StringTable) {
-    // Resolve synthetic header scopes back to source files before choosing a human-readable path.
-    let relative_dir = resolved_display_path(&e.location.scope, string_table);
-    let display_line = display_line_number(e.location.start_pos.line_number);
-    let display_column = display_column_number(e.location.start_pos.char_column);
-
-    // Read the file and get the actual line as a string from the code
-    // Strip the actual header at the end of the path (.header extension)
-    let actual_file = resolve_source_file_path(&e.location.scope, string_table);
-
-    let source_line_index = e.location.start_pos.line_number.max(0) as usize;
-    let line = match std::fs::read_to_string(&actual_file) {
-        Ok(file) => file
-            .lines()
-            .nth(source_line_index)
-            .unwrap_or_default()
-            .to_string(),
-        Err(_) => String::new(),
-    };
+pub fn print_formatted_error(e: CompilerError, _string_table: &StringTable) {
+    // Infrastructure errors carry no diagnostic source frame. Their optional host path is shown
+    // only as an explicit path, while message and structured guidance remain the useful detail.
+    let display_path = e.host_path.as_deref().map(|host_path| {
+        let resolved = std::fs::canonicalize(host_path).unwrap_or_else(|_| host_path.to_path_buf());
+        relative_display_path_from_root(&resolved, &std::env::current_dir().unwrap_or_default())
+    });
 
     say!(
         "\n",
@@ -66,44 +67,15 @@ pub fn print_formatted_error(e: CompilerError, string_table: &StringTable) {
 
     say!(Reset e.msg.as_str());
 
-    if !relative_dir.is_empty() {
+    if let Some(display_path) = display_path.filter(|path| !path.is_empty()) {
         say!(
             Blue "\n  --> ",
-            Reset Magenta relative_dir.as_str(),
-            Dark Magenta ":",
-            Reset Bold Blue display_line,
-            Reset Grey ":",
-            Reset Magenta display_column
+            Reset Magenta display_path.as_str(),
         );
-    } else {
-        say!(
-            Blue "\n   --> ",
-            Reset Magenta display_line,
-            Dark Magenta ":",
-            Reset Magenta display_column
-        );
-    }
-
-    if !line.is_empty() {
-        say!(Blue "    |");
-        let line_label = display_line.to_string();
-        let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-        say!(Blue line_padding, Bold Blue line_label, " | ", Reset line.as_str());
-        print!("{}", " ".repeat(display_line.to_string().len() + 4));
-
-        let underline_start = e.location.start_pos.char_column.max(0) as usize;
-        print!("{}", " ".repeat(underline_start));
-        let underline_length =
-            (e.location.end_pos.char_column - e.location.start_pos.char_column + 1).max(1) as usize;
-        say!(Red "^".repeat(underline_length));
     }
 
     for guidance_line in format_error_guidance_lines(&e) {
         say!(Bright Blue "  ", guidance_line);
-    }
-
-    if line.is_empty() && e.location.scope.as_components().is_empty() {
-        say!(Dark "     No source location available.");
     }
 }
 
@@ -129,14 +101,6 @@ fn error_visual(error_type: &ErrorType) -> &'static str {
         ErrorType::Backend(BackendErrorType::LirTransformation) => "ヽ(°〇°)ﾉ 🔥",
         ErrorType::Backend(BackendErrorType::WasmGeneration) => "(° O °) 🔥",
     }
-}
-
-fn display_line_number(raw_line: i32) -> i32 {
-    raw_line.saturating_add(1).max(1)
-}
-
-fn display_column_number(raw_column: i32) -> i32 {
-    raw_column.saturating_add(1).max(1)
 }
 
 pub(crate) fn format_error_guidance_lines(error: &CompilerError) -> Vec<String> {

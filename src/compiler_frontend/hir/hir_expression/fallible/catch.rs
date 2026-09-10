@@ -16,6 +16,7 @@ use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::super::LoweredExpression;
@@ -28,14 +29,11 @@ struct FallibleSuccessAssignment<'a> {
     ok_type: FrontendTypeId,
     result_type_ids: &'a [FrontendTypeId],
     result_locals: &'a [LocalId],
-    location: &'a crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    span: &'a Option<SourceSpan>,
 }
 
 impl<'a> HirBuilder<'a> {
     /// Lowers a handled fallible call with catch branching.
-    ///
-    /// WHAT: emits the call, then delegates to `lower_fallible_carrier_with_branching` to build
-    /// the success/error/merge blocks.
     pub(crate) fn lower_handled_fallible_call_with_branching(
         &mut self,
         target: CallTarget,
@@ -49,14 +47,14 @@ impl<'a> HirBuilder<'a> {
             ok_type,
             err_type,
             value_required,
-            location,
+            span,
             ..
         } = context;
         let validate_float_success =
             matches!(&target, CallTarget::External(_)) && self.type_id_is_float(ok_type);
         let result_local =
-            self.emit_result_call_to_current_block(target, args, carrier_type, location)?;
-        let current_block = self.current_block_id_or_error(location)?;
+            self.emit_result_call_to_current_block(target, args, carrier_type, span)?;
+        let current_block = self.current_block_id_or_error(span)?;
 
         self.lower_fallible_carrier_with_branching(FallibleCarrierBranchingContext {
             current_block,
@@ -68,20 +66,13 @@ impl<'a> HirBuilder<'a> {
                 ok_type,
                 err_type,
                 value_required,
-                location,
+                span,
                 validate_float_success,
             },
         })
     }
 
     /// Lowers the catch/recovery path for a fallible carrier.
-    ///
-    /// WHAT: creates success/error/merge blocks, assigns the success payload to a merge local,
-    /// runs the catch handler body with the active value target, and joins both edges at
-    /// the merge block.
-    /// WHY: catch is the only fallible path that must resume with a value after handling the
-    /// error. The merge block guarantees that later code sees a single definition regardless of
-    /// which path was taken.
     pub(crate) fn lower_fallible_carrier_with_branching(
         &mut self,
         context: FallibleCarrierBranchingContext<'_>,
@@ -98,47 +89,44 @@ impl<'a> HirBuilder<'a> {
             ok_type,
             err_type,
             value_required,
-            location,
+            span,
             validate_float_success,
         } = handled_result;
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span)?;
         let result_for_test =
-            self.make_local_load_expression(result_local, carrier_type, location, region);
+            self.make_local_load_expression(result_local, carrier_type, &None, region);
 
-        let success_block = self.create_block(region, location, "fallible-handled-ok")?;
+        let success_block = self.create_block(region, span, "fallible-handled-ok")?;
         let error_region = self.create_child_region(region);
-        let error_block = self.create_block(error_region, location, "fallible-handled-err")?;
-        let merge_block = self.create_block(region, location, "fallible-handled-merge")?;
+        let error_block = self.create_block(error_region, span, "fallible-handled-err")?;
+        let merge_block = self.create_block(region, span, "fallible-handled-merge")?;
 
-        self.emit_terminator(
+        self.emit_terminator_with_span(
             current_block,
             HirTerminator::FallibleBranch {
                 result: result_for_test,
                 success_block,
                 error_block,
             },
-            location,
+            span,
+            *span,
         )?;
 
         let result_locals = if value_required && !self.is_unit_type(ok_type) {
-            self.allocate_fallible_catch_result_locals(result_type_ids, location)?
+            self.allocate_fallible_catch_result_locals(result_type_ids, span)?
         } else {
             vec![]
         };
 
         // Success edge: unwrap the payload, store it in the merge local, and jump to merge.
-        self.set_current_block(success_block, location)?;
+        self.set_current_block(success_block, span)?;
         if !result_locals.is_empty() {
-            let success_region = self.current_region_or_error(location)?;
-            let success_result = self.make_local_load_expression(
-                result_local,
-                carrier_type,
-                location,
-                success_region,
-            );
+            let success_region = self.current_region_or_error(span)?;
+            let success_result =
+                self.make_local_load_expression(result_local, carrier_type, &None, success_region);
             let success_payload = self.make_expression(
-                location,
+                &None,
                 HirExpressionKind::FallibleUnwrapSuccess {
                     result: Box::new(success_result),
                 },
@@ -147,7 +135,7 @@ impl<'a> HirBuilder<'a> {
                 success_region,
             );
             let success_payload = if validate_float_success {
-                self.emit_validated_float_value(success_payload, location)?
+                self.emit_validated_float_value(success_payload, span)?
             } else {
                 success_payload
             };
@@ -158,26 +146,26 @@ impl<'a> HirBuilder<'a> {
                 ok_type,
                 result_type_ids,
                 result_locals: &result_locals,
-                location,
+                span,
             })?;
         }
 
         self.emit_jump_to(
             success_block,
             merge_block,
-            location,
+            span,
             "fallible-handled.success.merge",
         )?;
 
         // Error edge: enter the catch handler region, bind the error local, then run
         // the handler body. Any `ThenValue` in that body assigns the shared result
         // locals and jumps to the value-block merge.
-        self.set_current_block(error_block, location)?;
-        let error_region = self.current_region_or_error(location)?;
+        self.set_current_block(error_block, span)?;
+        let error_region = self.current_region_or_error(span)?;
         let error_result =
-            self.make_local_load_expression(result_local, carrier_type, location, error_region);
+            self.make_local_load_expression(result_local, carrier_type, &None, error_region);
         let error_payload = self.make_expression(
-            location,
+            &None,
             HirExpressionKind::FallibleUnwrapError {
                 result: Box::new(error_result),
             },
@@ -193,10 +181,10 @@ impl<'a> HirBuilder<'a> {
                         error_binding.error_binding.to_owned(),
                         err_type,
                         false,
-                        Some(location.to_owned()),
+                        None,
                     )?;
 
-                    self.emit_assign_local_statement(handler_error_local, error_payload, location)?;
+                    self.emit_assign_local_statement(handler_error_local, error_payload, span)?;
                 }
 
                 if !result_locals.is_empty() {
@@ -211,16 +199,16 @@ impl<'a> HirBuilder<'a> {
                     self.lower_statement_sequence(body)?;
                 }
 
-                let error_tail_block = self.current_block_id_or_error(location)?;
-                if self.block_has_explicit_terminator(error_tail_block, location)? {
-                    self.set_current_block(merge_block, location)?;
+                let error_tail_block = self.current_block_id_or_error(span)?;
+                if self.block_has_explicit_terminator(error_tail_block, span)? {
+                    self.set_current_block(merge_block, span)?;
                     let value = if result_locals.is_empty() {
-                        self.unit_expression(location, self.current_region_or_error(location)?)
+                        self.unit_expression(span, self.current_region_or_error(span)?)
                     } else {
                         self.value_block_result_expression(
                             &result_locals,
                             result_type_ids,
-                            location,
+                            span,
                             region,
                         )?
                     };
@@ -233,34 +221,34 @@ impl<'a> HirBuilder<'a> {
                 if !result_locals.is_empty() {
                     return_hir_transformation_error!(
                         "Catch handler reached HIR fallthrough while a value continuation is required",
-                        self.hir_error_location(location)
+                        self.hir_error_location(span)
                     );
                 }
             }
             FallibleHandling::Propagate => {
                 return_hir_transformation_error!(
                     "Propagation handling unexpectedly reached fallible branching lowering",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
         }
 
-        let error_tail_block = self.current_block_id_or_error(location)?;
-        if !self.block_has_explicit_terminator(error_tail_block, location)? {
+        let error_tail_block = self.current_block_id_or_error(span)?;
+        if !self.block_has_explicit_terminator(error_tail_block, span)? {
             self.emit_jump_to(
                 error_tail_block,
                 merge_block,
-                location,
+                span,
                 "fallible-handled.error.merge",
             )?;
         }
 
-        self.set_current_block(merge_block, location)?;
-        let merge_region = self.current_region_or_error(location)?;
+        self.set_current_block(merge_block, span)?;
+        let merge_region = self.current_region_or_error(span)?;
         let value = if result_locals.is_empty() {
-            self.unit_expression(location, merge_region)
+            self.unit_expression(span, merge_region)
         } else {
-            self.value_block_result_expression(&result_locals, result_type_ids, location, region)?
+            self.value_block_result_expression(&result_locals, result_type_ids, span, region)?
         };
 
         Ok(LoweredExpression {
@@ -272,12 +260,12 @@ impl<'a> HirBuilder<'a> {
     fn allocate_fallible_catch_result_locals(
         &mut self,
         result_type_ids: &[FrontendTypeId],
-        location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Vec<LocalId>, CompilerError> {
         let mut result_locals = Vec::with_capacity(result_type_ids.len());
         for type_id in result_type_ids {
-            let lowered_ty = self.lower_type_id(*type_id, location)?;
-            let local = self.allocate_temp_local(lowered_ty, Some(location.to_owned()))?;
+            let lowered_ty = self.lower_type_id(*type_id, span)?;
+            let local = self.allocate_temp_local(lowered_ty, None)?;
             result_locals.push(local);
         }
 
@@ -295,21 +283,21 @@ impl<'a> HirBuilder<'a> {
             ok_type,
             result_type_ids,
             result_locals,
-            location,
+            span,
         } = assignment;
 
         if result_locals.len() == 1 {
-            self.emit_assign_local_statement(result_locals[0], success_payload, location)?;
+            self.emit_assign_local_statement(result_locals[0], success_payload, span)?;
             return Ok(());
         }
 
         for (slot_index, slot_local) in result_locals.iter().enumerate() {
-            let slot_type = self.lower_type_id(result_type_ids[slot_index], location)?;
-            let region = self.current_region_or_error(location)?;
+            let slot_type = self.lower_type_id(result_type_ids[slot_index], span)?;
+            let region = self.current_region_or_error(span)?;
             let success_result =
-                self.make_local_load_expression(carrier_local, carrier_type, location, region);
+                self.make_local_load_expression(carrier_local, carrier_type, &None, region);
             let tuple_value = self.make_expression(
-                location,
+                &None,
                 HirExpressionKind::FallibleUnwrapSuccess {
                     result: Box::new(success_result),
                 },
@@ -318,7 +306,7 @@ impl<'a> HirBuilder<'a> {
                 region,
             );
             let slot_value = self.make_expression(
-                location,
+                &None,
                 HirExpressionKind::TupleGet {
                     tuple: Box::new(tuple_value),
                     index: slot_index,
@@ -333,7 +321,7 @@ impl<'a> HirBuilder<'a> {
                     target: HirPlace::Local(*slot_local),
                     value: slot_value,
                 },
-                location,
+                span,
             )?;
         }
 

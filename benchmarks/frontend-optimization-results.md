@@ -2846,3 +2846,713 @@ comparable before/after evidence: its endpoints fell from `41.20ms` / `1403.99ms
 `16.48ms` / `486.77ms`, while the fitted exponent fell from `n^1.70` to `n^1.63`. The development
 scaling gate fits `n^1.59`; its budget is tightened from `n^1.80` to `n^1.70` as a deliberately
 close ratchet, not headroom.
+
+## Data Layout Migration - Phase 0 Activation Baseline (historical, as of 2026-09-04)
+
+This is the historical activation baseline for
+`docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`, recorded as of
+2026-09-04. Evidence-only phase: no compiler or language semantics changed. The values and status
+claims below are historical and must not be read as current workspace status; subsequent phase
+sections compare against this recorded baseline.
+
+### Environment
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-09-04 |
+| Branch | `token-and-diagnostic-data-layout-changes` |
+| Activation commit | `b6f81fe58` |
+| Prerequisite | Compiler Test Suite Hardening, delivered at `03168082d` |
+| Machine | Apple M1 Pro, 10 cores |
+| OS | macOS 14.6.1 (`aarch64-apple-darwin`) |
+| Toolchain | `rustc 1.97.1 (8bab26f4f 2026-07-14)`, `clippy 0.1.97` |
+
+At activation, the plan text and the architecture document both referred to a Rust 1.95 CI gate.
+The repository's recorded toolchain was 1.97.1 and `.github/workflows/release.yml` ran
+`dtolnay/rust-toolchain@stable`, so the lanes below are activation-era evidence. The three Clippy
+lanes were reproduced locally by cross-checking; `x86_64-unknown-linux-gnu` was installed for this
+historical run.
+
+### Correctness and lint baseline: green (as of activation)
+
+| Command | Result |
+| --- | --- |
+| `just validate` | pass |
+| `cargo test --workspace` | 4947 + 817 + 17 pass, 0 fail |
+| `cargo run -- tests --terse` | 1951/1951 correct in 10.42s |
+| `cargo run -- check docs --terse` | no errors or warnings |
+| `just bench-ci` | 82/82 cases passed shared preflight |
+| `just bench-scaling` | within budget |
+| `just timers-erasure-check` | pass |
+| Clippy `aarch64-apple-darwin` (`just ci-clippy-native`) | pass, `-D warnings` |
+| Clippy `x86_64-unknown-linux-gnu`, same feature set | pass, `-D warnings` |
+| Clippy `x86_64-pc-windows-msvc`, same feature set | pass, `-D warnings` |
+| `just bench-frontend-check` | pass |
+| `just bench-check` | 40/40 cases, `-24ms avg`, 30 faster / 0 slower |
+
+No unrelated failures. The baseline is fully green, so no component had to be reported separately.
+
+### Historical activation lint bridge (as of 2026-09-04)
+
+At activation, two `#[allow(clippy::result_large_err)]` allowances existed and were recorded as
+the only reason the three Clippy lanes passed:
+
+| Site | Reason | Removal owner |
+| --- | --- | --- |
+| `src/lib.rs` | 192-byte `CompilerError` across internal `Result` boundaries | Slice 1G5 |
+| `xtask/src/benchmark_execution.rs` | 224-byte `BenchmarkCaseFailure` | Slice 1G5, by shrinking the record rather than relocating the allowance |
+
+These activation-only allowances are historical evidence, not current guidance; the active plan
+and fresh validation establish the current workspace status. No other lint suppression, boxing
+workaround or compatibility path was added during activation.
+
+### Historical layout baseline: predecessor types (as of activation)
+
+Measured on `aarch64-apple-darwin` with `std::mem::size_of` / `align_of` through a throwaway probe
+test, which was deleted after recording. The durable layout assertions arrive with the replacement
+types in Phase 1.
+
+| Type | size (bytes) | align | Target |
+| --- | ---: | ---: | --- |
+| `CharPosition` | 8 | 4 | deleted |
+| `SourceLocation` | 40 | 8 | `SourceSpan`, 8 |
+| `Option<SourceLocation>` | 40 | 8 | `Option<SourceSpan>`, 8 |
+| `FileId` | 4 | 4 | `SourceId`, 4 |
+| `SourceFileTable` | 56 | 8 | absorbed into the build-lifetime source database |
+| `StringId` | 4 | 4 | unchanged |
+| `InternedPath` | 24 | 8 | `PathId`, 4 |
+| `Option<InternedPath>` | 24 | 8 | `Option<PathId>`, 4 |
+| `PathSyntaxId` | 4 | 4 | unchanged |
+| `PathSyntax` | 64 | 8 | typed source-local path cold store |
+| `PathSyntaxTable` | 24 | 8 | source-owned |
+| `StringTable` | 72 | 8 | frozen lookup form |
+| `Token` | 64 | 8 | `TokenShape` 8 + `LocalSpan` 4 |
+| `TokenKind` | 24 | 4 | `TokenShape`, 8 |
+| `NumericLiteralToken` | 24 | 4 | numeric cold store |
+| `FileTokens` | 232 | 8 | `SourceTokens` + short-lived `TokenCursor` |
+| `DiagnosticKind` | 2 | 1 | `DiagnosticCode`, 2 |
+| `DiagnosticPayload` | 112 | 8 | four fact words plus typed extras |
+| `DiagnosticLabel` | 72 | 8 | `SecondaryDiagnosticLabel`, 12 |
+| `CompilerDiagnostic` | 184 | 8 | `DiagnosticRecord` 32, `DiagnosticDraft` <= 48 |
+| `DiagnosticBag` | 24 | 8 | move-only draft accumulator |
+| `CompilerMessages` | 120 | 8 | `DiagnosticReport` / `DiagnosticReportSet` |
+| `RenderTypeContext` | 640 | 8 | `DiagnosticTypeStore` |
+| `TypeEnvironment` | 624 | 8 | not retained for rendering at all |
+| `CompilerError` | 192 | 8 | split across the three failure lanes |
+
+Largest inline reason types inside `DiagnosticPayload`, out of the 75 measured in
+`diagnostic_payload/types.rs` (max 104 bytes, min 0 bytes):
+
+| Reason type | size (bytes) | align |
+| --- | ---: | ---: |
+| `InvalidGenericInstantiationReason` | 104 | 8 |
+| `InvalidConfigReason` | 40 | 8 |
+| `InvalidCallShapeReason` | 32 | 8 |
+| `InvalidFunctionSignatureReason` | 28 | 4 |
+| `InvalidTypeAnnotationReason` | 28 | 4 |
+| `DiagnosticPlace` | 24 | 8 |
+| `InvalidCollectionTypeReason` | 24 | 8 |
+| `InvalidDeclarationReason` | 24 | 8 |
+| `InvalidGenericParameterReason` | 24 | 4 |
+| `InvalidMultiBindReason` | 24 | 8 |
+| `InvalidReturnShapeReason` | 24 | 8 |
+| `InvalidTraitConformanceReason` | 24 | 8 |
+
+`InvalidGenericInstantiationReason` alone sets the 112-byte floor of `DiagnosticPayload`.
+`RenderTypeContext` at 640 bytes is the single largest retained-for-rendering record in the
+compiler, and it exists only because durable diagnostics keep a full `TypeEnvironment` view.
+
+`CompilerDiagnostic` at 184 bytes and `CompilerError` at 192 bytes are the direct causes of
+`clippy::result_large_err`. Slice 1G5's gate is `size_of::<CompilerDiagnostic>() <= 128`.
+
+### Historical migration inventory (as of activation)
+
+The searchable inventories and counts below describe the activation-era predecessor representation;
+they are not a current-workspace inventory.
+
+Full searchable inventories are generated under `target/data-layout-audit/` and are deliberately not
+committed. Concise summary:
+
+| Inventory | Scale | Highest-risk owners | Owning phases |
+| --- | --- | --- | --- |
+| `01-source-locations.md` | 2 location primitives, 2 file-identity structs, 5 `PreparedSourceInput` variants, 6 identity/remap gateways, 271+ location-bearing records | `SourceLocation`/`CharPosition` with interned scope and overlap-as-`Equal` ordering; two coexisting ID systems (`FileId`/`SourceFileTable` and `SourceId`/`SourceTreeIndex`) with provisional-to-final rebinding; `FileTokens` -> `FileFrontendPrepareOutput` -> `Header` identity chain | 1, 2, 3 |
+| `02-paths.md` | 301+ `InternedPath` rows (298+ in `compiler_frontend`), 24 inherent methods, 90+ path-keyed maps/sets, 0 `Box<Path>` | `symbols/interned_path.rs`; `paths/path_resolution.rs` mixing logical spelling with physical candidates; `headers/module_symbols.rs` prefix rebinding; `hir_side_table.rs` embedding `InternedPath` in location keys | 2, with token path rows in 3 |
+| `03-tokens.md` | 94 `TokenKind` variants (8 payload-bearing), 8 `FileTokens` fields, 31 files with token-vector shapes, 141 files referencing `FileTokens` | `tokenizer/tokens.rs:241-617` coupling storage, path-table lifecycle, identity, stats, cursor and remap; `headers/types.rs:404-1451`; `generic_functions/materialisation/frozen_syntax.rs` full-stream cloning; duplicated classification matches in `parse_expression_dispatch.rs` and `body_dispatch.rs` | 3, with token-bearing diagnostics in 4 |
+| `04-diagnostics.md` | 8 category wrappers, 147 stable descriptors, 127 `DiagnosticPayload` variants, 74 supporting enums, 11 label-message variants, 29 diagnostic clone sites, 72 files referencing `Box<CompilerDiagnostic>`, 38 files cloning `StringTable`, 21 `with_type_context_for_all_diagnostics` callsites | primary-location duplication into the primary label; the exhaustive payload remap/rebind walkers; `CompilerMessages.render_type_contexts` keyed by diagnostic index ranges that survive prepend/append | 4, with span work in 1 |
+| `05-failure-lanes.md` | 1 `CompilerError` struct, 6 `ErrorType` variants, 7 `CompilerErrorMetadataKey` variants, 16 + 151 + 1 macro callsites, 250+ `Result<_, CompilerError>` boundaries, 2 lint allowances, 4 `catch_unwind` sites, 8 poisoned-lock recovery sites, 0 panic hooks, 2 `panic = "abort"` profile settings (root `Cargo.toml`, release and profiling) | `compiler_errors.rs:511-716` mixing message, interned identity, category, metadata and an optional `StringTable`; 151 `return_hir_transformation_error!` callsites in `hir/`; dev-server poisoned-state recovery in `build_loop.rs`/`state.rs` | 5, 6 |
+
+Two counts in the generated `05-failure-lanes.md` inventory were wrong and are corrected above:
+`CompilerErrorMetadataKey` has seven variants, not six, and the repository has two `panic = "abort"`
+settings, not three. The generated file under `target/` retains the original figures.
+
+### Stale plan facts corrected at activation
+
+- The plan and the architecture document named a Rust 1.95 CI gate. Current toolchain is 1.97.1 and
+  CI pins `stable`.
+- The plan referenced `benchmarks/cases.txt` and `benchmarks/frontend-cases.txt`. No case-list text
+  files exist. `benchmarks/manifest.toml` is the corpus authority and declares every `[[workload]]`
+  and `[[case]]`; `xtask/src/benchmark_manifest.rs` is only its parser, and `BenchmarkSuiteKind` in
+  `xtask/src/bench_types.rs` owns suite selection and history identity. The planned data-layout
+  suite therefore becomes a `data_layout` case group in `benchmarks/manifest.toml` plus a third
+  `BenchmarkSuiteKind`, not a `benchmarks/data-layout-cases.txt` file.
+- The plan schedules the deletion of `PathTokenItem` and says `TokenKind` is widened by
+  `Path(Vec<PathTokenItem>)`. That migration already happened: `PathTokenItem` does not exist and
+  `TokenKind::Path` already carries a dense `PathSyntaxId` into a file-owned `PathSyntaxTable`.
+  The architecture document's current-to-target row repeated the same stale claim.
+- The plan named `src/build_system/build.rs::InputFile` as the duplicate source-text/path carrier.
+  No `InputFile` type exists; the current carriers are the five `PreparedSourceInput` variants in
+  `src/build_system/create_project_modules/prepared_source.rs` plus the frontend source variants in
+  `src/compiler_frontend/pipeline.rs`.
+- `docs/compiler-data-layout-design.md` still carried the pre-activation audit anchor
+  `d119988861aad9732c19d945eeabeb249a7e5caa` and a conceptual context example that placed
+  diagnostics inside the frozen context. Both were corrected in this phase.
+
+### Source-size census: the `LocalSpan` start-bit gates
+
+Scope: every compiler-visible source (`.moth`, `.mtf`, `.js`) under `benchmarks/`, `docs/src/` and
+`tests/`. Markdown and the evidence report itself are excluded because they are not compiler input
+and this report is modified by the census that would measure it.
+
+4584 files, 2,354,191 bytes total, median 77 bytes, p95 1,318 bytes, p99 9,002 bytes. The largest
+source is `benchmarks/nominal-scaling/nominal-scaling-320.moth` at 92,557 bytes, followed by
+`docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
+
+| `LENGTH_BITS` | Inline start range | Sources at or over the limit |
+| ---: | ---: | ---: |
+| 8 | 16 MiB | 0 |
+| 9 | 8 MiB | 0 |
+| 10 | 4 MiB | 0 |
+| 11 | 2 MiB | 0 |
+| 12 | 1 MiB | 0 |
+
+No candidate split suffers a single start overflow on the current corpus - the largest source is
+under 0.1 MiB, which is more than an order of magnitude below the tightest candidate's 1 MiB start
+range. Selection is therefore decided entirely by length overflow, which needs exact byte offsets
+and is measured once Slice 1C3 supplies them. The architecture's default 22/10 split stands until
+that census runs.
+
+### Five-run repeatability, September 4th
+
+Recorded runs (`just bench-frontend`, `just bench`, `just bench-data-layout`) each measure ten
+iterations per case and keep the median. Repeatability is then measured across five independent
+non-recording invocations against that stored baseline:
+
+| Suite | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | --- | --- | --- | --- | --- | --- |
+| Frontend phases, 42 cases | +1ms | 0ms | 0ms | -1ms | -1ms | 0ms |
+| End-to-end CLI, 40 cases | 0ms | 0ms | 0ms | 0ms | 0ms | 0ms |
+
+Every run reported "no measurable change" over the full case set, so the noise floor is +/-1ms on the
+suite average. A later phase's regression claim must exceed that band on the same machine.
+
+Recorded suite averages at this baseline: frontend phases all ~155ms (Core ~34ms, Docs ~1822ms,
+Stress ~176ms, Module ~31ms, Parallelism ~24ms, Borrow ~17ms); end-to-end CLI all ~57ms.
+The earlier prose claiming a diagnosed data-layout pair at ~33ms was not backed by retained raw
+predecessor runs: activation commit `b6f81fe58` predates the data-layout harness. That claim is
+withdrawn; the recovered five-run predecessor evidence below is the only data-layout repeatability
+record for this checkpoint.
+
+### Recovered predecessor data-layout evidence (historical, as of 2026-09-07)
+
+The activation base `b6f81fe58` is not the measured data-layout predecessor: it lacks the data-layout
+benchmark harness. I extracted the immediately preceding instrumentation checkpoint
+`2843b9d6b55013b0cfbc45d45682de1a9aaf3efa` (`chore: record data layout Phase 0 benchmark baseline`)
+from a Git archive under `tmp/data-layout-baseline/archive/`. `git merge-base --is-ancestor` exits 0
+for `b6f81fe58..2843b9d6b` and `2843b9d6b..32d2584b1`, so this is the actual predecessor interval.
+A bounded owner diff proves that `b6f81fe58..2843b9d6b` changed no files under `src/compiler_frontend`,
+`src/build_system` or `src/lib.rs`; the harness/fixtures/report changes are benchmark, xtask, justfile
+and documentation changes. The first representation change is then visible in
+`2843b9d6b..32d2584b1`: the `path_interner` files and their Stage 0/source-owner callers are the
+first bounded source-owner changes. Raw ancestry and diff outputs are in
+`tmp/data-layout-baseline/evidence/ancestry-proof.txt`,
+`diff-b6f-to-2843-source.txt`, `diff-b6f-to-2843-harness-files.txt` and `diff-2843-to-32d-source.txt`.
+
+Environment for the archived experiment: MacBookPro18,1, Apple M1 Pro, 10 physical CPUs, 16 GiB,
+Darwin 23.6.0 ARM64; `rustc 1.97.1 (8bab26f4f 2026-07-14)`, LLVM 22.1.6; `cargo 1.97.1
+(c980f4866 2026-06-30)`; `just 1.50.0`. The archive used its own temporary Git repository and
+`CARGO_TARGET_DIR=tmp/data-layout-baseline/target`; no current-worktree target or source was used.
+
+Five independent, uninstrumented invocations used the archived engine:
+
+```text
+CARGO_TARGET_DIR=../target MOTH_COUNTERS=off cargo run --quiet --locked --package xtask \
+  --features moth/timers -- bench-data-layout-check
+```
+
+Each invocation performed one shared preflight and ten measured iterations for each of the two
+`data_layout` cases. These are the engine's actual rounded suite results, not inferred timings;
+the raw stdout is `tmp/data-layout-baseline/evidence/data-layout-uninstrumented-{1..5}.txt`.
+
+| Invocation | Reported data-layout average | Top-stage output |
+| ---: | ---: | --- |
+| 1 | ~41ms | directory compile ~46ms; frontend ~33ms; boundary compile ~25ms |
+| 2 | ~41ms | directory compile ~45ms; frontend ~32ms; boundary compile ~25ms |
+| 3 | ~42ms | directory compile ~46ms; frontend ~33ms; boundary compile ~25ms |
+| 4 | ~42ms | directory compile ~47ms; frontend ~33ms; boundary compile ~26ms |
+| 5 | ~41ms | directory compile ~45ms; frontend ~32ms; boundary compile ~25ms |
+| **Median** | **~41ms** | **engine output is rounded to whole milliseconds** |
+
+The extracted archive had no local history, so these read-only invocations correctly reported no
+baseline and no comparison delta is claimed. The cases remained distinct: the warning-heavy file
+completed successfully with warnings, while the diagnosed directory returned expected user errors.
+The archived counter engine provided the following per-case evidence. `SourceByteCount` records the
+sum of source-text lengths processed/prepared by the predecessor; it is neither a claim that those
+bytes remain simultaneously live after the phase nor an on-disk-byte substitute. `TokenCount` is the
+number of original prepared token rows and excludes any cloned retained shell bodies.
+
+| Representative case | Outcome | SourceFileCount | Source bytes processed (`SourceByteCount`) | Original prepared tokens (`TokenCount`) | PathSyntaxRowCount | Errors | Warnings |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | success | 358 | 1,353,547 | 50,015 | 386 | 0 | 0 |
+| `warning-heavy.moth` | success (warned) | 1 | 1,200 | 265 | 0 | 0 | 39 |
+| `diagnosed/` | diagnosed | 41 | 4,721 | 1,103 | 1 | 40 | 0 |
+
+Clone and remap pressure from the same archived counters:
+
+| Case | Full StringTable clones | Fork-source base copies | Module string-ID remap calls | Identity remaps | Non-identity remaps | Non-identity entries | Payload remaps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 0 | 2 | 76 | 0 | 0 | 0 | 0 |
+| `warning-heavy.moth` | 0 | 3 | 0 | 0 | 0 | 0 | 0 |
+| `diagnosed/` | 80 | 2 | 1 | 0 | 0 | 0 | 0 |
+
+The predecessor has no dedicated path-only remap counter. `file_prepare_output_remap_calls`,
+`file_prepare_error_remap_calls` and `file_prepare_non_identity_payload_remaps` were all zero in
+the three probes, but that does not recover a path-specific count; path remap counts/bytes remain
+unavailable and are not marked complete.
+
+The owner-ledger and memory measurements below are archived predecessor evidence, recorded as of
+2026-09-07; they describe the activation-era representation rather than the current workspace.
+The aggregate allocator proxy does not by itself partition common/cold ownership. To recover bounded
+owner evidence without changing the timing run, a feature-gated throwaway owner ledger was enabled
+only in the archived probe binary. It samples actual owner capacities at each successful
+`PreparedHeaderSyntax` retention boundary and each final `CompilerMessages` boundary. Every
+`fetch_add` row below is cumulative across the module/message samples in one process, sampled once
+per boundary; it is not simultaneous retained bytes and must not be compared with the peak row.
+Five independent probe processes per case produced identical owner values and identical aggregate
+allocator values. Raw owner runs are
+`tmp/data-layout-baseline/evidence/memory-probe-{docs,warning-heavy,diagnosed}-owner-final-{1..5}.txt`.
+
+The raw files were captured before a final ledger cleanup removed two unused, never-written
+source-string fields. Those withdrawn zero rows are not evidence and are omitted below; every
+retained-owner and aggregate allocator value shown here is unchanged.
+
+Preparation-retention owner capacities (median; all five-run ranges are identical):
+
+| Case | Direct `PreparedHeaderSyntax` arrays B | Retained token `Vec` capacity B | Deduplicated path-table row arrays B | Arc owners | Path-component `Vec` capacities B | Direct cold `Vec` capacities B | Local StringTable payload / slots B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 1,233,808 | 1,570,432 | 38,144 | 358 | 40,052 | 153,647 | 1,215,059 / 201,728 |
+| `warning-heavy.moth` | 2,848 | 32,768 | 0 | 1 | 8 | 118 | 0 / 512 |
+| `diagnosed/` | 138,840 | 30,720 | 256 | 41 | 1,064 | 8,860 | 2,499 / 22,528 |
+
+`PreparedHeaderSyntax` owns retained syntax rather than source text. Stage 0's Moth,
+MothPrepared and MothTemplatePrepared inputs carry tokens or prepared output; its raw MothTemplate
+and PlainMarkdown source strings are consumed before this boundary. This is a type/ownership fact,
+not a compiler-wide sampled source-retention total. `SourceByteCount` above remains processed source
+volume, not retained snapshots. Direct header arrays are the actual capacities of
+`PreparedHeaderSyntax.headers`, `source_build_config_contracts` and `top_level_const_fragments`.
+Token bytes sum each retained `Header.tokens.tokens` capacity using the actual `Token` size; no
+`TokenCount*size` estimate is used.
+
+Path-table rows are deduplicated by `Arc` pointer within one prepared module. The owner count is
+cumulative across modules; identical pointers in different modules are not globally deduplicated.
+Path-component bytes cover each deduplicated table's `PathSyntax` root component vectors plus each
+retained header's `source_file` and token `src_path` component vectors.
+
+The direct cold row includes only `Header.capacity_references` vector capacities and
+`FileTokens.canonical_os_path` `PathBuf` capacities. It explicitly excludes `HashSet`/`HashMap`
+bucket allocations, nested `SourceLocation` paths in token/header shells, nested declaration
+vectors, and all other syntax/module-symbol heap payloads. StringTable payload bytes are exact
+locally owned `Box<str>` lengths; slots are the local pointer-array capacity. Reverse hash maps and
+inherited StringTable Arc-base payloads are excluded.
+
+Render-result owner capacities (median; all five-run ranges are identical):
+
+| Case | `CompilerMessages.diagnostics` Vec B | Diagnostic-label Vec capacities B | Render-context Vec B | Inline `DiagnosticPayload` B | Counted diagnostic cold label/payload B | Local StringTable payload / slots B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 0 | 0 | 0 | 0 | 0 | 9,696,613 / 250,576 |
+| `warning-heavy.moth` | 7,176 | 2,808 | 0 | 4,368 | 312 | 1,208 / 1,984 |
+| `diagnosed/` | 11,776 | 2,880 | 40,960 | 4,480 | 640 | 3,568 / 5,280 |
+
+Inline `DiagnosticPayload` bytes are reported separately and are not added to the diagnostic Vec
+row. Counted diagnostic cold bytes include primary and label `SourceLocation.scope` component
+vectors, diagnostic label substitutions and enumerated payload `InternedPath`/vector capacities;
+nested `SourceLocation` paths inside payload fields and unenumerated payload heap fields are
+excluded. TypeEnvironment heaps are excluded from the render-context row.
+These owner rows are bounded direct-owner evidence, not a complete common/cold partition; the
+counting allocator remains the aggregate live-allocation proxy:
+
+| Case | Semantic-result live bytes (median; range) | Rendered-message live bytes (median; range) | Peak live bytes (median; range) | After report return (median; range) |
+| --- | ---: | ---: | ---: | ---: |
+| `docs` | 18,450,304 (18,450,304-18,450,304) | 21,961,099 (21,961,099-21,961,099) | 29,216,701 (29,216,701-29,216,701) | 455,591 (455,591-455,591) |
+| `warning-heavy.moth` | 465,288 (465,288-465,288) | 176,115 (176,115-176,115) | 3,306,673 (3,306,673-3,306,673) | 18,093 (18,093-18,093) |
+| `diagnosed/` | 1,644,107 (1,644,107-1,644,107) | 423,210 (423,210-423,210) | 2,579,817 (2,579,817-2,579,817) | 23,339 (23,339-23,339) |
+
+The owner-ledger command was:
+
+```text
+CARGO_TARGET_DIR=../target cargo run --quiet --locked --package moth \
+  --bin data_layout_memory_probe \
+  --features timers,benchmark_counters,data_layout_memory_probe -- <entry>
+```
+
+This recovery supplies predecessor counter volumes, bounded direct-owner capacities, repeatable
+boundary/peak allocation proxies, success/warning/diagnosed distinction and five raw timing
+invocations. Exact total common/cold bytes, path-only remap counts and a complete semantic
+ownership breakdown remain unpartitioned because the explicit nested/hash/type-environment
+exclusions above are not tagged by the predecessor.
+
+### Work explicitly deferred out of Phase 0, with its owner
+
+| Deferred | Owner | Reason |
+| --- | --- | --- |
+| Exact span start/length histograms with per-candidate boundary buckets | Slice 1C3, consumed by 1C1 | The current model stores line/column, not byte offsets, so the census cannot run against today's spans. Phase 1's slice order is corrected so the byte cursor and line index (1C3) land before the encoding is selected (1C1); the census then runs against real offsets instead of a throwaway tracker. |
+
+This deferral does not block Phase 1; it is recorded on its owning slice in the plan, and the plan's
+Phase 1 slice order was changed in this phase so it is actually executable.
+
+## Data Layout Migration - Span Census and Encoding Selection (historical record, 2026-09-06)
+
+> This section preserves evidence as of its recorded date; its measurements and selection record are
+> historical and do not describe current workspace validation.
+
+Slice 1C2. Anchored at commit `14ab178d1`, which made token byte offsets exact. Command:
+`just span-census`; machine-readable report at `target/span-census.json`.
+
+### Corpus
+
+4,626 files walked under `benchmarks/`, `docs/src/` and `tests/`; 4,585 tokenized, 2,352,836 source
+bytes, 286,779 exact token spans, 896 ms wall time. The byte total counts only successfully
+tokenized `.moth` and `.mtf` sources.
+
+This is a later corpus snapshot than Phase 0's source-size census, with different inclusion
+criteria, and the two are not reconciled file by file. Phase 0 counted all 4,584 `.moth`, `.mtf`
+and `.js` files at 2,354,191 bytes; this run walks 4,626 and measures the 4,585 it tokenizes.
+An independent walk of the same three roots today finds 4,609 `.moth`/`.mtf` files at 2,353,813
+bytes plus 17 `.js`, which reconciles against this census both ways: 4,609 + 17 = 4,626 walked, and
+4,585 tokenized + 24 failed = 4,609, with the 977-byte difference being the failed fixtures. The
+corpus has grown since Phase 0; what both snapshots agree on is that no candidate suffers a start
+overflow.
+
+17 `.js` files (2,496 bytes) are excluded: the Moth tokenizer never produces spans for JavaScript,
+which is scanned by the HTML project's own byte-cursor parsers.
+
+24 files fail tokenization and are reported rather than dropped. Every one contains deliberately
+invalid syntax: 6 `InvalidPath`, 5 `InvalidNumberLiteral`, 5 `CommonSyntaxMistake`, 2
+`UnescapedImplicitTemplateClose`, 2 `InvalidStyleDirective`, 2 `InvalidCharacter`,
+1 `UnterminatedStringLiteral`, 1 `InvalidStringEscape`. Most are `tests/cases/*_rejected` or
+`*_failure` fixtures whose contract is to be rejected. Two are not: `diagnostic_quality_test`
+exists to produce a diagnostic worth reading, and `moth_template_unimported_entry_root_ignored`
+is a `mode = "success"` fixture whose `unused.mtf` carries an unmatched `]` precisely because the
+compiler must never import it. No source the compiler is expected to accept is missing from the
+census.
+
+The census tokenizes with the HTML project's style directives merged in, exactly as
+`moth_template::compile` does. An earlier run used built-ins alone and lost 276 documentation
+templates to `InvalidStyleDirective` - precisely the files that carry the longest spans. The
+selection below was not made on that run.
+
+### Span length distribution
+
+Min 0, median 1, p95 13, p99 52, max 31,475 bytes.
+
+| Length bucket | Spans |
+| --- | ---: |
+| 0-254 | 285,971 |
+| 255-510 | 355 |
+| 511-1,022 | 204 |
+| 1,023-2,046 | 126 |
+| 2,047-4,094 | 78 |
+| 4,095+ | 45 |
+
+### Candidate results
+
+| `LENGTH_BITS` | Total spans | Inline | Start overflow | Length overflow | Extended | Max in one source | Extended-table bytes | Construction | Resolution |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 286,779 | 285,971 | 0 | 808 | 808 | 49 | 6,464 | 9.82 ms | 7.05 ms |
+| 9 | 286,779 | 286,326 | 0 | 453 | 453 | 22 | 3,624 | 9.86 ms | 7.01 ms |
+| 10 | 286,779 | 286,530 | 0 | 249 | 249 | 16 | 1,992 | 9.68 ms | 6.95 ms |
+| 11 | 286,779 | 286,656 | 0 | 123 | 123 | 9 | 984 | 9.78 ms | 6.78 ms |
+| 12 | 286,779 | 286,734 | 0 | 45 | 45 | 5 | 360 | 9.74 ms | 6.85 ms |
+
+Each candidate's inline count equals the cumulative length buckets below its limit, and every one
+of the 286,779 spans round-trips through all five prototype codecs. The counts are exact and
+reproduce run to run; the two timing columns are one run's sample and do not. Repeating the census
+moves a single candidate's construction time by more than the whole spread across candidates, and
+changes which candidate is fastest, so no candidate is timing-preferred. The prototypes are
+enum-tagged rather than packed, so these figures bound nothing about production `LocalSpan` speed
+either.
+
+Start overflow is zero everywhere. The largest source is 92,557 bytes, an order of magnitude below
+the tightest candidate's 1 MiB start range, as Phase 0 predicted. Selection is decided by length
+overflow alone.
+
+### Selection
+
+**`LENGTH_BITS = 10`** - 22 start/index bits, 10 length bits, 4 MiB inline start range, 1,022-byte
+inline maximum length. Frozen in `docs/compiler-data-layout-design.md`.
+
+Applying the authority's rules in order: rules 1 and 2 reject nothing. The smallest usable index
+space is 1,048,575 entries at `LENGTH_BITS = 12`, against a largest observed per-source extended
+count of 49, so every candidate clears four times its own observed maximum by over 5,000 times,
+and the extended table encodes any range exactly. Rule 3 prefers `LENGTH_BITS = 12` with 45
+extended spans. Rule 4 then
+admits every candidate within 0.1% of the total span count (287 spans) of that best: 10 is 204
+behind (0.071%) and 11 is 78 behind (0.027%), while 9 is 408 behind (0.142%) and 8 is 763 behind
+(0.266%). Among the admitted three, the largest inline start range wins, which is
+`LENGTH_BITS = 10`. Rule 5 is not reached.
+
+The measured outcome agrees with the architecture's default 22/10 split. That default is now
+evidence, not an assumption.
+
+### Terminator-based encoding experiment: deferred, not evaluated
+
+No prototype was built and no acceptance gate was evaluated. The census bounds the prize instead,
+and the prize decides the priority: at the selected split the exact overflow-table design retains
+1,992 bytes for the entire corpus, so deleting it outright would recover 0.085% of the 2,352,836
+bytes of source those spans point into, and the memory gate's own bar is a 199-byte saving. That
+is not worth a second span encoding, so the investigation is declined.
+
+The gates remain open questions rather than settled failures. In particular the memory gate is not
+unreachable: every start and length in this corpus fits in 24 bits, so a packed endpoint pair is a
+concrete 6-byte match record, and 249 of them would retain 1,494 bytes - 25% below the 8-byte
+baseline, which clears the gate on arithmetic alone. The auditability condition is equally
+unassessed, there being no implementation to audit. Reopening is warranted if extended-span
+retention ever becomes large enough for a fraction of it to matter.
+
+### Deferral closed
+
+The Phase 0 deferral "Exact span start/length histograms with per-candidate boundary buckets" is
+discharged by this section. Its recorded owner was written as slice 1C3 consumed by 1C1, under the
+pre-activation numbering; the work landed as 1C1 (byte cursor and line index) followed by 1C2
+(this census), which is the same order under the corrected names.
+
+## Data Layout Migration - Source Ownership Checkpoint (historical record, 2026-09-08)
+
+> The checkpoint sections below preserve evidence as of their recorded dates. Their bridge wording,
+> validation results and acceptance claims are historical records, not current workspace status.
+
+Phase 1D4b replaces tokenizer-owned builder results with a borrowed original source builder.
+File/chunk aggregation returns every builder before fallible merging. Directory, package,
+single-file and direct-template outcomes retain the live owner until their last producer and
+reuse its existing `Arc<SourceDatabase>` for final lookup. This is an ownership checkpoint;
+the diagnostic, path and token layout migrations remain open.
+
+Machine: Apple M1 Pro, aarch64 macOS; Rust/Clippy 1.97.1. Commands and results:
+
+- `cargo fmt --all && just validate`: native featured all-target Clippy, 5,060 compiler tests,
+  17 CLI tests, 825 xtask tests, 1,951 integration cases, docs check and source audit passed.
+- The shared benchmark gate preflighted all 82 cases. Three-iteration quick CLI and frontend
+  averages reported no measurable change (0 ms); the changed docs workloads were excluded.
+  This does not establish a five-run median comparison or aggregate retained-memory improvement.
+- Scaling fits passed: nominal members \(n^{0.98}\), constant chains \(n^{0.82}\), generic
+  instantiation \(n^{1.61}\). Timer erasure passed.
+- `cargo check -p moth --all-targets --features boracle,timers,benchmark_counters` passed.
+- `target/release/moth build docs --release`: 74 outputs. Known generated-only CSS drift was
+  excluded from the ownership checkpoint.
+
+The existing preparation-to-semantics regression now resolves a tokenizer-created 1,506-byte
+identifier span through the finalized database and checks the return-site offset and exact text.
+Source-unit coverage separately proves repeated preparation preserves distinct original overflow
+rows. Neither test claims semantic stages already append compact spans; that migration follows.
+
+## Data Layout Migration - Preparation Diagnostic Spans (historical record, 2026-09-08)
+
+> This section preserves evidence as of its recorded date; its bridge wording, validation results and
+> acceptance claims are historical records, not current workspace status.
+
+Phase 1D3 retains exact primary and related preparation spans in the original source tables.
+This checkpoint preserves lexical infrastructure failures separately from source diagnoses and
+checks real extended-table exhaustion through the preparation boundary. The legacy location bridge
+remains until 1H, so this slice claims no aggregate retained-memory reduction.
+
+Machine: Apple M1 Pro, aarch64 macOS; Rust/Clippy 1.97.1. The final
+`cargo fmt --all && just validate` passed native featured all-target Clippy, 5,069 compiler tests,
+17 CLI tests, 825 xtask tests, 1,951 integration cases, docs check and the 1,319-file source audit.
+All 82 shared benchmark preflights passed. The three-iteration quick comparison against recorded
+history reported +3 ms CLI averages and 0 ms frontend averages, with changed docs workloads
+excluded. These bounded checks do not establish five-run medians or a phase-wide memory result.
+
+Scaling fits passed at nominal members \(n^{0.98}\), constant chains \(n^{0.79}\) and generic
+instantiation \(n^{1.62}\). Timer erasure passed with a 9,043,728-byte no-timer binary.
+Independent span-ownership and failure-lane reviews and focused correction verification were
+clean before acceptance. The accepted commit is the commit containing this checkpoint section.
+
+### Declaration anchor checkpoint (1D5a)
+
+The declaration-shell anchor now reaches initializer EOF unchanged, including an extended
+1,200-byte type anchor after a multibyte literal. The old source-start terminator constructor is
+deleted. Synthetic content retains explicit source-start anchors under its own source identity.
+No new extended rows or heap owners are introduced. The legacy location bridge remains until 1H.
+
+On the same host/toolchain, `cargo fmt --all && just validate` passed 5,070 compiler tests,
+17 CLI tests, 825 xtask tests, 1,951 integration cases, native featured all-target Clippy,
+documentation checking, source audit and all 82 benchmark preflights. Quick history comparisons
+reported +3 ms CLI averages and +1 ms frontend averages, excluding changed docs workloads.
+Scaling fits were 0.97, 0.79 and 1.61, within all three budgets. Timer erasure passed with the
+same 9,043,728-byte binary size. These are bounded gate observations, not five-run medians or
+aggregate memory evidence. Independent exactness/ownership and test review was clean.
+The accepted checkpoint is the commit containing this subsection.
+
+### Path and dependency anchor checkpoint (1D5b)
+
+Path tokens and path rows share one exact encoding. Dependency providers, selections, aliases
+and structural file references preserve their token anchors through string remapping and source
+identity finalization. Long multibyte path coverage resolves the original overflow row after
+persistent subset capture and after rebinding to a different registered source identity.
+The legacy location bridge remains until 1H, so this checkpoint claims no aggregate memory win.
+
+The mandatory provider now owns the retained clause anchor, removing its duplicated location.
+After this independent review correction, `cargo fmt --all && just validate` passed native featured all-target
+Clippy, 5,072 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integration cases, docs checking,
+source audit and all 82 benchmark preflights. Focused runs passed 60 path, 328 header and 25
+frozen-generic tests; correction checks also passed 192 config-filter tests. Quick history
+comparisons reported +3 ms CLI averages and +1 ms frontend averages, excluding changed docs
+workloads. Scaling fits were 0.98, 0.81 and 1.62, within their
+budgets. Timer erasure passed with a 9,043,728-byte no-timer binary. These observations are bounded
+gate checks, not five-run medians or phase-wide retained-memory evidence.
+Independent focused verification of the correction was clean. The accepted checkpoint is the
+commit containing this subsection.
+
+### Signature and choice anchor checkpoint (1D5c1)
+
+Member, return-type and choice-variant shells copy their original token anchors. Return slots
+now use the nested return value as their sole location owner. Focused tests preserve authored
+anchors through trait `This` substitution, string remapping and nonidentity source rebinding,
+including three extended rows after multibyte text. The original table resolves every range.
+The interval bridge remains until 1H, so this checkpoint claims no aggregate memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, final `cargo fmt --all && just validate` passed
+native featured all-target Clippy, 5,074 compiler tests, 17 CLI tests, 825 xtask tests,
+1,951 integrations, docs checking, source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +3 ms CLI averages and 0 ms frontend averages, excluding changed docs
+workloads. Scaling fits were 0.99, 0.80 and 1.61, within their budgets. Timer erasure passed
+with a 9,043,728-byte no-timer binary. These bounded checks establish neither five-run medians
+nor phase-wide memory evidence. Independent review's rebind test correction passed focused
+verification. The accepted checkpoint is the commit containing this subsection.
+
+### Trait preparation anchor checkpoint (1D5c2)
+
+Trait declarations, requirements, references and conformance targets copy their original token
+anchors. Duplicate outer locations and receiver classification are removed. The resolver consumes
+names and borrowed locations directly, removing temporary trait-reference records for generic bounds.
+The regression preserves ten anchors through string remapping and nonidentity source rebinding,
+resolves seven original extended rows after multibyte text and checks exact byte offsets and text.
+The interval bridge remains until 1H; this checkpoint claims no aggregate retained-memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, source audit and all 82 benchmark preflights. Quick historical comparisons reported
++4 ms CLI averages and +2 ms frontend averages, excluding changed docs workloads. Scaling fits
+were 0.98, 0.78 and 1.64, within their budgets. Timer erasure passed with a 9,027,216-byte no-timer
+binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
+Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
+commit containing this subsection.
+
+### Parsed type and capacity anchor checkpoint (1D5c3)
+
+Located parsed type constructors and collection capacities copy their original token anchors.
+Synthetic content and trait substitution preserve supplied spans. Unused parsed `BuiltinNone`
+and `Result` variants and their dead consumers are removed. The regression preserves 29 anchors
+through string remapping and nonidentity source rebinding, resolving the same five extended rows
+and exact UTF-8 byte ranges. This interval checkpoint claims no aggregate memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, the 1,319-file source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +3 ms CLI and frontend averages, excluding changed docs workloads. Scaling
+fits were 0.97, 0.79 and 1.57, within budget. Timer erasure passed with a 9,027,216-byte no-timer
+binary. These bounded checks establish neither five-run medians nor phase-wide memory evidence.
+Independent exactness, ownership and regression review is clean. The accepted checkpoint is the
+commit containing this subsection.
+
+### Generic parameter and bound anchor checkpoint (1D5c4)
+
+Parsed generic parameters and bounds preserve their original token spans. Synthetic trait `This`
+uses the authored trait declaration's name anchor. Semantic registration consumes ordered IDs and
+names directly. Generic declaration maps no longer duplicate parsed parameter lists or locations.
+The exactness regression preserves nine anchors through string remapping and nonidentity source
+rebinding, resolving the original extended rows after multibyte text. This interval checkpoint
+claims no aggregate retained-memory reduction.
+
+On the same host and Rust 1.97.1 toolchain, `cargo fmt --all && just validate` passed native
+featured all-target Clippy, 5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations,
+docs checking, the 1,319-file source audit and all 82 benchmark preflights. Quick historical
+comparisons reported +4 ms CLI and 0 ms frontend averages, excluding changed docs workloads.
+Scaling fits were 0.98, 0.77 and 1.61, within budget. Timer erasure passed with a 9,027,216-byte
+no-timer binary. These bounded checks establish neither five-run medians nor phase-wide memory
+evidence. Independent exactness, semantic ownership and regression review is clean. The accepted
+checkpoint is the commit containing this subsection.
+
+## Data Layout Migration - Phase 1 Closeout (2026-09-10)
+
+Phase 1 is complete. The implementation checkpoint is `a9f9744de`; representation corrections are
+in `e1f16cb49`, the cross-target test-import correction is `134aebf63`, obsolete span-allowance cleanup
+is `749f9c3f0`, and stale diagnostic-boxing comment cleanup is `eb6416312`.
+The final correction review found no blockers.
+
+Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1 / Clippy 0.1.97. Cross-target
+Clippy also ran with installed `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` targets.
+
+| Evidence | Result |
+| --- | --- |
+| `cargo fmt --all`; `git diff --check` | pass |
+| native and cross-target featured all-target Clippy, `-D warnings` | native, Linux and Windows pass |
+| `cargo test --workspace --quiet -- --format terse` | 5,920 passed |
+| `cargo run --quiet -- tests --terse` | 1,951 / 1,951 integration cases correct |
+| `cargo run --quiet -- build docs --release` | 74 output files built successfully |
+| `cargo run --quiet -- check docs --terse` | no errors or warnings |
+| `just feature-lane-check` | 0 findings |
+| `just source-audit` | 1,324 files audited, 0 findings |
+| `just span-census` | 4,626 files walked; 4,585 tokenized; 286,779 spans; 2,353,104 source bytes |
+| selected `LocalSpan` extended table | 1,992 bytes at the 22/10 split; source corpus +268 bytes versus the historical census, with the same span count |
+| `just bench-data-layout-check` | 2/2 cases; 10 iterations; **-5 ms average**, 1 faster, 0 slower |
+| `just bench-ci` | 82/82 preflight; no failures; CLI 7/8 and frontend 9/10 quick cases; CLI **-1 ms average** (no measurable change); frontend **-4 ms average** |
+| `just bench-scaling` | all 3 series within budget; fitted exponents 0.95, 0.76 and 1.63 |
+| `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
+
+The source-byte and extended-table values are span-census corpus measurements, not retained-heap
+claims. This historical closeout paragraph records the evidence available before the external-review
+correction; the bounded runner then exposed timing and counters but no retained-layout partition.
+The repeatable retained-layout and allocator-proxy evidence below supersedes that limitation.
+
+## Phase 1 Review-Correction Retention Probe
+
+The Phase 1 external-review corrections added a repeatable retained-layout probe rather than
+relying on the earlier single-run timing record. Five independent processes ran each of the same
+three data-layout workloads used by the recovered predecessor evidence:
+
+```text
+cargo run --quiet --locked --package moth --bin data_layout_memory_probe \
+  --features data_layout_memory_probe -- <entry>
+```
+
+`data_layout_memory_probe` expands to `timers` and `benchmark_counters`; the allocator and source/layout
+accounting scans are compiled only in this probe feature lane. `total_ms` is the benchmark report's
+direct elapsed time. Current probe output names the three allocator lifetimes explicitly:
+`peak_allocation_bytes_delta` is the aggregate peak live-allocation delta, `live_report_bytes_delta`
+is sampled while the owner-preserving benchmark result still holds the final `CompilerMessages`,
+and `after_report_drop_bytes_delta` is sampled after both that owner and the public report are
+dropped. All three are process-global allocator proxies, not owner attribution.
+
+The current five-run rows below were captured after the owner-preserving split with the current
+probe. The elapsed value and each allocator value use the median with the inclusive five-run range.
+The retained layout columns count only frozen identity contexts reachable from the final report;
+`retained.identity_contexts` counts distinct range-row and donor-only-handle contexts, and
+diagnostic-free package databases are excluded.
+
+| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Median live-report bytes (range) | Median peak allocation bytes (range) | Median after-report-drop bytes (range) | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Identity contexts |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `docs` | Success | 0 / 0 | 1936.796209 (1922.272958–1978.143542) | 377,831 (377,831–377,831) | 23,954,631 (23,954,631–23,954,631) | 1,542 (1,542–1,542) | 0 | 0 | 0 | 0 | 0 | 0 |
+| `warning-heavy.moth` | Success | 0 / 39 | 39.917583 (21.979833–48.051208) | 28,276 (28,276–28,276) | 2,699,354 (2,699,354–2,699,354) | 1,479 (1,479–1,479) | 1,200 | 0 | 2 | 39 | 0 | 1 |
+| `diagnosed/` | Diagnosed | 40 / 0 | 88.565833 (66.884583–99.111791) | 255,540 (255,540–255,540) | 2,108,306 (2,108,306–2,108,306) | 1,488 (1,488–1,488) | 903 | 0 | 42 | 40 | 0 | 1 |
+
+The predecessor comparison remains historical context only:
+
+| Workload | Predecessor peak bytes | Current peak bytes | Peak delta | Predecessor after-report bytes | Current after-report-drop bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `docs` | 29,216,701 | 23,954,631 | -18.01% | 455,591 | 1,542 |
+| `warning-heavy.moth` | 3,306,673 | 2,699,354 | -18.37% | 18,093 | 1,479 |
+| `diagnosed/` | 2,579,817 | 2,108,306 | -18.28% | 23,339 | 1,488 |
+
+The corrected live-report and after-report-drop fields are process-global allocator proxies, not owner
+attribution. The probe still does not partition common versus cold allocations or attribute allocator
+bytes to individual owners.

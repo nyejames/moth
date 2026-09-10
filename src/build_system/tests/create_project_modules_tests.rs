@@ -5,7 +5,7 @@ use super::file_reference_resolution::SingleFileReferenceOutcome;
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
-use super::prepared_source::PreparedSourceInput;
+use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
@@ -27,8 +27,7 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
-use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
@@ -38,6 +37,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{ExternalFunctionId, ExternalTypeId};
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -57,9 +57,12 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
+    SourceRegistrationIndex, SourceSpan,
+};
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -144,25 +147,204 @@ fn test_style_directives() -> StyleDirectiveRegistry {
     StyleDirectiveRegistry::built_ins()
 }
 
+fn source_database_for_test(
+    source_tree_index: &super::source_tree_index::SourceTreeIndex,
+    resolver: &ProjectPathResolver,
+    string_table: &mut StringTable,
+) -> SourceDatabase {
+    let registration_index = source_tree_index.source_registration_index();
+    SourceDatabase::from_ordered_registration_index(
+        &registration_index,
+        resolver.entry_root(),
+        Some(resolver),
+        string_table,
+    )
+    .expect("test source database should build from the indexed canonical inventory")
+}
+
+const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
+
+fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
+    source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
+}
+
+fn load_missing_source_path_for_test(
+    source_path: PathBuf,
+    _source_kind: SourceFileKind,
+    string_table: &mut StringTable,
+) -> Result<(), CompilerMessages> {
+    match super::source_loading::read_source_code(&source_path) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let error = super::source_loading::source_read_error(&source_path, error);
+            Err(CompilerMessages::from_error_ref(error, string_table))
+        }
+    }
+}
+
+fn load_missing_source_paths_for_test(
+    source_paths: Vec<PathBuf>,
+    source_kind: SourceFileKind,
+    string_table: &mut StringTable,
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+    let canonical_paths = source_paths
+        .into_iter()
+        .map(|path| {
+            fs::canonicalize(&path).map_err(|error| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::file_error(
+                        &path,
+                        format!("failed to canonicalize test source path: {error}"),
+                    ),
+                    string_table,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    load_missing_source_paths_with_registered_paths_for_test(
+        canonical_paths,
+        source_kind,
+        string_table,
+    )
+}
+
+/// Load caller-supplied source identities through the selected-source boundary used by discovery.
+///
+/// Unlike [`load_missing_source_paths_for_test`], this helper does not canonicalize paths first, so
+/// a test can register a deterministic identity for a source that is intentionally absent.
+fn load_missing_source_paths_with_registered_paths_for_test(
+    source_paths: Vec<PathBuf>,
+    source_kind: SourceFileKind,
+    string_table: &mut StringTable,
+) -> Result<(SourceDatabase, Vec<PreparedSourceInput>), CompilerMessages> {
+    let entry_path = source_paths.first().ok_or_else(|| {
+        CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("test source loading requires at least one path"),
+            string_table,
+        )
+    })?;
+    let registration_index = SourceRegistrationIndex::from_rows(
+        source_paths
+            .iter()
+            .map(|path| (path.as_path(), SourceKind::Compiler(source_kind))),
+    );
+    let source_files = SourceDatabase::from_registration_index_sorted_by_logical_path(
+        &registration_index,
+        entry_path,
+        None,
+        string_table,
+    )
+    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    let mut first_read_error = None;
+    for source_path in &source_paths {
+        if let Err(error) = selected_source_texts.load(source_path) {
+            first_read_error.get_or_insert(error);
+        }
+    }
+
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let retain_error = selected_source_texts
+        .retain_into(source_owner.sources_mut())
+        .err();
+    let load_error = first_read_error.or(retain_error);
+    if let Some(error) = load_error {
+        let mut messages = CompilerMessages::from_error_ref(error, string_table);
+        let source_files = source_owner
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        messages.set_source_database(Arc::new(source_files));
+        return Err(messages);
+    }
+
+    let source_files = source_owner
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    let mut input_files = Vec::with_capacity(source_paths.len());
+    for source_path in &source_paths {
+        let source_id = source_files
+            .get_by_canonical_path(source_path)
+            .map(|record| record.id)
+            .ok_or_else(|| {
+                CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error("test source has no registered source identity"),
+                    string_table,
+                )
+            })?;
+        if source_files.retained_text(source_id).is_none() {
+            return Err(CompilerMessages::from_error_ref(
+                CompilerError::compiler_error("test source loading left input slot empty"),
+                string_table,
+            ));
+        }
+        let source = match source_kind {
+            SourceFileKind::MothTemplate => PreparedSourceKind::MothTemplate,
+            SourceFileKind::PlainMarkdown => PreparedSourceKind::PlainMarkdown,
+            SourceFileKind::Moth => {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "test missing-source helper cannot create an unprepared Moth input",
+                    ),
+                    string_table,
+                ));
+            }
+        };
+        input_files.push(PreparedSourceInput { source_id, source });
+    }
+
+    Ok((source_files, input_files))
+}
+
+fn prepared_entry_file_path(
+    prepared: &crate::compiler_frontend::module_compilation::PreparedModuleInput,
+) -> Option<PathBuf> {
+    let module_symbols = &prepared.prepared_header_syntax.module_symbols;
+    module_symbols
+        .file_roles_by_source
+        .iter()
+        .find_map(|(source_file, role)| {
+            if matches!(
+                *role,
+                FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
+            ) {
+                Some(source_file.to_path_buf(&prepared.string_table))
+            } else {
+                None
+            }
+        })
+}
+
+fn prepared_entry_canonical_file_path(
+    prepared: &crate::compiler_frontend::module_compilation::PreparedModuleInput,
+    source_files: &SourceDatabase,
+) -> Option<PathBuf> {
+    prepared
+        .entry_file_path(source_files)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
 fn module_prepared_source_names(
     module: &super::module_inventory::ModuleCompilationJob,
 ) -> Vec<String> {
-    let prepared_logical_paths = &module
+    let module_symbols = &module
         .prepared
         .semantic
         .prepared_header_syntax
-        .module_symbols
-        .module_file_paths;
-
-    module
-        .prepared
-        .semantic
-        .source_files
+        .module_symbols;
+    let string_table = &module.prepared.semantic.string_table;
+    let mut logical_paths = module_symbols
+        .module_file_paths
         .iter()
-        .filter(|source| prepared_logical_paths.contains(&source.logical_path))
-        .map(|source| {
-            source
-                .canonical_os_path
+        .map(|source_file| source_file.to_portable_string(string_table))
+        .collect::<Vec<_>>();
+    logical_paths.sort();
+
+    logical_paths
+        .into_iter()
+        .map(|logical_path| {
+            Path::new(&logical_path)
                 .file_name()
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
@@ -171,13 +353,28 @@ fn module_prepared_source_names(
         .collect()
 }
 
-fn module_source_paths(module: &super::module_inventory::ModuleCompilationJob) -> HashSet<PathBuf> {
-    module
+fn module_source_paths(
+    module: &super::module_inventory::ModuleCompilationJob,
+    source_files: &SourceDatabase,
+) -> HashSet<PathBuf> {
+    let module_symbols = &module
         .prepared
         .semantic
-        .source_files
+        .prepared_header_syntax
+        .module_symbols;
+    module_symbols
+        .module_file_paths
         .iter()
-        .map(|source| source.canonical_os_path.clone())
+        .filter_map(|source_file| {
+            module_symbols
+                .source_record(source_file, source_files)
+                .and_then(|record| {
+                    record
+                        .canonical_os_path
+                        .clone()
+                        .map(|canonical| canonical.into_path_buf())
+                })
+        })
         .collect()
 }
 
@@ -188,13 +385,21 @@ fn parse_project_config_for_test(
 ) -> Result<(), CompilerMessages> {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        &mut source_files,
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn parse_project_config_for_test_with_html_keys(
@@ -206,13 +411,21 @@ fn parse_project_config_for_test_with_html_keys(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
             .frontend_surface();
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        &mut source_files,
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn parse_project_config_for_test_with_packages(
@@ -222,13 +435,21 @@ fn parse_project_config_for_test_with_packages(
     frontend_surface: &crate::builder_surface::BuilderSurface,
 ) -> Result<(), CompilerMessages> {
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives,
         frontend_surface,
         build_config_inputs: &build_config_inputs,
     };
-    compile_project_config_file(config, config_path, &services, &mut string_table).map(|_| ())
+    compile_project_config_file(
+        config,
+        config_path,
+        &services,
+        &mut source_files,
+        &mut string_table,
+    )
+    .map(|_| ())
 }
 
 fn discover_modules_for_test(
@@ -237,14 +458,21 @@ fn discover_modules_for_test(
     style_directives: &StyleDirectiveRegistry,
 ) -> Result<ModuleCompilationSchedule, CompilerMessages> {
     discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
-        .map(|(schedule, _resource_inputs)| schedule)
+        .map(|(schedule, _resource_inputs, _source_files)| schedule)
 }
 
 fn discover_modules_for_test_with_resource_inputs(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> Result<(ModuleCompilationSchedule, ResourceInputRegistry), CompilerMessages> {
+) -> Result<
+    (
+        ModuleCompilationSchedule,
+        ResourceInputRegistry,
+        SourceDatabase,
+    ),
+    CompilerMessages,
+> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root =
@@ -260,7 +488,10 @@ fn discover_modules_for_test_with_resource_inputs(
         resolver.source_file_kinds(),
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
+    let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -276,7 +507,8 @@ fn discover_modules_for_test_with_resource_inputs(
         resolver.source_file_kinds(),
         &external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -290,19 +522,58 @@ fn discover_modules_for_test_with_resource_inputs(
         resolution_table: &mut external_dependency_resolution_table,
     };
     let mut resource_inputs = ResourceInputRegistry::new();
-    let schedule = discover_all_modules_in_project(
-        config,
-        resolver,
-        &mut project_module_graph,
-        style_directives,
-        &mut external_imports,
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
-        &mut resource_inputs,
-        &mut string_table,
-        #[cfg(feature = "timers")]
-        crate::timing::NO_TIMING_BOUNDARY,
-    )?;
-    Ok((schedule, resource_inputs))
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    let schedule_result = {
+        let (source_files, mut source_spans) = source_owner.split();
+        discover_all_modules_in_project_with_check_only(
+            config,
+            resolver,
+            source_files,
+            &mut source_spans,
+            &mut project_module_graph,
+            style_directives,
+            &mut external_imports,
+            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            &mut resource_inputs,
+            false,
+            &mut selected_source_texts,
+            &mut string_table,
+            #[cfg(feature = "timers")]
+            crate::timing::NO_TIMING_BOUNDARY,
+        )
+    };
+    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
+    source_owner.adopt_pending_span_builders();
+    if let Err(error) = retain_result {
+        let source_files = source_owner
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
+        messages.set_source_database(Arc::new(source_files));
+        return Err(messages);
+    }
+    let schedule = match schedule_result {
+        Ok(schedule) => schedule,
+        Err(failure) => {
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            return Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)));
+        }
+    };
+    let source_files = source_owner
+        .finish()
+        .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+    Ok((schedule, resource_inputs, source_files))
+}
+
+fn discover_modules_and_source_files_for_test(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+) -> Result<(ModuleCompilationSchedule, SourceDatabase), CompilerMessages> {
+    discover_modules_for_test_with_resource_inputs(config, resolver, style_directives)
+        .map(|(schedule, _resource_inputs, source_files)| (schedule, source_files))
 }
 
 fn discover_modules_for_test_with_providers(
@@ -326,7 +597,10 @@ fn discover_modules_for_test_with_providers(
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
+    let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -340,7 +614,8 @@ fn discover_modules_for_test_with_providers(
         resolver.source_file_kinds(),
         external_import_providers,
         &mut string_table,
-    )?;
+    )
+    .map_err(|failure| failure.into_messages(&string_table))?;
     let module_namespace_set = ModuleNamespaceSet::build(
         &source_tree_index,
         &project_module_graph,
@@ -355,18 +630,45 @@ fn discover_modules_for_test_with_providers(
     };
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    discover_all_modules_in_project(
-        config,
-        resolver,
-        &mut project_module_graph,
-        style_directives,
-        &mut external_imports,
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
-        &mut resource_inputs,
-        &mut string_table,
-        #[cfg(feature = "timers")]
-        crate::timing::NO_TIMING_BOUNDARY,
-    )
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    let schedule_result = {
+        let (source_files, mut source_spans) = source_owner.split();
+        discover_all_modules_in_project_with_check_only(
+            config,
+            resolver,
+            source_files,
+            &mut source_spans,
+            &mut project_module_graph,
+            style_directives,
+            &mut external_imports,
+            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            &mut resource_inputs,
+            false,
+            &mut selected_source_texts,
+            &mut string_table,
+            #[cfg(feature = "timers")]
+            crate::timing::NO_TIMING_BOUNDARY,
+        )
+    };
+    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
+    source_owner.adopt_pending_span_builders();
+    if let Err(error) = retain_result {
+        let source_files = source_owner
+            .finish()
+            .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+        let mut messages = CompilerMessages::from_error_ref(error, &string_table);
+        messages.set_source_database(Arc::new(source_files));
+        return Err(messages);
+    }
+    match schedule_result {
+        Ok(schedule) => Ok(schedule),
+        Err(failure) => {
+            let source_files = source_owner
+                .finish()
+                .map_err(|error| CompilerMessages::from_error_ref(error, &string_table))?;
+            Err(failure.into_messages_with_source(&string_table, Arc::new(source_files)))
+        }
+    }
 }
 
 /// Build the Stage 0 namespace resolution context for one project and run a closure against it.
@@ -439,27 +741,27 @@ fn provider_root(path_segments: &[&str], string_table: &mut StringTable) -> Reta
         path.push_str(segment, string_table);
     }
     RetainedDependencyPath {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path,
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        location: SourceLocation::default(),
         dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-            crate::compiler_frontend::symbols::identity::FileId(0),
+            crate::compiler_frontend::source::SourceId::from_index(0),
             0,
         ),
     }
 }
 
-/// Collect synthetic inputs through the production Stage 0 path while retaining the merged table
-/// needed to inspect the rebased syntax identities.
+/// Collect production Stage 0 inputs with their original live source owner.
 fn collect_synthetic_inputs_for_test(
     entry_file_path: &Path,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
-) -> (Vec<PreparedSourceInput>, StringTable) {
+) -> (SourceDatabaseBuilder, Vec<PreparedSourceInput>, StringTable) {
     let mut string_table = StringTable::new();
     let mut external_packages = ExternalPackageRegistry::new();
-    let external_import_providers = crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
+    let external_import_providers =
+        crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::empty();
     let mut external_import_cache =
         crate::builder_surface::external_import_providers::cache::ExternalImportProviderCache::new(
         );
@@ -485,13 +787,13 @@ fn collect_synthetic_inputs_for_test(
     )
     .expect("synthetic source discovery should succeed");
 
-    (collected.input_files, string_table)
+    (collected.source_files, collected.input_files, string_table)
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct SyntheticPreparedIdentitySnapshot {
     logical_path: String,
-    file_id: FileId,
+    file_id: SourceId,
     shell_ids: Vec<DependencyShellId>,
     selected_source_names: Vec<String>,
 }
@@ -500,34 +802,27 @@ struct SyntheticPreparedIdentitySnapshot {
 /// of traversal order.
 fn synthetic_prepared_identity_snapshot(
     prepared: &super::prepared_module::PreparedModule,
+    source_files: &SourceDatabase,
 ) -> Vec<SyntheticPreparedIdentitySnapshot> {
     let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
-    let mut snapshot = prepared
-        .semantic
-        .source_files
+    let path_table = source_files.paths();
+    let mut path_scratch = Vec::new();
+    let mut snapshot = source_files
         .iter()
         .map(|identity| {
-            let logical_path = &identity.logical_path;
-            let file_id = identity.file_id;
+            let logical_path = source_files.legacy_logical_path(identity.id);
+            let file_id = identity.id;
             for header in prepared
                 .semantic
                 .prepared_header_syntax
                 .headers
                 .iter()
-                .filter(|header| header.source_file == *logical_path)
+                .filter(|header| header.source_file == logical_path)
             {
-                assert_eq!(header.tokens.file_id, Some(file_id));
+                assert_eq!(header.tokens.file_id, file_id);
                 assert_eq!(
                     header.tokens.canonical_os_path.as_deref(),
-                    Some(identity.canonical_os_path.as_path())
-                );
-                assert!(
-                    header
-                        .tokens
-                        .tokens
-                        .iter()
-                        .all(|token| token.location.scope == *logical_path),
-                    "header token locations must use the final logical source scope"
+                    identity.canonical_os_path.as_deref()
                 );
                 assert!(
                     header
@@ -535,20 +830,23 @@ fn synthetic_prepared_identity_snapshot(
                         .path_syntax
                         .paths()
                         .iter()
-                        .all(|path| path.location.scope == *logical_path),
-                    "header path locations must use the final logical source scope"
+                        .all(|path| path.span.source() == file_id),
+                    "header path spans must use the final source identity"
                 );
             }
             let clauses = module_symbols
                 .file_dependency_clauses_by_source
-                .get(logical_path)
+                .get(&logical_path)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             let shell_ids = clauses
                 .iter()
                 .map(|clause| {
-                    assert_eq!(clause.location.scope, *logical_path);
-                    assert_eq!(clause.dependency.location.scope, *logical_path);
+                    assert_eq!(
+                        clause.dependency.span.source(),
+                        file_id,
+                        "rebased dependency span must belong to its owning prepared file"
+                    );
                     assert_eq!(
                         clause.dependency.dependency_shell_id.source, file_id,
                         "rebased shell source must belong to its owning prepared file"
@@ -558,15 +856,23 @@ fn synthetic_prepared_identity_snapshot(
                 .collect::<Vec<_>>();
             let selections = module_symbols
                 .dependency_selections_by_source
-                .get(logical_path)
+                .get(&logical_path)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             let selected_source_names = selections
                 .iter()
                 .map(|selection| {
-                    assert_eq!(selection.source_location.scope, *logical_path);
+                    assert_eq!(
+                        selection.source_span.source(),
+                        file_id,
+                        "dependency selection span must belong to its owning prepared file"
+                    );
                     if let Some(alias) = &selection.local_alias {
-                        assert_eq!(alias.location.scope, *logical_path);
+                        assert_eq!(
+                            alias.span.source(),
+                            file_id,
+                            "dependency alias span must belong to its owning prepared file"
+                        );
                     }
                     prepared
                         .semantic
@@ -577,7 +883,11 @@ fn synthetic_prepared_identity_snapshot(
                 .collect::<Vec<_>>();
 
             SyntheticPreparedIdentitySnapshot {
-                logical_path: logical_path.to_portable_string(&prepared.semantic.string_table),
+                logical_path: path_table.render_portable(
+                    identity.logical_path,
+                    &prepared.semantic.string_table,
+                    &mut path_scratch,
+                ),
                 file_id,
                 shell_ids,
                 selected_source_names,
@@ -610,14 +920,22 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (input_files, string_table) =
+    let (mut span_owners, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
+    let (source_files, mut span_view) = span_owners.split();
+    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
+
     let source_byte_count = input_files
         .iter()
-        .map(PreparedSourceInput::source_byte_len)
+        .map(|input| {
+            source_files
+                .retained_text(input.source_id())
+                .expect("synthetic snapshot should be retained")
+                .len()
+        })
         .sum();
-    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
     let preparation_context = super::module_preparation::ModulePreparationContext {
+        source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -632,6 +950,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
@@ -643,12 +962,13 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
         )
         .expect("synthetic outputs should prepare against the retained source table");
-    synthetic_prepared_identity_snapshot(&prepared)
+    synthetic_prepared_identity_snapshot(&prepared, source_files)
 }
 
 #[test]
@@ -667,17 +987,193 @@ fn synthetic_rebinding_makes_file_and_shell_identities_discovery_order_independe
     );
     assert_eq!(
         forward.iter().map(|file| file.file_id).collect::<Vec<_>>(),
-        vec![FileId(0), FileId(1), FileId(2)],
-        "final FileIds must come from the sorted complete closure"
+        vec![
+            SourceId::from_index(1),
+            SourceId::from_index(2),
+            SourceId::from_index(3),
+        ],
+        "final SourceIds must come from the sorted complete closure"
     );
     assert_eq!(
         forward[2].shell_ids,
         vec![
-            DependencyShellId::new(FileId(2), 0),
-            DependencyShellId::new(FileId(2), 1)
+            DependencyShellId::new(SourceId::from_index(3), 0),
+            DependencyShellId::new(SourceId::from_index(3), 1)
         ]
     );
     assert_eq!(forward[2].selected_source_names, vec!["greet", "greet"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn synthetic_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let payload = root.join("payload.bin");
+    let entry = root.join("main.moth");
+    fs::write(&payload, "#[:ok]\n").expect("should write unrecognized-extension payload");
+    symlink(&payload, &entry).expect("should symlink recognized source name onto payload");
+
+    let config = Config::new(root.clone());
+    let resolver = configured_resolver(&config);
+    let style_directives = test_style_directives();
+    let (source_files, input_files, _string_table) =
+        collect_synthetic_inputs_for_test(&entry, &resolver, &style_directives);
+
+    let canonical = fs::canonicalize(&entry).expect("symlinked entry should canonicalize");
+    assert_eq!(
+        canonical
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("bin"),
+        "canonical target must keep the unrecognized extension"
+    );
+    let record = source_files
+        .sources()
+        .get_by_canonical_path(&canonical)
+        .expect("discovered source should retain its identity");
+    assert_eq!(
+        record.kind,
+        Some(SourceKind::Compiler(SourceFileKind::Moth)),
+        "authored .moth kind must survive a canonical .bin target"
+    );
+    assert!(
+        input_files
+            .iter()
+            .any(|input| matches!(input.source, PreparedSourceKind::MothPrepared { .. })),
+        "discovery must prepare the authored Moth source rather than reject it as provider-owned"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(source_root.join("main.moth"), "value #= 1\n").expect("should write entry");
+    let payload = source_root.join("payload.bin");
+    fs::write(&payload, "template body\n").expect("should write unrecognized-extension payload");
+    symlink(&payload, source_root.join("page.mtf"))
+        .expect("should symlink a template name onto the payload");
+
+    let config = Config::new(root.clone());
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+    let mut string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &source_file_kinds,
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should discover the symlinked template");
+
+    let registration_index = source_tree_index.source_registration_index();
+    let source_files = SourceDatabase::from_ordered_registration_index(
+        &registration_index,
+        resolver.entry_root(),
+        Some(&resolver),
+        &mut string_table,
+    )
+    .expect("indexed inventory should register");
+
+    let canonical = fs::canonicalize(source_root.join("page.mtf"))
+        .expect("symlinked template should canonicalize");
+    assert_eq!(
+        canonical
+            .extension()
+            .and_then(|extension| extension.to_str()),
+        Some("bin"),
+        "canonical target must keep the unrecognized extension"
+    );
+    assert_eq!(
+        source_files
+            .get_by_canonical_path(&canonical)
+            .and_then(|record| record.kind),
+        Some(SourceKind::Compiler(SourceFileKind::MothTemplate)),
+        "Stage 0's authored .mtf classification must reach the record"
+    );
+}
+
+#[test]
+fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees() {
+    // WHY: a flat portable key sorts `a-b/@b.moth` before `a/@a.moth` because '-' precedes '/'.
+    // Assigned SourceIds must follow module-origin order instead: module `a` before module `a-b`.
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(source_root.join("a")).expect("should create module a");
+    fs::create_dir_all(source_root.join("a-b")).expect("should create module a-b");
+    fs::write(source_root.join("a/@a.moth"), "value #= 1\n").expect("should write module a root");
+    fs::write(source_root.join("a-b/@b.moth"), "value #= 1\n")
+        .expect("should write module a-b root");
+
+    let mut config = Config::new(root.clone());
+    config.entry_root = PathBuf::from("src");
+    let resolver = configured_resolver(&config);
+    let mut string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should discover sibling modules");
+
+    let registration_index = source_tree_index.source_registration_index();
+    let source_files = SourceDatabase::from_ordered_registration_index(
+        &registration_index,
+        resolver.entry_root(),
+        Some(&resolver),
+        &mut string_table,
+    )
+    .expect("indexed inventory should register");
+
+    let path_table = source_files.paths();
+    let mut path_scratch = Vec::new();
+    let assigned_logical_paths = source_files
+        .iter()
+        .map(|record| {
+            path_table.render_portable(record.logical_path, &string_table, &mut path_scratch)
+        })
+        .collect::<Vec<_>>();
+    let mut flat_portable_order = assigned_logical_paths.clone();
+    flat_portable_order.sort();
+
+    assert_eq!(
+        assigned_logical_paths,
+        vec!["a/@a.moth", "a-b/@b.moth"],
+        "indexed registration must assign SourceIds in Stage 0 module-origin order"
+    );
+    assert_ne!(
+        assigned_logical_paths, flat_portable_order,
+        "fixture must disagree with flat portable-key order"
+    );
 }
 
 #[test]
@@ -698,7 +1194,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let helper_file_path =
         fs::canonicalize(root.join("helper.moth")).expect("helper should canonicalize");
     let canonical_root = fs::canonicalize(&root).expect("fixture root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
     crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&canonical_root);
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
@@ -712,22 +1208,24 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
     let style_directives = test_style_directives();
-    let (input_files, string_table) =
+    let (mut span_owners, input_files, string_table) =
         collect_synthetic_inputs_for_test(&entry_file_path, &resolver, &style_directives);
+    let (source_files, mut span_view) = span_owners.split();
+    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     assert!(
         input_files
             .iter()
-            .all(|input| matches!(input, PreparedSourceInput::MothPrepared { .. })),
+            .all(|input| matches!(input.source, PreparedSourceKind::MothPrepared { .. })),
         "every synthetic Moth source must carry its complete first preparation"
     );
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&entry_file_path),
+        super::source_loading_test_support::source_read_count_for_path_for_test(&entry_file_path),
         1,
         "the entry source must be read once"
     );
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&helper_file_path),
+        super::source_loading_test_support::source_read_count_for_path_for_test(&helper_file_path),
         1,
         "the imported source must be read once"
     );
@@ -744,10 +1242,15 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
 
     let source_byte_count = input_files
         .iter()
-        .map(PreparedSourceInput::source_byte_len)
+        .map(|input| {
+            source_files
+                .retained_text(input.source_id())
+                .expect("synthetic source should retain its snapshot")
+                .len()
+        })
         .sum();
-    let local_string_table = string_table.fork_source().fork_for_module().into_parts().0;
     let preparation_context = super::module_preparation::ModulePreparationContext {
+        source_files,
         style_directives: &style_directives,
         project_path_resolver: Some(resolver),
     };
@@ -763,6 +1266,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
@@ -774,14 +1278,12 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         .prepare_module(
             stable_origin,
             input_files,
+            &mut span_view,
             &entry_file_path,
             local_string_table,
             source_byte_count,
         )
         .expect("retained synthetic outputs should prepare once");
-
-    assert_eq!(prepared.semantic.source_file_count, 2);
-    assert_eq!(prepared.semantic.source_files.iter().count(), 2);
     assert_eq!(
         prepared
             .semantic
@@ -793,12 +1295,12 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         "one final header aggregation must retain both prepared source identities"
     );
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&entry_file_path),
+        super::source_loading_test_support::source_read_count_for_path_for_test(&entry_file_path),
         1,
         "final aggregation must not reread the entry source"
     );
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&helper_file_path),
+        super::source_loading_test_support::source_read_count_for_path_for_test(&helper_file_path),
         1,
         "final aggregation must not reread the imported source"
     );
@@ -839,8 +1341,11 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let root = _temp.path().to_path_buf();
 
     fs::write(root.join("main.moth"), "@helper\n").expect("should write entry");
-    fs::write(root.join("helper.moth"), "@core/math sin,\n")
-        .expect("should write malformed helper");
+    fs::write(
+        root.join("helper.moth"),
+        "-- é🦋\n@core/math sin,\nvalue = 1\n",
+    )
+    .expect("should write malformed helper");
 
     let config = Config::new(root.clone());
     let resolver = configured_resolver(&config);
@@ -850,7 +1355,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let helper_file_path =
         fs::canonicalize(root.join("helper.moth")).expect("helper should canonicalize");
     let canonical_root = fs::canonicalize(&root).expect("fixture root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
     crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&canonical_root);
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_capture =
@@ -877,7 +1382,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     let source_file_kinds = crate::builder_surface::SourceFileKindRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    let messages = match super::source_discovery::collect_reachable_input_files(
+    let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
         &resolver,
         &style_directives,
@@ -887,8 +1392,11 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &mut string_table,
     ) {
         Ok(_) => panic!("malformed synthetic preparation should diagnose"),
-        Err(messages) => messages,
+        Err(error) => error.into_parts(),
     };
+    let source_files =
+        source_database.expect("diagnosed discovery must publish its finalized source context");
+    let messages = failure.into_messages_with_source(&string_table, Arc::new(source_files));
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(
         diagnostics.len(),
@@ -897,15 +1405,62 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
     );
     assert!(matches!(
         diagnostics[0].payload,
-        DiagnosticPayload::InvalidDependencyClause { .. }
+        DiagnosticPayload::InvalidDependencyClause {
+            reason: InvalidDependencyClauseReason::ContinuationEnteredStatement,
+            ..
+        }
     ));
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("diagnosed discovery must publish its finalized source context");
+    let entry_id = source_files
+        .get_by_canonical_path(&entry_file_path)
+        .expect("the previously prepared entry must remain in the diagnosed context")
+        .id;
+    let helper_id = source_files
+        .get_by_canonical_path(&helper_file_path)
+        .expect("the failed source must remain in the diagnosed context")
+        .id;
+    assert_eq!(helper_id, SourceId::from_index(1));
+    assert_eq!(entry_id, SourceId::from_index(2));
+    let diagnostic_span = diagnostics[0]
+        .primary_span
+        .expect("preparation diagnosis must retain its exact span");
+    assert_eq!(diagnostic_span.source(), helper_id);
+    let diagnostic_range = diagnostic_span.byte_range(source_files);
+    let helper_text = source_files.retained_text(helper_id).unwrap();
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&entry_file_path),
+        &helper_text[diagnostic_range.start() as usize..diagnostic_range.end() as usize],
+        "value"
+    );
+    assert_eq!(diagnostics[0].labels.len(), 1);
+    let comma_label = &diagnostics[0].labels[0];
+    let comma_span = comma_label
+        .span
+        .expect("discovery retains every preparation label span");
+    assert_eq!(
+        comma_span.source(),
+        helper_id,
+        "related spans must use the finalized source identity"
+    );
+    let comma_range = comma_span.byte_range(source_files);
+    assert_eq!(
+        &helper_text[comma_range.start() as usize..comma_range.end() as usize],
+        ","
+    );
+    assert_eq!(source_files.retained_text(entry_id), Some("@helper\n"));
+    assert_eq!(
+        source_files.retained_text(helper_id),
+        Some("-- é🦋\n@core/math sin,\nvalue = 1\n")
+    );
+    assert_eq!(
+        super::source_loading_test_support::source_read_count_for_path_for_test(&entry_file_path),
         1,
         "a diagnosed entry source must be read once"
     );
     assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&helper_file_path),
+        super::source_loading_test_support::source_read_count_for_path_for_test(&helper_file_path),
         1,
         "a diagnosed imported source must be read once"
     );
@@ -1056,8 +1611,9 @@ fn direct_selection_resolves_source_package_facade() {
     );
 }
 
-/// Discover modules and return the populated project module graph plus the shared string table
-/// so focused Phase 5b invariant tests can inspect inserted edges and retained source locations.
+/// Discover modules and return the populated project module graph plus the shared source database
+/// and string table so focused Phase 5b invariant tests can inspect inserted edges and retained
+/// source locations.
 fn discover_modules_and_graph_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
@@ -1066,6 +1622,7 @@ fn discover_modules_and_graph_for_test(
     ModuleCompilationSchedule,
     super::project_module_graph::ProjectModuleGraph,
     super::source_tree_index::SourceTreeIndex,
+    SourceDatabase,
     StringTable,
 ) {
     let mut string_table = StringTable::new();
@@ -1085,6 +1642,8 @@ fn discover_modules_and_graph_for_test(
         &mut string_table,
     )
     .expect("source tree index should build");
+    let source_files = source_database_for_test(&source_tree_index, resolver, &mut string_table);
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
     let mut project_module_graph =
         super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&source_tree_index);
     let mut external_packages = ExternalPackageRegistry::new();
@@ -1116,24 +1675,39 @@ fn discover_modules_and_graph_for_test(
     };
     let mut resource_inputs = ResourceInputRegistry::new();
 
-    let modules = discover_all_modules_in_project(
-        config,
-        resolver,
-        &mut project_module_graph,
-        style_directives,
-        &mut external_imports,
-        DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
-        &mut resource_inputs,
-        &mut string_table,
-        #[cfg(feature = "timers")]
-        crate::timing::NO_TIMING_BOUNDARY,
-    )
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    let modules = {
+        let (source_files, mut source_spans) = source_owner.split();
+        discover_all_modules_in_project_with_check_only(
+            config,
+            resolver,
+            source_files,
+            &mut source_spans,
+            &mut project_module_graph,
+            style_directives,
+            &mut external_imports,
+            DirectoryDependencyResolution::project(&module_namespace_set, &source_tree_index),
+            &mut resource_inputs,
+            false,
+            &mut selected_source_texts,
+            &mut string_table,
+            #[cfg(feature = "timers")]
+            crate::timing::NO_TIMING_BOUNDARY,
+        )
+    }
     .expect("module discovery should pass for focused graph-edge tests");
+    let retain_result = selected_source_texts.retain_into(source_owner.sources_mut());
+    source_owner.adopt_pending_span_builders();
+    retain_result.expect("selected source snapshots should retain");
+    let source_files = source_owner
+        .finish()
+        .expect("discovery source tables should finalize");
 
     (
         modules,
         project_module_graph,
         source_tree_index,
+        source_files,
         string_table,
     )
 }
@@ -1176,6 +1750,30 @@ fn first_error_diagnostic(messages: &CompilerMessages) -> &CompilerDiagnostic {
         .error_diagnostics()
         .next()
         .expect("expected at least one typed error diagnostic")
+}
+
+fn assert_primary_span_text(messages: &CompilerMessages, source_path: &Path, expected_text: &str) {
+    let diagnostic = first_error_diagnostic(messages);
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("diagnostic should retain its source database");
+    let source_path = fs::canonicalize(source_path).expect("diagnostic source path should resolve");
+    let source_id = source_files
+        .get_by_canonical_path(&source_path)
+        .expect("diagnostic source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("diagnostic should retain its exact primary span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("diagnostic source snapshot should remain available");
+    assert_eq!(
+        &source_text[range.start() as usize..range.end() as usize],
+        expected_text
+    );
 }
 
 #[test]
@@ -1362,7 +1960,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
 
-    let messages = super::source_tree_index::SourceTreeIndex::discover(
+    let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &canonical_root,
@@ -1375,6 +1973,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
         &mut string_table,
     )
     .expect_err("non-skipped bst/folder collision should be rejected");
+    let messages = failure.into_messages(&string_table);
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
@@ -1436,7 +2035,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
     let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
     let mut string_table = StringTable::new();
 
-    let messages = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
+    let failure = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
         &entry_file,
         &config,
         &crate::builder_surface::SourcePackageRegistry::default(),
@@ -1445,6 +2044,7 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
         &mut string_table,
     )
     .expect_err("single-file normal module roots should reject real dependency-name collisions");
+    let messages = failure.into_messages(&string_table);
 
     assert!(matches!(
         first_invalid_config_reason(&messages),
@@ -1466,7 +2066,7 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
     let canonical_entry_root =
         fs::canonicalize(&entry_root).expect("entry root should canonicalize");
     let mut string_table = StringTable::new();
-    let messages = super::source_tree_index::SourceTreeIndex::discover(
+    let failure = super::source_tree_index::SourceTreeIndex::discover(
         canonical_entry_root,
         super::source_tree_index::SourceTreeProjectContext {
             project_root: &canonical_root,
@@ -1479,6 +2079,7 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         &mut string_table,
     )
     .expect_err("a module directory may contain only one normal module root");
+    let messages = failure.into_messages(&string_table);
 
     let reason = first_invalid_config_reason(&messages);
     let InvalidConfigReason::MultipleModuleRootFiles {
@@ -1489,8 +2090,8 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         panic!("expected duplicate module root diagnostic, got {reason:?}");
     };
     assert_eq!(
-        *directory,
-        string_table.intern(&fs::canonicalize(&entry_root).unwrap().display().to_string())
+        messages.string_table.resolve(*directory),
+        fs::canonicalize(&entry_root).unwrap().display().to_string()
     );
     assert_eq!(candidates.len(), 2);
 }
@@ -1649,7 +2250,7 @@ fn fixture_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAssetIdent
         ),
         canonical_source_path,
         asset_kind: "js".to_owned(),
-        authored_import_location: SourceLocation::default(),
+        source_span: None,
     }
 }
 
@@ -1725,6 +2326,93 @@ fn parses_config_constant_declarations() {
 }
 
 #[test]
+fn config_span_tables_finalize_for_success_and_diagnosed_results() {
+    let cases = [
+        (
+            "successful",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+            false,
+        ),
+        (
+            "diagnosed",
+            "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    release_output = \"src/out\",\n|\n",
+            true,
+        ),
+    ];
+
+    for (label, source, diagnosed) in cases {
+        let _temp = tempfile::tempdir().expect("should create temporary project");
+        let root = _temp.path().to_path_buf();
+        fs::create_dir(root.join("src")).expect("should create the source directory");
+        let config_path = root.join(settings::CONFIG_FILE_NAME);
+        fs::write(&config_path, source).expect("should write config");
+
+        let mut config = Config::new(root);
+        let style_directives = test_style_directives();
+        let frontend_surface =
+            crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new()
+                .frontend_surface();
+        let build_config_inputs =
+            crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+        let services = ProjectConfigParseServices {
+            style_directives: &style_directives,
+            frontend_surface: &frontend_surface,
+            build_config_inputs: &build_config_inputs,
+        };
+        let mut string_table = StringTable::new();
+        let mut source_files = SourceDatabase::empty();
+
+        let result = compile_project_config_file(
+            &mut config,
+            &config_path,
+            &services,
+            &mut source_files,
+            &mut string_table,
+        );
+        if diagnosed {
+            let messages = result.expect_err("invalid output settings should diagnose");
+            assert!(
+                messages.error_diagnostics().any(|diagnostic| {
+                    matches!(
+                        &diagnostic.payload,
+                        DiagnosticPayload::InvalidConfig {
+                            reason: InvalidConfigReason::InvalidOutputFolder {
+                                reason: InvalidOutputFolderReason::InsideOrEqualToEntryRoot,
+                                ..
+                            },
+                            ..
+                        }
+                    )
+                }),
+                "{label} config should retain its typed output diagnostic",
+            );
+        } else {
+            result.expect("valid config should compile and apply");
+        }
+
+        let canonical_config_path =
+            fs::canonicalize(&config_path).expect("config path should canonicalize");
+        let config_file_id = source_files
+            .get_by_canonical_path(&canonical_config_path)
+            .expect("compiled config should have a registered source slot")
+            .id;
+        assert!(
+            source_files.retained_text(config_file_id).is_some(),
+            "{label} config should retain the compiled snapshot",
+        );
+
+        let installation_error = source_files
+            .install_extended_spans(config_file_id, ExtendedSpanBuilder::default().freeze())
+            .expect_err("the config span table should already be installed");
+        assert_eq!(
+            installation_error.error_type,
+            ErrorType::Compiler,
+            "{label} config should reject a second span-table installation",
+        );
+    }
+}
+
+#[test]
 fn persists_direct_project_config_resolution_records_in_live_config() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -1755,10 +2443,29 @@ fn loads_canonical_config_file_from_project_root() {
         "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
     )
     .expect("should write config");
+    fs::create_dir_all(root.join("src/alpha")).expect("should create first module directory");
+    fs::create_dir_all(root.join("src/beta")).expect("should create second module directory");
+    fs::write(
+        root.join("src/alpha/@alpha.moth"),
+        "@drawing.js as drawing\nvalue = 1\n",
+    )
+    .expect("should write first module root");
+    fs::write(
+        root.join("src/alpha/drawing.js"),
+        "export function draw() {}\n",
+    )
+    .expect("should write first module provider");
+    fs::write(root.join("src/beta/@beta.moth"), "").expect("should write second module root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let mut frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    frontend_surface
+        .external_import_providers
+        .register(Arc::new(ResolvingCountingProvider::new(Arc::clone(
+            &provider_calls,
+        ))));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
         style_directives: &style_directives,
@@ -1766,12 +2473,108 @@ fn loads_canonical_config_file_from_project_root() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
 
-    load_project_config(&mut config, &services, &mut string_table)
-        .expect("canonical config should load");
+    let validated_output_settings = load_project_config(
+        &mut config,
+        &services,
+        &mut string_table,
+        Some(&mut source_files),
+    )
+    .expect("canonical config should load");
 
     assert_eq!(config.config_file_path(), root.join("config.moth"));
     assert_eq!(config.entry_root, PathBuf::from("src"));
+
+    let mut project_source_files = Some(Arc::new(source_files));
+    let frontend = compile_project_frontend_with_inputs(
+        &mut config,
+        crate::build_system::BuildProfile::Dev,
+        validated_output_settings.as_ref(),
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+        &mut project_source_files,
+        &build_config_inputs,
+        FrontendCompilationMode::Canonical,
+    )
+    .expect("directory frontend should extend the config source database");
+
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "the provider-backed alpha source should resolve its physical provider once",
+    );
+    let alpha = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry_point
+                .ends_with(Path::new("alpha/@alpha.moth"))
+        })
+        .expect("expected alpha module artefact");
+    let alpha_provider_package_paths = alpha
+        .module
+        .link_facts
+        .external_import_candidates
+        .iter()
+        .filter_map(|candidate| {
+            alpha
+                .module
+                .link_facts
+                .external_package_registry
+                .get_package_by_id(candidate.package_id)
+                .map(|package| package.path.clone())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        alpha_provider_package_paths,
+        vec!["@test/resolving".to_owned()],
+        "alpha should retain the provider candidate resolved for its own source",
+    );
+
+    let project_source_files = project_source_files
+        .as_ref()
+        .expect("directory frontend should retain the project source database");
+    let canonical_config = fs::canonicalize(root.join(settings::CONFIG_FILE_NAME))
+        .expect("config should canonicalize");
+    let canonical_alpha =
+        fs::canonicalize(root.join("src/alpha/@alpha.moth")).expect("alpha should canonicalize");
+    let canonical_beta =
+        fs::canonicalize(root.join("src/beta/@beta.moth")).expect("beta should canonicalize");
+    let canonical_alpha_provider =
+        fs::canonicalize(root.join("src/alpha/drawing.js")).expect("provider should canonicalize");
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_config)
+            .expect("config should have a source identity")
+            .id,
+        SourceId::from_index(1)
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_alpha)
+            .expect("alpha should have a source identity")
+            .id,
+        SourceId::from_index(2)
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_alpha_provider)
+            .expect("provider should have a source identity")
+            .id,
+        SourceId::from_index(3),
+    );
+    assert_eq!(
+        project_source_files
+            .get_by_canonical_path(&canonical_beta)
+            .expect("beta should have a source identity")
+            .id,
+        SourceId::from_index(4)
+    );
 }
 
 #[test]
@@ -1840,9 +2643,15 @@ fn directory_projects_require_config_moth() {
         build_config_inputs: &build_config_inputs,
     };
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::empty();
 
-    let messages = load_project_config(&mut config, &services, &mut string_table)
-        .expect_err("a directory project without config.moth must fail");
+    let messages = load_project_config(
+        &mut config,
+        &services,
+        &mut string_table,
+        Some(&mut source_files),
+    )
+    .expect_err("a directory project without config.moth must fail");
     assert!(
         messages.diagnostics().any(|diagnostic| matches!(
             diagnostic.payload,
@@ -1968,18 +2777,9 @@ fn rejects_section_output_inside_or_equal_to_entry_root() {
     };
 
     // The output roots resolve from the grouped section now, so the diagnostic underlines the
-    // section's value location on its authored line. Locations are 0-indexed.
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        config_path.as_path(),
-        "the diagnostic should point at the authored config file"
-    );
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number, 4,
-        "the html section is authored after the grouped project record"
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the output-folder diagnostic should retain its authored span"
     );
 }
 
@@ -2372,17 +3172,10 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics[0];
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        src.join("@page.moth")
-            .canonicalize()
-            .expect("entry path should canonicalize")
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the malformed dependency diagnostic should retain its authored span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
     assert!(
         matches!(
             &diagnostic.payload,
@@ -2411,15 +3204,10 @@ fn config_dependency_parse_failure_keeps_precise_location_in_compiler_messages()
     let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
     assert_eq!(diagnostics.len(), 1);
     let diagnostic = diagnostics[0];
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_path_buf(&messages.string_table),
-        config_path
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the config dependency diagnostic should retain its authored span"
     );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
     assert!(
         matches!(
             &diagnostic.payload,
@@ -2473,10 +3261,7 @@ fn discover_modules_uses_reachable_files_only() {
     let page_module = modules
         .iter()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 == Some(OsStr::new("@page.moth"))
@@ -2595,7 +3380,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
         shells,
         vec![
             crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-                crate::compiler_frontend::symbols::identity::FileId(0),
+                crate::compiler_frontend::source::SourceId::from_index(1),
                 0
             )
         ],
@@ -2643,16 +3428,16 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
     .expect("config parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("module discovery should pass");
+    let (modules, source_files) =
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
+            .expect("module discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules.len(), 1, "expected exactly one entry module");
 
     let source_theme = fs::canonicalize(src.join("helpers/theme.moth")).expect("canonical source");
     let package_theme =
         fs::canonicalize(lib.join("helpers/theme.moth")).expect("canonical package file");
-    let discovered_paths = module_source_paths(modules[0]);
-
+    let discovered_paths = module_source_paths(modules[0], &source_files);
     assert!(
         discovered_paths.contains(&source_theme),
         "module-root-relative dependencies should resolve from the entry root"
@@ -2724,7 +3509,19 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
     let discovered_paths: HashSet<_> = collected
         .input_files
         .iter()
-        .map(|input| input.source_path().to_path_buf())
+        .map(|input| {
+            collected
+                .source_files
+                .sources()
+                .get(input.source_id())
+                .and_then(|identity| {
+                    identity
+                        .canonical_os_path
+                        .clone()
+                        .map(|canonical| canonical.into_path_buf())
+                })
+                .expect("discovered source should have a canonical path")
+        })
         .collect();
     let entry_namesake =
         fs::canonicalize(src.join("helpers.moth")).expect("canonical entry namesake");
@@ -2784,10 +3581,7 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
     let entry_names = modules
         .iter()
         .map(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .and_then(OsStr::to_str)
@@ -2836,10 +3630,7 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -2885,17 +3676,15 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("missing user-authored resource should remain a retained outcome");
+    let (modules, _resource_inputs, source_files) =
+        discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
+            .expect("missing user-authored resource should remain a retained outcome");
     let module = modules
         .waves()
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -2908,10 +3697,32 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
         .iter()
         .collect::<Vec<_>>();
     assert_eq!(references.len(), 1);
-    assert!(matches!(
-        references[0].outcome,
-        ResolvedFileReferenceOutcome::Diagnostic(_)
-    ));
+    let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &references[0].outcome else {
+        panic!("missing resource should retain a typed diagnostic outcome");
+    };
+    let source_id = source_files
+        .get_by_canonical_path(
+            &fs::canonicalize(src.join("@page.moth"))
+                .expect("entry source path should canonicalize"),
+        )
+        .expect("entry source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("Stage 0 file-reference diagnostics retain their authored span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(&source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("entry source snapshot should remain available");
+    let expected_start = source_text
+        .find("@assets/missing.svg")
+        .expect("fixture should contain the missing resource path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(
+        range.end(),
+        expected_start + "@assets/missing.svg".len() as u32
+    );
 }
 
 #[test]
@@ -2945,10 +3756,7 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -3005,10 +3813,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -3070,7 +3875,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs) =
+    let (modules, resource_inputs, _source_files) =
         discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
             .expect("child-boundary failures should remain retained outcomes");
     let module = modules
@@ -3078,10 +3883,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -3162,7 +3964,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     )
     .expect("config should parse");
     let resolver = configured_resolver(&config);
-    let (modules, resource_inputs) =
+    let (modules, resource_inputs, _source_files) =
         discover_modules_for_test_with_resource_inputs(&config, &resolver, &style_directives)
             .expect("symlink-ancestor failures should remain retained outcomes");
     let module = modules
@@ -3170,10 +3972,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -3240,10 +4039,7 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@b.moth")
@@ -3347,10 +4143,13 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
         .input_files
         .iter()
         .map(|input| {
-            input
-                .source_path()
-                .file_name()
-                .and_then(OsStr::to_str)
+            collected
+                .source_files
+                .sources()
+                .get(input.source_id())
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
                 .unwrap_or_default()
                 .to_owned()
         })
@@ -3360,6 +4159,30 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
     assert!(input_paths.contains("second.mtf"));
     assert!(input_paths.contains("notes.md"));
     assert!(!input_paths.contains("helper.moth"));
+
+    // The Markdown target is never tokenized, so it reaches discovery's cache-miss branch. Its
+    // snapshot must arrive in the final slot: nothing reads this source again from disk.
+    let markdown_source_id = collected
+        .input_files
+        .iter()
+        .map(PreparedSourceInput::source_id)
+        .find(|source_id| {
+            collected
+                .source_files
+                .sources()
+                .get(*source_id)
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::file_name)
+                == Some(OsStr::new("notes.md"))
+        })
+        .expect("the Markdown content target should be a prepared input");
+    assert_eq!(
+        collected
+            .source_files
+            .sources()
+            .retained_text(markdown_source_id),
+        Some("# notes\n")
+    );
 
     let references = collected.resolved_file_references;
     assert_eq!(references.len(), 6);
@@ -3575,10 +4398,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -3986,15 +4806,9 @@ fn authored_config_keeps_non_canonical_spelling_in_duplicate_diagnostic() {
         diagnostic.payload
     );
 
-    // The diagnostic location scope must keep the non-canonical authored spelling, proving the
-    // same interned identity used for tokenization and classification is preserved for rendering.
-    let rendered_scope = diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&messages.string_table);
     assert!(
-        rendered_scope.contains("sub") && rendered_scope.contains(".."),
-        "expected non-canonical authored spelling in diagnostic scope, got: {rendered_scope}"
+        diagnostic.primary_span.is_some(),
+        "the duplicate-key diagnostic should retain its authored span"
     );
 }
 
@@ -4372,7 +5186,8 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
             ) else {
                 panic!("source-package @project dependency must be rejected");
             };
-            let messages = error.into_messages(string_table);
+            let failure = error.into_failure(string_table);
+            let messages = failure.into_messages(string_table);
             let diagnostic = first_error_diagnostic(&messages);
             assert!(matches!(
                 diagnostic.payload,
@@ -4586,8 +5401,11 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     .expect("should write config");
 
     // Entry file imports a .js file explicitly.
-    fs::write(src.join("@page.moth"), "@drawing.js as drawing\n#[:ok]\n")
-        .expect("should write entry");
+    fs::write(
+        src.join("@page.moth"),
+        "-- é🦋\n@drawing.js as drawing\n#[:ok]\n",
+    )
+    .expect("should write entry");
 
     // The .js file actually exists on disk.
     fs::write(src.join("drawing.js"), "export function draw() {}\n").expect("should write js file");
@@ -4629,6 +5447,58 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
             diagnostic.payload
         );
     }
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@drawing.js");
+
+    let mut source_string_table = StringTable::new();
+    let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
+    let entry_root =
+        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let empty_providers = ExternalImportProviderRegistry::empty();
+    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
+        entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        resolver.source_file_kinds(),
+        &empty_providers,
+        &mut source_string_table,
+    )
+    .expect("source tree index should rebuild for span assertions");
+    let mut source_files =
+        source_database_for_test(&source_tree_index, &resolver, &mut source_string_table);
+    let entry_path =
+        fs::canonicalize(src.join("@page.moth")).expect("entry source path should canonicalize");
+    let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
+    selected_source_texts
+        .load(&entry_path)
+        .expect("entry source snapshot should load");
+    selected_source_texts
+        .retain_into(&mut source_files)
+        .expect("entry source snapshot should retain");
+    let source_id = source_files
+        .get_by_canonical_path(&entry_path)
+        .expect("entry source should remain in the source database")
+        .id;
+    let span = diagnostic
+        .primary_span
+        .expect("provider diagnostic should retain its authored path span");
+    assert_eq!(span.source(), source_id);
+    let range = span.byte_range(&source_files);
+    let source_text = source_files
+        .retained_text(source_id)
+        .expect("entry source snapshot should remain available");
+    let expected_start = source_text
+        .find("@drawing.js")
+        .expect("fixture should contain the provider path") as u32;
+    assert_eq!(range.start(), expected_start);
+    assert_eq!(
+        range.end(),
+        expected_start + "@drawing.js".len() as u32,
+        "provider span should cover the full UTF-8 path token"
+    );
 }
 
 #[test]
@@ -4857,10 +5727,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     let entry_module = modules
         .iter()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@page.moth")
@@ -4876,10 +5743,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
     let docs_module = modules
         .iter()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@docs.moth")
@@ -5220,6 +6084,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
             diagnostic.payload
         );
     }
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@intro");
 }
 
 #[test]
@@ -5249,7 +6114,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 
     let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
         .expect("module discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
@@ -5258,7 +6123,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     for source in [src.join("@page.moth"), src.join("helper.moth")] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
-            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            super::source_loading_test_support::source_read_count_for_path_for_test(&canonical),
             1,
             "each selected Moth source should be read exactly once"
         );
@@ -5271,8 +6136,8 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 
 #[test]
 fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
-    assert!(!super::source_discovery::should_parallelize_owned_source_preparation(15));
-    assert!(super::source_discovery::should_parallelize_owned_source_preparation(16));
+    assert!(!should_parallelize_owned_source_preparation(15));
+    assert!(should_parallelize_owned_source_preparation(16));
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
@@ -5317,7 +6182,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 
     let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
     crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&canonical_root);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
@@ -5342,11 +6207,19 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         .chain(unreachable_names.iter().map(|name| src.join(name)))
         .collect::<Vec<_>>();
     for source_path in &all_source_paths {
-        let canonical_path = fs::canonicalize(source_path).expect("source should canonicalize");
+        let canonical = fs::canonicalize(source_path).expect("source should canonicalize");
+        let expected_reads = if unreachable_names
+            .iter()
+            .any(|name| source_path.ends_with(name))
+        {
+            0
+        } else {
+            1
+        };
         assert_eq!(
-            super::source_loading::source_read_count_for_path_for_test(&canonical_path),
-            1,
-            "each owned candidate should be read exactly once, including speculative sources"
+            super::source_loading_test_support::source_read_count_for_path_for_test(&canonical),
+            expected_reads,
+            "selected sources should be read once while unselected sources stay unread"
         );
     }
 
@@ -5412,80 +6285,6 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 }
 
 #[test]
-fn project_source_ids_are_prepared_into_owned_inputs_without_a_retained_store() {
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src dir");
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
-    )
-    .expect("should write config");
-    fs::write(src.join("@page.moth"), "value #= 1\n").expect("should write entry");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let project_root = fs::canonicalize(&root).expect("project root should canonicalize");
-    let entry_root = fs::canonicalize(&src).expect("entry root should canonicalize");
-    let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
-    let mut string_table = StringTable::new();
-    let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
-        entry_root,
-        super::source_tree_index::SourceTreeProjectContext {
-            project_root: &project_root,
-            validated_output_settings: None,
-        },
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &ExternalImportProviderRegistry::default(),
-        &mut string_table,
-    )
-    .expect("source tree index should build");
-    let source_id = source_tree_index
-        .source_id_for_canonical_path(&entry_path)
-        .expect("entry should have a dense source ID");
-
-    let _counter_guard = lock_source_read_counter_tests();
-    super::source_loading::reset_source_read_count_for_test(&project_root);
-
-    let first = match super::source_discovery::prepare_owned_source_input(
-        source_id,
-        &source_tree_index,
-        &style_directives,
-        &mut string_table,
-    ) {
-        Ok(input) => input,
-        Err(_) => panic!("direct source preparation should succeed"),
-    };
-    let second = match super::source_discovery::prepare_owned_source_input(
-        source_id,
-        &source_tree_index,
-        &style_directives,
-        &mut string_table,
-    ) {
-        Ok(input) => input,
-        Err(_) => panic!("a separately requested input should prepare directly"),
-    };
-
-    assert_eq!(
-        super::source_loading::source_read_count_for_path_for_test(&entry_path),
-        2,
-        "direct preparation has no project-wide payload cache"
-    );
-    assert!(matches!(first, PreparedSourceInput::Moth { .. }));
-    assert!(matches!(second, PreparedSourceInput::Moth { .. }));
-}
-
-#[test]
 fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
@@ -5539,7 +6338,7 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
         .collect::<Vec<_>>();
     let mut string_table = StringTable::new();
 
-    let input_files = super::source_discovery::load_missing_source_paths_for_test(
+    let (source_files, input_files) = load_missing_source_paths_for_test(
         source_paths,
         crate::builder_surface::SourceFileKind::PlainMarkdown,
         &mut string_table,
@@ -5549,9 +6348,11 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
     let loaded_names = input_files
         .iter()
         .map(|input| {
-            input
-                .source_path()
-                .file_name()
+            source_files
+                .get(input.source_id())
+                .and_then(|identity| identity.canonical_os_path.as_deref())
+                .and_then(Path::to_str)
+                .and_then(|path| Path::new(path).file_name())
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
                 .to_owned()
@@ -5563,12 +6364,15 @@ fn stage0_parallel_missing_source_loading_preserves_input_order() {
 
     assert_eq!(loaded_names, expected_names);
     for (index, input_file) in input_files.iter().enumerate() {
-        match input_file {
-            PreparedSourceInput::PlainMarkdown { source_code, .. } => {
-                assert_eq!(source_code, &format!("# Asset {index}\n"));
-            }
-            _ => panic!("missing-source loading should produce PlainMarkdown inputs"),
-        }
+        assert!(
+            matches!(input_file.source, PreparedSourceKind::PlainMarkdown),
+            "missing-source loading should produce PlainMarkdown inputs"
+        );
+        let source_code = source_files
+            .retained_text(input_file.source_id())
+            .expect("loaded source should retain its snapshot");
+        let expected_source = format!("# Asset {index}\n");
+        assert_eq!(source_code, expected_source);
     }
 }
 
@@ -5580,26 +6384,158 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     let missing_source = root.join("missing.md");
     let mut string_table = StringTable::new();
 
-    let messages = super::source_discovery::load_missing_source_path_for_test(
+    let messages = load_missing_source_path_for_test(
         missing_source.clone(),
         crate::builder_surface::SourceFileKind::PlainMarkdown,
         &mut string_table,
     )
     .expect_err("missing source read should fail");
 
-    let (_error_type, message, location) = messages
-        .first_infrastructure_error_for_tests()
+    let error = messages
+        .infrastructure_error()
         .expect("expected infrastructure file error");
     assert!(
-        message.contains("Error reading file when adding new moth files to parse"),
-        "unexpected infrastructure message: {message}"
+        error
+            .msg
+            .contains("Error reading file when adding new moth files to parse"),
+        "unexpected infrastructure message: {}",
+        error.msg,
     );
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
     assert!(
-        location
-            .scope
-            .to_portable_string(&messages.string_table)
-            .contains("missing.md"),
-        "missing source path should be preserved in the diagnostic location"
+        host_path.ends_with("missing.md"),
+        "missing source path should be preserved in the diagnostic host path: {host_path:?}"
+    );
+}
+
+#[test]
+fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let first_missing = root.join("z_first_missing.md");
+    let loaded = root.join("a_loaded.md");
+    let second_missing = root.join("y_second_missing.md");
+    fs::write(&loaded, "# Loaded sibling\n").expect("should write loaded source");
+
+    let mut string_table = StringTable::new();
+    let messages = match load_missing_source_paths_with_registered_paths_for_test(
+        vec![
+            first_missing.clone(),
+            loaded.clone(),
+            second_missing.clone(),
+        ],
+        SourceFileKind::PlainMarkdown,
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("a serial missing-source failure should be reported"),
+        Err(messages) => messages,
+    };
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("mixed source loading should publish its finalized source context");
+    let first_missing_id = source_files
+        .get_by_canonical_path(&first_missing)
+        .expect("first missing source should retain its registration slot")
+        .id;
+    let loaded_id = source_files
+        .get_by_canonical_path(&loaded)
+        .expect("loaded sibling should retain its registration slot")
+        .id;
+    let second_missing_id = source_files
+        .get_by_canonical_path(&second_missing)
+        .expect("second missing source should retain its registration slot")
+        .id;
+
+    assert_eq!(
+        source_files.retained_text(loaded_id),
+        Some("# Loaded sibling\n"),
+        "a successful sibling must be retained before the terminal read failure is published"
+    );
+    assert!(source_files.retained_text(first_missing_id).is_none());
+    assert!(source_files.retained_text(second_missing_id).is_none());
+    assert!(source_files.source_load_error(first_missing_id).is_some());
+    assert!(source_files.source_load_error(second_missing_id).is_some());
+
+    let error = messages
+        .infrastructure_error()
+        .expect("the first read failure should retain the infrastructure error lane");
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
+    assert!(
+        host_path.ends_with("z_first_missing.md"),
+        "the first input-order read failure should be reported first: {host_path:?}"
+    );
+}
+
+#[test]
+fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let source_count = super::source_discovery::STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES;
+    let source_paths = (0..source_count)
+        .map(|index| {
+            let path = root.join(format!("asset_{index}.md"));
+            if index != 1 && index != source_count - 1 {
+                fs::write(&path, format!("# Asset {index}\n"))
+                    .expect("should write parallel source");
+            }
+            path
+        })
+        .collect::<Vec<_>>();
+    let mut string_table = StringTable::new();
+
+    let messages = match load_missing_source_paths_with_registered_paths_for_test(
+        source_paths.clone(),
+        SourceFileKind::PlainMarkdown,
+        &mut string_table,
+    ) {
+        Ok(_) => panic!("parallel missing-source failures should be reported"),
+        Err(messages) => messages,
+    };
+
+    let source_files = messages
+        .source_database_for_diagnostic(0)
+        .expect("parallel source loading should publish its finalized source context");
+    for (index, path) in source_paths.iter().enumerate() {
+        let source_id = source_files
+            .get_by_canonical_path(path)
+            .expect("every parallel source should retain its registration slot")
+            .id;
+        if index == 1 || index == source_count - 1 {
+            assert!(
+                source_files.retained_text(source_id).is_none(),
+                "failed source {index} must not create a loaded record"
+            );
+            assert!(
+                source_files.source_load_error(source_id).is_some(),
+                "failed source {index} must finalize its slot"
+            );
+        } else {
+            assert_eq!(
+                source_files.retained_text(source_id),
+                Some(format!("# Asset {index}\n").as_str()),
+                "successful source {index} must survive a sibling failure"
+            );
+            assert!(source_files.source_load_error(source_id).is_none());
+        }
+    }
+
+    let error = messages
+        .infrastructure_error()
+        .expect("the parallel read failure should retain the infrastructure error lane");
+    let host_path = error
+        .host_path
+        .as_deref()
+        .expect("file errors should retain their host path");
+    assert!(
+        host_path.ends_with("asset_1.md"),
+        "parallel failures should be reported in deterministic input order: {host_path:?}"
     );
 }
 
@@ -5842,7 +6778,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
     let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
 
     let modules = discover_modules_for_test(&config, &resolver, &style_directives)
         .expect("canonical multi-entry discovery should pass");
@@ -5858,7 +6794,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     ] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
-            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            super::source_loading_test_support::source_read_count_for_path_for_test(&canonical),
             1,
             "each selected Moth source should be read exactly once"
         );
@@ -5869,10 +6805,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     let module_names: Vec<_> = modules
         .iter()
         .map(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .and_then(OsStr::to_str)
@@ -6002,7 +6935,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
 
     let _counter_guard = lock_source_read_counter_tests();
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    super::source_loading::reset_source_read_count_for_test(&canonical_root);
+    super::source_loading_test_support::reset_source_read_count_for_test(&canonical_root);
 
     let modules =
         discover_modules_for_test_with_providers(&config, &resolver, &style_directives, &providers)
@@ -6019,7 +6952,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     ] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
-            super::source_loading::source_read_count_for_path_for_test(&canonical),
+            super::source_loading_test_support::source_read_count_for_path_for_test(&canonical),
             1,
             "each selected Moth source should be read exactly once"
         );
@@ -6285,7 +7218,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "missing provider target should surface a structured import diagnostic"
     );
     assert!(
-        messages.first_infrastructure_error_for_tests().is_none(),
+        messages.infrastructure_error().is_none(),
         "missing provider target must not surface a filesystem infrastructure error"
     );
     let diagnostic = first_error_diagnostic(&messages);
@@ -6295,6 +7228,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "expected missing import target diagnostic, got {:?}",
         diagnostic
     );
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@missing.js");
 }
 
 #[test]
@@ -6342,10 +7276,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     let module_a = modules
         .iter()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@pageA.moth")
@@ -6354,10 +7285,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     let module_b = modules
         .iter()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .is_some_and(|name| name == "@api.moth")
@@ -6460,6 +7388,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         first_error_diagnostic(&messages).kind.code(),
         "MOTH-IMPORT-0006"
     );
+    assert_primary_span_text(&messages, &src.join("@page.moth"), "@HELPER");
 }
 
 #[test]
@@ -6605,8 +7534,9 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     source_file_kinds.register("md", crate::builder_surface::SourceFileKind::PlainMarkdown);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
 
-    let modules = discover_modules_for_test(&config, &resolver, &style_directives)
-        .expect("header discovery should pass");
+    let (modules, source_files) =
+        discover_modules_and_source_files_for_test(&config, &resolver, &style_directives)
+            .expect("header discovery should pass");
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(modules[0].prepared.semantic.source_file_count, 3);
     assert_eq!(
@@ -6615,11 +7545,21 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     );
     assert!(modules[0].prepared.contains_moth_template);
     let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
-    let entry_identity = modules[0]
+    let module_symbols = &modules[0]
         .prepared
         .semantic
-        .source_files
-        .get_by_canonical_path(&entry_path)
+        .prepared_header_syntax
+        .module_symbols;
+    let entry_logical_path = module_symbols
+        .source_ids_by_source
+        .iter()
+        .find_map(|(logical_path, source_id)| {
+            source_files
+                .get(*source_id)
+                .and_then(|record| record.canonical_os_path.as_ref())
+                .filter(|canonical_path| canonical_path.to_path_buf() == entry_path)
+                .map(|_| logical_path)
+        })
         .expect("entry should retain a source identity");
     assert_eq!(
         modules[0]
@@ -6628,7 +7568,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
             .prepared_header_syntax
             .module_symbols
             .file_dependency_clauses_by_source
-            .get(&entry_identity.logical_path)
+            .get(entry_logical_path)
             .map(Vec::len),
         Some(2),
         "the consumed Moth token payload should produce retained entry dependency facts"
@@ -6752,7 +7692,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, graph, source_tree_index, _string_table) =
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -6785,10 +7725,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
         .iter()
         .position(|wave| {
             wave.iter().any(|module| {
-                module
-                    .prepared
-                    .semantic
-                    .entry_file_path()
+                prepared_entry_file_path(&module.prepared.semantic)
                     .expect("prepared module retains its entry file identity")
                     .file_name()
                     == Some(OsStr::new("@api.moth"))
@@ -6799,10 +7736,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
         .iter()
         .position(|wave| {
             wave.iter().any(|module| {
-                module
-                    .prepared
-                    .semantic
-                    .entry_file_path()
+                prepared_entry_file_path(&module.prepared.semantic)
                     .expect("prepared module retains its entry file identity")
                     .file_name()
                     == Some(OsStr::new("@pageA.moth"))
@@ -6851,7 +7785,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let entry_root = graph.entry_modules().to_vec();
@@ -6911,7 +7845,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     // No cross-module edges means a single ready wave containing both entries.
@@ -6949,10 +7883,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     let inventory_order: Vec<String> = inventory_waves[0]
         .iter()
         .map(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 .unwrap()
@@ -7002,7 +7933,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
 
-    let (modules, graph, source_tree_index, _string_table) =
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7048,10 +7979,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
         "the provider is the sole entry in the first wave"
     );
     assert!(
-        inventory_waves[0][0]
-            .prepared
-            .semantic
-            .entry_file_path()
+        prepared_entry_file_path(&inventory_waves[0][0].prepared.semantic)
             .expect("prepared module retains its entry file identity")
             .file_name()
             .is_some_and(|name| name == "@api.moth"),
@@ -7063,10 +7991,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
         "the consumer is the sole entry in the second wave"
     );
     assert!(
-        inventory_waves[1][0]
-            .prepared
-            .semantic
-            .entry_file_path()
+        prepared_entry_file_path(&inventory_waves[1][0].prepared.semantic)
             .expect("prepared module retains its entry file identity")
             .file_name()
             .is_some_and(|name| name == "@pageA.moth"),
@@ -7081,7 +8006,7 @@ fn dependency_fact_retains_authored_source_location() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (_modules, graph, source_tree_index, string_table) =
+    let (_modules, graph, source_tree_index, source_files, string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7093,20 +8018,24 @@ fn dependency_fact_retains_authored_source_location() {
         .module_id_for_directory(&module_b_root)
         .expect("module_b root should be a graph node");
 
-    let retained_location = graph
-        .edge_source_location(module_b_id, module_a_id)
-        .expect("the provider-before-consumer edge should retain its authored location");
+    let retained_span = graph
+        .edge_source_span(module_b_id, module_a_id)
+        .expect("the provider-before-consumer edge should retain its authored span");
 
-    // The retained scope is the declaring_source file that authored the structural provider reference.
-    let scope_path = retained_location.scope.to_portable_string(&string_table);
+    // The retained source identity is the declaring source file that authored the structural
+    // provider reference.
+    let scope_path = source_files
+        .legacy_logical_path(retained_span.source())
+        .to_portable_string(&string_table);
     assert!(
         scope_path.contains("@pageA.moth"),
-        "retained location scope should name the declaring module root file: {scope_path}"
+        "retained span source should name the declaring module root file: {scope_path}"
     );
-    // The dependency clause is on the first source line.
+    // The dependency clause starts at byte zero of the declaring source file.
     assert_eq!(
-        retained_location.start_pos.line_number, 0,
-        "retained location should point at the first authored source line"
+        retained_span.start(&source_files),
+        0,
+        "retained span should point at the first authored source byte"
     );
 }
 
@@ -7121,7 +8050,7 @@ fn production_graph_completes_before_scheduling() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, mut graph, source_tree_index, _string_table) =
+    let (modules, mut graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let module_a_id = source_tree_index
@@ -7182,7 +8111,7 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, graph, _source_tree_index, _string_table) =
+    let (modules, graph, _source_tree_index, source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     assert!(
@@ -7193,10 +8122,7 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
     for module in modules.waves().iter().flatten() {
         let matching_node = graph.nodes().iter().find(|node| {
             node.root_file()
-                == module
-                    .prepared
-                    .semantic
-                    .entry_file_path()
+                == prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                     .expect("prepared module retains its entry file identity")
         });
         let matching_node = matching_node.expect(
@@ -7206,20 +8132,14 @@ fn discovered_modules_carry_both_graph_assigned_identities() {
             module.module_id,
             matching_node.module_id(),
             "discovered module ID must equal its graph-assigned dense identity (entry {:?})",
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                 .expect("prepared module retains its entry file identity"),
         );
         assert_eq!(
             module.stable_origin,
             *matching_node.stable_origin(),
             "discovered module stable origin must equal its graph-assigned origin (entry {:?})",
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_canonical_file_path(&module.prepared.semantic, &source_files)
                 .expect("prepared module retains its entry file identity"),
         );
     }
@@ -7235,7 +8155,7 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (modules, _graph, _source_tree_index, _string_table) =
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
@@ -7266,7 +8186,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
         write_cross_module_project(&root);
 
-    let (_modules, graph, source_tree_index, _string_table) =
+    let (_modules, graph, source_tree_index, _source_files, _string_table) =
         discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
 
     let lookup = graph
@@ -7277,7 +8197,7 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // The graph node carries no source records; owned source data is resolved through the
     // retained central index, so the lookup must cover exactly the index's owned source IDs.
     for node in graph.nodes() {
-        for source_id in source_tree_index.owned_source_ids(node.module_id()) {
+        for source_id in source_tree_index.owned_source_indices(node.module_id()) {
             let record = source_tree_index.source(*source_id);
             let lookup_origin = lookup
                 .get(record.canonical_path())
@@ -7298,7 +8218,11 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     let total_entries: usize = graph
         .nodes()
         .iter()
-        .map(|node| source_tree_index.owned_source_ids(node.module_id()).len())
+        .map(|node| {
+            source_tree_index
+                .owned_source_indices(node.module_id())
+                .len()
+        })
         .sum();
     assert_eq!(
         unique_paths.len(),
@@ -7346,10 +8270,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
         .iter()
         .flatten()
         .find(|module| {
-            module
-                .prepared
-                .semantic
-                .entry_file_path()
+            prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
                 == Some(OsStr::new("@page.moth"))
@@ -7444,19 +8365,19 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
 
 #[test]
 fn provider_binding_index_rejects_duplicate_shell_edges() {
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let edges = vec![
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(1),
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
-            graph_location: SourceLocation::default(),
+            graph_span: None,
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
-            graph_location: SourceLocation::default(),
+            graph_span: None,
         },
     ];
 
@@ -7472,12 +8393,12 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
 
 #[test]
 fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() {
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider_edge = ResolvedDependencyEdge {
         provider_module_id: ModuleId::from_index(1),
         consumer_module_id: ModuleId::from_index(0),
         dependency_shell_id: shell,
-        graph_location: SourceLocation::default(),
+        graph_span: None,
     };
     let provider_binding_index = super::compilation::build_provider_binding_index(&[provider_edge])
         .expect("one provider edge should index");
@@ -7759,7 +8680,7 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         .expect("consumer package publishes");
 
     let consumer_module_id = ModuleId::from_index(5);
-    let shell = DependencyShellId::new(FileId(0), 0);
+    let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let dependencies = vec![ResolvedSourcePackageDependency {
         consumer_module_id,
         dependency_prefix: "b".to_owned(),
@@ -7934,13 +8855,15 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
                     &format!("counter-fixture-{index}.moth"),
                     &mut expected_token_string_table,
                 );
+            let mut counter_span_builder = ExtendedSpanBuilder::new();
             crate::compiler_frontend::tokenizer::lexer::tokenize(
                 source,
                 &scope,
                 crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
                 &style_directives,
                 &mut expected_token_string_table,
-                None,
+                crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+                &mut counter_span_builder,
             )
             .expect("counter fixture source should tokenize")
             .length
@@ -8026,12 +8949,11 @@ mod file_reference_resolution_tests {
     use super::super::resource_inputs::ResourceInputRegistry;
     use crate::builder_surface::SourceFileKind;
     use crate::compiler_frontend::compiler_messages::InvalidCompileTimePathReason;
-    use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
     use crate::compiler_frontend::paths::file_references::{
         PreparedFileReference, PreparedFileReferenceClass,
     };
     use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-    use crate::compiler_frontend::symbols::identity::FileId;
+    use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
     use crate::compiler_frontend::symbols::interned_path::InternedPath;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
     use std::fs;
@@ -8071,11 +8993,14 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("assets/logo.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        );
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -8113,11 +9038,14 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("missing.moth", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        );
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::SourceKindNoFileValue,
         };
 
@@ -8155,11 +9083,14 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("not_a_directory/value.mtf", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        );
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ContentSource,
         };
         let resolved = resolver
@@ -8170,16 +9101,20 @@ mod file_reference_resolution_tests {
                 &mut strings,
             )
             .expect("NotADirectory should remain a typed path outcome");
+        let SingleFileReferenceOutcome::Diagnostic(diagnostic) = resolved.outcome else {
+            panic!("NotADirectory should remain a typed path diagnostic");
+        };
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(reference.span),
+            "synthetic file-reference diagnostics must retain the authored source span"
+        );
         assert!(matches!(
-            resolved.outcome,
-            SingleFileReferenceOutcome::Diagnostic(diagnostic)
-                if matches!(
-                    diagnostic.payload,
-                    crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
-                        reason: InvalidCompileTimePathReason::TargetNotRegular,
-                        ..
-                    }
-                )
+            diagnostic.payload,
+            crate::compiler_frontend::compiler_messages::DiagnosticPayload::InvalidCompileTimePath {
+                reason: InvalidCompileTimePathReason::TargetNotRegular,
+                ..
+            }
         ));
         assert!(resource_inputs.missing_watch_interests().is_empty());
     }
@@ -8207,11 +9142,14 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("alias/leaf.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        );
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -8267,11 +9205,14 @@ mod file_reference_resolution_tests {
         let mut strings = StringTable::new();
         let mut path_syntax = PathSyntaxTable::new();
         let path = InternedPath::from_single_str("alias/missing.svg", &mut strings);
-        let path_syntax_id = path_syntax.push(path.clone(), SourceLocation::default());
+        let path_syntax_id = path_syntax.push(
+            path.clone(),
+            SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        );
         let reference = PreparedFileReference {
-            source_file: Some(FileId(0)),
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
             path_syntax: path_syntax_id,
-            location: SourceLocation::default(),
             class: PreparedFileReferenceClass::ResourceFile,
         };
 
@@ -8334,11 +9275,14 @@ mod file_reference_resolution_tests {
                        strings: &mut StringTable,
                        path_syntax: &mut PathSyntaxTable| {
             let authored_path = InternedPath::from_single_str(path, strings);
-            let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
+            let path_syntax_id = path_syntax.push(
+                authored_path.clone(),
+                SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            );
             let reference = PreparedFileReference {
-                source_file: Some(FileId(0)),
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+                source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
-                location: SourceLocation::default(),
                 class: PreparedFileReferenceClass::ResourceFile,
             };
             resolver.resolve(&root.join("main.moth"), path_syntax, &reference, strings)
@@ -8425,11 +9369,14 @@ mod file_reference_resolution_tests {
                        strings: &mut StringTable,
                        path_syntax: &mut PathSyntaxTable| {
             let authored_path = InternedPath::from_single_str(path, strings);
-            let path_syntax_id = path_syntax.push(authored_path.clone(), SourceLocation::default());
+            let path_syntax_id = path_syntax.push(
+                authored_path.clone(),
+                SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            );
             let reference = PreparedFileReference {
-                source_file: Some(FileId(0)),
+                span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+                source_file: SourceId::COMPILATION_ROOT,
                 path_syntax: path_syntax_id,
-                location: SourceLocation::default(),
                 class,
             };
             resolver

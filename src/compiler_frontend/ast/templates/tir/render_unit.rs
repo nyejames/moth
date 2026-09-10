@@ -28,8 +28,6 @@ use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
 // ------------------------------
 //  Aggregate-wrapper candidates
 // ------------------------------
@@ -49,8 +47,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_aggregate_wrapper_cand
     store: &mut TemplateIrStore,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let mut children = Vec::with_capacity(head_prefix_nodes.len() + 1);
-    let root_location =
-        head_prefix_node_location(store, head_prefix_nodes).map_err(TemplateError::from)?;
+    let root_span = head_prefix_node_span(store, head_prefix_nodes).map_err(TemplateError::from)?;
 
     for &node_id in head_prefix_nodes {
         children.push(node_id);
@@ -58,12 +55,12 @@ pub(in crate::compiler_frontend::ast::templates) fn build_aggregate_wrapper_cand
 
     children.push(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::AggregateOutput,
-        root_location.to_owned(),
+        None,
     )));
 
     Ok(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children },
-        root_location,
+        root_span,
     )))
 }
 
@@ -82,41 +79,33 @@ pub(in crate::compiler_frontend::ast::templates) fn build_branch_body_candidate_
     store: &mut TemplateIrStore,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let mut children = Vec::with_capacity(head_prefix_nodes.len() + body_children.len());
-    let root_location = branch_body_candidate_location(store, head_prefix_nodes, body_children)
+    let root_span = branch_body_candidate_span(store, head_prefix_nodes, body_children)
         .map_err(TemplateError::from)?;
 
     // Reuse each parser-emitted head-prefix node directly. Parser template
     // values are structural nodes before render-unit preparation begins.
     children.extend_from_slice(head_prefix_nodes);
-
-    // The body children are already materialized in this store, so append them
-    // directly. They carry Body-origin metadata so head-chain composition
-    // partitions them into the body partition and applies head-prefix wrappers
-    // around them.
     children.extend_from_slice(body_children);
 
     Ok(store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children },
-        root_location,
+        root_span,
     )))
 }
 
-/// Returns the source location for an aggregate-wrapper candidate root.
+/// Returns the source span for an aggregate-wrapper candidate root.
 ///
-/// WHAT: uses the first head-prefix node's location so the
-///       aggregate wrapper candidate root carries a meaningful source span.
-fn head_prefix_node_location(
+/// An empty candidate carries no provenance. A selected node that is missing is
+/// an internal invariant failure.
+fn head_prefix_node_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
-) -> Result<SourceLocation, CompilerError> {
-    // An empty candidate carries no provenance, so a default location is the
-    // only honest span. A selected node that is missing is an internal
-    // invariant failure.
+) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, CompilerError> {
     match head_prefix_nodes.first().copied() {
-        None => Ok(SourceLocation::default()),
+        None => Ok(None),
         Some(node_id) => store
             .get_node(node_id)
-            .map(|node| node.location.clone())
+            .map(|node| node.span)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "TIR aggregate-wrapper candidate: selected head-prefix node {} was missing from the store.",
@@ -126,29 +115,24 @@ fn head_prefix_node_location(
     }
 }
 
-/// Returns the source location for a branch/fallback body candidate root.
+/// Returns the source span for a branch/fallback body candidate root.
 ///
-/// WHAT: prefers the first shared head-prefix node and otherwise uses the first
-///       prepared body child.
-/// WHY: branch templates without a head prefix still need a concrete body span
-///      after their candidate composition root is built.
-fn branch_body_candidate_location(
+/// The first shared head-prefix node is preferred; otherwise the first prepared
+/// body child supplies the retained provenance.
+fn branch_body_candidate_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
-) -> Result<SourceLocation, CompilerError> {
-    // An empty candidate (no head prefix and no body children) carries no
-    // provenance, so a default location is the only honest span. A selected
-    // node that is missing is an internal invariant failure.
+) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, CompilerError> {
     let selected = head_prefix_nodes
         .first()
         .or_else(|| body_children.first())
         .copied();
     match selected {
-        None => Ok(SourceLocation::default()),
+        None => Ok(None),
         Some(node_id) => store
             .get_node(node_id)
-            .map(|node| node.location.clone())
+            .map(|node| node.span)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "TIR branch body candidate: selected node {} was missing from the store.",
@@ -179,12 +163,17 @@ pub(in crate::compiler_frontend::ast::templates) struct PreparedLoopAggregateWra
 
 /// Converts TIR formatter diagnostic messages into a single `TemplateError`.
 ///
-/// WHAT: scans the formatter output for hard errors and returns the first one
-///       as a `TemplateError`; when no error exists, fabricates a generic
-///       compiler-error so the caller never receives an unexplained failure.
+/// WHAT: returns the outer infrastructure failure typed when present, else scans the
+///       formatter output for hard errors and returns the first one as a `TemplateError`;
+///       when neither exists, fabricates a generic compiler-error so the caller never
+///       receives an unexplained failure.
 /// WHY: the formatter emits structured diagnostics; this helper provides the
-///      narrow bridge from formatter messages back to template-stage errors.
+///      narrow bridge from formatter messages back to template-stage errors without
+///      converting the outer failure into a user diagnostic.
 fn tir_formatter_messages_to_template_error(messages: CompilerMessages) -> TemplateError {
+    if let Some(error) = messages.infrastructure_error() {
+        return TemplateError::Infrastructure(Box::new(error.clone()));
+    }
     for diagnostic in messages.into_diagnostics() {
         if diagnostic.severity == DiagnosticSeverity::Error {
             return diagnostic.into();
@@ -321,7 +310,7 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
     store: &mut TemplateIrStore,
     string_table: &StringTable,
 ) -> Result<TemplateIrNodeId, CompilerError> {
-    let (children, location) = {
+    let (children, span) = {
         let node = store.get_node(body_root).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "TIR loop-control trim: body root node {} was missing from the store.",
@@ -329,7 +318,7 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
             ))
         })?;
         match &node.kind {
-            TemplateIrNodeKind::Sequence { children } => (children.clone(), node.location.clone()),
+            TemplateIrNodeKind::Sequence { children } => (children.clone(), node.span),
             _ => {
                 return Err(CompilerError::compiler_error(format!(
                     "TIR loop-control trim: body root node {} was not a Sequence.",
@@ -375,7 +364,7 @@ pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_
         TemplateIrNodeKind::Sequence {
             children: new_children,
         },
-        location,
+        span,
     )))
 }
 

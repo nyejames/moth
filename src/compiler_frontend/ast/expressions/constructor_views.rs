@@ -9,7 +9,6 @@
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::datatypes::definitions::FieldDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -25,10 +24,6 @@ pub(crate) struct ConstructorField {
     pub name: InternedPath,
     pub type_id: TypeId,
     pub access_mode: ConstructorFieldAccessMode,
-    // Carried as part of the semantic view contract even though current call-validation
-    // consumers do not yet need it; future diagnostics or span-aware defaults may.
-    #[allow(dead_code)]
-    pub location: SourceLocation,
     pub default_value: Option<Expression>,
 }
 
@@ -56,7 +51,6 @@ impl ConstructorField {
                 name: declaration.id.clone(),
                 type_id: declaration.value.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
-                location: declaration.value.location.clone(),
                 default_value: extract_default_value(&declaration.value),
             })
             .collect()
@@ -78,7 +72,6 @@ impl ConstructorField {
                 name: field_definition.name.clone(),
                 type_id: field_definition.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
-                location: field_definition.location.clone(),
                 default_value: default_sources
                     .get(index)
                     .and_then(|source| extract_default_value(&source.value)),
@@ -96,7 +89,6 @@ impl ConstructorField {
                 name: field_definition.name.clone(),
                 type_id: field_definition.type_id,
                 access_mode: ConstructorFieldAccessMode::Shared,
-                location: field_definition.location.clone(),
                 default_value: None,
             })
             .collect()

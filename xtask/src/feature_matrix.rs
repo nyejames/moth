@@ -173,9 +173,9 @@ pub const FEATURE_LANES: &[FeatureLane] = &[
     FeatureLane {
         name: "timers-counters",
         package: "moth",
-        features: &["timers", "benchmark_counters"],
+        features: &["timers", "benchmark_counters", "data_layout_memory_probe"],
         kind: FeatureLaneKind::Standard,
-        owns: "collector-backed counters and the counter summary carried by a timing session",
+        owns: "collector-backed counters and the retained-layout memory probe",
     },
     FeatureLane {
         name: "scoped-blocks",

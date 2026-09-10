@@ -32,7 +32,7 @@ Watch for catch-all codes hiding materially different corrections.
 - Constructed at the owner with the best semantic context, through one typed constructor rather than near-identical prose in several callers.
 - Renderers never infer semantic meaning from message text.
 - Consumers do not reopen source or an earlier IR just to build a better error.
-- Every user-facing diagnostic has a useful `SourceLocation`. A file-level span is acceptable only when no narrower owner exists, and the report should say why.
+- Every user-facing diagnostic whose authored source owns the error has a useful `SourceSpan` naming its source identity and exact byte range. Source-less project, filesystem and config-boundary diagnostics may omit it, but must not fabricate provenance; a file-level span is acceptable only when no narrower owner exists, and the report should say why.
 - Interned paths stay interned until rendering; render context outlives the diagnostics that need it.
 - Diagnostic data is remapped before later consumers read it. Wrong attribution from remapping is also a Correctness finding.
 

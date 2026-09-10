@@ -13,11 +13,11 @@ use crate::compiler_frontend::ast::generic_functions::{
     MaterialisedGenericAst, ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     recursive_generic_function_instantiation,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::reachability::{
-    collect_module_function_link_facts_with_string_table,
-    collect_reachability_from_function_link_facts,
+    collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
@@ -37,47 +37,49 @@ use crate::compiler_frontend::module_compilation::generated::transaction::{
 use crate::compiler_frontend::module_compilation::stages::{check_borrows, lower_hir};
 use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// The identity and diagnostic facts one generated request needs while materialising.
+/// The identity and call-site span one generated request needs while materialising.
 struct MaterialisingRequest {
     identity: GeneratedFunctionIdentity,
     display_name: String,
-    diagnostic_location: SourceLocation,
+    call_span: Option<SourceSpan>,
     #[cfg(feature = "timers")]
     timing_context: Option<crate::timing::TimingContext>,
 }
 
 /// Materialise every request this module emitted from its own AST.
-pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots(
-    context: &ModuleCompilationContext<'_>,
+pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots<
+    'build,
+>(
+    context: &ModuleCompilationContext<'build>,
     request_ids: &[GeneratedRequestId],
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PremergeFailure> {
     for request_id in request_ids {
         let identity = transaction
             .identity(*request_id)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+            .map_err(PremergeFailure::Infrastructure)?
             .clone();
-        let (display_name, diagnostic_location) = transaction
+        let (display_name, call_span) = transaction
             .request_facts(*request_id)
-            .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+            .map_err(PremergeFailure::Infrastructure)?;
         materialise_generated_request(
             context,
             *request_id,
             &MaterialisingRequest {
                 identity,
                 display_name,
-                diagnostic_location,
+                call_span,
                 #[cfg(feature = "timers")]
                 timing_context,
             },
@@ -91,28 +93,36 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
 }
 
 /// Materialise one request, completing every nested request it raises first.
-fn materialise_generated_request(
-    context: &ModuleCompilationContext<'_>,
+fn materialise_generated_request<'build>(
+    context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
     request: &MaterialisingRequest,
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
-    compiler: &mut CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     entry_file_path: &Path,
-) -> Result<(), CompilerMessages> {
+) -> Result<(), PremergeFailure> {
     match transaction
         .enter(request_id)
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?
+        .map_err(PremergeFailure::Infrastructure)?
     {
         GeneratedRequestEntry::Complete => return Ok(()),
         GeneratedRequestEntry::Recursive => {
-            return Err(CompilerMessages::from_diagnostic(
-                recursive_generic_function_instantiation(
-                    Some(compiler.string_table.intern(&request.display_name)),
-                    request.diagnostic_location.clone(),
-                ),
-                compiler.string_table.clone(),
-            ));
+            let display_name = compiler.string_table.intern(&request.display_name);
+            let diagnostic =
+                recursive_generic_function_instantiation(Some(display_name), request.call_span);
+            let diagnostic = if request.call_span.is_some() {
+                diagnostic.with_primary_frozen_identity_handle(
+                    requester_context.frozen_identity_handle.clone(),
+                )
+            } else {
+                diagnostic
+            };
+            return Err(PremergeDiagnosticBatch::from_diagnostic(
+                diagnostic,
+                std::mem::take(&mut compiler.string_table),
+            )
+            .into());
         }
         GeneratedRequestEntry::Materialise => {}
     }
@@ -121,15 +131,16 @@ fn materialise_generated_request(
         request.identity.declaration(),
         requester_context,
     )
-        .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(format!(
-                    "Generated request for '{}' has no completed declaring-module materialisation context",
-                    request.identity.declaration().defining_name()
-                )),
-                &compiler.string_table,
-            )
-        })?;
+    .ok_or_else(|| {
+        PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+            "Generated request for '{}' has no completed declaring-module materialisation context",
+            request.identity.declaration().defining_name()
+        )))
+    })?;
+    let declaring_source_identity_handle = match &declaring_context {
+        DeclaringMaterialisation::Published { context, .. } => context.frozen_identity_handle(),
+        DeclaringMaterialisation::Preparing(context) => context.frozen_identity_handle.clone(),
+    };
     let materialised = match declaring_context {
         DeclaringMaterialisation::Published {
             context: declaring_context,
@@ -139,7 +150,7 @@ fn materialise_generated_request(
             ModuleMaterialisationInput {
                 identity: &request.identity,
                 requester_context,
-                requester_call_location: &request.diagnostic_location,
+                requester_call_span: request.call_span,
                 external_package_registry: context.external_packages.as_ref(),
                 style_directives: context.style_directives,
                 build_profile: context.build_profile,
@@ -154,7 +165,7 @@ fn materialise_generated_request(
             .materialise_ast(
                 &request.identity,
                 requester_context,
-                &request.diagnostic_location,
+                request.call_span,
                 #[cfg(feature = "timers")]
                 request.timing_context,
             ),
@@ -172,16 +183,13 @@ fn materialise_generated_request(
         ..
     } = build_result;
     let module_resources = module_resources.ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "generated AST finalization did not retain its sidecar resource table",
-            ),
-            &compiler.string_table,
-        )
+        PremergeFailure::Infrastructure(CompilerError::compiler_error(
+            "generated AST finalization did not retain its sidecar resource table",
+        ))
     })?;
     let generated_context = generated_context_builder
         .finish_preparation()
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+        .map_err(PremergeFailure::Infrastructure)?;
     let nested_requests = install_generated_request_contracts(
         &nested_requests,
         &generated_context,
@@ -189,7 +197,7 @@ fn materialise_generated_request(
         context.external_packages.as_ref(),
         &mut generated_ast,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &generated_string_table))?;
+    .map_err(PremergeFailure::Infrastructure)?;
     let nested_request_ids = transaction.register_requests(nested_requests.iter().map(|request| {
         GeneratedRequestFacts {
             identity: request.identity.clone(),
@@ -197,7 +205,7 @@ fn materialise_generated_request(
                 .function_name
                 .map(|name| generated_string_table.resolve(name).to_owned())
                 .unwrap_or_else(|| "<generated>".to_owned()),
-            diagnostic_location: request.call_location.clone(),
+            call_span: request.call_span,
         }
     }));
 
@@ -205,29 +213,26 @@ fn materialise_generated_request(
     let mut generated_compiler = CompilerFrontend::new(
         context.options.clone(),
         generated_string_table,
-        context.style_directives.to_owned(),
-        Arc::clone(&context.external_packages),
-        context.project_path_resolver.clone(),
+        context.style_directives,
+        &context.external_packages,
+        context.project_path_resolver,
+        context.source_files,
     );
     for nested_request_id in &nested_request_ids {
         let nested_identity = transaction
             .identity(*nested_request_id)
-            .map_err(|error| {
-                CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-            })?
+            .map_err(PremergeFailure::Infrastructure)?
             .clone();
-        let (nested_name, nested_location) = transaction
+        let (nested_name, nested_span) = transaction
             .request_facts(*nested_request_id)
-            .map_err(|error| {
-                CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-            })?;
+            .map_err(PremergeFailure::Infrastructure)?;
         materialise_generated_request(
             context,
             *nested_request_id,
             &MaterialisingRequest {
                 identity: nested_identity,
                 display_name: nested_name,
-                diagnostic_location: nested_location,
+                call_span: nested_span,
                 #[cfg(feature = "timers")]
                 timing_context: request.timing_context,
             },
@@ -237,17 +242,18 @@ fn materialise_generated_request(
             entry_file_path,
         )?;
     }
+    let generated_warnings = generated_ast.warnings.clone();
     // The generated preparation retains a second handle only while nested requests are
     // materialised; release it before lowering so the sidecar can own its table immutably.
     drop(generated_context);
 
-    let generated_warnings = generated_ast.warnings.clone();
     let generated_lowering = lower_hir(
         &mut generated_compiler,
         generated_ast,
         &generated_warnings,
         HirFunctionOriginLookup::default(),
         Some(Rc::clone(&module_resources)),
+        Some(&declaring_source_identity_handle),
     )?;
     let HirLoweringResult {
         mut hir_module,
@@ -257,12 +263,9 @@ fn materialise_generated_request(
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
         .map_err(|_| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "generated sidecar resource table still has a live shared handle after HIR lowering",
-                ),
-                &generated_compiler.string_table,
-            )
+            PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                "generated sidecar resource table still has a live shared handle after HIR lowering",
+            ))
         })?;
     let function_id = hir_module
         .functions
@@ -272,37 +275,33 @@ fn materialise_generated_request(
                 .then_some(function.id)
         })
         .ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error("Generated HIR omitted its requested root function"),
-                &generated_compiler.string_table,
-            )
+            PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                "Generated HIR omitted its requested root function",
+            ))
         })?;
     hir_module
         .function_ids_by_generated
         .insert(request.identity.clone(), function_id);
     increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
-    let borrow_analysis = check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
-    let functions = collect_module_function_link_facts_with_string_table(
+    let borrow_analysis = check_borrows(
+        &mut generated_compiler,
         &hir_module,
-        &generated_compiler.string_table,
-    )
-    .map_err(|error| CompilerMessages::from_error_ref(error, &generated_compiler.string_table))?;
+        &generated_warnings,
+        Some(&declaring_source_identity_handle),
+    )?;
+    let functions =
+        collect_module_function_link_facts(&hir_module).map_err(PremergeFailure::Infrastructure)?;
     let reachability = collect_reachability_from_function_link_facts(&functions, &[function_id])
-        .map_err(|error| {
-            CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-        })?;
+        .map_err(PremergeFailure::Infrastructure)?;
     let mut reachable_package_ids = FxHashSet::default();
     for external_function_id in &reachability.reachable_external_functions {
         let package_id = context
             .external_packages
             .resolve_function_package_id(*external_function_id)
             .ok_or_else(|| {
-                CompilerMessages::from_error_ref(
-                    CompilerError::compiler_error(format!(
-                        "Generated external function {external_function_id:?} has no owning package"
-                    )),
-                    &generated_compiler.string_table,
-                )
+                PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                    "Generated external function {external_function_id:?} has no owning package"
+                )))
             })?;
         reachable_package_ids.insert(package_id);
     }
@@ -332,10 +331,8 @@ fn materialise_generated_request(
             materialisation_context: None,
         },
     };
-    let summary =
-        exact_generated_sidecar_summary(&request.identity, &generated_module).map_err(|error| {
-            CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
-        })?;
+    let summary = exact_generated_sidecar_summary(&request.identity, &generated_module)
+        .map_err(PremergeFailure::Infrastructure)?;
     let generated_remap = requester_context.merge_materialisation_string_table_into(
         &mut compiler.string_table,
         &generated_compiler.string_table,
@@ -353,5 +350,5 @@ fn materialise_generated_request(
             summary,
             GeneratedFunctionSidecar::new(request.identity.clone(), generated_module),
         )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))
+        .map_err(PremergeFailure::Infrastructure)
 }

@@ -3,7 +3,6 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterOutputPiece, FormatterTextPiece,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::projects::html_project::styles::code::{
     CodeLanguage, code_formatter, highlight_code_html,
 };
@@ -85,7 +84,7 @@ fn text_code_formatter_escapes_html_without_highlighting() {
     let input = FormatterInput {
         pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
             text: id,
-            location: SourceLocation::default(),
+            span: None,
         })],
     };
 
@@ -124,7 +123,7 @@ fn code_formatter_wraps_opaque_pieces_inside_the_code_block() {
             FormatterInputPiece::Opaque(opaque),
             FormatterInputPiece::Text(FormatterTextPiece {
                 text: text_id,
-                location: SourceLocation::default(),
+                span: None,
             }),
             FormatterInputPiece::Opaque(opaque),
         ],
@@ -876,7 +875,7 @@ fn escape_html_formatter_covers_all_special_chars_and_unicode() {
     let input = FormatterInput {
         pieces: vec![FormatterInputPiece::Text(FormatterTextPiece {
             text: id,
-            location: SourceLocation::default(),
+            span: None,
         })],
     };
 

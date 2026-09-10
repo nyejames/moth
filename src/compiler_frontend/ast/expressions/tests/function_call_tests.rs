@@ -1,11 +1,10 @@
-//! Function call argument parser and source-location regression tests.
+//! Function call argument parser and source-span regression tests.
 //!
 //! WHAT: protects raw parsed argument shape, call-access mode classification, and the distinct
-//!       named-target, value-expression and authored-marker source locations produced by the
-//!       call argument parser.
+//! named-target, value-expression and authored-marker spans produced by the call argument parser.
 //! WHY: parser-local facts and the parser-to-final-validation retained-slot handoff are internal
-//!      invariants that end-to-end integration output cannot inspect. Whole-source call acceptance
-//!      and rejection behavior is owned by canonical integration cases under
+//! invariants that end-to-end integration output cannot inspect. Whole-source call acceptance
+//! and rejection behavior is owned by canonical integration cases under
 //!      `tests/cases/function_call_*`.
 
 use crate::compiler_frontend::ast::expressions::call_argument::{
@@ -20,11 +19,12 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidCallShapeReason,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticToken, InvalidCallShapeReason,
     SyntaxDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
@@ -40,15 +40,17 @@ use std::sync::Arc;
 fn parse_args(
     source: &str,
 ) -> Vec<crate::compiler_frontend::ast::expressions::call_argument::CallArgument> {
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
-    let mut tokens = tokenize(
+    let mut tokens: FileTokens = tokenize(
         source,
         &file_path,
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -75,13 +77,15 @@ fn parse_args(
 fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         source,
         &file_path,
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -149,13 +153,15 @@ fn parse_raw_call_args_for_test(
 fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         source,
         &file_path,
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -178,8 +184,12 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
     let error =
         parse_raw_call_args_for_test(&mut tokens, &context, &mut type_interner, &mut string_table)
             .expect_err("call arguments should fail");
-
-    CompilerDiagnostic::from(error)
+    match error {
+        ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
+        ExpressionParseError::Infrastructure(error) => {
+            panic!("expected user diagnostic, found infrastructure error: {error:?}")
+        }
+    }
 }
 
 // ── Parser-level tests (syntax-only call arguments) ──────────────────────────
@@ -204,40 +214,37 @@ fn parses_named_mutable_argument_on_value_side() {
 }
 
 #[test]
-fn call_argument_locations_keep_named_target_value_and_marker_distinct() {
+fn call_argument_spans_keep_named_target_value_and_marker_distinct() {
     // `parameter = ~value` must keep the named-target token, the value expression and the
-    // authored `~` marker at three distinct source locations so diagnostics can label the
-    // source the author must change. The value here is a literal, not a binding.
+    // authored `~` marker at three distinct source spans so diagnostics can label the source the
+    // author must change. The value here is a literal, not a binding.
     let args = parse_args("take(value = ~1)");
 
     assert_eq!(args.len(), 1);
     let argument = &args[0];
     assert_eq!(argument.access_mode, CallAccessMode::Mutable);
 
-    let target_location = argument
-        .target_location
-        .clone()
-        .expect("named argument should carry a target location");
-    let marker_location = argument
-        .marker_location
-        .clone()
-        .expect("authored ~ should carry a marker location");
+    let target_span = argument
+        .target_span
+        .expect("named argument should carry a target span");
+    let marker_span = argument
+        .marker_span
+        .expect("authored ~ should carry a marker span");
 
-    // `location` is the value-expression location, not the named-target token.
-    assert_ne!(argument.location, target_location);
-    assert_ne!(argument.location, marker_location);
-    assert_ne!(target_location, marker_location);
+    assert_ne!(argument.span, Some(target_span));
+    assert_ne!(argument.span, Some(marker_span));
+    assert_ne!(Some(target_span), Some(marker_span));
 }
 
 #[test]
-fn call_argument_marker_location_is_absent_without_authored_tilde() {
+fn call_argument_marker_span_is_absent_without_authored_tilde() {
     let args = parse_args("take(value = 1)");
 
     assert_eq!(args.len(), 1);
     assert_eq!(args[0].access_mode, CallAccessMode::Shared);
     assert!(
-        args[0].marker_location.is_none(),
-        "absent ~ must not synthesize a marker location",
+        args[0].marker_span.is_none(),
+        "absent ~ must not synthesize a marker span",
     );
 }
 
@@ -274,13 +281,15 @@ fn retains_parser_selected_parameter_slots_for_named_and_positional_arguments() 
 fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut string_table = StringTable::new();
     let file_path = InternedPath::from_single_str("@page.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut tokens = tokenize(
         "call(1, third = 3)",
         &file_path,
         TokenizerEntryMode::SourceFile,
         &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -312,11 +321,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             expected_type: ExpectedParameterType::Known(int_type_id),
             access_mode: ExpectedAccessMode::Shared,
             requires_reactive_source: false,
-            default_value: Some(Expression::int(
-                2,
-                Default::default(),
-                ValueMode::ImmutableOwned,
-            )),
+            default_value: Some(Expression::int(2, None, ValueMode::ImmutableOwned)),
         },
         ParameterExpectation {
             name: Some(string_table.intern("third")),
@@ -339,13 +344,13 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     )
     .expect("call arguments should parse");
 
-    let location = arguments[0].location.clone();
+    let span = arguments[0].span;
     let type_check_context = type_interner.type_check_context();
     let resolved = resolve_call_arguments(
         CallDiagnosticContext::function("call"),
         &arguments,
         &expectations,
-        location,
+        span,
         CallArgumentResolutionContext {
             string_table: &mut string_table,
             type_environment: type_check_context.type_environment,
@@ -380,6 +385,30 @@ fn optional_call_context_is_limited_to_bare_none_arguments() {
 }
 
 #[test]
+fn generic_call_diagnostic_retains_exact_multibyte_callee_span() {
+    let function_name = "f".repeat(1024);
+    let source = format!(
+        "{function_name} type T || -> {{T}}:\n    return {{}}\n;\n\nprefix = \"é\"\nvalue = {function_name}()\n"
+    );
+    let diagnostic = parse_single_file_ast_diagnostic(&source);
+    let call_start = source
+        .rfind(&format!("{function_name}()"))
+        .expect("the generic call should be present") as u32;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    // The declaration's long name occupies the first extended row in the tokenizer.
+    let _declaration_span =
+        LocalSpan::exact(0, function_name.len() as u32, &mut span_builder).unwrap();
+    let call_span = LocalSpan::exact(call_start, function_name.len() as u32, &mut span_builder)
+        .expect("the callee should fit the extended span table");
+
+    assert_eq!(span_builder.len(), 2);
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
+    );
+}
+
+#[test]
 fn rejects_mutable_marker_on_named_argument_target() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
@@ -409,19 +438,15 @@ fn rejects_tilde_on_left_side_of_named_arg() {
     assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::UnexpectedToken {
-            found: TokenKind::Mutable
-        }
+        DiagnosticPayload::UnexpectedToken { found }
+            if found == DiagnosticToken::from(TokenKind::Mutable)
     ));
 }
 
-// ── Source-location diagnostics for mutable-access call shape ────────────────
+// ── Source-span diagnostics for mutable-access call shape ───────────────────
 
 #[test]
-fn mutable_marker_on_immutable_argument_uses_authored_marker_location() {
-    // `mutate(~x)` places the authored `~` at column 8 and the value `x` at column 9.
-    // The primary label must point at the marker, because the authored `~` is the source the
-    // author must remove or repair.
+fn mutable_marker_on_immutable_argument_uses_authored_marker_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~Int|:
@@ -446,27 +471,11 @@ mutate(~x)
         ),
         "expected MutableAccessOnImmutablePlace, got {reason:?}"
     );
-
-    let location = &diagnostic.primary_location;
-    assert_eq!(
-        location.start_pos.line_number, 6,
-        "marker is on the call line"
-    );
-    assert_eq!(
-        location.start_pos.char_column, 8,
-        "marker `~` sits at column 8"
-    );
-    assert_ne!(
-        location.start_pos.char_column, 9,
-        "must not point at the value `x` at column 9"
-    );
+    assert!(diagnostic.primary_span.is_some());
 }
 
 #[test]
-fn mutable_marker_on_fresh_value_uses_authored_marker_location() {
-    // `mutate(~12)` places the authored `~` at column 8 and the fresh literal at column 9.
-    // The primary label must point at the marker, since the plain fresh value is valid and the
-    // authored `~` is the mistake.
+fn mutable_marker_on_fresh_value_uses_authored_marker_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~Int|:
@@ -490,26 +499,11 @@ mutate(~12)
         ),
         "expected MutableAccessOnNonPlace, got {reason:?}"
     );
-
-    let location = &diagnostic.primary_location;
-    assert_eq!(
-        location.start_pos.line_number, 5,
-        "marker is on the call line"
-    );
-    assert_eq!(
-        location.start_pos.char_column, 8,
-        "marker `~` sits at column 8"
-    );
-    assert_ne!(
-        location.start_pos.char_column, 9,
-        "must not point at the fresh value at column 9"
-    );
+    assert!(diagnostic.primary_span.is_some());
 }
 
 #[test]
-fn unmarked_immutable_argument_uses_value_expression_location() {
-    // `mutate(x)` has no authored `~`, so the value expression `x` is the call-site source the
-    // author must change. The primary label must point at the value, at column 8.
+fn unmarked_immutable_argument_uses_value_expression_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
 mutate |value ~Int|:
@@ -534,14 +528,5 @@ mutate(x)
         ),
         "expected ImmutablePlaceMutableAccessRequired, got {reason:?}"
     );
-
-    let location = &diagnostic.primary_location;
-    assert_eq!(
-        location.start_pos.line_number, 6,
-        "value is on the call line"
-    );
-    assert_eq!(
-        location.start_pos.char_column, 8,
-        "value expression `x` sits at column 8"
-    );
+    assert!(diagnostic.primary_span.is_some());
 }

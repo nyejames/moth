@@ -6,15 +6,14 @@
 //! an expression parse. Preparation owns classification; Stage 0 owns filesystem resolution;
 //! AST interprets an already-resolved target and is given no filesystem resolver.
 //!
-//! Path syntax rows stay spelling and location only. This table does not store resource identity,
-//! output placement, hashes or byte contents.
+//! Path syntax rows retain their exact source-qualified span. This table does not store resource
+//! identity, output placement, hashes or byte contents.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -34,16 +33,16 @@ pub(crate) enum PreparedFileReferenceClass {
 }
 
 /// One graph-active file-value path occurrence.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct PreparedFileReference {
-    pub(crate) source_file: Option<FileId>,
+    pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: SourceSpan,
     pub(crate) class: PreparedFileReferenceClass,
 }
 
 /// File-local table of structural file references, in authored path-row order.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct PreparedFileReferenceTable {
     references: Vec<PreparedFileReference>,
 }
@@ -57,16 +56,19 @@ impl PreparedFileReferenceTable {
         self.references.iter()
     }
 
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for reference in &mut self.references {
-            reference.location.remap_string_ids(remap);
-        }
+    pub(crate) fn remap_string_ids(&mut self, _remap: &StringIdRemap) {
+        // Prepared references carry only source-qualified spans and dense IDs; neither contains
+        // interned strings.
     }
 
-    pub(crate) fn rebind_source_identity(&mut self, file_id: FileId, logical_path: &InternedPath) {
+    pub(crate) fn rebind_source_identity(
+        &mut self,
+        file_id: SourceId,
+        _logical_path: &InternedPath,
+    ) {
         for reference in &mut self.references {
-            reference.source_file = Some(file_id);
-            reference.location.rebind_source_identity(logical_path);
+            reference.source_file = file_id;
+            reference.span = SourceSpan::new(file_id, reference.span.local());
         }
     }
 }
@@ -80,7 +82,7 @@ impl PreparedFileReferenceTable {
 pub(crate) fn classify_prepared_file_references(
     path_syntax: &PathSyntaxTable,
     consumed_by_dependency_clauses: impl IntoIterator<Item = PathSyntaxId>,
-    source_file: Option<FileId>,
+    source_file: SourceId,
     string_table: &StringTable,
 ) -> PreparedFileReferenceTable {
     let consumed: FxHashSet<PathSyntaxId> = consumed_by_dependency_clauses
@@ -97,7 +99,7 @@ pub(crate) fn classify_prepared_file_references(
         references.push(PreparedFileReference {
             source_file,
             path_syntax: path_id,
-            location: row.location.clone(),
+            span: row.span,
             class: classify_authored_path(&row.root, string_table),
         });
     }
@@ -160,7 +162,7 @@ impl ResourceSourceId {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResolvedFileReferenceTarget {
     ContentSource {
-        source: FileId,
+        source: SourceId,
     },
     ResourceSource {
         source: ResourceSourceId,
@@ -180,20 +182,20 @@ pub(crate) enum ResolvedFileReferenceOutcome {
     /// extensionless path retained for AST's typed diagnostic).
     NoPhysicalTarget,
     Target(ResolvedFileReferenceTarget),
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
 }
 
 /// Module-compilation table pairing prepared path rows with Stage 0 resolved targets.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResolvedFileReferenceTable {
     targets: Vec<ResolvedFileReference>,
-    by_key: FxHashMap<(FileId, PathSyntaxId), ResolvedFileReferenceId>,
+    by_key: FxHashMap<(SourceId, PathSyntaxId), ResolvedFileReferenceId>,
 }
 
 /// One resolved file-value occurrence, keyed by the preparing file and its path-syntax handle.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedFileReference {
-    pub(crate) source_file: FileId,
+    pub(crate) source_file: SourceId,
     pub(crate) path_syntax: PathSyntaxId,
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: ResolvedFileReferenceOutcome,
@@ -246,8 +248,8 @@ impl ResolvedFileReferenceTable {
         let key = (reference.source_file, reference.path_syntax);
         if self.by_key.contains_key(&key) {
             return Err(CompilerError::compiler_error(format!(
-                "duplicate resolved file reference for FileId {} and PathSyntaxId {:?}",
-                reference.source_file.0, reference.path_syntax
+                "duplicate resolved source reference for {:?} and PathSyntaxId {:?}",
+                reference.source_file, reference.path_syntax
             )));
         }
 
@@ -259,7 +261,7 @@ impl ResolvedFileReferenceTable {
 
     pub(crate) fn get(
         &self,
-        source_file: FileId,
+        source_file: SourceId,
         path_syntax: PathSyntaxId,
     ) -> Option<&ResolvedFileReference> {
         let reference_id = self.by_key.get(&(source_file, path_syntax))?;

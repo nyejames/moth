@@ -313,6 +313,20 @@ fingerprint_mode = "full_tree"
 fingerprint_roots = ["benchmarks/parallelism/few-modules-many-files-each"]
 fingerprint_excludes = ["benchmarks/parallelism/few-modules-many-files-each/dev", "benchmarks/parallelism/few-modules-many-files-each/release"]
 
+[[workload]]
+id = "data_layout_diagnosed"
+entry = "benchmarks/data-layout/diagnosed"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/data-layout/diagnosed"]
+fingerprint_excludes = []
+
+[[workload]]
+id = "data_layout_warning_heavy"
+entry = "benchmarks/data-layout/warning-heavy.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/data-layout/warning-heavy.moth"]
+fingerprint_excludes = []
+
 [[case]]
 id = "root_single_file_check"
 workload = "root_single_file"
@@ -1169,6 +1183,26 @@ workload = "borrow_stress"
 group = "borrow"
 quick = true
 expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "data_layout_diagnosed_frontend"
+workload = "data_layout_diagnosed"
+group = "data_layout"
+quick = false
+expectation = "diagnosed"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[case]]
+id = "data_layout_warning_heavy_frontend"
+workload = "data_layout_warning_heavy"
+group = "data_layout"
+quick = false
+expectation = "warned"
 [case.runner]
 kind = "frontend"
 profile = "dev"

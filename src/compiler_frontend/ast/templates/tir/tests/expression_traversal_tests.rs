@@ -48,11 +48,10 @@ use crate::compiler_frontend::ast::templates::template_slots::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn expression(value: i32) -> Expression {
-    Expression::int(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::int(value, None, ValueMode::ImmutableOwned)
 }
 
 fn dynamic_node(store: &mut TemplateIrStore, value: i32) -> TemplateIrNodeId {
@@ -64,7 +63,7 @@ fn dynamic_node(store: &mut TemplateIrStore, value: i32) -> TemplateIrNodeId {
             reactive_subscription: None,
             site_id,
         },
-        SourceLocation::default(),
+        None,
     ))
 }
 
@@ -78,7 +77,7 @@ fn push_template(
         Style::default(),
         kind,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     ))
 }
 
@@ -139,15 +138,16 @@ fn mutates_branch_selector_and_body_expression() {
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(expression(1)),
         body,
-        SourceLocation::default(),
+        None,
         store.next_expression_site_id(),
     );
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
             branches: vec![branch],
             fallback: None,
+            else_marker: None,
         },
-        SourceLocation::default(),
+        None,
     ));
     let mut mutator = CountingMutator::default();
 
@@ -172,7 +172,7 @@ fn mutates_nested_same_store_child_expression() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
+        None,
     ));
     let mut mutator = CountingMutator::default();
 
@@ -208,7 +208,7 @@ fn structural_collection_ignores_child_expression_overlay() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_template = push_template(&mut store, child_node, TemplateType::StringFunction);
 
@@ -246,7 +246,7 @@ fn effective_collection_reads_same_store_child_overlay() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_template = push_template(&mut store, child_node, TemplateType::StringFunction);
     let root_view_context = TemplateViewContext::default();
@@ -299,13 +299,13 @@ fn effective_collection_preserves_outer_context_precedence_for_reused_site() {
             reference: child_reference,
             occurrence_id: child_occurrence,
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![shared_root, child_node],
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_template = push_template(&mut store, parent_root, TemplateType::StringFunction);
     let outer_context = TemplateViewContext {
@@ -355,7 +355,7 @@ fn effective_collection_revisits_shared_root_for_a_new_context_once() {
             ),
             occurrence_id: first_occurrence,
         },
-        SourceLocation::default(),
+        None,
     ));
     let second_occurrence = store.next_child_template_occurrence_id();
     let second_child = store.push_node(TemplateIrNode::new(
@@ -367,13 +367,13 @@ fn effective_collection_revisits_shared_root_for_a_new_context_once() {
             ),
             occurrence_id: second_occurrence,
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![first_child, second_child],
         },
-        SourceLocation::default(),
+        None,
     ));
     let parent_template = push_template(&mut store, parent_root, TemplateType::StringFunction);
     let root_view = TirView::new(
@@ -450,7 +450,7 @@ fn nested_expression_walker_enters_same_store_template_view() {
                 phase: TemplateTirPhase::Finalized,
                 context: TemplateViewContext::default(),
             },
-            location: SourceLocation::default(),
+            span: None,
         },
         ValueMode::ImmutableOwned,
     );
@@ -482,7 +482,7 @@ fn missing_child_template_is_reported() {
             ),
             occurrence_id,
         },
-        SourceLocation::default(),
+        None,
     ));
     let mut mutator = CountingMutator::default();
 
@@ -496,7 +496,7 @@ fn missing_child_template_is_reported() {
 // -------------------------
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(value, None, ValueMode::ImmutableOwned)
 }
 
 fn mutate_from_root(
@@ -532,7 +532,7 @@ fn finalized_tir_reference(
 fn template_with_reference(reference: TemplateTirReference) -> Template {
     Template {
         tir_reference: reference,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -545,7 +545,7 @@ fn runtime_expression(operand: Expression) -> Expression {
         ExpressionKind::Runtime(ExpressionRpn {
             items: vec![ExpressionRpnItem::Operand(operand)],
         }),
-        SourceLocation::default(),
+        None,
         builtin_type_ids::INT,
         DataType::Int,
         ValueMode::ImmutableOwned,
@@ -558,7 +558,7 @@ fn coerced_expression(value: Expression) -> Expression {
             value: Box::new(value),
             to_type: builtin_type_ids::STRING,
         },
-        SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -584,20 +584,20 @@ fn runtime_slot_plan_store(
 ) -> TemplateSlotPlanId {
     let contribution_source = RuntimeSlotContributionSourceId(0);
     store.push_slot_plan(TemplateSlotPlan {
-        location: SourceLocation::default(),
         contribution_sources: vec![TemplateSlotContributionSourcePlan {
             source: contribution_source,
             target: SlotKey::Default,
             render_root: source_root,
             renders_wrapper_unconditionally: true,
-            location: SourceLocation::default(),
+            span: None,
         }],
         slot_sites: vec![TemplateSlotSitePlan {
             site: RuntimeSlotSiteId(0),
             key: SlotKey::Default,
             render_root: site_render_root,
-            location: SourceLocation::default(),
+            span: None,
         }],
+        span: None,
     })
 }
 
@@ -621,7 +621,7 @@ fn mutates_loop_header_body_and_aggregate_wrapper_expression() {
             body,
             aggregate_wrapper: Some(aggregate_wrapper),
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let mutator = mutate_from_root(&mut store, root).expect("walk should succeed");
@@ -647,7 +647,7 @@ fn mutates_child_template_and_nested_child_template_expression() {
             reference: nested_child_reference,
             occurrence_id: nested_child_occurrence,
         },
-        SourceLocation::default(),
+        None,
     ));
     let child_template = push_template(&mut store, nested_child, TemplateType::StringFunction);
 
@@ -662,7 +662,7 @@ fn mutates_child_template_and_nested_child_template_expression() {
             reference: root_reference,
             occurrence_id: root_occurrence,
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let mutator = mutate_from_root(&mut store, root).expect("walk should succeed");
@@ -679,7 +679,7 @@ fn mutates_insert_contribution_child_expression() {
         TemplateIrNodeKind::InsertContribution {
             template: insert_template,
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let mutator = mutate_from_root(&mut store, root).expect("walk should succeed");
@@ -700,7 +700,7 @@ fn mutates_runtime_slot_plan_wrapper_source_and_site_render_piece() {
         Style::default(),
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
     runtime_template.runtime_slot_plan = Some(slot_plan_id);
     let runtime_template_id = store.push_template(runtime_template);
@@ -715,7 +715,7 @@ fn mutates_runtime_slot_plan_wrapper_source_and_site_render_piece() {
             reference: runtime_reference,
             occurrence_id,
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let mutator = mutate_from_root(&mut store, root).expect("walk should succeed");
@@ -727,16 +727,16 @@ fn mutates_runtime_slot_plan_wrapper_source_and_site_render_piece() {
 fn reports_missing_runtime_slot_site_as_compiler_error() {
     let mut store = TemplateIrStore::new();
     let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
-        location: SourceLocation::default(),
         contribution_sources: vec![],
         slot_sites: vec![],
+        span: None,
     });
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::RuntimeSlotSite {
             plan: slot_plan_id,
             site: RuntimeSlotSiteId(0),
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let error = mutate_from_root(&mut store, root).expect_err("missing slot site should fail");
@@ -761,7 +761,7 @@ fn collects_runtime_slot_plan_wrapper_source_and_site_render_piece_dynamic_paylo
         Style::default(),
         TemplateType::StringFunction,
         TemplateIrSummary::default(),
-        SourceLocation::default(),
+        None,
     );
     runtime_template.runtime_slot_plan = Some(slot_plan_id);
     let runtime_template_id = store.push_template(runtime_template);
@@ -780,15 +780,16 @@ fn collects_dynamic_payloads_branch_selectors_and_loop_headers() {
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(expression(1)),
         branch_body,
-        SourceLocation::default(),
+        None,
         selector_site_id,
     );
     let branch_chain = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::BranchChain {
             branches: vec![branch],
             fallback: None,
+            else_marker: None,
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let loop_body = dynamic_node(&mut store, 4);
@@ -808,14 +809,14 @@ fn collects_dynamic_payloads_branch_selectors_and_loop_headers() {
             body: loop_body,
             aggregate_wrapper: Some(aggregate_wrapper),
         },
-        SourceLocation::default(),
+        None,
     ));
 
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
             children: vec![branch_chain, loop_node],
         },
-        SourceLocation::default(),
+        None,
     ));
     let template_id = push_template(&mut store, root, TemplateType::StringFunction);
 
@@ -854,7 +855,7 @@ fn structural_collection_sorts_expression_sites_once_after_keyed_accumulation() 
         TemplateIrNodeKind::Sequence {
             children: vec![second, first],
         },
-        SourceLocation::default(),
+        None,
     ));
     let template_id = push_template(&mut store, root, TemplateType::StringFunction);
 
@@ -946,7 +947,7 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
     let mut store = TemplateIrStore::new();
     let body = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence { children: vec![] },
-        SourceLocation::default(),
+        None,
     ));
     let header = TemplateLoopHeader::Range {
         bindings: Box::new(LoopBindings {
@@ -976,7 +977,7 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
             body,
             aggregate_wrapper: None,
         },
-        SourceLocation::default(),
+        None,
     ));
     let template_id = push_template(&mut store, root, TemplateType::StringFunction);
 
@@ -1034,17 +1035,17 @@ fn view_walker_reads_branch_selector_overlay() {
         let branch = TemplateIrBranch::new(
             TemplateBranchSelector::Bool(bool_expression(false)),
             body,
-            SourceLocation::default(),
+            None,
             store.next_expression_site_id(),
         );
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
         let template_id = builder.finish_template(
             root,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
-            SourceLocation::default(),
+            None,
         );
         let selector_site_id = branch_selector_site_id(&store, root);
         (template_id, selector_site_id)
@@ -1099,7 +1100,7 @@ fn view_walker_reads_loop_header_overlay() {
     let (template_id, start_site_id, step_site_id) = {
         let body = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence { children: vec![] },
-            SourceLocation::default(),
+            None,
         ));
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
@@ -1129,7 +1130,7 @@ fn view_walker_reads_loop_header_overlay() {
                 body,
                 aggregate_wrapper: None,
             },
-            SourceLocation::default(),
+            None,
         ));
         let template_id = push_template(&mut store, root, TemplateType::StringFunction);
         (template_id, start_site_id, step_site_id)
@@ -1229,7 +1230,7 @@ fn view_walker_uses_parent_overlay_for_the_same_child_root() {
                 ),
                 occurrence_id: structural_occurrence_id,
             },
-            SourceLocation::default(),
+            None,
         ));
         let overlaid_occurrence_id = store.next_child_template_occurrence_id();
         let overlaid_child = store.push_node(TemplateIrNode::new(
@@ -1241,13 +1242,13 @@ fn view_walker_uses_parent_overlay_for_the_same_child_root() {
                 ),
                 occurrence_id: overlaid_occurrence_id,
             },
-            SourceLocation::default(),
+            None,
         ));
         let parent_root = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence {
                 children: vec![structural_child, overlaid_child],
             },
-            SourceLocation::default(),
+            None,
         ));
         push_template(&mut store, parent_root, TemplateType::StringFunction)
     };
@@ -1289,7 +1290,7 @@ fn view_walker_reads_insert_contribution_effective_overlay() {
 
         let parent_root = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            builder.push_insert_contribution_node(insert_template_id, SourceLocation::default())
+            builder.push_insert_contribution_node(insert_template_id, None)
         };
         let parent_template_id =
             push_template(&mut store, parent_root, TemplateType::StringFunction);
@@ -1331,7 +1332,7 @@ fn view_walker_reports_missing_insert_contribution_template() {
     let parent_template_id = {
         let parent_root = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            builder.push_insert_contribution_node(TemplateIrId::new(99), SourceLocation::default())
+            builder.push_insert_contribution_node(TemplateIrId::new(99), None)
         };
         push_template(&mut store, parent_root, TemplateType::StringFunction)
     };
@@ -1415,7 +1416,7 @@ fn nested_walker_shares_visited_set_between_tir_child_and_expression_template() 
                 reference: child_ref,
                 occurrence_id,
             },
-            SourceLocation::default(),
+            None,
         ));
 
         let site_id = store.next_expression_site_id();
@@ -1426,14 +1427,14 @@ fn nested_walker_shares_visited_set_between_tir_child_and_expression_template() 
                 reactive_subscription: None,
                 site_id,
             },
-            SourceLocation::default(),
+            None,
         ));
 
         let parent_root = store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::Sequence {
                 children: vec![child_node, expr_node],
             },
-            SourceLocation::default(),
+            None,
         ));
         push_template(&mut store, parent_root, TemplateType::StringFunction)
     };

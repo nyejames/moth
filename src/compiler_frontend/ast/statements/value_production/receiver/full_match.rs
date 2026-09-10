@@ -21,8 +21,9 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
 /// Full value matches recurse into statement match bodies, so their result retains internal
 /// frozen-token-table failures for the expression parser boundary.
@@ -35,7 +36,7 @@ pub(super) struct ValueMatchParseInput<'a, 'b> {
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
-    pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
 }
 
 /// Parses a full value-producing match at a closed receiver.
@@ -51,7 +52,7 @@ pub(super) fn parse_value_match_at_receiver(
         type_interner,
         target,
         string_table,
-        location,
+        span,
     } = input;
 
     let scrutinee_context = context.new_child_control_flow(ContextKind::Condition, string_table);
@@ -65,7 +66,7 @@ pub(super) fn parse_value_match_at_receiver(
     if token_stream.current_token_kind() != &TokenKind::Is {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -86,23 +87,20 @@ pub(super) fn parse_value_match_at_receiver(
     )?;
     emit_collected_warnings(context, warnings);
 
-    validate_value_match_completeness(
-        &parsed_match.arms,
-        parsed_match.default.as_deref(),
-        &location,
-    )?;
+    validate_value_match_completeness(&parsed_match.arms, parsed_match.default.as_deref(), span)?;
 
     if needs_slot_inference {
-        return Ok(ParsedReceiverValue::NeedsSlotInference(ValueBlock::Match(
-            ValueMatchBlock {
+        return Ok(ParsedReceiverValue::NeedsSlotInference {
+            block: ValueBlock::Match(ValueMatchBlock {
                 scrutinee: parsed_match.scrutinee,
                 arms: parsed_match.arms,
                 default: parsed_match.default,
                 exhaustiveness: parsed_match.exhaustiveness,
-                location,
+                span,
                 result_type_ids: Vec::new(),
-            },
-        )));
+            }),
+            span,
+        });
     }
 
     let result_type_id = infer_value_match_result_type(
@@ -110,7 +108,7 @@ pub(super) fn parse_value_match_at_receiver(
         parsed_match.default.as_deref(),
         &expected_result_type_ids,
         type_interner,
-        &location,
+        span,
         receiver_kind,
     )?;
     let result_type_ids = if expected_result_type_ids.is_empty() {
@@ -125,9 +123,10 @@ pub(super) fn parse_value_match_at_receiver(
             arms: parsed_match.arms,
             default: parsed_match.default,
             exhaustiveness: parsed_match.exhaustiveness,
-            location,
+            span,
             result_type_ids,
         },
+        span,
         result_type_id,
         type_interner.environment(),
     )))

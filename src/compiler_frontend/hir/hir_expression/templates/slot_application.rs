@@ -22,8 +22,8 @@ use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
 use super::append_context::{
@@ -40,12 +40,12 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_slot_application_template_expression(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let output_accumulator = self.initialize_runtime_template_accumulator(location)?;
+        let output_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         let append_context = RuntimeTemplateAppendContext::new(output_accumulator);
         let emission =
-            self.append_runtime_slot_application_with_context(handoff, append_context, location)?;
+            self.append_runtime_slot_application_with_context(handoff, append_context, span_ref)?;
 
         if matches!(
             emission,
@@ -53,13 +53,13 @@ impl<'a> HirBuilder<'a> {
         ) {
             return_hir_transformation_error!(
                 "Runtime slot application emitted loop control outside a template loop body.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         }
 
-        let region = self.current_region_or_error(location)?;
+        let region = self.current_region_or_error(span_ref)?;
         let value = self.make_expression(
-            location,
+            span_ref,
             HirExpressionKind::Copy(HirPlace::Local(output_accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,
@@ -79,16 +79,16 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let source_accumulators =
-            self.initialize_runtime_slot_source_accumulators(handoff, location)?;
+            self.initialize_runtime_slot_source_accumulators(handoff, span_ref)?;
 
         let contribution_result = self.append_runtime_slot_contributions(
             handoff,
             append_context,
             &source_accumulators,
-            location,
+            span_ref,
         )?;
         if matches!(
             contribution_result.emission,
@@ -102,7 +102,7 @@ impl<'a> HirBuilder<'a> {
                 handoff,
                 append_context,
                 &source_accumulators,
-                location,
+                span_ref,
             );
         }
 
@@ -111,19 +111,19 @@ impl<'a> HirBuilder<'a> {
             append_context,
             &source_accumulators,
             contribution_result.emitted_any_contribution,
-            location,
+            span_ref,
         )
     }
 
     fn initialize_runtime_slot_source_accumulators(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeSlotSourceAccumulatorContext, CompilerError> {
         let mut context = RuntimeSlotSourceAccumulatorContext::new();
 
         for source in &handoff.contribution_sources {
-            let accumulator = self.initialize_runtime_template_accumulator(location)?;
+            let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
             context.insert(source.source, accumulator);
         }
 
@@ -135,10 +135,9 @@ impl<'a> HirBuilder<'a> {
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeSlotContributionResult, CompilerError> {
-        let contribution_emitted_flag =
-            self.initialize_runtime_template_emitted_flag(fallback_location)?;
+        let contribution_emitted_flag = self.initialize_runtime_template_emitted_flag(span_ref)?;
         let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty();
         let loop_control_flush = RuntimeSlotLoopControlFlush {
             wrapper_plan: &handoff.wrapper,
@@ -153,7 +152,7 @@ impl<'a> HirBuilder<'a> {
             let Some(target_accumulator) = source_accumulators.local_for(source.source) else {
                 return_hir_transformation_error!(
                     "Runtime slot contribution referenced a source with no allocated accumulator.",
-                    self.hir_error_location(&source.location)
+                    self.hir_error_location(&source.span)
                 );
             };
 
@@ -175,7 +174,7 @@ impl<'a> HirBuilder<'a> {
                 target_accumulator,
                 loop_control_flush,
                 contribution_emitted_flag,
-                fallback_location,
+                span_ref,
             )?;
 
             match emission {
@@ -189,8 +188,8 @@ impl<'a> HirBuilder<'a> {
                 }
             }
 
-            let current_block = self.current_block_id_or_error(fallback_location)?;
-            if self.block_has_explicit_terminator(current_block, fallback_location)? {
+            let current_block = self.current_block_id_or_error(span_ref)?;
+            if self.block_has_explicit_terminator(current_block, span_ref)? {
                 break;
             }
         }
@@ -208,7 +207,7 @@ impl<'a> HirBuilder<'a> {
         target_accumulator: LocalId,
         loop_control_flush: RuntimeSlotLoopControlFlush<'_>,
         contribution_emitted_flag: LocalId,
-        fallback_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let append_context = RuntimeTemplateAppendContext::new(target_accumulator)
             .with_emitted_output(Some(contribution_emitted_flag))
@@ -218,7 +217,7 @@ impl<'a> HirBuilder<'a> {
             &source.render_root,
             append_context,
             None,
-            fallback_location,
+            span_ref,
         )
     }
 
@@ -227,7 +226,7 @@ impl<'a> HirBuilder<'a> {
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
         let wrapper_context = append_context
             .with_runtime_slot_sites(source_accumulators, &handoff.slot_sites)
@@ -236,7 +235,7 @@ impl<'a> HirBuilder<'a> {
             &handoff.wrapper,
             wrapper_context,
             None,
-            location,
+            span_ref,
         )?;
 
         if append_context.emitted_output().is_some() && emission == TemplateBodyEmission::Output {
@@ -252,19 +251,19 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         emitted_any_contribution: LocalId,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, CompilerError> {
-        let condition_block = self.current_block_id_or_error(location)?;
-        let parent_region = self.current_region_or_error(location)?;
+        let condition_block = self.current_block_id_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error(span_ref)?;
         let rendered_region = self.create_child_region(parent_region);
         let skipped_region = self.create_child_region(parent_region);
         let rendered_block =
-            self.create_block(rendered_region, location, "runtime-slot-rendered")?;
-        let skipped_block = self.create_block(skipped_region, location, "runtime-slot-skipped")?;
+            self.create_block(rendered_region, span_ref, "runtime-slot-rendered")?;
+        let skipped_block = self.create_block(skipped_region, span_ref, "runtime-slot-skipped")?;
         let condition = self.make_local_load_expression(
             emitted_any_contribution,
             builtin_type_ids::BOOL,
-            location,
+            span_ref,
             parent_region,
         );
 
@@ -275,19 +274,19 @@ impl<'a> HirBuilder<'a> {
                 then_block: rendered_block,
                 else_block: skipped_block,
             },
-            location,
+            span_ref,
         )?;
 
         // Runtime-only contribution plans render their wrapper only when a
         // contribution produced structural output. This preserves the documented
         // no-output behavior for false branches and no-output loops.
-        self.set_current_block(rendered_block, location)?;
-        self.append_runtime_slot_wrapper(handoff, append_context, source_accumulators, location)?;
-        let rendered_tail = self.current_block_id_or_error(location)?;
-        let rendered_terminated = self.block_has_explicit_terminator(rendered_tail, location)?;
+        self.set_current_block(rendered_block, span_ref)?;
+        self.append_runtime_slot_wrapper(handoff, append_context, source_accumulators, span_ref)?;
+        let rendered_tail = self.current_block_id_or_error(span_ref)?;
+        let rendered_terminated = self.block_has_explicit_terminator(rendered_tail, span_ref)?;
 
-        self.set_current_block(skipped_block, location)?;
-        let skipped_tail = self.current_block_id_or_error(location)?;
+        self.set_current_block(skipped_block, span_ref)?;
+        let skipped_tail = self.current_block_id_or_error(span_ref)?;
 
         let emission = if append_context.emitted_output().is_some() {
             TemplateBodyEmission::NoOutput
@@ -296,25 +295,25 @@ impl<'a> HirBuilder<'a> {
         };
 
         if rendered_terminated {
-            self.set_current_block(skipped_tail, location)?;
+            self.set_current_block(skipped_tail, span_ref)?;
             return Ok(emission);
         }
 
-        let merge_block = self.create_block(parent_region, location, "runtime-slot-merge")?;
+        let merge_block = self.create_block(parent_region, span_ref, "runtime-slot-merge")?;
         self.emit_jump_to(
             rendered_tail,
             merge_block,
-            location,
+            span_ref,
             "runtime-slot.rendered.merge",
         )?;
         self.emit_jump_to(
             skipped_tail,
             merge_block,
-            location,
+            span_ref,
             "runtime-slot.skipped.merge",
         )?;
 
-        self.set_current_block(merge_block, location)?;
+        self.set_current_block(merge_block, span_ref)?;
         Ok(emission)
     }
 }

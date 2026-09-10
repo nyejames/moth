@@ -48,8 +48,6 @@ struct CommentScanner<'a> {
     source: &'a str,
     bytes: &'a [u8],
     pos: usize,
-    line: usize,
-    column: usize,
     annotations: Vec<ExtractedAnnotation>,
     diagnostics: Vec<JsParserDiagnostic>,
 }
@@ -60,8 +58,6 @@ impl<'a> CommentScanner<'a> {
             source,
             bytes: source.as_bytes(),
             pos: 0,
-            line: 1,
-            column: 1,
             annotations: Vec::new(),
             diagnostics: Vec::new(),
         }
@@ -92,14 +88,11 @@ impl<'a> CommentScanner<'a> {
 
     fn read_doc_comment_block(&mut self) {
         let block_start_byte = self.pos;
-        let block_start_line = self.line;
-        let block_start_column = self.column;
 
         // Consume `/**`
         self.advance_chars(3);
 
         let mut block_text = String::new();
-        let block_content_start = self.pos;
 
         while !self.is_at_end() {
             if self.peek_str("*/") {
@@ -110,26 +103,16 @@ impl<'a> CommentScanner<'a> {
             self.advance_char();
         }
 
-        let block_span = JsSourceSpan::range(
-            block_start_byte,
-            self.pos,
-            block_start_line,
-            block_start_column,
-        );
+        let block_span = JsSourceSpan::range(block_start_byte, self.pos);
 
-        self.parse_block_content(&block_text, block_content_start, block_span);
+        self.parse_block_content(&block_text, block_span);
     }
 
-    fn parse_block_content(
-        &mut self,
-        content: &str,
-        content_byte_offset: usize,
-        block_span: JsSourceSpan,
-    ) {
+    fn parse_block_content(&mut self, content: &str, block_span: JsSourceSpan) {
         // Normalize line breaks and strip leading `*` from each line
         let lines: Vec<&str> = content.lines().collect();
 
-        for (line_index, raw_line) in lines.iter().enumerate() {
+        for raw_line in lines {
             let trimmed = raw_line.trim_start();
             let after_star = if let Some(stripped) = trimmed.strip_prefix('*') {
                 stripped.trim_start()
@@ -138,23 +121,12 @@ impl<'a> CommentScanner<'a> {
             };
 
             if after_star.starts_with("@moth.") {
-                self.parse_annotation_line(
-                    after_star,
-                    content_byte_offset,
-                    line_index,
-                    block_span.clone(),
-                );
+                self.parse_annotation_line(after_star, block_span.clone());
             }
         }
     }
 
-    fn parse_annotation_line(
-        &mut self,
-        line: &str,
-        _content_byte_offset: usize,
-        _line_index: usize,
-        block_span: JsSourceSpan,
-    ) {
+    fn parse_annotation_line(&mut self, line: &str, block_span: JsSourceSpan) {
         let mut tokens = line.split_whitespace();
         let directive = tokens.next().unwrap_or("");
 
@@ -292,12 +264,6 @@ impl<'a> CommentScanner<'a> {
         }
         let ch = self.current_char();
         self.pos += ch.len_utf8();
-        if ch == '\n' {
-            self.line += 1;
-            self.column = 1;
-        } else {
-            self.column += 1;
-        }
     }
 
     fn advance_chars(&mut self, count: usize) {

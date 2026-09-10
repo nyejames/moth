@@ -7,8 +7,8 @@
 
 use crate::build_system::build_profile::BuildProfile;
 use crate::build_system::output::output_path::{canonicalize_output_path, normalize_relative_path};
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::utilities::basic::normalize_path;
 
 use std::collections::BTreeSet;
@@ -115,7 +115,8 @@ impl CleanupPolicy {
 pub struct ValidatedOutputFolder {
     pub relative_path: PathBuf,
     pub resolved_path: PathBuf,
-    pub location: SourceLocation,
+    /// Exact authored config span, when this folder came from source config.
+    pub span: Option<SourceSpan>,
 }
 
 /// Validated development and release output settings produced during bootstrap.
@@ -143,19 +144,18 @@ impl ValidatedDirectoryOutputSettings {
             project_root,
             entry_root,
             owner,
-            setting_location: folder.location.clone(),
+            setting_span: folder.span,
         }
     }
 }
 
-/// Complete output plan for a validated directory project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedOutputPlan {
     pub output_root: PathBuf,
     pub project_root: PathBuf,
     pub entry_root: PathBuf,
     pub owner: OutputOwner,
-    pub setting_location: SourceLocation,
+    pub setting_span: Option<SourceSpan>,
 }
 
 /// Explicit output plan for a single-file command.
@@ -164,7 +164,8 @@ pub struct SingleFileOutputPlan {
     pub output_root: PathBuf,
     pub project_root: Option<PathBuf>,
     pub owner: OutputOwner,
-    pub setting_location: SourceLocation,
+    /// Single-file paths are command/filesystem facts, never authored config spans.
+    pub setting_span: Option<SourceSpan>,
 }
 
 /// The output plan consumed by the writer.
@@ -203,10 +204,10 @@ impl OutputPlan {
         }
     }
 
-    pub(crate) fn setting_location(&self) -> &SourceLocation {
+    pub(crate) fn setting_span(&self) -> Option<SourceSpan> {
         match self {
-            Self::Directory(plan) => &plan.setting_location,
-            Self::SingleFile(plan) => &plan.setting_location,
+            Self::Directory(plan) => plan.setting_span,
+            Self::SingleFile(plan) => plan.setting_span,
         }
     }
 }
@@ -246,7 +247,7 @@ pub(crate) fn classify_output_folder(
     Ok(ValidatedOutputFolder {
         relative_path,
         resolved_path,
-        location: SourceLocation::default(),
+        span: None,
     })
 }
 

@@ -23,9 +23,9 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{FieldId, FunctionId, LocalId, StructId};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
@@ -54,7 +54,7 @@ impl<'a> HirBuilder<'a> {
             _ => {
                 return_hir_transformation_error!(
                     format!("AST node is not an expression: {:?}", node.kind),
-                    self.hir_error_location(&node.location)
+                    self.hir_error_location(&node.span)
                 )
             }
         }
@@ -79,24 +79,22 @@ impl<'a> HirBuilder<'a> {
                     // rvalues, so materialize them into a temporary local when referenced in
                     // place-position expressions (for example `format.center`).
                     let lowered =
-                        self.lower_reference_expression(name, expr.type_id, &node.location)?;
+                        self.lower_reference_expression(name, expr.type_id, &expr.span)?;
                     if let HirExpressionKind::Load(place) = &lowered.value.kind {
                         return Ok((lowered.prelude, place.to_owned()));
                     }
 
-                    let temp_local =
-                        self.allocate_temp_local(lowered.value.ty, Some(node.location.to_owned()))?;
+                    let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
                     let assign_statement = HirStatement {
                         id: self.allocate_node_id(),
                         kind: HirStatementKind::Assign {
                             target: HirPlace::Local(temp_local),
                             value: lowered.value,
                         },
-                        location: node.location.to_owned(),
+                        span: None,
                     };
 
-                    self.side_table
-                        .map_statement(&node.location, &assign_statement);
+                    self.side_table.map_statement(node.span, &assign_statement);
 
                     let mut prelude = lowered.prelude;
                     prelude.push(assign_statement);
@@ -117,18 +115,16 @@ impl<'a> HirBuilder<'a> {
                         return Ok((lowered.prelude, place.to_owned()));
                     }
 
-                    let temp_local =
-                        self.allocate_temp_local(lowered.value.ty, Some(node.location.to_owned()))?;
+                    let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
                     let assign_statement = HirStatement {
                         id: self.allocate_node_id(),
                         kind: HirStatementKind::Assign {
                             target: HirPlace::Local(temp_local),
                             value: lowered.value,
                         },
-                        location: node.location.to_owned(),
+                        span: None,
                     };
-                    self.side_table
-                        .map_statement(&node.location, &assign_statement);
+                    self.side_table.map_statement(node.span, &assign_statement);
 
                     let mut prelude = lowered.prelude;
                     prelude.push(assign_statement);
@@ -139,7 +135,7 @@ impl<'a> HirBuilder<'a> {
             _ => {
                 return_hir_transformation_error!(
                     format!("Cannot lower AST node to HIR place: {:?}", node.kind),
-                    self.hir_error_location(&node.location)
+                    self.hir_error_location(&node.span)
                 )
             }
         }
@@ -161,25 +157,22 @@ impl<'a> HirBuilder<'a> {
                 // Field/index lowering requires a place. Module constants are lowered as
                 // rvalues, so materialize them into a temporary local when referenced in
                 // place-position expressions.
-                let lowered =
-                    self.lower_reference_expression(name, place.type_id, &place.location)?;
+                let lowered = self.lower_reference_expression(name, place.type_id, &place.span)?;
                 if let HirExpressionKind::Load(hir_place) = &lowered.value.kind {
                     return Ok((lowered.prelude, hir_place.to_owned()));
                 }
 
-                let temp_local =
-                    self.allocate_temp_local(lowered.value.ty, Some(place.location.to_owned()))?;
+                let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
                 let assign_statement = HirStatement {
                     id: self.allocate_node_id(),
                     kind: HirStatementKind::Assign {
                         target: HirPlace::Local(temp_local),
                         value: lowered.value,
                     },
-                    location: place.location.to_owned(),
+                    span: None,
                 };
 
-                self.side_table
-                    .map_statement(&place.location, &assign_statement);
+                self.side_table.map_statement(place.span, &assign_statement);
 
                 let mut prelude = lowered.prelude;
                 prelude.push(assign_statement);
@@ -191,7 +184,7 @@ impl<'a> HirBuilder<'a> {
                 let field_id = self.resolve_field_id_for_base_place_or_error(
                     &base_place,
                     *field,
-                    &place.location,
+                    &place.span,
                 )?;
 
                 Ok((
@@ -212,25 +205,22 @@ impl<'a> HirBuilder<'a> {
         base: &Expression,
         field: StringId,
         result_type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        if let Some(lowered) = self.try_lower_const_record_field_access_expression(
-            base,
-            field,
-            result_type_id,
-            location,
-        )? {
+        if let Some(lowered) =
+            self.try_lower_const_record_field_access_expression(base, field, result_type_id, span)?
+        {
             return Ok(lowered);
         }
 
-        let region = self.current_region_or_error(location)?;
-        let (prelude, place) = self.lower_expression_to_place(base, field, location)?;
-        let ty = self.lower_type_id(result_type_id, location)?;
+        let region = self.current_region_or_error(span)?;
+        let (prelude, place) = self.lower_expression_to_place(base, field, span)?;
+        let ty = self.lower_type_id(result_type_id, span)?;
 
         Ok(LoweredExpression {
             prelude,
             value: self.make_expression(
-                location,
+                span,
                 HirExpressionKind::Load(place),
                 ty,
                 ValueKind::Place,
@@ -246,13 +236,13 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         base: &Expression,
         field: StringId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<(Vec<HirStatement>, HirPlace), CompilerError> {
         let lowered = self.lower_expression(base)?;
 
         if let HirExpressionKind::Load(base_place) = &lowered.value.kind {
             let field_id =
-                self.resolve_field_id_for_base_place_or_error(base_place, field, location)?;
+                self.resolve_field_id_for_base_place_or_error(base_place, field, span)?;
             return Ok((
                 lowered.prelude,
                 HirPlace::Field {
@@ -262,16 +252,16 @@ impl<'a> HirBuilder<'a> {
             ));
         }
 
-        let temp_local = self.allocate_temp_local(lowered.value.ty, Some(location.to_owned()))?;
+        let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
         let assign_statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Assign {
                 target: HirPlace::Local(temp_local),
                 value: lowered.value,
             },
-            location: location.to_owned(),
+            span: None,
         };
-        self.side_table.map_statement(location, &assign_statement);
+        self.side_table.map_statement(*span, &assign_statement);
 
         let mut prelude = lowered.prelude;
         prelude.push(assign_statement);
@@ -279,7 +269,7 @@ impl<'a> HirBuilder<'a> {
         let field_id = self.resolve_field_id_for_base_place_or_error(
             &HirPlace::Local(temp_local),
             field,
-            location,
+            span,
         )?;
 
         Ok((
@@ -296,7 +286,7 @@ impl<'a> HirBuilder<'a> {
         base: &Expression,
         field: StringId,
         result_type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Option<LoweredExpression>, CompilerError> {
         if let Some(base_value_id) = self.const_store_value_for_expression(base) {
             let base_metadata = self
@@ -318,7 +308,7 @@ impl<'a> HirBuilder<'a> {
                         "Const record field '{}' was not present during HIR field lowering",
                         self.string_table.resolve(field)
                     ),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             };
 
@@ -333,13 +323,13 @@ impl<'a> HirBuilder<'a> {
             if metadata.const_record_state == ConstRecordState::ConstRecord {
                 return_hir_transformation_error!(
                     "HIR invariant: nested const-record field access still produces a record",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 );
             }
 
-            let mut value = self.lower_const_store_expression(field_value_id, location)?;
-            value.ty = self.lower_type_id(result_type_id, location)?;
-            value.region = self.current_region_or_error(location)?;
+            let mut value = self.lower_const_store_expression(field_value_id, span)?;
+            value.ty = self.lower_type_id(result_type_id, span)?;
+            value.region = self.current_region_or_error(span)?;
             return Ok(Some(LoweredExpression {
                 prelude: vec![],
                 value,
@@ -349,13 +339,12 @@ impl<'a> HirBuilder<'a> {
         if base.is_const_record_value() {
             return_hir_transformation_error!(
                 "HIR invariant: const-record field access reached HIR without a folded store binding",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         }
 
         Ok(None)
     }
-
     fn const_store_value_for_expression(&self, expression: &Expression) -> Option<ConstValueId> {
         match &expression.kind {
             ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
@@ -371,16 +360,16 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         name: &InternedPath,
         type_id: FrontendTypeId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
-        let region = self.current_region_or_error(location)?;
-        let ty = self.lower_type_id(type_id, location)?;
+        let region = self.current_region_or_error(span)?;
+        let ty = self.lower_type_id(type_id, span)?;
 
         if let Some(local_id) = self.locals_by_name.get(name).copied() {
             return Ok(LoweredExpression {
                 prelude: vec![],
                 value: self.make_expression(
-                    location,
+                    span,
                     HirExpressionKind::Load(HirPlace::Local(local_id)),
                     ty,
                     ValueKind::Place,
@@ -389,9 +378,7 @@ impl<'a> HirBuilder<'a> {
             });
         }
 
-        if let Some(mut constant_value) =
-            self.try_lower_module_constant_reference(name, location)?
-        {
+        if let Some(mut constant_value) = self.try_lower_module_constant_reference(name, span)? {
             // Preserve the type expected by the AST reference expression while reusing
             // the constant's lowered value shape.
             constant_value.ty = ty;
@@ -408,14 +395,14 @@ impl<'a> HirBuilder<'a> {
                 "Unresolved local '{}' during HIR expression lowering",
                 self.symbol_name_for_diagnostics(name)
             ),
-            self.hir_error_location(location)
+            self.hir_error_location(span)
         )
     }
 
     fn try_lower_module_constant_reference(
         &mut self,
         name: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<Option<HirExpression>, CompilerError> {
         let Some(value_id) = self.module_constants_by_name.get(name).copied() else {
             return Ok(None);
@@ -438,7 +425,7 @@ impl<'a> HirBuilder<'a> {
                     "HIR invariant: non-renderable template constant '{}' reached HIR expression lowering",
                     self.symbol_name_for_diagnostics(name)
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         }
 
@@ -451,11 +438,11 @@ impl<'a> HirBuilder<'a> {
                     "HIR invariant: const record '{}' reached HIR reference lowering without field access",
                     self.symbol_name_for_diagnostics(name)
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         }
 
-        Ok(Some(self.lower_const_store_expression(value_id, location)?))
+        Ok(Some(self.lower_const_store_expression(value_id, span)?))
     }
 
     // WHAT: resolves a function path through the HIR declaration table.
@@ -464,7 +451,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_function_id_or_error(
         &self,
         name: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<FunctionId, CompilerError> {
         let Some(function_id) = self.functions_by_name.get(name).copied() else {
             return_hir_transformation_error!(
@@ -472,7 +459,7 @@ impl<'a> HirBuilder<'a> {
                     "Unresolved function '{}' during HIR expression lowering",
                     self.symbol_name_for_diagnostics(name)
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
@@ -482,7 +469,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_call_target_or_error(
         &self,
         name: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<crate::compiler_frontend::external_packages::CallTarget, CompilerError> {
         use crate::compiler_frontend::external_packages::CallTarget;
         use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
@@ -512,7 +499,7 @@ impl<'a> HirBuilder<'a> {
                 "Unresolved function '{}' during HIR expression lowering",
                 self.symbol_name_for_diagnostics(name)
             ),
-            self.hir_error_location(location)
+            self.hir_error_location(span)
         );
     }
 
@@ -523,7 +510,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         struct_id: StructId,
         field_name: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<FieldId, CompilerError> {
         let Some(field_id) = self
             .fields_by_struct_and_name
@@ -536,7 +523,7 @@ impl<'a> HirBuilder<'a> {
                     self.symbol_name_for_diagnostics(field_name),
                     struct_id
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
@@ -546,7 +533,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn resolve_struct_id_from_nominal_path(
         &self,
         nominal_path: &InternedPath,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<StructId, CompilerError> {
         let Some(struct_id) = self.structs_by_name.get(nominal_path).copied() else {
             return_hir_transformation_error!(
@@ -554,7 +541,7 @@ impl<'a> HirBuilder<'a> {
                     "Unresolved struct '{}' during HIR lowering",
                     self.symbol_name_for_diagnostics(nominal_path)
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
@@ -565,30 +552,30 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         base_place: &HirPlace,
         field_name: StringId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<FieldId, CompilerError> {
-        let struct_id = self.resolve_struct_id_for_place_or_error(base_place, location)?;
+        let struct_id = self.resolve_struct_id_for_place_or_error(base_place, span)?;
         let Some(struct_path) = self.side_table.struct_name_path(struct_id) else {
             return_hir_transformation_error!(
                 format!(
                     "Struct {:?} is missing a side-table path binding",
                     struct_id
                 ),
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
         let field_path = struct_path.append(field_name);
 
-        self.resolve_field_id_or_error(struct_id, &field_path, location)
+        self.resolve_field_id_or_error(struct_id, &field_path, span)
     }
 
     fn resolve_struct_id_for_place_or_error(
         &mut self,
         place: &HirPlace,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<StructId, CompilerError> {
-        let ty = self.resolve_place_type_id_or_error(place, location)?;
+        let ty = self.resolve_place_type_id_or_error(place, span)?;
         let path = match self.type_environment.get(ty).cloned() {
             Some(TypeDefinition::Struct(def)) => Some(def.path),
             Some(TypeDefinition::GenericInstance(instance))
@@ -601,7 +588,7 @@ impl<'a> HirBuilder<'a> {
                 else {
                     return_hir_transformation_error!(
                         "Generic struct instance is missing nominal path metadata",
-                        self.hir_error_location(location)
+                        self.hir_error_location(span)
                     );
                 };
                 let nominal_path = nominal_path.to_owned();
@@ -610,23 +597,23 @@ impl<'a> HirBuilder<'a> {
                 else {
                     return_hir_transformation_error!(
                         "Generic struct instance is missing a canonical key during field access lowering",
-                        self.hir_error_location(location)
+                        self.hir_error_location(span)
                     );
                 };
 
-                return self.resolve_or_register_generic_struct(&key, &nominal_path, ty, location);
+                return self.resolve_or_register_generic_struct(&key, &nominal_path, ty, span);
             }
             _ => {
                 return_hir_transformation_error!(
                     "Field access base does not resolve to a struct value in this HIR phase",
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
         };
         let Some(path) = path else {
             return_hir_transformation_error!(
                 "Field access base is missing nominal struct path metadata",
-                self.hir_error_location(location)
+                self.hir_error_location(span)
             );
         };
 
@@ -638,7 +625,7 @@ impl<'a> HirBuilder<'a> {
                         "Struct '{}' is not registered in HIR builder",
                         path.to_string(self.string_table)
                     ),
-                    self.hir_error_location(location)
+                    self.hir_error_location(span)
                 )
             }
         }
@@ -647,19 +634,19 @@ impl<'a> HirBuilder<'a> {
     fn resolve_place_type_id_or_error(
         &self,
         place: &HirPlace,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
         match place {
-            HirPlace::Local(local_id) => self.resolve_local_type_id_or_error(*local_id, location),
-            HirPlace::Field { field, .. } => self.resolve_field_type_id_or_error(*field, location),
+            HirPlace::Local(local_id) => self.resolve_local_type_id_or_error(*local_id, span),
+            HirPlace::Field { field, .. } => self.resolve_field_type_id_or_error(*field, span),
             HirPlace::Index { base, .. } => {
-                let base_type = self.resolve_place_type_id_or_error(base, location)?;
+                let base_type = self.resolve_place_type_id_or_error(base, span)?;
                 match self.type_environment.collection_element_type(base_type) {
                     Some(element) => Ok(element),
                     None => {
                         return_hir_transformation_error!(
                             "Index access base is not a collection type",
-                            self.hir_error_location(location)
+                            self.hir_error_location(span)
                         )
                     }
                 }
@@ -670,16 +657,16 @@ impl<'a> HirBuilder<'a> {
     fn resolve_local_type_id_or_error(
         &self,
         local_id: LocalId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
-        self.local_type_id_or_error(local_id, location)
+        self.local_type_id_or_error(local_id, span)
     }
 
     fn resolve_field_type_id_or_error(
         &self,
         field_id: FieldId,
-        location: &SourceLocation,
+        span: &Option<SourceSpan>,
     ) -> Result<TypeId, CompilerError> {
-        self.field_type_id_or_error(field_id, location)
+        self.field_type_id_or_error(field_id, span)
     }
 }

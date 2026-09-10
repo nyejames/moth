@@ -3,16 +3,17 @@
 //! WHAT: verifies that incomplete inline value-if tails retain their real boundary,
 //! and that declarations missing an initializer are rejected with the correct
 //! structured diagnostic at the real source boundary.
-//! WHY: AST otherwise appends a synthetic EOF at the declaration location, erasing
-//! multiline context and the source location of authored closing tokens, and the
+//! WHY: AST otherwise appends a synthetic EOF at the declaration span, erasing
+//! multiline context and the source span of authored closing tokens, and the
 //! shell must distinguish an authored `=` with no initializer from an omitted `=`.
 
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidDeclarationReason,
     RuleDiagnosticKind,
 };
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -43,21 +44,28 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut token_stream = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
     let name = string_table.intern("value");
     token_stream.index = 2; // skip ModuleStart and the declaration name, land on `=`
 
-    let declaration_syntax = parse_declaration_syntax(&mut token_stream, name, &mut string_table)
-        .expect("declaration shell should parse");
+    let declaration_syntax = parse_declaration_syntax(
+        &mut token_stream,
+        name,
+        &mut string_table,
+        &mut span_builder,
+    )
+    .expect("declaration shell should parse");
 
     declaration_syntax
         .initializer_tokens
@@ -231,8 +239,12 @@ fn non_control_flow_initializer_is_unchanged() {
 ///
 /// Returns the shared string table, the stream, the interned declaration name, and the
 /// index of the first `Assign` token (when present) so callers can compute the boundary
-/// location the shell must point at.
-fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId, Option<usize>) {
+/// span the shell must point at. The caller owns `span_builder` and keeps it alive wherever the returned
+/// token spans are still resolved.
+fn tokenize_for_declaration(
+    source: &str,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> (StringTable, FileTokens, StringId, Option<usize>) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -242,7 +254,8 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -258,28 +271,48 @@ fn tokenize_for_declaration(source: &str) -> (StringTable, FileTokens, StringId,
 /// Parses the declaration shell and returns the rejection diagnostic plus the interned
 /// declaration name so callers can assert the structured payload facts.
 fn parse_shell_error(source: &str) -> (CompilerDiagnostic, StringId) {
-    let (mut string_table, mut token_stream, name, _) = tokenize_for_declaration(source);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (mut string_table, mut token_stream, name, _) =
+        tokenize_for_declaration(source, &mut span_builder);
     token_stream.index = 2; // skip ModuleStart and the declaration name
 
-    let diagnostic = *parse_declaration_syntax(&mut token_stream, name, &mut string_table)
-        .expect_err("declaration shell should reject the missing initializer");
+    let failure = parse_declaration_syntax(
+        &mut token_stream,
+        name,
+        &mut string_table,
+        &mut span_builder,
+    )
+    .expect_err("declaration shell should reject the missing initializer");
+    let diagnostic = match failure {
+        HeaderParseFailure::Diagnostic(diagnostic) => diagnostic,
+        HeaderParseFailure::Infrastructure(error) => {
+            panic!("declaration shell infrastructure failure: {error:?}")
+        }
+    };
     (diagnostic, name)
 }
 
-/// Location of the token immediately after the first authored `=`.
+/// Span of the token immediately after the first authored `=`.
 ///
 /// This is the real newline/end/EOF/comma boundary the diagnostic must anchor against.
-fn boundary_location_after_assign(source: &str) -> SourceLocation {
-    let (_string_table, token_stream, _name, assign_index) = tokenize_for_declaration(source);
+fn boundary_span_after_assign(source: &str) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (_string_table, token_stream, _name, assign_index) =
+        tokenize_for_declaration(source, &mut span_builder);
     let assign_index = assign_index.expect("source must contain an authored '='");
-    token_stream.tokens[assign_index + 1].location.clone()
+    SourceSpan::new(
+        token_stream.file_id,
+        token_stream.tokens[assign_index + 1].span,
+    )
 }
 
-/// Location of the first top-level boundary token (newline/end/EOF/comma) starting after
+/// Span of the first top-level boundary token (newline/end/EOF/comma) starting after
 /// the declaration name. Used for the no-`=` path, which never sees an authored `=`.
-fn first_boundary_location_after_name(source: &str) -> SourceLocation {
-    let (_string_table, token_stream, _name, _) = tokenize_for_declaration(source);
-    token_stream
+fn first_boundary_span_after_name(source: &str) -> SourceSpan {
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (_string_table, token_stream, _name, _) =
+        tokenize_for_declaration(source, &mut span_builder);
+    let token = token_stream
         .tokens
         .iter()
         .skip(2)
@@ -289,9 +322,8 @@ fn first_boundary_location_after_name(source: &str) -> SourceLocation {
                 TokenKind::Newline | TokenKind::End | TokenKind::Eof | TokenKind::Comma
             )
         })
-        .expect("source must contain a declaration boundary")
-        .location
-        .clone()
+        .expect("source must contain a declaration boundary");
+    SourceSpan::new(token_stream.file_id, token.span)
 }
 
 /// Asserts the diagnostic is the authored-`=` rejection, names the declaration, and
@@ -299,7 +331,7 @@ fn first_boundary_location_after_name(source: &str) -> SourceLocation {
 fn assert_missing_initializer_expression(
     diagnostic: &CompilerDiagnostic,
     expected_name: StringId,
-    expected_boundary: &SourceLocation,
+    expected_boundary: &SourceSpan,
     case: &str,
 ) {
     assert_eq!(
@@ -328,7 +360,8 @@ fn assert_missing_initializer_expression(
         other => panic!("{case}: expected InvalidDeclaration payload, got {other:?}"),
     }
     assert_eq!(
-        &diagnostic.primary_location, expected_boundary,
+        diagnostic.primary_span,
+        Some(*expected_boundary),
         "{case}: authored `=` with no initializer must point at the real boundary after `=`, not the declaration name or target type",
     );
 }
@@ -338,7 +371,7 @@ fn assert_missing_initializer_expression(
 fn assert_missing_declaration_initializer(
     diagnostic: &CompilerDiagnostic,
     expected_name: StringId,
-    expected_boundary: &SourceLocation,
+    expected_boundary: &SourceSpan,
     case: &str,
 ) {
     assert_eq!(
@@ -361,7 +394,8 @@ fn assert_missing_declaration_initializer(
         other => panic!("{case}: expected MissingDeclarationInitializer payload, got {other:?}"),
     }
     assert_eq!(
-        &diagnostic.primary_location, expected_boundary,
+        diagnostic.primary_span,
+        Some(*expected_boundary),
         "{case}: the no-`=` diagnostic must point at the boundary where `=` was expected",
     );
 }
@@ -377,7 +411,7 @@ fn authored_assign_with_no_initializer_rejects_inferred_declarations_at_each_bou
 
     for (source, case) in cases {
         let (diagnostic, name) = parse_shell_error(source);
-        let boundary = boundary_location_after_assign(source);
+        let boundary = boundary_span_after_assign(source);
         assert_missing_initializer_expression(&diagnostic, name, &boundary, case);
     }
 }
@@ -394,7 +428,7 @@ fn authored_assign_with_no_initializer_rejects_explicit_type_and_binding_modes()
 
     for (source, case) in cases {
         let (diagnostic, name) = parse_shell_error(source);
-        let boundary = boundary_location_after_assign(source);
+        let boundary = boundary_span_after_assign(source);
         assert_missing_initializer_expression(&diagnostic, name, &boundary, case);
     }
 }
@@ -409,7 +443,7 @@ fn omitted_assign_rejects_at_each_boundary_and_binding_mode() {
 
     for (source, case) in cases {
         let (diagnostic, name) = parse_shell_error(source);
-        let boundary = first_boundary_location_after_name(source);
+        let boundary = first_boundary_span_after_name(source);
         assert_missing_declaration_initializer(&diagnostic, name, &boundary, case);
     }
 }

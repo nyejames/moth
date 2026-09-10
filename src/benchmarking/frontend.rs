@@ -12,6 +12,8 @@ use std::time::Instant;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
@@ -72,14 +74,60 @@ pub struct FrontendBenchmarkOptions {
     pub build_config_inputs: Vec<FrontendBenchmarkInput>,
 }
 
-/// Report produced by a successful frontend benchmark run.
+/// Whether a completed frontend benchmark compiled cleanly or produced user diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendBenchmarkOutcome {
+    Success,
+    Diagnosed,
+}
+
+/// Retained source and diagnostic storage observed at the frontend render boundary.
+///
+/// These values are layout counters, not allocator ownership attribution. They are populated only
+/// with the `data_layout_memory_probe` feature; normal benchmark builds carry zeroes. The probe
+/// records them beside peak, live-report and after-report-drop allocator deltas so repeated runs
+/// distinguish construction pressure from report-owner retention.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrontendBenchmarkRetention {
+    pub source_snapshot_bytes: usize,
+    pub extended_span_rows: usize,
+    pub source_identity_slots: usize,
+    pub diagnostic_records: usize,
+    pub diagnostic_label_slots: usize,
+    /// Distinct frozen identity contexts reachable from range rows or donor-only handles.
+    pub retained_identity_contexts: usize,
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
+    fn from(metrics: FrozenRenderRetentionMetrics) -> Self {
+        Self {
+            source_snapshot_bytes: metrics.source_snapshot_bytes,
+            extended_span_rows: metrics.extended_span_rows,
+            source_identity_slots: metrics.source_identity_slots,
+            diagnostic_records: metrics.diagnostic_records,
+            diagnostic_label_slots: metrics.diagnostic_label_slots,
+            retained_identity_contexts: metrics.retained_identity_contexts,
+        }
+    }
+}
+
+/// Report produced by a completed frontend benchmark run.
+
 #[derive(Debug, Clone)]
 pub struct FrontendBenchmarkReport {
+    /// Whether compilation completed cleanly or with user-facing diagnostics.
+    pub outcome: FrontendBenchmarkOutcome,
+    /// Number of error-severity user diagnostics.
+    pub error_count: usize,
+    /// Stable codes for the error-severity user diagnostics.
+    pub diagnostic_codes: Vec<String>,
     /// Timing observation schema used by the stage list.
     pub timing_schema_version: u32,
     pub total_ms: f64,
     pub warning_count: usize,
     pub warning_codes: Vec<String>,
+    pub retention: FrontendBenchmarkRetention,
     pub stages: Vec<FrontendBenchmarkStage>,
     pub counters: Vec<FrontendBenchmarkCounter>,
 }
@@ -189,22 +237,51 @@ fn build_config_inputs_from_options(
 
     Ok(typed_inputs)
 }
-
-impl std::error::Error for FrontendBenchmarkError {}
-
 /// Run one frontend benchmark for the given entry path.
 ///
-/// WHAT: validates the path, bootstraps an HTML project build, compiles through
-/// the frontend pipeline, and returns total plus per-stage timings.
-/// WHY: this is the narrow dev-tooling entry point that keeps benchmark
-/// orchestration out of the compiler frontend while reusing production setup.
-///
-/// Stage timings are populated when the `timers` feature is enabled and a
-/// collection scope is active during compilation. Counters are additionally
-/// populated when `benchmark_counters` is also enabled.
+/// The ordinary API drops the completed render message owner before returning. The memory probe
+/// uses the feature-gated owner-preserving API below so its allocator sample can distinguish live
+/// report retention from the after-report-drop baseline.
 pub fn run_frontend_benchmark(
     options: FrontendBenchmarkOptions,
 ) -> Result<FrontendBenchmarkReport, FrontendBenchmarkError> {
+    run_frontend_benchmark_with_owner_internal(options).map(|(report, _)| report)
+}
+
+/// Completed benchmark report plus its live diagnostic/render owner.
+///
+/// This type exists only in the data-layout probe lane. Keeping the owner private prevents normal
+/// callers from depending on compiler message internals while the value itself keeps that owner
+/// alive until [`Self::into_report`] is called.
+#[cfg(feature = "data_layout_memory_probe")]
+#[derive(Debug)]
+pub struct FrontendBenchmarkReportWithOwner {
+    pub report: FrontendBenchmarkReport,
+    owner: CompilerMessages,
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl FrontendBenchmarkReportWithOwner {
+    /// Drop the live report owner and return the public report value.
+    pub fn into_report(self) -> FrontendBenchmarkReport {
+        let Self { report, owner } = self;
+        drop(owner);
+        report
+    }
+}
+
+/// Run a frontend benchmark while retaining the final diagnostic/render owner.
+#[cfg(feature = "data_layout_memory_probe")]
+pub fn run_frontend_benchmark_with_report_owner(
+    options: FrontendBenchmarkOptions,
+) -> Result<FrontendBenchmarkReportWithOwner, FrontendBenchmarkError> {
+    run_frontend_benchmark_with_owner_internal(options)
+        .map(|(report, owner)| FrontendBenchmarkReportWithOwner { report, owner })
+}
+
+fn run_frontend_benchmark_with_owner_internal(
+    options: FrontendBenchmarkOptions,
+) -> Result<(FrontendBenchmarkReport, CompilerMessages), FrontendBenchmarkError> {
     let start = Instant::now();
 
     // Acquire the raw session before even path validation. A benchmark must
@@ -233,13 +310,14 @@ pub fn run_frontend_benchmark(
         })?;
     let normalized = if path.trim().is_empty() { "." } else { path };
 
-    let mut path_string_table = StringTable::new();
-    let valid_path = match check_if_valid_path(normalized, &mut path_string_table) {
+    let valid_path = match check_if_valid_path(normalized) {
         Ok(path) => path,
         Err(error) => {
-            let messages = CompilerMessages::from_error(error, path_string_table);
-            let diagnostic_codes = collect_diagnostic_codes(&messages);
-
+            let messages = CompilerMessages::from_error(error, StringTable::new());
+            let mut diagnostic_codes = collect_diagnostic_codes(&messages);
+            if messages.has_infrastructure_error() {
+                diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
+            }
             return Err(FrontendBenchmarkError {
                 kind: FrontendBenchmarkFailureKind::PathValidation,
                 diagnostic_codes,
@@ -255,6 +333,7 @@ pub fn run_frontend_benchmark(
         mut string_table,
         mut frontend_surface,
         validated_directory_output_settings,
+        mut project_source_files,
         build_config_inputs,
     } = match bootstrap_project_build(&project_builder, valid_path, &requested_inputs) {
         Ok(bootstrap) => bootstrap,
@@ -273,18 +352,49 @@ pub fn run_frontend_benchmark(
         FrontendBenchmarkBuildProfile::Dev => BuildProfile::Dev,
     };
 
-    let messages = match compile_project_frontend_with_inputs(
+    let (messages, retention, compilation_failed) = match compile_project_frontend_with_inputs(
         &mut config,
         build_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
         &mut string_table,
+        &mut project_source_files,
         &build_config_inputs,
         FrontendCompilationMode::Canonical,
     ) {
-        Ok(frontend) => frontend.into_render_messages(&mut string_table),
-        Err(messages) => messages,
+        Ok(frontend) => {
+            #[cfg(feature = "data_layout_memory_probe")]
+            let (messages, retention) = frontend
+                .into_render_messages_with_frozen_identity_and_metrics(
+                    &mut string_table,
+                    project_source_files.take(),
+                    None,
+                )
+                .map_err(|error| FrontendBenchmarkError {
+                    kind: FrontendBenchmarkFailureKind::Compilation,
+                    diagnostic_codes: Vec::new(),
+                    message: error.msg,
+                })?;
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let messages = frontend
+                .into_render_messages_with_frozen_identity(
+                    &mut string_table,
+                    project_source_files.take(),
+                    None,
+                )
+                .map_err(|error| FrontendBenchmarkError {
+                    kind: FrontendBenchmarkFailureKind::Compilation,
+                    diagnostic_codes: Vec::new(),
+                    message: error.msg,
+                })?;
+            #[cfg(feature = "data_layout_memory_probe")]
+            let retention = FrontendBenchmarkRetention::from(retention);
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let retention = FrontendBenchmarkRetention::default();
+            (messages, retention, false)
+        }
+        Err(messages) => (messages, FrontendBenchmarkRetention::default(), true),
     };
 
     #[cfg(feature = "timers")]
@@ -297,21 +407,23 @@ pub fn run_frontend_benchmark(
     let counters: Vec<FrontendBenchmarkCounter> = Vec::new();
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let error_count = messages.error_count();
+    let mut diagnostic_codes = collect_diagnostic_codes(&messages);
+    let has_infrastructure_error = messages.has_infrastructure_error();
+    if has_infrastructure_error {
+        diagnostic_codes.push("MOTH-INFRA-0001".to_owned());
+    }
 
-    if messages.error_count() > 0 {
-        let diagnostic_codes = collect_diagnostic_codes(&messages);
+    // User diagnostics are an expected benchmark outcome, but an infrastructure
+    // failure or a failed compilation with no user error is still a runner
+    // failure and must abort the benchmark.
+    if has_infrastructure_error || (compilation_failed && error_count == 0) {
         return Err(FrontendBenchmarkError {
             kind: FrontendBenchmarkFailureKind::Compilation,
             diagnostic_codes,
             message: format_compiler_messages(&messages),
         });
     }
-
-    let warning_count = messages.warning_count();
-    let warning_codes = messages
-        .warnings()
-        .map(|warning| warning.kind.code().to_owned())
-        .collect();
 
     #[cfg(feature = "timers")]
     let stages = snapshot
@@ -334,28 +446,49 @@ pub fn run_frontend_benchmark(
         })
         .collect();
 
-    #[cfg(feature = "timers")]
-    let timing_schema_version = crate::benchmarking::TIMING_SCHEMA_VERSION;
-    #[cfg(not(feature = "timers"))]
-    let timing_schema_version = 0;
+    let warning_count = messages.warning_count();
+    let warning_codes = messages
+        .warnings()
+        .map(|warning| warning.kind.code().to_owned())
+        .collect();
+    let outcome = if error_count == 0 {
+        FrontendBenchmarkOutcome::Success
+    } else {
+        FrontendBenchmarkOutcome::Diagnosed
+    };
+    let timing_schema_version = {
+        #[cfg(feature = "timers")]
+        {
+            crate::benchmarking::TIMING_SCHEMA_VERSION
+        }
+        #[cfg(not(feature = "timers"))]
+        {
+            0
+        }
+    };
 
-    Ok(FrontendBenchmarkReport {
-        timing_schema_version,
-        total_ms,
-        warning_count,
-        warning_codes,
-        stages,
-        counters,
-    })
+    Ok((
+        FrontendBenchmarkReport {
+            outcome,
+            error_count,
+            diagnostic_codes,
+            timing_schema_version,
+            total_ms,
+            warning_count,
+            warning_codes,
+            retention,
+            stages,
+            counters,
+        },
+        messages,
+    ))
 }
 
 fn format_compiler_messages(messages: &CompilerMessages) -> String {
     let mut lines = format_terse_compiler_messages(messages);
-
     if lines.is_empty() {
         lines.push(format!("{} error(s) found", messages.error_count()));
     }
-
     lines.join("\n")
 }
 

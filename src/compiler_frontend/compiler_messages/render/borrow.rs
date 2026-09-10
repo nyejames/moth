@@ -6,7 +6,10 @@
 
 use super::*;
 
-pub(crate) fn diagnostic_place_name(place: &DiagnosticPlace, string_table: &StringTable) -> String {
+pub(crate) fn diagnostic_place_name(
+    place: &DiagnosticPlace,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match place {
         DiagnosticPlace::Local(name) | DiagnosticPlace::RenderedText(name) => {
             format!("`{}`", string_table.resolve(*name))
@@ -28,7 +31,7 @@ pub(crate) fn borrow_conflict_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,
     requested_access: BorrowAccessKind,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     format!(
         "Cannot access {}: existing {} access conflicts with requested {} access.",
@@ -41,7 +44,7 @@ pub(crate) fn borrow_conflict_message(
 pub(crate) fn multiple_mutable_borrows_message(
     place: &DiagnosticPlace,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let place_name = diagnostic_place_name(place, string_table);
 
@@ -63,7 +66,7 @@ pub(crate) fn shared_mutable_conflict_message(
     existing_access: BorrowAccessKind,
     requested_access: BorrowAccessKind,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let place_name = diagnostic_place_name(place, string_table);
     let conflicting_name = conflicting_place
@@ -90,7 +93,7 @@ pub(crate) fn shared_mutable_conflict_message(
 
 pub(crate) fn use_after_possible_move_message(
     place: &DiagnosticPlace,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     format!(
         "Cannot use {} because it may have been moved or left its valid scope.",
@@ -101,7 +104,7 @@ pub(crate) fn use_after_possible_move_message(
 pub(crate) fn move_while_borrowed_message(
     place: &DiagnosticPlace,
     existing_access: BorrowAccessKind,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     format!(
         "Cannot transfer ownership of {} while it has an active {} access.",
@@ -113,7 +116,7 @@ pub(crate) fn move_while_borrowed_message(
 pub(crate) fn whole_object_borrow_conflict_message(
     whole_place: &DiagnosticPlace,
     part_place: &DiagnosticPlace,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     format!(
         "Cannot access whole value {} while part {} is already active.",
@@ -126,7 +129,7 @@ pub(crate) fn invalid_mutable_access_message(
     place: &DiagnosticPlace,
     reason: InvalidMutableAccessReason,
     conflicting_place: Option<&DiagnosticPlace>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let place_name = diagnostic_place_name(place, string_table);
 
@@ -152,7 +155,7 @@ pub(crate) fn invalid_mutable_access_message(
 
 pub(crate) fn use_of_uninitialized_local_message(
     place: &DiagnosticPlace,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     format!(
         "Use of {} before initialization or after scope end.",

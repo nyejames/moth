@@ -41,7 +41,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement, TraitVisibility,
@@ -70,15 +69,14 @@ fn trait_definition(
             |(index, (req_name, return_type))| ResolvedTraitRequirement {
                 id: TraitRequirementId(start_requirement_id + index as u32),
                 name: string_table.intern(req_name),
-                name_location: SourceLocation::default(),
                 receiver: TraitReceiverRequirement::Immutable { this_type },
                 parameters: vec![],
                 returns: vec![ResolvedTraitReturn {
                     type_id: *return_type,
                     channel: ReturnChannel::Success,
-                    location: SourceLocation::default(),
+                    span: None,
                 }],
-                location: SourceLocation::default(),
+                span: None,
             },
         )
         .collect();
@@ -90,7 +88,7 @@ fn trait_definition(
         source_file: path(name, string_table),
         this_type,
         requirements,
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         visibility: TraitVisibility::Source { exported: true },
     }
 }
@@ -117,7 +115,7 @@ fn canonical_evidence(
         target_type_id,
         trait_id,
         source_file: InternedPath::new(),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         requirements,
     }
 }
@@ -129,7 +127,7 @@ fn builtin_evidence(trait_id: TraitId, target_type_id: TypeId) -> TraitEvidenceD
         target_type_id,
         trait_id,
         source_file: InternedPath::new(),
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         requirements: vec![],
     }
 }
@@ -1043,17 +1041,16 @@ fn evidence_rejects_core_trait_without_classifier() {
         requirements: vec![ResolvedTraitRequirement {
             id: TraitRequirementId(0),
             name: string_table.intern("display"),
-            name_location: SourceLocation::default(),
             receiver: TraitReceiverRequirement::Immutable { this_type: this_id },
             parameters: vec![],
             returns: vec![ResolvedTraitReturn {
                 type_id: env.builtins().string,
                 channel: ReturnChannel::Success,
-                location: SourceLocation::default(),
+                span: None,
             }],
-            location: SourceLocation::default(),
+            span: None,
         }],
-        declaration_location: SourceLocation::default(),
+        declaration_span: None,
         visibility: TraitVisibility::Core,
     };
     trait_env.insert(definition);

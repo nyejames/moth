@@ -44,7 +44,7 @@ fn lower_minimal_module_with_float_statement(
         },
     };
 
-    let float_statement = statement(1, statement_kind, 1);
+    let float_statement = statement(1, statement_kind);
 
     let block = HirBlock {
         id: BlockId(0),
@@ -269,7 +269,6 @@ fn lower_minimal_module_with_numeric_op(
             operands,
             result: LocalId(0),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -686,7 +685,6 @@ fn numeric_op_arity_mismatch_returns_error() {
             },
             result: LocalId(0),
         },
-        1,
     );
 
     let block = HirBlock {

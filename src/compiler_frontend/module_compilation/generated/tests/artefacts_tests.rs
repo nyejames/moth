@@ -24,7 +24,6 @@ use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 /// Builds one sidecar root statement carrying a structural string with the given pieces.
 fn sidecar_structural_statement(pieces: Vec<ConstStringPiece>) -> HirStatement {
@@ -36,8 +35,9 @@ fn sidecar_structural_statement(pieces: Vec<ConstStringPiece>) -> HirStatement {
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         }),
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 

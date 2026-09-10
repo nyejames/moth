@@ -334,7 +334,7 @@ impl Ast {
     #[allow(clippy::new_ret_no_self)]
     pub(in crate::compiler_frontend) fn new(
         input: AstBuildInput,
-        context: AstBuildContext<'_>,
+        context: AstBuildContext,
     ) -> Result<AstBuildResult, CompilerMessages> {
         let AstBuildInput {
             headers,

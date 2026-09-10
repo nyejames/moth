@@ -5,7 +5,8 @@
 use super::*;
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{
-    DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder, build_project,
+    BuildResult, DeferredResourceOutput, FileKind, OutputFile, Project, ProjectBuilder,
+    build_project,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceContentState;
 #[cfg(unix)]
@@ -14,16 +15,21 @@ use crate::build_system::output::manifest::BUILD_MANIFEST_FILENAME;
 use crate::build_system::output::{
     BuilderKind, OutputDestinationOutcome, OutputOwner, OutputPlan, OutputWriteOutcome,
 };
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, resolve_source_file_path, terse,
-};
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCategory, DiagnosticPayload, InvalidConfigReason,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };
-use crate::compiler_frontend::utilities::basic::normalize_path;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceSpan,
+};
 use crate::compiler_tests::test_diagnostics::{
     assert_no_infrastructure_errors, assert_output_rejection,
 };
@@ -31,12 +37,19 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn rendered_error_messages(messages: &CompilerMessages) -> Vec<String> {
-    let context = DiagnosticRenderContext::new(&messages.string_table);
     messages
-        .error_diagnostics()
-        .map(|diagnostic| terse::format_terse_diagnostic_with_context(diagnostic, context))
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|(diagnostic_index, diagnostic)| {
+            terse::format_terse_diagnostic_with_context(
+                diagnostic,
+                messages.diagnostic_render_context(diagnostic_index),
+            )
+        })
         .collect()
 }
 
@@ -82,7 +95,7 @@ fn build_project_returns_result_without_writing_files() {
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let result = build_project(
+    let mut result = build_project(
         &builder,
         entry_file
             .to_str()
@@ -94,6 +107,22 @@ fn build_project_returns_result_without_writing_files() {
 
     assert!(!result.project.output_files.is_empty());
     assert_path_missing(&root.join("index.html"));
+    assert!(
+        result
+            .take_warning_messages()
+            .expect("clean report handoff should succeed")
+            .is_none(),
+        "clean build should publish no warning report"
+    );
+    assert_eq!(
+        result.string_table.len(),
+        0,
+        "clean build should release its compiler identity table at the report boundary"
+    );
+    assert!(
+        result.source_database.is_none(),
+        "clean build should not retain a source database"
+    );
 }
 
 #[test]
@@ -119,6 +148,309 @@ fn build_project_preserves_builder_warnings_in_build_result() {
             "build result should include backend warnings"
         );
     }
+}
+
+#[test]
+fn build_result_warning_handoff_resolves_generated_donor_source_context() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let package_temp = tempfile::tempdir().expect("should create package temp dir");
+    let project_root = project_temp.path().join("src");
+    let package_root = package_temp.path().join("src");
+    fs::create_dir_all(&project_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package source root");
+
+    let project_path = project_root.join("@mod.moth");
+    let package_path = package_root.join("@mod.moth");
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "package_snapshot = 1\n";
+    fs::write(&project_path, project_text).expect("should write project source");
+    fs::write(&package_path, package_text).expect("should write package source");
+
+    let mut string_table = StringTable::new();
+    let mut project_database = SourceDatabase::build(
+        std::iter::once(project_path.as_path()),
+        &project_root,
+        None,
+        &mut string_table,
+    )
+    .expect("project source identity should build");
+    let project_source_id = project_database
+        .get_by_canonical_path(&project_path)
+        .expect("project source should be registered")
+        .id;
+    project_database
+        .retain_text(project_source_id, project_text.to_owned())
+        .expect("project snapshot should be retained");
+
+    let mut package_database = SourceDatabase::build(
+        std::iter::once(package_path.as_path()),
+        &package_root,
+        None,
+        &mut string_table,
+    )
+    .expect("package source identity should build");
+    let package_source_id = package_database
+        .get_by_canonical_path(&package_path)
+        .expect("package source should be registered")
+        .id;
+    package_database
+        .retain_text(package_source_id, package_text.to_owned())
+        .expect("package snapshot should be retained");
+    assert_eq!(
+        project_source_id, package_source_id,
+        "independent source databases should have colliding SourceId values"
+    );
+
+    let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "pkg");
+    let package_database = Arc::new(package_database);
+    let project_database = Arc::new(project_database);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span =
+        LocalSpan::exact(0, 1, &mut span_builder).expect("warning span should fit inline");
+    let warning = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+        package_source_id,
+        local_span,
+    )))
+    .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(
+        package_identity.clone(),
+    ));
+
+    let mut result = BuildResult {
+        project: Project {
+            output_files: Vec::new(),
+            entry_page_rel: None,
+            cleanup_policy: generic_cleanup_policy(),
+            warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
+        },
+        config: Config::new(project_temp.path().to_path_buf()),
+        warnings: vec![warning],
+        string_table,
+        warning_source_contexts: vec![RenderSourceContext {
+            diagnostic_range: 0..0,
+            source_database: Arc::clone(&package_database),
+            domain: Some(package_identity),
+        }],
+        source_database: Some(Arc::clone(&project_database)),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Test,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
+    };
+    drop(package_database);
+    drop(project_database);
+
+    let messages = result
+        .take_warning_messages()
+        .expect("warning report handoff should succeed")
+        .expect("spanful warning should produce a report");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("warning report should retain its diagnostic");
+    let position = messages
+        .diagnostic_render_context(0)
+        .primary_position(diagnostic)
+        .expect("donor warning should resolve through its package identity");
+    assert_eq!(position.host_path, Some(package_path.as_path()));
+    assert!(
+        position.line.contains("package_snapshot"),
+        "donor warning should render the package snapshot: {}",
+        position.line
+    );
+    assert!(
+        !position.line.contains("project_snapshot"),
+        "donor warning must not render the project snapshot: {}",
+        position.line
+    );
+}
+
+#[test]
+fn build_result_warning_handoff_keeps_related_package_label_out_of_default_context() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let package_temp = tempfile::tempdir().expect("should create package temp dir");
+    let project_root = project_temp.path().join("src");
+    let package_root = package_temp.path().join("src");
+    fs::create_dir_all(&project_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package source root");
+
+    let project_path = project_root.join("@mod.moth");
+    let package_path = package_root.join("@mod.moth");
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "package_snapshot = 1\n";
+    fs::write(&project_path, project_text).expect("should write project source");
+    fs::write(&package_path, package_text).expect("should write package source");
+
+    let mut string_table = StringTable::new();
+    let mut project_database = SourceDatabase::build(
+        std::iter::once(project_path.as_path()),
+        &project_root,
+        None,
+        &mut string_table,
+    )
+    .expect("project source identity should build");
+    let project_source_id = project_database
+        .get_by_canonical_path(&project_path)
+        .expect("project source should be registered")
+        .id;
+    project_database
+        .retain_text(project_source_id, project_text.to_owned())
+        .expect("project snapshot should be retained");
+
+    let mut package_database = SourceDatabase::build(
+        std::iter::once(package_path.as_path()),
+        &package_root,
+        None,
+        &mut string_table,
+    )
+    .expect("package source identity should build");
+    let package_source_id = package_database
+        .get_by_canonical_path(&package_path)
+        .expect("package source should be registered")
+        .id;
+    package_database
+        .retain_text(package_source_id, package_text.to_owned())
+        .expect("package snapshot should be retained");
+    assert_eq!(
+        project_source_id, package_source_id,
+        "independent source databases should have colliding SourceId values"
+    );
+
+    let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "pkg");
+    let package_database = Arc::new(package_database);
+    let project_database = Arc::new(project_database);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span =
+        LocalSpan::exact(0, 1, &mut span_builder).expect("diagnostic span should fit inline");
+    let package_handle = FrozenIdentityHandle::for_domain(package_identity.clone());
+    let diagnostic = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+        project_source_id,
+        local_span,
+    )))
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(SourceSpan::new(package_source_id, local_span)),
+        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
+        package_handle,
+    )]);
+
+    let mut result = BuildResult {
+        project: Project {
+            output_files: Vec::new(),
+            entry_page_rel: None,
+            cleanup_policy: generic_cleanup_policy(),
+            warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
+        },
+        config: Config::new(project_temp.path().to_path_buf()),
+        warnings: vec![diagnostic],
+        string_table,
+        warning_source_contexts: vec![RenderSourceContext {
+            diagnostic_range: 0..0,
+            source_database: Arc::clone(&package_database),
+            domain: Some(package_identity),
+        }],
+        source_database: Some(Arc::clone(&project_database)),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Test,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
+    };
+    drop(package_database);
+    drop(project_database);
+
+    let messages = result
+        .take_warning_messages()
+        .expect("warning report handoff should succeed")
+        .expect("spanful warning should produce a report");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("warning report should retain its diagnostic");
+    let context = messages.diagnostic_render_context(0);
+    let primary = context
+        .primary_position(diagnostic)
+        .expect("ownerless primary should use the project default context");
+    assert_eq!(primary.host_path, Some(project_path.as_path()));
+    assert!(
+        primary.line.contains("project_snapshot"),
+        "ownerless primary should render the project snapshot: {}",
+        primary.line
+    );
+    let label = context
+        .label_position(&diagnostic.labels[0])
+        .expect("package-owned secondary label should resolve through its explicit owner");
+    assert_eq!(label.host_path, Some(package_path.as_path()));
+    assert!(
+        label.line.contains("package_snapshot"),
+        "package-owned secondary label should render the package snapshot: {}",
+        label.line
+    );
+}
+
+#[test]
+fn build_project_preserves_package_warnings_on_late_backend_failure() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let root = _temp.path().to_path_buf();
+    let package = root.join("packages/warnpkg");
+    let src = root.join("src");
+    fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"late_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write project config");
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write warning package root");
+
+    let builder = ProjectBuilder::new(Box::new(LateFailureBuilder {
+        package_root: package,
+    }));
+    let Err(messages) = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    ) else {
+        panic!("late backend failure should return compiler messages");
+    };
+
+    assert!(messages.has_infrastructure_error());
+    assert!(
+        messages.warning_count() >= 1,
+        "frontend package warnings must survive a late backend failure"
+    );
+    let warning_contexts_are_frozen = messages
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
+        .map(|(index, diagnostic)| {
+            (
+                messages
+                    .diagnostic_render_context(index)
+                    .frozen_identity
+                    .is_some(),
+                terse::format_terse_diagnostic_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(index),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        warning_contexts_are_frozen
+            .iter()
+            .any(|(frozen, rendered)| *frozen && rendered.contains("@mod.moth")),
+        "package warning should retain a frozen package source owner: {warning_contexts_are_frozen:?}"
+    );
 }
 
 #[test]
@@ -999,7 +1331,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
 }
 
 #[test]
-fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
+fn build_project_preserves_frozen_identity_for_frontend_signature_diagnostics() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1021,14 +1353,28 @@ fn build_project_preserves_string_table_for_frontend_signature_diagnostics() {
         assert!(
             errors
                 .iter()
-                .any(|diagnostic| diagnostic.kind.descriptor().title == "Unknown type name"),
+                .any(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035"),
             "expected the named-type diagnostic to be preserved"
         );
+        let identity = messages
+            .frozen_identity_context_for_diagnostic(0)
+            .expect("frontend diagnostics should retain their frozen identity context");
+        let diagnostic = errors
+            .iter()
+            .find(|diagnostic| diagnostic.kind.code() == "MOTH-RULE-0035")
+            .expect("named-type diagnostic should be retained");
+        let source_span = diagnostic
+            .primary_span
+            .expect("frontend diagnostic should retain its authored span");
+        let source = identity
+            .get(source_span.source())
+            .expect("frozen identity should resolve the diagnostic source");
+        let canonical_path =
+            fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize");
         assert_eq!(
-            resolve_source_file_path(&errors[0].primary_location.scope, &messages.string_table),
-            normalize_path(
-                &fs::canonicalize(root.join("main.moth")).expect("main file should canonicalize")
-            )
+            source.canonical_os_path.as_deref(),
+            Some(canonical_path.as_path()),
+            "frozen identity should retain the diagnostic source's canonical path"
         );
     }
 }
@@ -1304,8 +1650,8 @@ fn validated_output_settings_reject_canonical_root_aliases() {
     assert_eq!(string_table.resolve(*dev_folder), "dev-alias");
     assert_eq!(string_table.resolve(*release_folder), "release-alias");
     assert_eq!(
-        resolve_source_file_path(&diagnostic.primary_location.scope, &string_table),
-        root.join("config.moth")
+        diagnostic.primary_span, None,
+        "synthetic Config values have no authored source span",
     );
     let rendered = terse::format_terse_diagnostic_with_context(
         diagnostic,
@@ -1345,7 +1691,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     };
     assert_has_config_error(&messages);
     assert!(
-        messages.first_infrastructure_error_for_tests().is_none(),
+        messages.infrastructure_error().is_none(),
         "missing homepage should stay as a typed config diagnostic"
     );
 }
@@ -1952,7 +2298,7 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
                 project_root: root.clone(),
                 entry_root: entry_root.clone(),
                 owner,
-                setting_location: SourceLocation::default(),
+                setting_span: None,
             }),
             write_mode: WriteMode::AlwaysWrite,
         };
@@ -2146,6 +2492,94 @@ fn valid_distinct_output_folders_resolve_unchanged() {
             .expect("directory build should carry an output plan")
             .output_root,
         root.join("dev")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn late_output_failure_keeps_authored_setting_source_owner() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"dev\",\n    release_output = \"release\",\n|\n",
+    )
+    .expect("should write config");
+    fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
+        .expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let first_build = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("first build should compile");
+    let first_plan = first_build
+        .directory_output_plan
+        .clone()
+        .expect("directory build should carry an output plan");
+    write_project_outputs(
+        &first_build.project,
+        &WriteOptions {
+            output_plan: OutputPlan::Directory(first_plan),
+            write_mode: WriteMode::AlwaysWrite,
+        },
+    )
+    .expect("first build should create its manifest");
+
+    let mut second_build = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("second build should compile");
+    let second_plan = second_build
+        .directory_output_plan
+        .clone()
+        .expect("second build should carry an output plan");
+    let setting_span = second_plan
+        .setting_span
+        .expect("validated output plan should retain its authored setting span");
+    let late_messages = write_project_outputs(
+        &second_build.project,
+        &WriteOptions {
+            output_plan: OutputPlan::Directory(ValidatedOutputPlan {
+                output_root: second_plan.output_root.clone(),
+                project_root: second_plan.project_root.clone(),
+                entry_root: second_plan.entry_root.clone(),
+                owner: OutputOwner {
+                    builder: BuilderKind::Test,
+                    profile: BuildProfile::Dev,
+                },
+                setting_span: Some(setting_span),
+            }),
+            write_mode: WriteMode::AlwaysWrite,
+        },
+    )
+    .expect_err("a foreign output owner should produce a late diagnostic");
+
+    let messages = second_build
+        .take_output_failure_messages(late_messages)
+        .expect("late output report should freeze");
+    let diagnostic = messages
+        .error_diagnostics()
+        .next()
+        .expect("late output diagnostic should remain");
+    assert_eq!(diagnostic.primary_span, Some(setting_span));
+    let context = messages.diagnostic_render_context(0);
+    assert!(
+        context.frozen_identity.is_some(),
+        "late output diagnostic should retain the project source owner"
+    );
+    let rendered = terse::format_terse_diagnostic_with_context(diagnostic, context);
+    assert!(
+        rendered.contains("config.moth"),
+        "late output diagnostic should render its authored config path: {rendered}"
     );
 }
 

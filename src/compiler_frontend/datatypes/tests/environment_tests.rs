@@ -8,9 +8,7 @@ use crate::compiler_frontend::datatypes::display::display_type;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, FunctionTypeKey, GenericInstanceKey, GenericParameterId, NominalTypeId,
     TypeConstructor, TypeId,
@@ -19,22 +17,13 @@ use crate::compiler_frontend::datatypes::{
     BuiltinScalarReceiver, DataType, ReceiverKey, diagnostic_type_spelling,
 };
 use crate::compiler_frontend::external_packages::ExternalTypeId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::FxHashMap;
 
-fn single_generic_parameter_list(
-    name: crate::compiler_frontend::symbols::string_interning::StringId,
-) -> GenericParameterList {
-    GenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name,
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        }],
-    }
+fn single_generic_parameter_list(name: StringId) -> [(TypeParameterId, StringId); 1] {
+    [(TypeParameterId(0), name)]
 }
 
 #[test]
@@ -322,7 +311,7 @@ fn display_renders_choice_variants() {
                 name: ready,
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
-                location: SourceLocation::default(),
+                span: None,
             },
             ChoiceVariantDefinition {
                 name: failed,
@@ -330,7 +319,7 @@ fn display_renders_choice_variants() {
                 payload: ChoiceVariantPayloadDefinition::Record {
                     fields: Box::new([]),
                 },
-                location: SourceLocation::default(),
+                span: None,
             },
         ]
         .into_boxed_slice(),
@@ -420,7 +409,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
         fields: vec![FieldDefinition {
             name: value_name.clone(),
             type_id: env.builtins().int,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -447,7 +436,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
             name: ready_name,
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -470,7 +459,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
     let box_parameter_name = table.intern("T");
     let box_parameters = single_generic_parameter_list(box_parameter_name);
     let registered_box_parameters =
-        env.register_generic_parameter_list(&box_parameters, &Default::default());
+        env.register_generic_parameter_list(box_parameters.into_iter(), &Default::default());
     let box_parameter_list = registered_box_parameters.list_id;
     let box_parameter_id = registered_box_parameters.canonical_by_local[&TypeParameterId(0)];
     let box_parameter_type_id = env
@@ -485,7 +474,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
         fields: vec![FieldDefinition {
             name: item_name.clone(),
             type_id: box_parameter_type_id,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(box_parameter_list),
@@ -507,7 +496,7 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
     let state_parameter_name = table.intern("U");
     let state_parameters = single_generic_parameter_list(state_parameter_name);
     let registered_state_parameters =
-        env.register_generic_parameter_list(&state_parameters, &Default::default());
+        env.register_generic_parameter_list(state_parameters.into_iter(), &Default::default());
     let state_parameter_list = registered_state_parameters.list_id;
     let state_parameter_id = registered_state_parameters.canonical_by_local[&TypeParameterId(0)];
     let state_parameter_type_id = env
@@ -526,11 +515,11 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
                 fields: vec![FieldDefinition {
                     name: InternedPath::from_single_str("inner", &mut table),
                     type_id: state_parameter_type_id,
-                    location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: Some(state_parameter_list),
@@ -602,7 +591,7 @@ fn receiver_key_queries_use_type_id_semantics() {
     let box_parameter_name = table.intern("T");
     let box_parameters = single_generic_parameter_list(box_parameter_name);
     let registered_box_parameters =
-        env.register_generic_parameter_list(&box_parameters, &Default::default());
+        env.register_generic_parameter_list(box_parameters.into_iter(), &Default::default());
     let box_parameter_list = registered_box_parameters.list_id;
     let box_path = InternedPath::from_single_str("Box", &mut table);
     let (box_nominal_id, _) = env.register_nominal_struct(StructTypeDefinition {
@@ -627,9 +616,9 @@ fn updating_choice_variants_preserves_generic_parameter_list() {
     let path = InternedPath::from_single_str("ResultShape", &mut table);
     let parameter_name = table.intern("T");
 
-    let parsed_parameters = single_generic_parameter_list(parameter_name);
+    let parameter_ids = single_generic_parameter_list(parameter_name);
     let parameter_list = env
-        .register_generic_parameter_list(&parsed_parameters, &Default::default())
+        .register_generic_parameter_list(parameter_ids.into_iter(), &Default::default())
         .list_id;
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
@@ -645,7 +634,7 @@ fn updating_choice_variants_preserves_generic_parameter_list() {
             name: table.intern("Empty"),
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
@@ -663,9 +652,9 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
     let path = InternedPath::from_single_str("State", &mut table);
     let parameter_name = table.intern("T");
 
-    let parsed_parameters = single_generic_parameter_list(parameter_name);
+    let parameter_ids = single_generic_parameter_list(parameter_name);
     let registered_parameters =
-        env.register_generic_parameter_list(&parsed_parameters, &Default::default());
+        env.register_generic_parameter_list(parameter_ids.into_iter(), &Default::default());
     let parameter_list = registered_parameters.list_id;
     let parameter_id = registered_parameters.canonical_by_local[&TypeParameterId(0)];
     let parameter_type_id = env
@@ -696,7 +685,7 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
                 name: table.intern("Empty"),
                 tag: 0,
                 payload: ChoiceVariantPayloadDefinition::Unit,
-                location: SourceLocation::default(),
+                span: None,
             },
             ChoiceVariantDefinition {
                 name: table.intern("Full"),
@@ -705,11 +694,11 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
                     fields: vec![FieldDefinition {
                         name: InternedPath::from_single_str("value", &mut table),
                         type_id: parameter_type_id,
-                        location: SourceLocation::default(),
+                        span: None,
                     }]
                     .into_boxed_slice(),
                 },
-                location: SourceLocation::default(),
+                span: None,
             },
         ]
         .into_boxed_slice(),
@@ -739,9 +728,9 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
     let path = InternedPath::from_single_str("Box", &mut table);
     let parameter_name = table.intern("T");
 
-    let parsed_parameters = single_generic_parameter_list(parameter_name);
+    let parameter_ids = single_generic_parameter_list(parameter_name);
     let registered_parameters =
-        env.register_generic_parameter_list(&parsed_parameters, &Default::default());
+        env.register_generic_parameter_list(parameter_ids.into_iter(), &Default::default());
     let parameter_list = registered_parameters.list_id;
     let parameter_id = registered_parameters.canonical_by_local[&TypeParameterId(0)];
     let parameter_type_id = env
@@ -773,7 +762,7 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
         vec![FieldDefinition {
             name: InternedPath::from_single_str("value", &mut table),
             type_id: parameter_type_id,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
@@ -796,16 +785,20 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
 fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     let mut env = TypeEnvironment::new();
     let mut local_table = StringTable::new();
-
-    let source_scope = InternedPath::from_single_str("source.moth", &mut local_table);
-    let source_location =
-        SourceLocation::new(source_scope.clone(), Default::default(), Default::default());
+    let source_id = SourceId::from_index(7);
+    let source_span = {
+        let mut builder = ExtendedSpanBuilder::new();
+        SourceSpan::new(
+            source_id,
+            LocalSpan::exact(12, 4, &mut builder).expect("test field span should encode"),
+        )
+    };
 
     let box_path = InternedPath::from_single_str("Box", &mut local_table);
     let box_parameter_name = local_table.intern("T");
-    let box_parsed_parameters = single_generic_parameter_list(box_parameter_name);
+    let box_parameter_ids = single_generic_parameter_list(box_parameter_name);
     let box_registered_parameters =
-        env.register_generic_parameter_list(&box_parsed_parameters, &Default::default());
+        env.register_generic_parameter_list(box_parameter_ids.into_iter(), &Default::default());
     let box_parameter_list = box_registered_parameters.list_id;
     let box_parameter_id = box_registered_parameters.canonical_by_local[&TypeParameterId(0)];
     let box_parameter_type_id = env
@@ -818,7 +811,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         fields: vec![FieldDefinition {
             name: InternedPath::from_single_str("value", &mut local_table),
             type_id: box_parameter_type_id,
-            location: source_location.clone(),
+            span: Some(source_span),
         }]
         .into_boxed_slice(),
         generic_parameters: Some(box_parameter_list),
@@ -828,9 +821,9 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
 
     let state_path = InternedPath::from_single_str("State", &mut local_table);
     let state_parameter_name = local_table.intern("U");
-    let state_parsed_parameters = single_generic_parameter_list(state_parameter_name);
+    let state_parameter_ids = single_generic_parameter_list(state_parameter_name);
     let state_registered_parameters =
-        env.register_generic_parameter_list(&state_parsed_parameters, &Default::default());
+        env.register_generic_parameter_list(state_parameter_ids.into_iter(), &Default::default());
     let state_parameter_list = state_registered_parameters.list_id;
     let state_parameter_id = state_registered_parameters.canonical_by_local[&TypeParameterId(0)];
     let state_parameter_type_id = env
@@ -847,11 +840,11 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
                 fields: vec![FieldDefinition {
                     name: InternedPath::from_single_str("item", &mut local_table),
                     type_id: state_parameter_type_id,
-                    location: source_location.clone(),
+                    span: Some(source_span),
                 }]
                 .into_boxed_slice(),
             },
-            location: source_location.clone(),
+            span: Some(source_span),
         }]
         .into_boxed_slice(),
         generic_parameters: Some(state_parameter_list),
@@ -911,10 +904,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         .fields_for(box_of_int)
         .expect("generic struct substituted fields should survive remapping");
     assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
-    assert_eq!(
-        fields[0].location.scope.name_str(&merged_table),
-        Some("source.moth")
-    );
+    assert_eq!(fields[0].span, Some(source_span));
 
     let variants = env
         .variants_for(state_of_string)
@@ -925,10 +915,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         panic!("choice payload should remain a record");
     };
     assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
-    assert_eq!(
-        fields[0].location.scope.name_str(&merged_table),
-        Some("source.moth")
-    );
+    assert_eq!(fields[0].span, Some(source_span));
 }
 
 #[test]
@@ -1078,7 +1065,7 @@ fn runtime_equality_query_accepts_unit_choices() {
             name: table.intern("Ready"),
             tag: 0,
             payload: ChoiceVariantPayloadDefinition::Unit,
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1104,11 +1091,11 @@ fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
                 fields: vec![FieldDefinition {
                     name: InternedPath::from_single_str("value", &mut table),
                     type_id: int_type_id,
-                    location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1138,11 +1125,11 @@ fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
                 fields: vec![FieldDefinition {
                     name: InternedPath::from_single_str("callback", &mut table),
                     type_id: function_type_id,
-                    location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
         generic_parameters: None,
@@ -1173,18 +1160,17 @@ fn runtime_equality_query_rejects_recursive_choice_payloads() {
                 fields: vec![FieldDefinition {
                     name: InternedPath::from_single_str("next", &mut table),
                     type_id: choice_type_id,
-                    location: SourceLocation::default(),
+                    span: None,
                 }]
                 .into_boxed_slice(),
             },
-            location: SourceLocation::default(),
+            span: None,
         }]
         .into_boxed_slice(),
     );
 
     assert!(!env.supports_runtime_equality(choice_type_id));
 }
-
 #[test]
 fn external_type_interning_reuses_ids() {
     let mut env = TypeEnvironment::new();
@@ -1540,8 +1526,14 @@ fn generated_forks_share_inherited_types_and_keep_local_interning_independent() 
 fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
     let mut requester = TypeEnvironment::new();
     let mut local_table = StringTable::new();
-    let source_scope = InternedPath::from_single_str("generated_source.moth", &mut local_table);
-    let source_location = SourceLocation::new(source_scope, Default::default(), Default::default());
+    let source_id = SourceId::from_index(8);
+    let source_span = {
+        let mut builder = ExtendedSpanBuilder::new();
+        SourceSpan::new(
+            source_id,
+            LocalSpan::exact(20, 5, &mut builder).expect("generated field span should encode"),
+        )
+    };
 
     let point_path = InternedPath::from_single_str("Point", &mut local_table);
     let (point_nominal_id, point_type_id) =
@@ -1551,7 +1543,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             fields: vec![FieldDefinition {
                 name: InternedPath::from_single_str("value", &mut local_table),
                 type_id: requester.builtins().int,
-                location: source_location.clone(),
+                span: Some(source_span),
             }]
             .into_boxed_slice(),
             generic_parameters: None,
@@ -1574,11 +1566,11 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
                     fields: vec![FieldDefinition {
                         name: InternedPath::from_single_str("item", &mut local_table),
                         type_id: requester.builtins().string,
-                        location: source_location.clone(),
+                        span: Some(source_span),
                     }]
                     .into_boxed_slice(),
                 },
-                location: source_location,
+                span: Some(source_span),
             }]
             .into_boxed_slice(),
             generic_parameters: None,
@@ -1625,10 +1617,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             .fields_for(point_type_id)
             .expect("generated fork should resolve inherited struct fields");
         assert_eq!(fields[0].name.name_str(&merged_table), Some("value"));
-        assert_eq!(
-            fields[0].location.scope.name_str(&merged_table),
-            Some("generated_source.moth")
-        );
+        assert_eq!(fields[0].span, Some(source_span));
 
         let variants = generated
             .variants_for(state_type_id)
@@ -1638,10 +1627,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             panic!("inherited choice payload should remain a record");
         };
         assert_eq!(fields[0].name.name_str(&merged_table), Some("item"));
-        assert_eq!(
-            fields[0].location.scope.name_str(&merged_table),
-            Some("generated_source.moth")
-        );
+        assert_eq!(fields[0].span, Some(source_span));
     }
 }
 

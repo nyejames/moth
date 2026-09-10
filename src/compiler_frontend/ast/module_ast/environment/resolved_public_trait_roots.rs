@@ -67,7 +67,7 @@ pub(crate) struct ResolvedTraitReturnFact {
 ///
 /// WHAT: carries the owned requirement name (`StringId`), the receiver access plus embedded
 /// `this_type`, the ordered non-receiver parameters and the ordered return slots. It drops
-/// every `SourceLocation` from the resolved trait requirement so the transient fact stays
+/// every source-coordinate record from the resolved trait requirement so the transient fact stays
 /// minimal. Donor-local `TypeId`, `StringId` and `InternedPath` are consumed transiently and
 /// never cross the module result boundary.
 #[derive(Clone, Debug)]
@@ -255,7 +255,7 @@ fn build_trait_root(
 /// Copy one resolved trait requirement into a location-free transient fact.
 ///
 /// WHAT: keeps the owned name, the receiver access kind plus embedded `this_type`, the ordered
-/// non-receiver parameters and the ordered return slots, dropping every `SourceLocation`. The
+/// non-receiver parameters and the ordered return slots, dropping every source-coordinate record.
 /// resolved receiver enum always contains `this_type`, so this copy is infallible.
 fn build_trait_requirement_fact(
     requirement: &ResolvedTraitRequirement,

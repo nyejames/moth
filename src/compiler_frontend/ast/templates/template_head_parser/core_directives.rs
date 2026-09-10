@@ -119,7 +119,7 @@ pub(super) fn parse_core_style_directive(
                 format!(
                     "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
                 ),
-                token_stream.current_location(),
+                token_stream.current_span().into(),
                 ErrorType::Compiler,
             )));
         }

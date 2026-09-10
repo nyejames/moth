@@ -23,19 +23,20 @@
 //! resolution phases that produce them.
 //!
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::NumberLiteralErrorReason;
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::keywords::is_valid_identifier;
 use crate::compiler_frontend::numeric_text::parse::{
     parse_numeric_text_to_f64, parse_numeric_text_to_i32,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use std::cell::RefCell;
@@ -307,12 +308,7 @@ impl PrimitiveBuildValue {
         }
 
         if value.starts_with('\'') || value.starts_with('"') {
-            let literal = match parse_ordinary_quoted_literal(value) {
-                Ok(literal) => literal,
-                Err(rejection) => {
-                    return Err(malformed_quoted_literal_error(value, rejection));
-                }
-            };
+            let literal = parse_ordinary_quoted_literal(value)?;
 
             return Ok(match literal {
                 OrdinaryCommandLiteral::String(text) => Self::String(text),
@@ -340,24 +336,39 @@ impl PrimitiveBuildValue {
 /// WHAT: one rejection vocabulary for immediate command-input inference. Whole-number Int
 ///       overflow and non-finite Float materialisation are diagnostics; a quote-leading value
 ///       that is not one complete ordinary Moth literal is rejected with the ordinary
-///       tokenizer's stable diagnostic title.
+///       tokenizer's stable diagnostic title. Infrastructure failures retain their separate
+///       carrier until the command boundary renders them.
 /// WHY:  every command variant renders the same concrete rejection without a second wording
 ///       owner, and the compiler owns the inference semantics behind the message.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum BuildInputValueError {
+    Infrastructure(Box<CompilerError>),
     /// A whole-number-shaped value is outside the Int range.
-    IntOutOfRange { text: String },
+    IntOutOfRange {
+        text: String,
+    },
     /// A decimal-point or exponent-shaped value did not materialise as a finite Float.
-    NonFiniteFloat { text: String },
+    NonFiniteFloat {
+        text: String,
+    },
     /// A single-quote-leading value is not one complete ordinary Moth Char literal.
-    MalformedCharLiteral { text: String, reason: &'static str },
+    MalformedCharLiteral {
+        text: String,
+        reason: &'static str,
+    },
     /// A double-quote-leading value is not one complete ordinary Moth String literal.
-    MalformedStringLiteral { text: String, reason: &'static str },
+    MalformedStringLiteral {
+        text: String,
+        reason: &'static str,
+    },
 }
 
 impl fmt::Display for BuildInputValueError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Infrastructure(error) => {
+                write!(formatter, "input tokenization failed: {}", error.msg)
+            }
             Self::IntOutOfRange { text } => {
                 write!(
                     formatter,
@@ -389,34 +400,28 @@ enum OrdinaryCommandLiteral {
     Char(char),
 }
 
-/// Why a quote-leading command value is not one complete ordinary literal.
-struct QuotedLiteralRejection {
-    reason: &'static str,
-}
-
 /// Reason text for a value that tokenizes but carries text past its complete literal.
 const QUOTED_LITERAL_TRAILING_TEXT: &str = "text follows the literal";
 
-/// The synthetic file identity given to the ordinary lexer for standalone command values.
+/// The logical path and source identity supplied to the ordinary lexer for standalone command
+/// values.
 ///
-/// Command inputs carry no source span, so the path only exists to keep the ordinary lexer's
-/// diagnostics well-formed; command diagnostics use its stable titles, not the location.
+/// Command-input text belongs to the whole compilation rather than any file, so its token stream
+/// carries [`SourceId::COMPILATION_ROOT`]. The path remains only a lexer scope for well-formed
+/// diagnostics; command diagnostics use their stable titles rather than that location.
 const COMMAND_INPUT_TOKENIZER_PATH: &str = "command-input";
 
 /// Map a quoted-literal rejection to the typed error for the authored leading quote.
-fn malformed_quoted_literal_error(
-    value: &str,
-    rejection: QuotedLiteralRejection,
-) -> BuildInputValueError {
+fn malformed_quoted_literal_error(value: &str, reason: &'static str) -> BuildInputValueError {
     if value.starts_with('\'') {
         BuildInputValueError::MalformedCharLiteral {
             text: value.to_owned(),
-            reason: rejection.reason,
+            reason,
         }
     } else {
         BuildInputValueError::MalformedStringLiteral {
             text: value.to_owned(),
-            reason: rejection.reason,
+            reason,
         }
     }
 }
@@ -427,45 +432,56 @@ fn malformed_quoted_literal_error(
 ///       `ModuleStart + one matching StringSliceLiteral/CharLiteral + Eof` shape. The literal
 ///       must begin at the first value character and end at the tokenizer's final Eof position.
 ///       This deliberately rejects all terminal trivia, including comments and whitespace.
+///       The command-value token stream is synthetic: its span rows land in a temporary
+///       builder that is discarded with the tokens, and command diagnostics report their
+///       stable titles rather than any source location.
 /// WHY:  command inputs must reuse the one ordinary literal grammar — delimiter, escape and
 ///       rejection policy stay owned by the tokenizer instead of a second command parser. The
 ///       strict terminal-trivia policy prevents source-file comment handling from silently
 ///       discarding an authored command-value suffix.
 fn parse_ordinary_quoted_literal(
     value: &str,
-) -> Result<OrdinaryCommandLiteral, QuotedLiteralRejection> {
+) -> Result<OrdinaryCommandLiteral, BuildInputValueError> {
     let mut string_table = StringTable::new();
     let path = InternedPath::from_single_str(COMMAND_INPUT_TOKENIZER_PATH, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         value,
         &path,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
-    .map_err(|diagnostic| QuotedLiteralRejection {
-        reason: diagnostic.kind.descriptor().title,
+    .map_err(|failure| match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => {
+            malformed_quoted_literal_error(value, diagnostic.kind.descriptor().title)
+        }
+        TokenizeFailure::Infrastructure(error) => {
+            BuildInputValueError::Infrastructure(Box::new(error))
+        }
     })?;
 
     let [module_start, literal, eof] = file_tokens.tokens.as_slice() else {
-        return Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        });
+        return Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        ));
     };
 
+    let resolver = span_builder.resolver();
+    let literal_range = literal.span.resolve_with(resolver);
+    let eof_range = eof.span.resolve_with(resolver);
     if !matches!(module_start.kind, TokenKind::ModuleStart)
         || !matches!(eof.kind, TokenKind::Eof)
-        || literal.location.start_pos
-            != (CharPosition {
-                line_number: 0,
-                char_column: 1,
-            })
-        || literal.location.end_pos != eof.location.end_pos
+        || literal_range.start() != 0
+        || literal_range.end() != eof_range.end()
     {
-        return Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        });
+        return Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        ));
     }
 
     match &literal.kind {
@@ -473,9 +489,10 @@ fn parse_ordinary_quoted_literal(
             string_table.resolve(*id).to_owned(),
         )),
         TokenKind::CharLiteral(character) => Ok(OrdinaryCommandLiteral::Char(*character)),
-        _ => Err(QuotedLiteralRejection {
-            reason: QUOTED_LITERAL_TRAILING_TEXT,
-        }),
+        _ => Err(malformed_quoted_literal_error(
+            value,
+            QUOTED_LITERAL_TRAILING_TEXT,
+        )),
     }
 }
 
@@ -580,18 +597,16 @@ impl BuildInputName {
     }
 }
 
-/// Where a build-config value or contract fact came from.
-///
-/// WHAT: one location enum for diagnostics and provenance. Retained compiler source spans reuse
-///       the shared [`SourceLocation`]; command and programmatic inputs carry their argument
-///       position instead, because they have no source span.
+/// WHAT: one carrier for source-span and command-input provenance. Retained compiler source spans
+///       use the shared [`SourceSpan`]; command and programmatic inputs carry their argument
+///       position instead because they have no source span.
 /// WHY:  mismatch, duplicate and missing-input diagnostics must underline either the source
 ///       declaration or the exact command argument without a second location model.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BuildConfigValueLocation {
     /// A retained compiler source span: a contract declaration, its default literal or a
     /// direct project field initializer.
-    Source(SourceLocation),
+    Source(SourceSpan),
 
     /// An explicit command or programmatic input at one argument position.
     Command(BuildCommandLocation),
@@ -728,7 +743,7 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
-    pub(crate) qualifier_location: SourceLocation,
+    pub(crate) qualifier_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 
@@ -802,7 +817,7 @@ pub(crate) struct BuildConfigContractFact {
     value_type: BuildInputType,
     required: bool,
     default: Option<PrimitiveBuildValue>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     resolved_provider: Option<ResolvedBuildConfigProvider>,
 }
 
@@ -813,14 +828,14 @@ impl BuildConfigContractFact {
         value_type: BuildInputType,
         required: bool,
         default: Option<PrimitiveBuildValue>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         Self {
             name,
             value_type,
             required,
             default,
-            location,
+            span,
             resolved_provider: None,
         }
     }
@@ -861,8 +876,8 @@ impl BuildConfigContractFact {
         self.default.as_ref()
     }
 
-    pub(crate) fn location(&self) -> &SourceLocation {
-        &self.location
+    pub(crate) fn span(&self) -> Option<SourceSpan> {
+        self.span
     }
 
     fn resolved_provider(&self) -> Option<&ResolvedBuildConfigProvider> {
@@ -912,43 +927,43 @@ pub(crate) enum BuildConfigContractConflictReason {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BuildConfigResolutionError {
     SourceContractConflict {
-        first: BuildConfigContractFact,
-        conflicting: BuildConfigContractFact,
+        first: Box<BuildConfigContractFact>,
+        conflicting: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     DuplicateProjectContract {
-        first: BuildConfigContractFact,
-        conflicting: BuildConfigContractFact,
+        first: Box<BuildConfigContractFact>,
+        conflicting: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     ProjectSourceContractConflict {
-        project: BuildConfigContractFact,
-        source: BuildConfigContractFact,
+        project: Box<BuildConfigContractFact>,
+        source: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     FixedProjectSourceTypeMismatch {
-        fixed: BuildConfigContractFact,
-        source: BuildConfigContractFact,
+        fixed: Box<BuildConfigContractFact>,
+        source: Box<BuildConfigContractFact>,
         reason: BuildConfigContractConflictReason,
     },
     DefaultTypeMismatch {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
         provided: PrimitiveBuildInputType,
     },
     ValueTypeMismatch {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
         provided: PrimitiveBuildInputType,
         value_location: Option<BuildConfigValueLocation>,
     },
     MissingRequiredValue {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
     },
     /// A direct project contract reached the barrier without its folded provider payload.
     ///
     /// This is an internal handoff invariant: direct project config selection belongs exclusively
     /// to the config-folding service and must never fall back to boundary resolution.
     DirectProjectProviderMissing {
-        contract: BuildConfigContractFact,
+        contract: Box<BuildConfigContractFact>,
     },
     UnknownExplicitInput {
         input: BuildConfigInputEntry,
@@ -979,11 +994,12 @@ impl BuildConfigResolutionError {
         }
     }
 
-    /// Return the authored contract location when this error has one.
-    pub(crate) fn contract_location(&self) -> Option<&SourceLocation> {
+    /// Return the authored contract span when this error has one.
+    #[cfg(test)]
+    pub(crate) fn contract_span(&self) -> Option<SourceSpan> {
         match self {
             Self::SourceContractConflict { first, .. }
-            | Self::DuplicateProjectContract { first, .. } => Some(first.location()),
+            | Self::DuplicateProjectContract { first, .. } => first.span(),
             Self::ProjectSourceContractConflict { source, .. }
             | Self::FixedProjectSourceTypeMismatch { source, .. }
             | Self::DefaultTypeMismatch {
@@ -997,23 +1013,8 @@ impl BuildConfigResolutionError {
             }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
-            } => Some(source.location()),
+            } => source.span(),
             Self::UnknownExplicitInput { .. } => None,
-        }
-    }
-
-    /// Return the typed mismatch reason, if this error came from a supplied value or default.
-    pub(crate) fn provided_type(&self) -> Option<PrimitiveBuildInputType> {
-        match self {
-            Self::DefaultTypeMismatch { provided, .. }
-            | Self::ValueTypeMismatch { provided, .. } => Some(*provided),
-            Self::SourceContractConflict { .. }
-            | Self::DuplicateProjectContract { .. }
-            | Self::ProjectSourceContractConflict { .. }
-            | Self::FixedProjectSourceTypeMismatch { .. }
-            | Self::MissingRequiredValue { .. }
-            | Self::DirectProjectProviderMissing { .. }
-            | Self::UnknownExplicitInput { .. } => None,
         }
     }
 
@@ -1041,7 +1042,7 @@ impl BuildConfigResolutionError {
             }
             | Self::DuplicateProjectContract {
                 first, conflicting, ..
-            } => Some((first, conflicting)),
+            } => Some((first.as_ref(), conflicting.as_ref())),
             Self::ProjectSourceContractConflict {
                 project, source, ..
             }
@@ -1049,7 +1050,7 @@ impl BuildConfigResolutionError {
                 fixed: project,
                 source,
                 ..
-            } => Some((project, source)),
+            } => Some((project.as_ref(), source.as_ref())),
             Self::DefaultTypeMismatch { .. }
             | Self::ValueTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
@@ -1074,7 +1075,7 @@ impl BuildConfigResolutionError {
             }
             | Self::DirectProjectProviderMissing {
                 contract: source, ..
-            } => Some(source),
+            } => Some(source.as_ref()),
             Self::SourceContractConflict { .. }
             | Self::DuplicateProjectContract { .. }
             | Self::UnknownExplicitInput { .. } => None,
@@ -1092,7 +1093,7 @@ pub(crate) struct ResolvedBuildConfigValue {
     value: Option<PrimitiveBuildValue>,
     origin: BuildConfigValueOrigin,
     fingerprint: BuildConfigFingerprint,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_location: Option<BuildConfigValueLocation>,
 }
 
@@ -1253,8 +1254,8 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                     && let Some(reason) = contract_conflict_reason(fixed, fact, false)
                 {
                     return Err(BuildConfigResolutionError::FixedProjectSourceTypeMismatch {
-                        fixed: (**fixed).clone(),
-                        source: fact.clone(),
+                        fixed: Box::new((**fixed).clone()),
+                        source: Box::new(fact.clone()),
                         reason,
                     });
                 }
@@ -1262,8 +1263,8 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                     && let Some(reason) = contract_conflict_reason(project, fact, true)
                 {
                     return Err(BuildConfigResolutionError::ProjectSourceContractConflict {
-                        project: (**project).clone(),
-                        source: fact.clone(),
+                        project: Box::new((**project).clone()),
+                        source: Box::new(fact.clone()),
                         reason,
                     });
                 }
@@ -1322,8 +1323,8 @@ fn collect_transient_source_facts<'a>(
             && let Some(reason) = contract_conflict_reason(first, fact, true)
         {
             return Err(BuildConfigResolutionError::SourceContractConflict {
-                first: first.clone(),
-                conflicting: fact.clone(),
+                first: Box::new(first.clone()),
+                conflicting: Box::new(fact.clone()),
                 reason,
             });
         }
@@ -1407,8 +1408,8 @@ fn collect_source_facts(
             let reason = contract_conflict_reason(first, fact, true);
             if let Some(reason) = reason {
                 return Err(BuildConfigResolutionError::SourceContractConflict {
-                    first: first.clone(),
-                    conflicting: fact.clone(),
+                    first: Box::new(first.clone()),
+                    conflicting: Box::new(fact.clone()),
                     reason,
                 });
             }
@@ -1432,8 +1433,8 @@ fn collect_project_facts(
                 },
             );
             return Err(BuildConfigResolutionError::DuplicateProjectContract {
-                first: first.clone(),
-                conflicting: fact.clone(),
+                first: Box::new(first.clone()),
+                conflicting: Box::new(fact.clone()),
                 reason,
             });
         }
@@ -1452,7 +1453,7 @@ fn validate_fact_defaults<'a>(
                 .accepts_primitive(default.primitive_type())
         {
             return Err(BuildConfigResolutionError::DefaultTypeMismatch {
-                contract: fact.clone(),
+                contract: Box::new(fact.clone()),
                 provided: default.primitive_type(),
             });
         }
@@ -1481,8 +1482,8 @@ fn validate_project_source_compatibility(
             && let Some(reason) = contract_conflict_reason(fixed, source, false)
         {
             return Err(BuildConfigResolutionError::FixedProjectSourceTypeMismatch {
-                fixed: fixed.clone(),
-                source: source.clone(),
+                fixed: Box::new(fixed.clone()),
+                source: Box::new(source.clone()),
                 reason,
             });
         }
@@ -1491,8 +1492,8 @@ fn validate_project_source_compatibility(
             && let Some(reason) = contract_conflict_reason(project, source, true)
         {
             return Err(BuildConfigResolutionError::ProjectSourceContractConflict {
-                project: project.clone(),
-                source: source.clone(),
+                project: Box::new(project.clone()),
+                source: Box::new(source.clone()),
                 reason,
             });
         }
@@ -1551,7 +1552,7 @@ fn resolve_one_build_config_value(
     if let Some(direct_project) = direct_project {
         let provider = direct_project.resolved_provider().ok_or_else(|| {
             BuildConfigResolutionError::DirectProjectProviderMissing {
-                contract: direct_project.clone(),
+                contract: Box::new(direct_project.clone()),
             }
         })?;
         return Ok(resolved_value_from_provider(direct_project, provider));
@@ -1562,13 +1563,13 @@ fn resolve_one_build_config_value(
         // not user input; preserving a typed error is preferable to panicking if map assembly
         // changes that invariant.
         BuildConfigResolutionError::MissingRequiredValue {
-            contract: BuildConfigContractFact::new(
+            contract: Box::new(BuildConfigContractFact::new(
                 name.clone(),
                 BuildInputType::Primitive(PrimitiveBuildInputType::String),
                 true,
                 None,
-                SourceLocation::default(),
-            ),
+                None,
+            )),
         }
     })?;
 
@@ -1576,7 +1577,7 @@ fn resolve_one_build_config_value(
         let value_type = input.value().primitive_type();
         if !contract.value_type().accepts_primitive(value_type) {
             return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: contract.clone(),
+                contract: Box::new(contract.clone()),
                 provided: value_type,
                 value_location: Some(input.location().clone()),
             });
@@ -1590,7 +1591,7 @@ fn resolve_one_build_config_value(
         let value_type = value.primitive_type();
         if !contract.value_type().accepts_primitive(value_type) {
             return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: contract.clone(),
+                contract: Box::new(contract.clone()),
                 provided: value_type,
                 value_location: None,
             });
@@ -1604,13 +1605,11 @@ fn resolve_one_build_config_value(
         (
             Some(value.clone()),
             BuildConfigValueOrigin::DeclarationDefault,
-            Some(BuildConfigValueLocation::Source(
-                contract.location().clone(),
-            )),
+            contract.span.map(BuildConfigValueLocation::Source),
         )
     } else if contract.required() {
         return Err(BuildConfigResolutionError::MissingRequiredValue {
-            contract: contract.clone(),
+            contract: Box::new(contract.clone()),
         });
     } else {
         (None, BuildConfigValueOrigin::DeclarationDefault, None)
@@ -1632,11 +1631,10 @@ fn resolved_fixed_project_value(
         source,
         fixed_project.default.clone(),
         BuildConfigValueOrigin::FixedProjectField,
-        Some(BuildConfigValueLocation::Source(
-            fixed_project.location().clone(),
-        )),
+        fixed_project.span.map(BuildConfigValueLocation::Source),
     ))
 }
+
 fn resolved_value_from_provider(
     contract: &BuildConfigContractFact,
     provider: &ResolvedBuildConfigProvider,
@@ -1649,7 +1647,7 @@ fn resolved_value_from_provider(
         value: provider.value.clone(),
         origin: provider.origin,
         fingerprint: provider.fingerprint,
-        location: contract.location().clone(),
+        span: contract.span,
         value_location: provider.value_location.clone(),
     }
 }
@@ -1674,7 +1672,7 @@ fn resolved_value_from_contract(
         value,
         origin,
         fingerprint,
-        location: contract.location().clone(),
+        span: contract.span,
         value_location,
     }
 }

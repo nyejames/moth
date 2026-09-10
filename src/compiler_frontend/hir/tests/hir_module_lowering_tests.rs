@@ -30,7 +30,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_source_location,
+    function_node, make_test_variable, node,
 };
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -67,14 +67,10 @@ fn registers_declarations_and_resolves_start_function() {
             struct_name,
             vec![make_test_variable(
                 field_name,
-                no_value_expr(
-                    builtin_type_ids::INT,
-                    test_source_location(1),
-                    ValueMode::ImmutableOwned,
-                ),
+                no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
             )],
         ),
-        test_source_location(1),
+        None,
     );
 
     let start_function = function_node(
@@ -84,7 +80,7 @@ fn registers_declarations_and_resolves_start_function() {
             returns: vec![],
         },
         vec![],
-        test_source_location(2),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
@@ -122,7 +118,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
                 returns: vec![],
             },
             vec![],
-            test_source_location(1),
+            None,
         );
         let mut ast = build_ast_with_registered_types(vec![declaration], entry_path);
         ast.root_role = root_role;
@@ -154,7 +150,7 @@ fn lowers_module_constants_into_hir_const_pool() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -163,11 +159,7 @@ fn lowers_module_constants_into_hir_const_pool() {
         &mut ast,
         make_test_variable(
             const_name,
-            Expression::string_slice(
-                string_table.intern("Moth"),
-                test_source_location(1),
-                ValueMode::ImmutableOwned,
-            ),
+            Expression::string_slice(string_table.intern("Moth"), None, ValueMode::ImmutableOwned),
         ),
     );
 
@@ -240,12 +232,12 @@ fn start_function_can_reference_module_constant() {
             NodeKind::ExpressionStatement(inferred_type_reference_expr(
                 third_const.clone(),
                 builtin_type_ids::INT,
-                test_source_location(2),
+                None,
                 ValueMode::ImmutableReference,
             )),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -253,7 +245,7 @@ fn start_function_can_reference_module_constant() {
         &mut ast,
         make_test_variable(
             third_const,
-            Expression::int(3, test_source_location(1), ValueMode::ImmutableOwned),
+            Expression::int(3, None, ValueMode::ImmutableOwned),
         ),
     );
 
@@ -288,12 +280,12 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::String,
-        test_source_location(2),
+        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -308,10 +300,10 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
 
     let error =
         lower_ast(ast, &mut string_table).expect_err("template constants should fail in HIR");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(message.contains(
+    assert!(error.msg.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",
     ));
 }
@@ -328,12 +320,12 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::String,
-        test_source_location(2),
+        None,
         ValueMode::ImmutableOwned,
     );
 
@@ -348,7 +340,7 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
             Expression::struct_instance(
                 super::symbol("Page", &mut string_table),
                 vec![make_test_variable(body_field, template_constant)],
-                test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
                 true,
                 None,
@@ -359,10 +351,10 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
 
     let error =
         lower_ast(ast, &mut string_table).expect_err("nested template constants should fail");
-    let (_error_type, message, _location) = error
-        .first_infrastructure_error_for_tests()
+    let error = error
+        .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
-    assert!(message.contains(
+    assert!(error.msg.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",
     ));
 }
@@ -379,7 +371,7 @@ fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     // The fold fixture supplies the pieces a wrapper-template finalization would fold, while
@@ -391,7 +383,7 @@ fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
         TemplateType::String,
-        test_source_location(2),
+        None,
         ValueMode::ImmutableOwned,
     );
     let folded = ConstStringValue::Pieces(vec![
@@ -449,23 +441,15 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             vec![
                 make_test_variable(
                     x_field.clone(),
-                    no_value_expr(
-                        builtin_type_ids::INT,
-                        test_source_location(1),
-                        ValueMode::ImmutableOwned,
-                    ),
+                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
                 ),
                 make_test_variable(
                     y_field.clone(),
-                    no_value_expr(
-                        builtin_type_ids::INT,
-                        test_source_location(1),
-                        ValueMode::ImmutableOwned,
-                    ),
+                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
                 ),
             ],
         ),
-        test_source_location(1),
+        None,
     );
 
     let start_function = function_node(
@@ -475,7 +459,7 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             returns: vec![],
         },
         vec![],
-        test_source_location(2),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![struct_node, start_function], entry_path);
@@ -490,14 +474,14 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
                 vec![
                     make_test_variable(
                         x_field,
-                        Expression::int(5, test_source_location(2), ValueMode::ImmutableOwned),
+                        Expression::int(5, None, ValueMode::ImmutableOwned),
                     ),
                     make_test_variable(
                         y_field,
-                        Expression::int(99, test_source_location(2), ValueMode::ImmutableOwned),
+                        Expression::int(99, None, ValueMode::ImmutableOwned),
                     ),
                 ],
-                test_source_location(2),
+                None,
                 ValueMode::ImmutableOwned,
                 true,
                 None,
@@ -547,7 +531,7 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -555,12 +539,12 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
         AstDocFragment {
             kind: AstDocFragmentKind::Doc,
             value: first_doc,
-            location: test_source_location(4),
+            span: None,
         },
         AstDocFragment {
             kind: AstDocFragmentKind::Doc,
             value: second_doc,
-            location: test_source_location(7),
+            span: None,
         },
     ];
 
@@ -572,8 +556,8 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
     assert!(matches!(doc_fragments[1].kind, ModuleDocFragmentKind::Doc));
     assert_eq!(doc_fragments[0].rendered_text, "First doc");
     assert_eq!(doc_fragments[1].rendered_text, "Second doc");
-    assert_eq!(doc_fragments[0].location.start_pos.line_number, 4);
-    assert_eq!(doc_fragments[1].location.start_pos.line_number, 7);
+    assert_eq!(doc_fragments[0].span, None);
+    assert_eq!(doc_fragments[1].span, None);
 }
 
 /// Mint one real resource handle through the issuing module resource table.
@@ -592,7 +576,7 @@ fn fixture_resource_id(resources: &mut ModuleResourceTable, relative: &str) -> R
 
     resources.intern_origin(
         StableResourceOriginId::module_owned(module, logical_path),
-        test_source_location(1),
+        None,
     )
 }
 
@@ -605,10 +589,7 @@ fn structural_constant(
     let const_name = super::symbol(name, string_table);
     add_test_module_constant(
         ast,
-        make_test_variable(
-            const_name,
-            Expression::structural_string(pieces, test_source_location(1)),
-        ),
+        make_test_variable(const_name, Expression::structural_string(pieces, None)),
     );
 }
 
@@ -624,7 +605,7 @@ fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -679,7 +660,7 @@ fn site_root_module_constant_survives_hir_lowering() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -735,12 +716,12 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
             NodeKind::ExpressionStatement(inferred_type_reference_expr(
                 logo_const.clone(),
                 builtin_type_ids::STRING,
-                test_source_location(2),
+                None,
                 ValueMode::ImmutableReference,
             )),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -798,7 +779,7 @@ fn remaps_structural_module_constant_piece_text_after_table_merge() {
             returns: vec![],
         },
         vec![],
-        test_source_location(1),
+        None,
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -1170,7 +1151,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
             ConstStringPiece::Resource(logo),
             ConstStringPiece::Text(suffix),
         ],
-        test_source_location(2),
+        None,
     );
     // WHAT: the fixture mapper is the production handoff materialization mirrored, so the node
     //       crossing into HIR is the exact piece-bearing `Text` payload the handoff carries.
@@ -1179,7 +1160,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(text_node),
-        location: test_source_location(2),
+        span: None,
     };
 
     let start_function = function_node(
@@ -1193,9 +1174,9 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
                 handoff,
                 ValueMode::ImmutableOwned,
             )),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
 
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
@@ -1262,13 +1243,13 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
             ConstStringPiece::SiteRoot,
             ConstStringPiece::Text(suffix),
         ],
-        test_source_location(2),
+        None,
     );
     let text_node = expressions_to_owned_render_node(&[structural], &string_table);
 
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(text_node),
-        location: test_source_location(2),
+        span: None,
     };
 
     let start_function = function_node(
@@ -1282,9 +1263,9 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
                 handoff,
                 ValueMode::ImmutableOwned,
             )),
-            test_source_location(2),
+            None,
         )],
-        test_source_location(1),
+        None,
     );
     let ast = build_ast_with_registered_types(vec![start_function], entry_path);
     let table = Rc::new(RefCell::new(ModuleResourceTable::new()));

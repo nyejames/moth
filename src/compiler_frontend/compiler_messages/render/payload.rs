@@ -95,7 +95,6 @@ fn render_payload_message(
     let string_table = context.string_table;
 
     match payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => msg.clone(),
         DiagnosticPayload::ExpectedToken { expected, found } => {
             expected_token_message(expected, found.as_ref(), string_table)
         }
@@ -122,7 +121,7 @@ fn render_payload_message(
             diagnostic_type_name(*expected, context),
             diagnostic_type_name(*found, context)
         ),
-        DiagnosticPayload::DuplicateDeclaration { name, .. } => {
+        DiagnosticPayload::DuplicateDeclaration { name } => {
             duplicate_declaration_message(*name, string_table)
         }
         DiagnosticPayload::MissingImportTarget { .. }
@@ -209,6 +208,11 @@ fn render_payload_message(
         DiagnosticPayload::InvalidCharacter { character } => {
             format!("Invalid character: '{character}'")
         }
+        DiagnosticPayload::SourceSpanCapacity {
+            start,
+            length,
+            resource,
+        } => source_span_capacity_message(*start, *length, *resource),
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidNumberLiteral {
             literal_text,
@@ -324,7 +328,6 @@ fn render_payload_message(
         DiagnosticPayload::DuplicateTraitRequirement {
             trait_name,
             requirement_name,
-            ..
         } => format!(
             "Trait '{}' declares duplicate requirement '{}'. Trait requirements cannot be overloaded in v1.",
             string_table.resolve(*trait_name),
@@ -368,7 +371,7 @@ fn render_payload_message(
         DiagnosticPayload::InvalidTraitKeywordUsage { reason } => {
             invalid_trait_keyword_usage_message(*reason).to_owned()
         }
-        DiagnosticPayload::DuplicatePublicExport { name, .. } => format!(
+        DiagnosticPayload::DuplicatePublicExport { name } => format!(
             "Duplicate public export '{}' in module public surface. Each exported name must be unique.",
             string_table.resolve(*name)
         ),
@@ -390,7 +393,7 @@ fn render_payload_message(
         DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
             trait_name_used_as_type_message(*trait_name, context)
         }
-        DiagnosticPayload::ShadowedName { name, .. } => {
+        DiagnosticPayload::ShadowedName { name } => {
             format!("Shadowed name '{}'", string_table.resolve(*name))
         }
         DiagnosticPayload::ReservedNameCollision { name, reserved_by } => {
@@ -423,7 +426,6 @@ fn render_payload_message(
             target_type,
             field_name,
             root_binding_name,
-            declaration_location: _,
         } => invalid_assignment_target_message(
             *reason,
             *target_name,
@@ -554,6 +556,20 @@ fn render_payload_message(
         }
         DiagnosticPayload::None => String::new(),
     }
+}
+
+fn source_span_capacity_message(
+    start: u32,
+    length: u32,
+    resource: SourceSpanCapacityResource,
+) -> String {
+    let resource_name = match resource {
+        SourceSpanCapacityResource::ExtendedSpanTable => "extended span table",
+    };
+    format!(
+        "This source needs an exact span at byte offset {start} with length {length}, but its \
+         {resource_name} cannot hold another long or late range."
+    )
 }
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
@@ -769,7 +785,10 @@ fn trait_name_used_as_type_message(
     )
 }
 
-fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
+fn import_payload_message(
+    payload: &DiagnosticPayload,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match payload {
         DiagnosticPayload::MissingImportTarget { path } => {
             format!(
@@ -794,7 +813,7 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
                 "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
             )
         }
-        DiagnosticPayload::ImportNameCollision { name, .. } => {
+        DiagnosticPayload::ImportNameCollision { name } => {
             format!(
                 "Dependency binding name collision: '{}' is already visible in this file.",
                 string_table.resolve(*name)
@@ -891,7 +910,10 @@ fn import_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
     }
 }
 
-fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTable) -> String {
+fn borrow_payload_message(
+    payload: &DiagnosticPayload,
+    string_table: &dyn StringTableResolver,
+) -> String {
     match payload {
         DiagnosticPayload::BorrowConflict {
             place,
@@ -902,14 +924,12 @@ fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
         DiagnosticPayload::MultipleMutableBorrows {
             place,
             conflicting_place,
-            ..
         } => multiple_mutable_borrows_message(place, conflicting_place.as_ref(), string_table),
         DiagnosticPayload::SharedMutableConflict {
             place,
             existing_access,
             requested_access,
             conflicting_place,
-            ..
         } => shared_mutable_conflict_message(
             place,
             *existing_access,
@@ -934,7 +954,6 @@ fn borrow_payload_message(payload: &DiagnosticPayload, string_table: &StringTabl
             place,
             reason,
             conflicting_place,
-            ..
         } => {
             invalid_mutable_access_message(place, *reason, conflicting_place.as_ref(), string_table)
         }

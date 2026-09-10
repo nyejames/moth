@@ -3,8 +3,9 @@
 //! WHAT: resolves user/host call signatures and applies the postfix `!` propagation and `catch`
 //!       recovery forms that can follow a call expression.
 //! WHY: function-call completion owns result handling after the shared `call_arguments` parser
-//!      has produced retained, source-located argument metadata.
-
+//!      has produced retained, source-span argument metadata.
+//! WHY: call validation belongs here, while callers should consume the same
+//!      expression contract in statement and expression positions.
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -27,7 +28,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
@@ -36,6 +37,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
@@ -44,7 +46,7 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 pub struct FunctionCallParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
     pub id: &'a InternedPath,
-    pub call_location: SourceLocation,
+    pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub signature: &'a FunctionSignature,
     pub value_required: bool,
@@ -59,7 +61,7 @@ pub struct ExternalFunctionCallParseInput<'a, 'b> {
     pub token_stream: &'a mut FileTokens,
     pub external_function_id: ExternalFunctionId,
     pub external_function: &'a ExternalFunctionDef,
-    pub call_location: SourceLocation,
+    pub call_span: Option<SourceSpan>,
     pub context: &'a ScopeContext,
     pub value_required: bool,
     pub allow_boundary_catch: bool,
@@ -73,7 +75,7 @@ struct ParsedExternalFunctionCall {
     args: Vec<CallArgument>,
     result_type_ids: Vec<TypeId>,
     error_return_type_id: Option<TypeId>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 }
 
 struct CallFinishContext<'a, 'b> {
@@ -98,7 +100,7 @@ pub(crate) fn parse_function_call_expression(
     let FunctionCallParseInput {
         token_stream,
         id,
-        call_location,
+        call_span,
         context,
         signature,
         value_required,
@@ -121,7 +123,7 @@ pub(crate) fn parse_function_call_expression(
             token_stream,
             external_function_id: function_id,
             external_function: host_function,
-            call_location,
+            call_span,
             context,
             value_required,
             allow_boundary_catch,
@@ -149,7 +151,7 @@ pub(crate) fn parse_function_call_expression(
         id,
         &raw_args,
         &signature.parameters,
-        token_stream.current_location(),
+        call_span,
         string_table,
         type_interner,
         Some(context),
@@ -159,7 +161,7 @@ pub(crate) fn parse_function_call_expression(
         name: id.to_owned(),
         result_type_ids: signature.success_return_type_ids(),
         args,
-        call_location,
+        call_span,
     };
 
     finish_function_call_expression(
@@ -203,7 +205,7 @@ fn finish_function_call_expression(
             );
             return Err(CompilerDiagnostic::invalid_fallible_handling(
                 non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -229,7 +231,7 @@ fn finish_function_call_expression(
 
     Err(CompilerDiagnostic::invalid_fallible_handling(
         InvalidFallibleHandlingReason::UnhandledErrorReturn,
-        token_stream.current_location(),
+        Some(token_stream.current_span()),
     )
     .into())
 }
@@ -238,7 +240,7 @@ fn resolve_user_function_call_arguments(
     function_name: &InternedPath,
     raw_args: &[CallArgument],
     parameters: &[Declaration],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_interner: &mut AstTypeInterner<'_>,
     _scope_context: Option<&ScopeContext>,
@@ -254,7 +256,7 @@ fn resolve_user_function_call_arguments(
         CallDiagnosticContext::function(&callee_name),
         raw_args,
         &expectations,
-        location,
+        span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
@@ -277,7 +279,7 @@ pub(crate) fn parse_external_function_call_expression(
         token_stream,
         external_function_id,
         external_function,
-        call_location,
+        call_span,
         context,
         value_required,
         allow_boundary_catch,
@@ -290,7 +292,7 @@ pub(crate) fn parse_external_function_call_expression(
         token_stream,
         external_function_id,
         external_function,
-        call_location,
+        call_span,
         context,
         type_interner,
         string_table,
@@ -314,12 +316,12 @@ fn parse_external_function_call_parts(
     token_stream: &mut FileTokens,
     external_function_id: ExternalFunctionId,
     external_function: &ExternalFunctionDef,
-    call_location: SourceLocation,
+    span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> Result<ParsedExternalFunctionCall, ExpressionParseError> {
-    let location = call_location;
+    let call_span = span;
 
     // ------------------------
     //  Parse raw arguments
@@ -350,7 +352,7 @@ fn parse_external_function_call_parts(
         CallDiagnosticContext::host_function(&external_function.name),
         &raw_args,
         &expectations,
-        location.clone(),
+        call_span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
@@ -361,8 +363,8 @@ fn parse_external_function_call_parts(
     // ------------------------
     //  Validate signature and returns
     // ------------------------
-    let builtin_error_type = resolve_builtin_error_type_typed(context, &location, string_table)?;
-    validate_external_signature_types_are_registered(external_function, context, location.clone())?;
+    let builtin_error_type = resolve_builtin_error_type_typed(context, call_span, string_table)?;
+    validate_external_signature_types_are_registered(external_function, context, call_span)?;
     let diagnostic_result_types = external_function.success_return_data_types();
     let result_type_ids = external_function.success_return_type_ids(
         type_interner.environment_mut_for_derived_types(),
@@ -372,7 +374,7 @@ fn parse_external_function_call_parts(
         external_function,
         &diagnostic_result_types,
         &result_type_ids,
-        location.clone(),
+        call_span,
     )?;
 
     let error_return_type_id = external_function.error_return_type_id(
@@ -399,7 +401,7 @@ fn parse_external_function_call_parts(
         args,
         result_type_ids,
         error_return_type_id,
-        location,
+        span: call_span,
     })
 }
 
@@ -422,7 +424,7 @@ fn finish_external_function_call_expression(
         args,
         result_type_ids,
         error_return_type_id,
-        location,
+        span,
     } = parsed_call;
 
     if let Some(error_type_id) = error_return_type_id {
@@ -431,7 +433,7 @@ fn finish_external_function_call_expression(
             args,
             result_type_ids,
             error_type_id,
-            call_location: location,
+            call_span: span,
         };
 
         if token_stream_starts_fallible_handling_suffix(token_stream) {
@@ -451,7 +453,7 @@ fn finish_external_function_call_expression(
 
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::UnhandledErrorReturn,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -464,7 +466,7 @@ fn finish_external_function_call_expression(
             call_success_is_optional(result_type_ids.as_slice(), type_interner.environment());
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             non_fallible_handler_reason(token_stream.current_token_kind(), operand_is_optional),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -474,7 +476,7 @@ fn finish_external_function_call_expression(
         args,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
-        location,
+        span,
     ))
 }
 
@@ -483,14 +485,14 @@ fn validate_external_return_slots_are_visible(
     external_function: &ExternalFunctionDef,
     diagnostic_result_types: &[DataType],
     result_type_ids: &[TypeId],
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     if external_function.returns.len() != diagnostic_result_types.len()
         || external_function.returns.len() != result_type_ids.len()
     {
         return Err(CompilerError::compiler_error(format!(
             "External function '{}' declares a return slot that is not frontend-visible at {:?}.",
-            external_function.name, location
+            external_function.name, span
         ))
         .into());
     }
@@ -503,14 +505,14 @@ fn validate_external_return_slots_are_visible(
 fn validate_external_signature_types_are_registered(
     external_function: &ExternalFunctionDef,
     context: &ScopeContext,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     for parameter in &external_function.parameters {
         validate_external_signature_type_is_registered(
             external_function,
             &parameter.language_type,
             context,
-            location.clone(),
+            span,
         )?;
     }
 
@@ -519,7 +521,7 @@ fn validate_external_signature_types_are_registered(
             external_function,
             &slot.value_type,
             context,
-            location.clone(),
+            span,
         )?;
     }
 
@@ -528,7 +530,7 @@ fn validate_external_signature_types_are_registered(
             external_function,
             error_type,
             context,
-            location,
+            span,
         )?;
     }
 
@@ -540,7 +542,7 @@ fn validate_external_signature_type_is_registered(
     external_function: &ExternalFunctionDef,
     signature_type: &ExternalSignatureType,
     context: &ScopeContext,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     match signature_type {
         ExternalSignatureType::Abi(_)
@@ -557,16 +559,13 @@ fn validate_external_signature_type_is_registered(
 
             Err(CompilerError::compiler_error(format!(
                 "External function '{}' references unknown external type {:?} at {:?}.",
-                external_function.name, type_id, location
+                external_function.name, type_id, span
             ))
             .into())
         }
-        ExternalSignatureType::Optional(inner) => validate_external_signature_type_is_registered(
-            external_function,
-            inner,
-            context,
-            location,
-        ),
+        ExternalSignatureType::Optional(inner) => {
+            validate_external_signature_type_is_registered(external_function, inner, context, span)
+        }
     }
 }
 

@@ -10,18 +10,19 @@ use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operato
 use super::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(super) fn resolve_expression_result_type(
     output_queue: &[ExpressionRpnItem],
-    expression_location: &SourceLocation,
+    expression_span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
@@ -43,60 +44,58 @@ pub(super) fn resolve_expression_result_type(
             }
 
             // Operators consume operand types from the stack and push the result type.
-            ExpressionRpnItem::Operator { operator, location } => {
-                match operator.required_values() {
-                    1 => {
-                        let Some(operand) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::Unary,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        stack.push(resolve_unary_operator_type(
+            ExpressionRpnItem::Operator { operator, span } => match operator.required_values() {
+                1 => {
+                    let Some(operand) = stack.pop() else {
+                        return Err(missing_operand_error(
                             operator,
-                            operand,
-                            location,
-                            type_environment,
-                        )?);
-                    }
-
-                    2 => {
-                        let Some(rhs) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::BinaryRight,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        let Some(lhs) = stack.pop() else {
-                            return Err(missing_operand_error(
-                                operator,
-                                OperatorOperandPosition::BinaryLeft,
-                                location,
-                                string_table,
-                            ));
-                        };
-                        stack.push(resolve_binary_operator_type(
-                            lhs,
-                            rhs,
-                            operator,
-                            location,
-                            type_environment,
-                        )?);
-                    }
-
-                    _ => {
-                        return Err(CompilerError::compiler_error(format!(
-                            "Unsupported operator arity during expression typing: {:?}",
-                            operator
-                        ))
-                        .into());
-                    }
+                            OperatorOperandPosition::Unary,
+                            *span,
+                            string_table,
+                        ));
+                    };
+                    stack.push(resolve_unary_operator_type(
+                        operator,
+                        operand,
+                        *span,
+                        type_environment,
+                    )?);
                 }
-            }
+
+                2 => {
+                    let Some(rhs) = stack.pop() else {
+                        return Err(missing_operand_error(
+                            operator,
+                            OperatorOperandPosition::BinaryRight,
+                            *span,
+                            string_table,
+                        ));
+                    };
+                    let Some(lhs) = stack.pop() else {
+                        return Err(missing_operand_error(
+                            operator,
+                            OperatorOperandPosition::BinaryLeft,
+                            *span,
+                            string_table,
+                        ));
+                    };
+                    stack.push(resolve_binary_operator_type(
+                        lhs,
+                        rhs,
+                        operator,
+                        *span,
+                        type_environment,
+                    )?);
+                }
+
+                _ => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "Unsupported operator arity during expression typing: {:?}",
+                        operator
+                    ))
+                    .into());
+                }
+            },
         }
     }
 
@@ -107,7 +106,7 @@ pub(super) fn resolve_expression_result_type(
     if stack.len() != 1 {
         return Err(CompilerDiagnostic::invalid_expression(
             InvalidExpressionReason::UnresolvedStackShape,
-            expression_location.clone(),
+            expression_span,
         )
         .into());
     }
@@ -130,13 +129,13 @@ pub(super) fn resolve_expression_result_type(
 fn missing_operand_error(
     operator: &Operator,
     position: OperatorOperandPosition,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> ExpressionTypingError {
     CompilerDiagnostic::missing_operator_operand(
         string_table.get_or_intern(operator.to_str().to_owned()),
         position,
-        location.clone(),
+        span,
     )
     .into()
 }

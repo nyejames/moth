@@ -6,6 +6,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyClauseParseError;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -14,23 +15,29 @@ use crate::compiler_frontend::tokenizer::tokens::{
     FileTokens, Token, TokenKind, TokenizerEntryMode,
 };
 
-fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
-    tokenize_named_source(source, "test.moth")
+fn tokenize_source(source: &str) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
+    tokenize_named_source_with_id(source, "test.moth", SourceId::COMPILATION_ROOT)
 }
 
-fn tokenize_named_source(source: &str, file_name: &str) -> (FileTokens, StringTable) {
+fn tokenize_named_source_with_id(
+    source: &str,
+    file_name: &str,
+    source_id: SourceId,
+) -> (FileTokens, StringTable, ExtendedSpanBuilder) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str(file_name, &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &StyleDirectiveRegistry::built_ins(),
         &mut string_table,
-        None,
+        source_id,
+        &mut span_builder,
     )
     .expect("source should tokenize");
-    (tokens, string_table)
+    (tokens, string_table, span_builder)
 }
 
 fn path_token_index(tokens: &FileTokens) -> usize {
@@ -52,28 +59,38 @@ fn expect_infrastructure_error(error: DependencyClauseParseError, case: &str) {
 }
 
 fn parse_clause(source: &str) -> (ScannedDependencyClause, StringTable) {
-    let (tokens, string_table) = tokenize_source(source);
+    let (tokens, string_table, _span_builder) = tokenize_source(source);
     let path_index = tokens
         .tokens
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Path(_)))
         .expect("expected dependency path");
-    let (clause, _) = parse_dependency_clause(&tokens.tokens, path_index, &tokens.path_syntax)
-        .expect("clause should parse");
+    let (clause, _) = parse_dependency_clause(
+        &tokens.tokens,
+        path_index,
+        &tokens.path_syntax,
+        tokens.file_id,
+    )
+    .expect("clause should parse");
     (clause, string_table)
 }
 
 fn clause_diagnostic(source: &str) -> CompilerDiagnostic {
-    let (tokens, _) = tokenize_source(source);
+    let (tokens, _, _span_builder) = tokenize_source(source);
     let path_index = tokens
         .tokens
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Path(_)))
         .expect("expected dependency path");
-    match parse_dependency_clause(&tokens.tokens, path_index, &tokens.path_syntax)
-        .expect_err("clause should fail")
+    match parse_dependency_clause(
+        &tokens.tokens,
+        path_index,
+        &tokens.path_syntax,
+        tokens.file_id,
+    )
+    .expect_err("clause should fail")
     {
-        DependencyClauseParseError::Diagnostic(diagnostic) => *diagnostic,
+        DependencyClauseParseError::Diagnostic(diagnostic) => diagnostic,
         DependencyClauseParseError::Infrastructure(_) => {
             panic!("expected a user-facing diagnostic, not an infrastructure error")
         }
@@ -148,7 +165,8 @@ fn continues_only_after_comma() {
 
 #[test]
 fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
-    let error = clause_diagnostic("@core/math sin,\n    cos tan\n");
+    let source = "@core/math sin,\n    cos tan\n";
+    let error = clause_diagnostic(source);
     assert!(matches!(
         error.payload,
         DiagnosticPayload::InvalidDependencyClause {
@@ -156,8 +174,22 @@ fn reports_missing_comma_at_the_unexpected_selection_after_continuation() {
             ..
         }
     ));
-    assert_eq!(error.primary_location.start_pos.line_number, 1);
-    assert_eq!(error.primary_location.start_pos.char_column, 9);
+    let (tokens, strings, _) = tokenize_source(source);
+    let tan_span = tokens
+        .tokens
+        .iter()
+        .find(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::Symbol(id) if strings.resolve(*id) == "tan"
+            )
+        })
+        .expect("expected the unexpected adjacent selection")
+        .span;
+    assert_eq!(
+        error.primary_span,
+        Some(SourceSpan::new(tokens.file_id, tan_span))
+    );
 }
 
 #[test]
@@ -194,28 +226,28 @@ fn rejects_namespace_alias_followed_by_selections_and_delimiters() {
 
 #[test]
 fn corrupted_path_lookup_is_infrastructure_error() {
-    let (tokens, _) = tokenize_source("@core/math sin\n");
+    let (tokens, _, _span_builder) = tokenize_source("@core/math sin\n");
     let path_index = path_token_index(&tokens);
-    let (two_path_tokens, _) = tokenize_source("@core/math\n@other/path\n");
+    let (two_path_tokens, _, _span_builder) = tokenize_source("@core/math\n@other/path\n");
     let second_path_index = two_path_tokens
         .tokens
         .iter()
         .rposition(|token| matches!(token.kind, TokenKind::Path(_)))
         .expect("expected a second path token");
-    let (other_file, _) = tokenize_named_source("@other/path sin\n", "other.moth");
-    let mut location_mismatch_tokens = tokens.tokens.clone();
-    location_mismatch_tokens[path_index]
-        .location
-        .start_pos
-        .line_number += 10;
+    let (other_file, _, _span_builder) =
+        tokenize_named_source_with_id("@other/path sin\n", "other.moth", SourceId::from_index(1));
+    let mut span_mismatch_tokens = tokens.tokens.clone();
+    let mut mismatch_builder = ExtendedSpanBuilder::new();
+    span_mismatch_tokens[path_index].span =
+        LocalSpan::exact(1, 1, &mut mismatch_builder).expect("mismatch span should fit inline");
     let mut none_tokens = tokens.tokens.clone();
-    if let TokenKind::Path(ref mut id) = none_tokens[path_index].kind {
+    if let TokenKind::Path(id) = &mut none_tokens[path_index].kind {
         *id = PathSyntaxId::NONE;
     }
     let mut one_row_table = PathSyntaxTable::new();
     one_row_table.push(
         InternedPath::from_single_str("only", &mut StringTable::new()),
-        tokens.tokens[path_index].location.clone(),
+        SourceSpan::new(tokens.file_id, tokens.tokens[path_index].span),
     );
     let empty_table = PathSyntaxTable::new();
 
@@ -245,15 +277,20 @@ fn corrupted_path_lookup_is_infrastructure_error() {
             path_index,
         ),
         (
-            "location_mismatch",
-            location_mismatch_tokens.as_slice(),
+            "span_mismatch",
+            span_mismatch_tokens.as_slice(),
             &tokens.path_syntax,
             path_index,
         ),
     ];
 
     for (case, clause_tokens, table, index) in cases {
-        let error = match parse_dependency_clause(clause_tokens, index, table) {
+        let error = match parse_dependency_clause(
+            clause_tokens,
+            index,
+            table,
+            SourceId::COMPILATION_ROOT,
+        ) {
             Err(error) => error,
             Ok(_) => panic!("{case}: corrupted path lookup must fail"),
         };
@@ -274,41 +311,39 @@ fn assert_continuation_entered_statement(label: &str, source: &str, name: &str) 
         ),
     }
 
-    let name_line = source
-        .lines()
-        .position(|line| line.contains(name))
-        .expect("fixture must contain the selected name");
-    let name_column = source
-        .lines()
-        .nth(name_line)
-        .and_then(|line| line.find(name))
-        .expect("selected name column")
-        + 1;
-    let comma_column = source
-        .lines()
-        .next()
-        .and_then(|line| line.rfind(','))
-        .expect("continuation comma")
-        + 1;
+    let (tokens, strings, _) = tokenize_source(source);
+    let name_span = tokens
+        .tokens
+        .iter()
+        .find(|token| {
+            matches!(
+                &token.kind,
+                TokenKind::Symbol(id) if strings.resolve(*id) == name
+            )
+        })
+        .expect("fixture must contain the selected name")
+        .span;
+    let comma_span = tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::Comma))
+        .expect("fixture must contain the continuation comma")
+        .span;
 
     assert_eq!(
-        error.primary_location.start_pos.line_number,
-        name_line as i32
+        error.primary_span,
+        Some(SourceSpan::new(tokens.file_id, name_span))
     );
     assert_eq!(
-        error.primary_location.start_pos.char_column,
-        name_column as i32
+        error.labels.len(),
+        1,
+        "continuation diagnostics must carry the comma as a secondary label"
     );
-    assert!(
-        error.labels.len() >= 2,
-        "continuation diagnostics must carry the comma as a secondary span"
+    assert_eq!(
+        error.labels[0].span,
+        Some(SourceSpan::new(tokens.file_id, comma_span)),
+        "secondary label should point at the continuation comma"
     );
-    let comma_label = error
-        .labels
-        .iter()
-        .find(|label| label.location.start_pos.char_column == comma_column as i32)
-        .expect("secondary label should point at the continuation comma");
-    assert_eq!(comma_label.location.start_pos.line_number, 0);
 }
 
 #[test]

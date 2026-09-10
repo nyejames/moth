@@ -28,8 +28,9 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -67,7 +68,7 @@ pub(super) struct ValueIfParseInput<'a, 'b> {
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) condition: Expression,
-    pub(super) location: SourceLocation,
+    pub(super) span: Option<SourceSpan>,
 }
 
 /// Attempts to parse a value-producing block when the current token is `if` at a
@@ -96,7 +97,7 @@ pub fn try_parse_value_block_at_receiver(
     .map(|parsed| {
         parsed.map(|value| match value {
             ParsedReceiverValue::Complete(expression) => expression,
-            ParsedReceiverValue::NeedsSlotInference(_) => {
+            ParsedReceiverValue::NeedsSlotInference { .. } => {
                 unreachable!(
                     "known receivers must wrap a finished expression; mixed-slot parse results belong to multi-bind"
                 )
@@ -121,7 +122,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
         return None;
     }
 
-    let location = token_stream.current_location();
+    let header_index = token_stream.index;
+    let span = Some(token_stream.current_span());
     token_stream.advance();
 
     let classification = classify_if_header(token_stream);
@@ -134,7 +136,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
     ) {
         return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
             reason,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into()));
     }
@@ -147,7 +149,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 type_interner,
                 target,
                 string_table,
-                location,
+                span,
             },
         )),
 
@@ -159,7 +161,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     type_interner,
                     target: target.clone(),
                     string_table,
-                    location: location.clone(),
+                    header_index,
+                    span,
                     classification,
                 },
             ) {
@@ -172,7 +175,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 type_interner,
                 target,
                 string_table,
-                location,
+                header_index,
+                span,
             ))
         }
 
@@ -184,7 +188,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     type_interner,
                     target: target.clone(),
                     string_table,
-                    location: location.clone(),
+                    span,
                     classification,
                 },
             ) {
@@ -197,7 +201,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 type_interner,
                 target,
                 string_table,
-                location,
+                header_index,
+                span,
             ))
         }
 
@@ -207,7 +212,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
             type_interner,
             target,
             string_table,
-            location,
+            header_index,
+            span,
         )),
     }
 }
@@ -227,12 +233,13 @@ fn parse_bool_value_if_after_condition(
     type_interner: &mut AstTypeInterner<'_>,
     target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
-    location: SourceLocation,
+    header_index: usize,
+    span: Option<SourceSpan>,
 ) -> ReceiverResult<ParsedReceiverValue> {
     if if_condition_is_missing(token_stream) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
@@ -254,10 +261,10 @@ fn parse_bool_value_if_after_condition(
     ensure_if_statement_condition(&condition, type_interner.environment())?;
 
     if token_stream.current_token_kind() == &TokenKind::Then {
-        if !same_logical_line(&location, &token_stream.current_location()) {
+        if !same_logical_line(token_stream, header_index, token_stream.index) {
             return Err(CompilerDiagnostic::invalid_control_flow_statement(
                 InvalidControlFlowStatementReason::InlineValueIfMultiline,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             )
             .into());
         }
@@ -269,7 +276,7 @@ fn parse_bool_value_if_after_condition(
             target,
             string_table,
             condition,
-            location,
+            span,
         });
     }
 
@@ -281,13 +288,13 @@ fn parse_bool_value_if_after_condition(
             target,
             string_table,
             condition,
-            location,
+            span,
         });
     }
 
     Err(CompilerDiagnostic::invalid_control_flow_statement(
         InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-        token_stream.current_location(),
+        Some(token_stream.current_span()),
     )
     .into())
 }

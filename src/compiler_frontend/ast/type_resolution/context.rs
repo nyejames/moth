@@ -23,10 +23,10 @@ use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
-use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -41,6 +41,8 @@ use std::sync::Arc;
 ///      make every helper signature noisy and error-prone.
 pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
+    /// Authored source identity used when nested semantic scopes resolve file-owned references.
+    pub declaring_file_id: SourceId,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -50,8 +52,7 @@ pub(crate) struct TypeResolutionContext<'a> {
     /// Alias consumers use the required target identity directly. The diagnostic spelling and
     /// declaration location remain attached for use-site type text and declaration diagnostics.
     pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub generic_declarations_by_path:
-        Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    pub generic_declarations_by_path: Option<&'a FxHashMap<InternedPath, GenericDeclarationKind>>,
     pub generic_parameters: Option<&'a GenericParameterScope>,
     pub generic_substitutions: Option<&'a FxHashMap<GenericParameterId, TypeId>>,
     /// Resolved struct fields by canonical path, including generic struct templates.
@@ -74,13 +75,13 @@ pub(crate) struct TypeResolutionContext<'a> {
 ///       have to remember the field order of the context constructor.
 pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
+    pub declaring_file_id: SourceId,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<InternedPath>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub visible_type_aliases: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
     pub resolved_type_aliases: Option<&'a FxHashMap<InternedPath, ResolvedTypeAlias>>,
-    pub generic_declarations_by_path:
-        Option<&'a FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    pub generic_declarations_by_path: Option<&'a FxHashMap<InternedPath, GenericDeclarationKind>>,
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<InternedPath, Vec<Declaration>>>,
     pub type_environment: &'a mut TypeEnvironment,
     /// Visible namespace records for resolving namespace-qualified type names.
@@ -91,6 +92,9 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
 }
 
 impl<'a> TypeResolutionContext<'a> {
+    /// Construct a minimal context for isolated type-resolution tests.
+    ///
+    /// Isolated tests own no physical file, so the context carries the compilation-root identity.
     #[cfg(test)]
     pub(crate) fn from_declaration_table(
         declaration_table: &'a Rc<TopLevelDeclarationTable>,
@@ -98,6 +102,7 @@ impl<'a> TypeResolutionContext<'a> {
     ) -> Self {
         Self {
             declaration_table,
+            declaring_file_id: SourceId::COMPILATION_ROOT,
             visible_declaration_ids: None,
             visible_external_symbols: None,
             visible_source_bindings: None,
@@ -118,6 +123,7 @@ impl<'a> TypeResolutionContext<'a> {
     pub(crate) fn from_inputs(inputs: TypeResolutionContextInputs<'a>) -> Self {
         Self {
             declaration_table: inputs.declaration_table,
+            declaring_file_id: inputs.declaring_file_id,
             visible_declaration_ids: inputs.visible_declaration_ids,
             visible_external_symbols: inputs.visible_external_symbols,
             visible_source_bindings: inputs.visible_source_bindings,
@@ -158,7 +164,7 @@ impl<'a> TypeResolutionContext<'a> {
 
 /// A completed top-level type alias after semantic resolution.
 ///
-/// WHAT: carries the diagnostic spelling, canonical target identity and declaration location
+/// WHAT: carries the diagnostic spelling, canonical target identity and declaration span
 /// for one alias.
 /// WHY: a completed alias cannot represent an unresolved target. Keeping the required `TypeId`
 /// separate from the general annotation result prevents later consumers from mistaking an
@@ -167,7 +173,7 @@ impl<'a> TypeResolutionContext<'a> {
 pub(crate) struct ResolvedTypeAlias {
     pub(crate) diagnostic_type: DataType,
     pub(crate) target_type_id: TypeId,
-    pub(crate) declaration_location: SourceLocation,
+    pub(crate) declaration_span: Option<SourceSpan>,
 }
 
 /// A parsed type annotation after semantic resolution.

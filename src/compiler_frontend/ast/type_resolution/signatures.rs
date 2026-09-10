@@ -1,5 +1,6 @@
 //! Function signature resolution for AST type resolution.
 
+use super::{ResolvedFunctionSignature, resolve_named_signature_type};
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
@@ -11,10 +12,9 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::datatypes::{ReceiverKey, diagnostic_type_spelling};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-
-use super::{ResolvedFunctionSignature, resolve_named_signature_type};
 
 // -------------------------------
 //  Function signature resolution
@@ -34,11 +34,10 @@ pub(crate) fn resolve_function_signature(
         .name()
         .unwrap_or_else(|| string_table.intern("<function>"));
 
-    let function_location = type_resolution_context
+    let function_span = type_resolution_context
         .declaration_table
         .get_by_path(function_path)
-        .map(|declaration| declaration.value.location.clone())
-        .unwrap_or_default();
+        .and_then(|declaration| declaration.value.span);
 
     let mut resolved_parameters = Vec::with_capacity(signature.parameters.len());
     let mut receiver = None;
@@ -52,7 +51,7 @@ pub(crate) fn resolve_function_signature(
 
         resolved_parameter.value.diagnostic_type = resolve_named_signature_type(
             &parameter.value.diagnostic_type,
-            &parameter.value.location,
+            parameter.value.span,
             type_resolution_context,
             string_table,
         )?;
@@ -63,26 +62,25 @@ pub(crate) fn resolve_function_signature(
         resolved_parameter.value.type_id = resolve_diagnostic_type_to_type_id_checked(
             &resolved_parameter.value.diagnostic_type,
             type_resolution_context.type_environment,
-            &resolved_parameter.value.location,
+            resolved_parameter.value.span,
         )?;
-
         if resolved_parameter.id.name() == Some(this_name) {
             if receiver.is_some() {
-                return Err(Box::new(CompilerDiagnostic::invalid_this_usage(
+                return Err(CompilerDiagnostic::invalid_this_usage(
                     InvalidThisUsageReason::DuplicateThis {
                         function_name: function_name_id,
                     },
-                    parameter.value.location.clone(),
-                )));
+                    parameter.value.span,
+                ));
             }
 
             if parameter_index != 0 {
-                return Err(Box::new(CompilerDiagnostic::invalid_this_usage(
+                return Err(CompilerDiagnostic::invalid_this_usage(
                     InvalidThisUsageReason::NotFirstParameter {
                         function_name: function_name_id,
                     },
-                    parameter.value.location.clone(),
-                )));
+                    parameter.value.span,
+                ));
             }
 
             let receiver_key = receiver_key_for_resolved_parameter(
@@ -90,7 +88,7 @@ pub(crate) fn resolve_function_signature(
                 resolved_parameter.value.type_id,
                 generic_parameter_list_id,
                 type_resolution_context.type_environment,
-                &parameter.value.location,
+                parameter.value.span,
                 string_table,
             )?;
 
@@ -109,7 +107,7 @@ pub(crate) fn resolve_function_signature(
     for return_slot in &signature.returns {
         let resolved_value = resolve_named_signature_type(
             &return_slot.value,
-            &function_location,
+            function_span,
             type_resolution_context,
             string_table,
         )?;
@@ -117,7 +115,7 @@ pub(crate) fn resolve_function_signature(
         let type_id = resolve_diagnostic_type_to_type_id_checked(
             &resolved_value,
             type_resolution_context.type_environment,
-            &function_location,
+            function_span,
         )?;
 
         resolved_returns.push(ReturnSlot {
@@ -142,7 +140,7 @@ fn receiver_key_for_resolved_parameter(
     receiver_type_id: TypeId,
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_environment: &TypeEnvironment,
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> TypeResolutionResult<ReceiverKey> {
     if let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(receiver_type_id)
@@ -158,7 +156,7 @@ fn receiver_key_for_resolved_parameter(
                         function_name_id,
                         receiver_type_id,
                         type_environment,
-                        location,
+                        span,
                         string_table,
                     )
                 });
@@ -168,7 +166,7 @@ fn receiver_key_for_resolved_parameter(
             function_name_id,
             receiver_type_id,
             type_environment,
-            location,
+            span,
             string_table,
         ));
     }
@@ -180,7 +178,7 @@ fn receiver_key_for_resolved_parameter(
                 function_name_id,
                 receiver_type_id,
                 type_environment,
-                location,
+                span,
                 string_table,
             )
         })
@@ -238,34 +236,34 @@ fn generic_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Box<CompilerDiagnostic> {
+) -> CompilerDiagnostic {
     let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
-    Box::new(CompilerDiagnostic::invalid_receiver_declaration(
+    CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: function_name_id,
             type_name,
         },
-        location.clone(),
-    ))
+        span,
+    )
 }
 
 fn unsupported_receiver_type_diagnostic(
     function_name_id: StringId,
     receiver_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    location: &crate::compiler_frontend::tokenizer::tokens::SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Box<CompilerDiagnostic> {
+) -> CompilerDiagnostic {
     let type_name = receiver_type_name(receiver_type_id, type_environment, string_table);
-    Box::new(CompilerDiagnostic::invalid_receiver_declaration(
+    CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name: function_name_id,
             type_name,
         },
-        location.clone(),
-    ))
+        span,
+    )
 }
 
 fn receiver_type_name(

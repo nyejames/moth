@@ -20,7 +20,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticResult` carries the full unmerged module (HIR, type environment and borrow
     // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep
-    // the boundary outcome small. The box is transient: the caller unboxes once before merging.
+    // the boundary outcome small. The box is transient: the caller moves the payload before merging.
     Success(Box<ModuleSemanticResult>),
     Diagnosed(ModuleDiagnostics),
 }

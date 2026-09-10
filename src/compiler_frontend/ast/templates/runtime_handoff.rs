@@ -13,14 +13,13 @@
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
-
+use crate::compiler_frontend::source::SourceSpan;
 /// Owned runtime slot-application plan prepared for HIR lowering.
 ///
 /// WHAT: mirrors the routed source/site shape of a runtime slot plan, replacing
@@ -33,14 +32,14 @@ pub struct OwnedRuntimeSlotApplicationHandoff {
     pub(crate) wrapper: OwnedRuntimeTemplateNode,
     pub(crate) contribution_sources: Vec<OwnedRuntimeSlotContributionSource>,
     pub(crate) slot_sites: Vec<OwnedRuntimeSlotSite>,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template value materialized for a child-template boundary.
 #[derive(Clone, Debug)]
 pub struct OwnedRuntimeTemplateHandoff {
     pub(crate) body: OwnedRuntimeTemplateBody,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template body kind.
@@ -69,6 +68,8 @@ pub(crate) enum OwnedRuntimeTemplateBody {
 pub(crate) enum OwnedRuntimeTemplateNode {
     Sequence {
         children: Vec<OwnedRuntimeTemplateNode>,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     /// Owned literal or structural string payload.
@@ -80,16 +81,20 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     Text {
         text: OwnedFoldedString,
         reactive_subscription: Option<ReactiveSubscription>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     DynamicExpression {
         expression: Box<Expression>,
         reactive_subscription: Option<ReactiveSubscription>,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     ChildTemplate {
         template: Box<OwnedRuntimeTemplateHandoff>,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     /// Output-conditioned wrapper application around one child occurrence.
@@ -103,36 +108,45 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     ConditionalWrapper {
         child: Box<OwnedRuntimeTemplateNode>,
         wrapper: Box<OwnedRuntimeTemplateNode>,
-        location: SourceLocation,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     BranchChain {
         branches: Vec<OwnedRuntimeTemplateBranch>,
         fallback: Option<Box<OwnedRuntimeTemplateNode>>,
-        location: SourceLocation,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        else_marker: Option<TemplateElseMarker>,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     Loop {
         header: TemplateLoopHeader,
         body: Box<OwnedRuntimeTemplateNode>,
         aggregate_wrapper: Option<Box<OwnedRuntimeTemplateNode>>,
-        location: SourceLocation,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     AggregateOutput,
 
     LoopControl {
         kind: TemplateLoopControlKind,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     },
 
     RuntimeSlotSite {
         site: RuntimeSlotSiteId,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     /// Planned runtime contribution spliced into a copied wrapper tree.
     RuntimeSlotContributionSource {
         source: RuntimeSlotContributionSourceId,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 
     /// Structural slot placeholder that survived as a runtime value.
@@ -145,16 +159,16 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     /// are a valid structural no-output shape once wrapper composition has
     /// finished and the wrapper is treated as a value rather than a helper.
     Slot {
-        location: SourceLocation,
+        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+        span: Option<SourceSpan>,
     },
 }
 
-/// One owned conditional runtime-template branch.
 #[derive(Clone, Debug)]
 pub(crate) struct OwnedRuntimeTemplateBranch {
     pub(crate) selector: TemplateBranchSelector,
     pub(crate) body: OwnedRuntimeTemplateNode,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned source-accumulator plan for one runtime slot contribution.
@@ -163,7 +177,7 @@ pub(crate) struct OwnedRuntimeSlotContributionSource {
     pub(crate) source: RuntimeSlotContributionSourceId,
     pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) renders_wrapper_unconditionally: bool,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned runtime slot-site plan for one wrapper placeholder occurrence.
@@ -174,7 +188,7 @@ pub(crate) struct OwnedRuntimeSlotContributionSource {
 pub(crate) struct OwnedRuntimeSlotSite {
     pub(crate) site: RuntimeSlotSiteId,
     pub(crate) render_root: OwnedRuntimeTemplateNode,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Walks every nested `OwnedRuntimeTemplateNode` in `handoff` and calls `callback` for each.

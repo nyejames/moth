@@ -21,6 +21,7 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::{
     dependency_path_references_config_file, dependency_path_references_support_root_file,
 };
@@ -28,7 +29,6 @@ use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_sha
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -81,7 +81,7 @@ struct ProviderDeclarationBindingInput<'a> {
     local_name: StringId,
     local_alias: Option<&'a DependencyAlias>,
     local_path: &'a InternedPath,
-    source_location: &'a SourceLocation,
+    source_span: Option<SourceSpan>,
     provider_id: ProviderInterfaceId,
 }
 
@@ -138,6 +138,7 @@ pub(crate) struct BindingEnvironmentBuilder<'a> {
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
     pub(super) external_dependency_resolution_table: &'a ExternalImportResolutionTable,
     pub(super) source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
+    pub(super) source_files: &'a SourceDatabase,
     pub(super) string_table: &'a mut StringTable,
     pub(super) environment: HeaderBindingEnvironment,
     pub(super) warnings: Vec<crate::compiler_frontend::compiler_messages::CompilerDiagnostic>,
@@ -237,7 +238,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &mut file_visibility,
                         name,
                         path,
-                        SourceLocation::default(),
+                        self.module_symbols
+                            .declaration_spans_by_symbol_path
+                            .get(path)
+                            .copied(),
                     );
                     continue;
                 }
@@ -258,13 +262,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     }
                 };
 
-                let declaration_location = self
+                let declaration_span = self
                     .module_symbols
-                    .declaration_locations_by_symbol_path
+                    .declaration_spans_by_symbol_path
                     .get(path)
-                    .cloned()
-                    .unwrap_or_default();
-                registry.register(name, binding, Some(declaration_location))?;
+                    .copied();
+                registry.register(name, binding, declaration_span)?;
 
                 if is_type_alias {
                     file_visibility
@@ -288,11 +291,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .visible_declaration_paths_mut()
                 .insert(path.clone());
             if let Some(name) = path.name() {
-                registry.register(
-                    name,
-                    VisibleNameBinding::Builtin,
-                    Some(SourceLocation::default()),
-                )?;
+                registry.register(name, VisibleNameBinding::Builtin, None)?;
                 file_visibility
                     .visible_source_names
                     .insert(name, SourceDeclarationTarget::Local(path.clone()));
@@ -352,10 +351,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     &dependency.dependency.path,
                     self.string_table,
                 ) {
-                    return Err(Box::new(super::diagnostics::direct_special_file_dependency(
+                    return Err(super::diagnostics::direct_special_file_dependency(
                         &dependency.dependency.path,
-                        dependency.location.clone(),
-                    ))
+                        Some(dependency.dependency.span),
+                    )
                     .into());
                 }
 
@@ -418,8 +417,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .visible_namespace_records
                     .contains_key(&prelude_name_id)
             {
-                let record = self
-                    .build_external_namespace_record(package_path_id, &SourceLocation::default())?;
+                let record = self.build_external_namespace_record(package_path_id, None)?;
                 file_visibility
                     .visible_namespace_records
                     .insert(prelude_name_id, record);
@@ -517,16 +515,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             local_name,
             local_alias,
             local_path,
-            source_location,
+            source_span,
             provider_id,
         } = input;
 
-        let local_name_location = local_alias.map_or(source_location, |alias| &alias.location);
-        ensure_not_keyword_shadow_identifier(
-            local_name,
-            local_name_location.clone(),
-            self.string_table,
-        )?;
+        let local_name_span = local_alias.map_or(source_span, |alias| Some(alias.span));
+        ensure_not_keyword_shadow_identifier(local_name, local_name_span, self.string_table)?;
 
         let view = self
             .source_provider_dependencies
@@ -562,7 +556,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             },
         };
 
-        registry.register(local_name, binding, Some(local_name_location.clone()))?;
+        registry.register(local_name, binding, local_name_span)?;
         file_visibility
             .visible_declaration_paths_mut()
             .insert(local_path.clone());
@@ -604,7 +598,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 local_path,
                 receiver_methods,
                 provider_id,
-                source_location,
+                local_name_span,
             )?;
         }
 
@@ -672,9 +666,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     local_name,
                     local_alias: selection.local_alias(),
                     local_path: selected_path,
-                    source_location: selection
-                        .local_alias()
-                        .map_or(&selection.source_location, |alias| &alias.location),
+                    source_span: Some(selection.source_span),
                     provider_id,
                 },
             );
@@ -696,7 +688,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 ExternalImportInput {
                     symbol_name: provider_source_name,
                     local_name,
-                    source_location: &selection.source_location,
+                    source_span: Some(selection.source_span),
                     local_alias: selection.local_alias(),
                     symbol_id,
                 },
@@ -744,9 +736,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         local_name: selection.local_name(),
                         local_alias: selection.local_alias(),
                         local_path: &local_path,
-                        source_location: selection
-                            .local_alias()
-                            .map_or(&selection.source_location, |alias| &alias.location),
+                        source_span: Some(selection.source_span),
                         provider_id,
                     },
                 )?;
@@ -758,10 +748,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .external_package_registry
                     .resolve_canonical_symbol(&binding.target)
                 else {
-                    return Err(Box::new(
-                        self.provider_public_surface_diagnostic(dependency, selection, interface),
-                    )
-                    .into());
+                    return Err(self
+                        .provider_public_surface_diagnostic(dependency, selection, interface)
+                        .into());
                 };
                 self.register_external_import(
                     file_visibility,
@@ -769,7 +758,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     ExternalImportInput {
                         symbol_name: public_name_id,
                         local_name: selection.local_name(),
-                        source_location: &selection.source_location,
+                        source_span: Some(selection.source_span),
                         local_alias: selection.local_alias(),
                         symbol_id,
                     },
@@ -777,10 +766,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
-            return Err(Box::new(
-                self.provider_public_surface_diagnostic(dependency, selection, interface),
-            )
-            .into());
+            return Err(self
+                .provider_public_surface_diagnostic(dependency, selection, interface)
+                .into());
         }
         Ok(())
     }
@@ -796,7 +784,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         super::provider_public_surface_diagnostic(
             &selected_path,
             interface,
-            selection.source_location.clone(),
+            Some(selection.source_span),
             self.string_table,
         )
     }
@@ -818,16 +806,27 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .source_provider_dependencies
             .binding_view(provider_id)?;
         let interface = self.source_provider_dependencies.interface(provider_id)?;
+        let namespace_span = match &dependency.binding {
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::Namespace {
+                alias: Some(alias),
+            } => Some(alias.span),
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::Namespace {
+                alias: None,
+            } => Some(dependency.dependency.span),
+            crate::compiler_frontend::headers::types::DependencyBindingSyntax::DirectSelections {
+                ..
+            } => None,
+        };
 
         let mut record = NamespaceRecord::empty(NamespaceRecordSource::SourceFile(
             dependency.dependency.path.clone(),
         ));
         for binding in &interface.export_bindings {
             let declaration = view.declaration(binding.origin()).ok_or_else(|| {
-                Box::new(super::diagnostics::missing_dependency_target(
+                super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
-                    dependency.location.clone(),
-                ))
+                    Some(dependency.dependency.span),
+                )
             })?;
             let name = self.string_table.intern(binding.public_name());
             let local_path = dependency.dependency.path.append(name);
@@ -846,7 +845,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &structure.receiver_methods,
                         provider_id,
-                        &dependency.location,
+                        namespace_span,
                     )?;
                 }
                 PublicDeclarationSemantics::Choice(choice) => {
@@ -858,7 +857,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         &local_path,
                         &choice.receiver_methods,
                         provider_id,
-                        &dependency.location,
+                        namespace_span,
                     )?;
                 }
                 PublicDeclarationSemantics::TransparentAlias(_) => {
@@ -906,10 +905,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .external_package_registry
                 .resolve_canonical_symbol(&binding.target)
             else {
-                return Err(Box::new(super::diagnostics::missing_dependency_target(
+                return Err(super::diagnostics::missing_dependency_target(
                     &dependency.dependency.path,
-                    dependency.location.clone(),
-                ))
+                    Some(dependency.dependency.span),
+                )
                 .into());
             };
             let name = self.string_table.intern(&binding.public_name);
@@ -926,19 +925,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 }
             }
         }
-
         let local_name = self.derive_namespace_name(dependency)?;
+
         registry.register(
             local_name,
             VisibleNameBinding::NamespaceRecord {
                 record_source: record.record_source.clone(),
             },
-            Some(
-                dependency
-                    .namespace_binding_location()
-                    .cloned()
-                    .unwrap_or_else(|| dependency.location.clone()),
-            ),
+            namespace_span,
         )?;
         file_visibility
             .visible_namespace_records
@@ -952,7 +946,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         imported_type_path: &InternedPath,
         methods: &[crate::compiler_frontend::public_interface::PublicReceiverMethodSemantics],
         provider_id: ProviderInterfaceId,
-        dependency_location: &SourceLocation,
+        dependency_span: Option<SourceSpan>,
     ) -> BuilderResult<()> {
         self.register_provider_semantics_once(provider_id)?;
 
@@ -972,7 +966,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 .or_default()
                 .push(ReceiverMethodVisibility {
                     target: target.clone(),
-                    location: dependency_location.clone(),
+                    span: dependency_span,
                 });
 
             if self
@@ -1011,13 +1005,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // rather than resolved by source-order precedence.
         self.collect_same_directory_public_export_constants(source_file, &mut implicit_constants);
 
-        for (name, path, location) in implicit_constants {
+        for (name, path, span) in implicit_constants {
             registry.register(
                 name,
                 VisibleNameBinding::SourceDependency {
                     canonical_path: path.clone(),
                 },
-                Some(location),
+                span,
             )?;
             file_visibility
                 .visible_declaration_paths_mut()
@@ -1077,7 +1071,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn collect_implicit_template_scope_constants(
         &mut self,
-        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
     ) -> BuilderResult<()> {
         for (prefix, provider_id) in self
             .source_provider_dependencies
@@ -1132,17 +1126,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .imported_declarations_by_local_path
                     .entry(synthetic_path.clone())
                     .or_insert_with(|| origin);
-                let location = view
-                    .export_diagnostic_provenance(binding.public_name())
-                    .map(|location| self.remap_provider_diagnostic_location(location))
-                    .unwrap_or_else(|| SourceLocation {
-                        scope: InternedPath::from_single_str(
-                            &format!("@{prefix}"),
-                            self.string_table,
-                        ),
-                        ..SourceLocation::default()
-                    });
-                implicit_constants.push((name_id, synthetic_path, location));
+                // Provider declaration provenance does not cross the interface boundary. This
+                // compiler-generated implicit binding therefore carries no authored span.
+                implicit_constants.push((name_id, synthetic_path, None));
             }
         }
 
@@ -1152,7 +1138,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn collect_same_directory_public_export_constants(
         &mut self,
         source_file: &InternedPath,
-        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
     ) {
         let Some(root_file) = self.same_directory_root_file(source_file) else {
             return;
@@ -1176,7 +1162,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     fn collect_constant_exports(
         &mut self,
         entries: &FxHashSet<PublicExportEntry>,
-        implicit_constants: &mut Vec<(StringId, InternedPath, SourceLocation)>,
+        implicit_constants: &mut Vec<(StringId, InternedPath, Option<SourceSpan>)>,
         excluded_source_file: Option<&InternedPath>,
     ) {
         for entry in entries {
@@ -1194,65 +1180,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
-            let location = self.source_location_for_symbol(path);
-            implicit_constants.push((entry.export_name, path.clone(), location));
-        }
-    }
-
-    fn source_location_for_symbol(&mut self, symbol_path: &InternedPath) -> SourceLocation {
-        if let Some(location) = self
-            .module_symbols
-            .declaration_locations_by_symbol_path
-            .get(symbol_path)
-        {
-            return location.clone();
-        }
-
-        if let Some(source_file) = self
-            .module_symbols
-            .canonical_source_by_symbol_path
-            .get(symbol_path)
-        {
-            if let Some(canonical_path) = self
+            let span = self
                 .module_symbols
-                .canonical_os_path_by_source
-                .get(source_file)
-            {
-                return SourceLocation::from_path(canonical_path, self.string_table);
-            }
-
-            return SourceLocation {
-                scope: source_file.clone(),
-                ..SourceLocation::default()
-            };
-        }
-
-        SourceLocation {
-            scope: symbol_path.clone(),
-            ..SourceLocation::default()
-        }
-    }
-
-    fn remap_provider_diagnostic_location(
-        &mut self,
-        location: &crate::compiler_frontend::public_interface::PublicDiagnosticLocation,
-    ) -> SourceLocation {
-        SourceLocation {
-            scope: InternedPath::from_components(
-                location
-                    .scope_components
-                    .iter()
-                    .map(|component| self.string_table.intern(component))
-                    .collect(),
-            ),
-            start_pos: CharPosition {
-                line_number: location.start_line,
-                char_column: location.start_column,
-            },
-            end_pos: CharPosition {
-                line_number: location.end_line,
-                char_column: location.end_column,
-            },
+                .declaration_spans_by_symbol_path
+                .get(path)
+                .copied();
+            implicit_constants.push((entry.export_name, path.clone(), span));
         }
     }
 
@@ -1273,35 +1206,24 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return true;
         }
 
-        let Some(canonical_source_path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        else {
-            return false;
-        };
-
-        origin.to_path_buf(self.string_table) == *canonical_source_path
+        // `canonical_source_by_symbol_path` stores `Header::canonical_source_file`, which interns
+        // the OS path when one exists. The module-file key is the logical interned path, so the
+        // first comparison fails and this join recovers same-file identity.
+        self.module_symbols
+            .source_record(source_file, self.source_files)
+            .and_then(|record| record.canonical_os_path.as_ref())
+            .is_some_and(|canonical_path| {
+                origin.to_path_buf(self.string_table).into_boxed_path() == *canonical_path
+            })
     }
 
     fn is_moth_template_source_file(&self, source_file: &InternedPath) -> bool {
-        let Some(path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        else {
-            return source_file
-                .to_path_buf(self.string_table)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .and_then(SourceFileKind::from_extension)
-                == Some(SourceFileKind::MothTemplate);
-        };
-
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .and_then(SourceFileKind::from_extension)
-            == Some(SourceFileKind::MothTemplate)
+        matches!(
+            self.module_symbols
+                .source_record(source_file, self.source_files)
+                .and_then(|record| record.kind),
+            Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
+        )
     }
 
     fn same_directory_root_file(&self, source_file: &InternedPath) -> Option<InternedPath> {
@@ -1324,18 +1246,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             })
     }
 
-    fn source_directory(&self, source_file: &InternedPath) -> Option<std::path::PathBuf> {
-        if let Some(path) = self
-            .module_symbols
-            .canonical_os_path_by_source
-            .get(source_file)
-        {
-            return path.parent().map(|parent| parent.to_path_buf());
-        }
-
-        source_file
-            .parent()
-            .map(|parent| parent.to_path_buf(self.string_table))
+    fn source_directory(&self, source_file: &InternedPath) -> Option<InternedPath> {
+        // Same-directory public-export visibility is a module-scope question. Canonical OS
+        // parents can disagree with logical parents under a symlink that places two logical
+        // siblings on different physical directories, or that collides two logical directories
+        // onto one physical directory. Visibility follows the logical interned path uniformly.
+        source_file.parent()
     }
 
     fn source_package_public_exports_for_file(
@@ -1467,8 +1383,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         registry,
                         SourceDependencyInput {
                             symbol_path: &path,
-                            local_name,
-                            source_location: &selection.source_location,
+                            local_name: selection.local_name(),
+                            source_span: Some(selection.source_span),
                             local_alias: selection.local_alias(),
                             access: SourceDependencyAccess::PublicExport { exported_entries },
                         },
@@ -1498,8 +1414,8 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         registry,
                         ExternalImportInput {
                             symbol_name: selection.source_name,
-                            local_name,
-                            source_location: &selection.source_location,
+                            local_name: selection.local_name(),
+                            source_span: Some(selection.source_span),
                             local_alias: selection.local_alias(),
                             symbol_id,
                         },
@@ -1518,12 +1434,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                             ImportPublicSurfaceType::ModuleRoot
                         }
                     };
-                    return Err(Box::new(super::diagnostics::not_exported_by_public_surface(
+                    return Err(super::diagnostics::not_exported_by_public_surface(
                         selected_path,
                         public_surface_name_id,
                         diagnostic_public_surface_type,
-                        selection.source_location.clone(),
-                    ))
+                        Some(selection.source_span),
+                    )
                     .into());
                 }
                 PublicExportLookupResult::NotAPublicExportBoundary => {}
@@ -1532,7 +1448,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let target = resolve_dependency_target(DependencyTargetResolutionInput {
             dependency_path: selected_path,
-            location: &selection.source_location,
+            span: Some(selection.source_span),
             module_file_paths: &self.module_symbols.module_file_paths,
             dependency_bindable_symbol_paths,
             external_package_registry: self.external_package_registry,
@@ -1553,7 +1469,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         consumer_file: source_file,
                         target_file,
                         requested_path: selected_path,
-                        location: selection.source_location.clone(),
+                        span: Some(selection.source_span),
                         file_package_membership: &self.module_symbols.file_package_membership,
                         source_package_root_files: &self.module_symbols.source_package_root_files,
                         string_table: self.string_table,
@@ -1562,7 +1478,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         consumer_file: source_file,
                         target_file,
                         symbol_path: &symbol_path,
-                        location: selection.source_location.clone(),
+                        span: Some(selection.source_span),
                         file_module_membership: &self.module_symbols.file_module_membership,
                         module_root_public_exports: &self.module_symbols.module_root_public_exports,
                     })?;
@@ -1581,7 +1497,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     SourceDependencyInput {
                         symbol_path: &symbol_path,
                         local_name,
-                        source_location: &selection.source_location,
+                        source_span: Some(selection.source_span),
                         local_alias: selection.local_alias(),
                         access: effective_requirement,
                     },
@@ -1594,7 +1510,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     ExternalImportInput {
                         symbol_name: selection.source_name,
                         local_name,
-                        source_location: &selection.source_location,
+                        source_span: Some(selection.source_span),
                         local_alias: selection.local_alias(),
                         symbol_id,
                     },
@@ -1639,7 +1555,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         ExternalImportInput {
                             symbol_name: selection.source_name,
                             local_name,
-                            source_location: &selection.source_location,
+                            source_span: Some(selection.source_span),
                             local_alias: selection.local_alias(),
                             symbol_id,
                         },
@@ -1649,19 +1565,19 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     package_path,
                     symbol_name,
                 } => {
-                    return Err(Box::new(super::diagnostics::missing_package_symbol(
+                    return Err(super::diagnostics::missing_package_symbol(
                         symbol_name,
                         package_path,
-                        selection.source_location.clone(),
-                    ))
+                        Some(selection.source_span),
+                    )
                     .into());
                 }
                 ExternalPackageSymbolLookup::NoMatch => {
                     if found {
-                        return Err(Box::new(super::diagnostics::missing_dependency_target(
+                        return Err(super::diagnostics::missing_dependency_target(
                             &selected_path,
-                            selection.source_location.clone(),
-                        ))
+                            Some(selection.source_span),
+                        )
                         .into());
                     }
                     return Ok(None);
@@ -1681,10 +1597,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     ) -> BuilderResult<()> {
         // Reject explicit `.moth` extension in dependency paths.
         if has_explicit_moth_extension(&dependency.dependency.path, self.string_table) {
-            return Err(Box::new(CompilerDiagnostic::explicit_moth_extension(
+            return Err(CompilerDiagnostic::explicit_moth_extension(
                 dependency.dependency.path.clone(),
-                dependency.location.clone(),
-            ))
+                Some(dependency.dependency.span),
+            )
             .into());
         }
 
@@ -1738,7 +1654,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // direct symbol-path dependencies that are now invalid.
         let target = resolve_dependency_target(DependencyTargetResolutionInput {
             dependency_path: &dependency.dependency.path,
-            location: &dependency.location,
+            span: Some(dependency.dependency.span),
             module_file_paths: &self.module_symbols.module_file_paths,
             dependency_bindable_symbol_paths: &self
                 .module_symbols
@@ -1750,17 +1666,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         // If normal resolution succeeds for a bare dependency, it's a direct symbol-path dependency.
         match target {
             ResolvedDependencyTarget::Source { symbol_path, .. } => {
-                Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
+                Err(CompilerDiagnostic::direct_symbol_path_import(
                     symbol_path,
-                    dependency.location.clone(),
-                ))
+                    Some(dependency.dependency.span),
+                )
                 .into())
             }
             ResolvedDependencyTarget::External { .. } => {
-                Err(Box::new(CompilerDiagnostic::direct_symbol_path_import(
+                Err(CompilerDiagnostic::direct_symbol_path_import(
                     dependency.dependency.path.clone(),
-                    dependency.location.clone(),
-                ))
+                    Some(dependency.dependency.span),
+                )
                 .into())
             }
         }

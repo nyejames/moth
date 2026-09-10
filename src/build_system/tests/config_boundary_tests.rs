@@ -3,64 +3,25 @@
 //! WHAT: exercises the real resolver and config-boundary diagnostic mapper for contract
 //!       conflicts, unknown explicit inputs and typed value mismatches.
 //! WHY: these failures cross a StringTable boundary before they reach renderers, so tests must
-//!      inspect structured payloads, identities, labels and source locations rather than prose.
+//!      inspect structured payloads, identities, exact spans and payload facts rather than prose.
 
-use super::config_boundary::build_config_resolution_messages;
+use super::config_boundary::build_config_resolution_failure;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigContractFact, BuildConfigInputEntry, BuildConfigInputSet,
     BuildConfigResolutionError, BuildConfigValueLocation, BuildInputName, BuildInputType,
     BuilderConfigGlobalSet, PrimitiveBuildInputType, PrimitiveBuildValue,
     resolve_build_config_values,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, InvalidConfigReason,
+    DiagnosticLabelMessage, DiagnosticPayload, InvalidConfigReason, PremergeFailure,
 };
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-fn source_location(
-    string_table: &mut StringTable,
-    path: &str,
-    line: i32,
-    start_column: i32,
-    end_column: i32,
-) -> SourceLocation {
-    SourceLocation::new(
-        InternedPath::from_single_str(path, string_table),
-        CharPosition {
-            line_number: line,
-            char_column: start_column,
-        },
-        CharPosition {
-            line_number: line,
-            char_column: end_column,
-        },
-    )
-}
-
-/// Build one source location in a worker-local table, then remap it into the boundary table.
-///
-/// Seeding the destination with a different string makes the remap non-identity. This mirrors
-/// the production merge-before-map handoff and makes a foreign StringId resolve to the wrong path
-/// if the handoff is accidentally omitted.
-fn location_in_boundary_table(
-    boundary_table: &mut StringTable,
-    path: &str,
-    line: i32,
-    start_column: i32,
-    end_column: i32,
-) -> SourceLocation {
-    let mut local_table = StringTable::new();
-    let mut location = source_location(&mut local_table, path, line, start_column, end_column);
-    let remap = boundary_table.merge_from(&local_table);
-    assert!(
-        !remap.is_identity(),
-        "the distinct local and boundary tables must exercise a non-identity remap"
-    );
-    location.remap_string_ids(&remap);
-    location
+fn exact_span(source_index: usize, start: u32, length: u32) -> SourceSpan {
+    let mut builder = ExtendedSpanBuilder::new();
+    let local = LocalSpan::exact(start, length, &mut builder).expect("test span should fit");
+    SourceSpan::new(SourceId::from_index(source_index), local)
 }
 
 fn command_location(argument_index: usize) -> BuildConfigValueLocation {
@@ -75,9 +36,9 @@ fn input(name: &str, value: PrimitiveBuildValue, argument_index: usize) -> Build
     )
 }
 
-fn assert_config_identity_and_location<'a>(
+fn assert_config_identity_and_span<'a>(
     messages: &'a crate::compiler_frontend::compiler_errors::CompilerMessages,
-    expected_location: &SourceLocation,
+    expected_span: Option<SourceSpan>,
     expected_reason_key: &str,
 ) -> &'a crate::compiler_frontend::compiler_messages::CompilerDiagnostic {
     assert_eq!(messages.error_count(), 1);
@@ -87,26 +48,18 @@ fn assert_config_identity_and_location<'a>(
     let identity = diagnostic.identity();
     assert_eq!(identity.code, "MOTH-CONFIG-0001");
     assert_eq!(identity.reason_key, Some(expected_reason_key));
-    assert_eq!(&diagnostic.primary_location, expected_location);
-    assert_eq!(diagnostic.labels.len(), 1);
-    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
-    assert_eq!(diagnostic.labels[0].location, *expected_location);
-    assert_eq!(diagnostic.labels[0].message, None);
+    assert_eq!(diagnostic.primary_span, expected_span);
+    assert!(diagnostic.labels.is_empty());
     diagnostic
 }
 
 #[test]
-fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
+fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
     let mut boundary_table = StringTable::new();
     boundary_table.intern("boundary-table-prefix");
 
-    let first_location =
-        location_in_boundary_table(&mut boundary_table, "first-contract.moth", 3, 2, 9);
-    let conflicting_location =
-        location_in_boundary_table(&mut boundary_table, "conflicting-contract.moth", 8, 4, 12);
-    let fallback_location =
-        location_in_boundary_table(&mut boundary_table, "config-fallback.moth", 1, 0, 1);
-
+    let first_span = exact_span(0, 12, 7);
+    let conflicting_span = exact_span(1, 33, 8);
     let name = BuildInputName::new("setting").expect("test input name should be valid");
     let source_facts = [
         BuildConfigContractFact::new(
@@ -114,14 +67,14 @@ fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
             BuildInputType::Primitive(PrimitiveBuildInputType::Int),
             true,
             None,
-            first_location.clone(),
+            Some(first_span),
         ),
         BuildConfigContractFact::new(
             name,
             BuildInputType::Primitive(PrimitiveBuildInputType::String),
             true,
             None,
-            conflicting_location.clone(),
+            Some(conflicting_span),
         ),
     ];
 
@@ -138,7 +91,11 @@ fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
         BuildConfigResolutionError::SourceContractConflict { .. }
     ));
 
-    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
+    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
     let diagnostic = messages
         .first_error()
         .expect("mapped conflict should contain one error");
@@ -148,33 +105,13 @@ fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
         identity.reason_key,
         Some("invalid_config.config_contract_conflict")
     );
-    assert_eq!(diagnostic.primary_location, conflicting_location);
+    assert_eq!(diagnostic.primary_span, Some(conflicting_span));
+    assert_eq!(diagnostic.labels.len(), 1);
+    assert_eq!(diagnostic.labels[0].span, Some(first_span));
     assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "conflicting-contract.moth"
-    );
-    assert_eq!(diagnostic.labels.len(), 2);
-    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
-    assert_eq!(diagnostic.labels[0].location, conflicting_location);
-    assert_eq!(diagnostic.labels[0].message, None);
-    assert_eq!(diagnostic.labels[1].style, DiagnosticLabelStyle::Secondary);
-    assert_eq!(diagnostic.labels[1].location, first_location);
-    assert_eq!(
-        diagnostic.labels[1].message,
+        diagnostic.labels[0].message,
         Some(DiagnosticLabelMessage::PreviousDeclaration)
     );
-    assert_eq!(
-        diagnostic.labels[1]
-            .location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "first-contract.moth"
-    );
-    assert_eq!(diagnostic.labels[1].location.start_pos.line_number, 3);
-    assert_eq!(diagnostic.labels[1].location.start_pos.char_column, 2);
 
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
@@ -195,11 +132,9 @@ fn mapped_config_contract_conflict_preserves_payload_locations_and_labels() {
 }
 
 #[test]
-fn mapped_unknown_build_config_input_preserves_fallback_location_and_argument_index() {
+fn mapped_unknown_build_config_input_preserves_spanlessness_and_argument_index() {
     let mut boundary_table = StringTable::new();
     boundary_table.intern("boundary-table-prefix");
-    let fallback_location =
-        location_in_boundary_table(&mut boundary_table, "unknown-fallback.moth", 6, 1, 6);
 
     let mut explicit_inputs = BuildConfigInputSet::new();
     explicit_inputs
@@ -218,19 +153,15 @@ fn mapped_unknown_build_config_input_preserves_fallback_location_and_argument_in
         BuildConfigResolutionError::UnknownExplicitInput { .. }
     ));
 
-    let messages =
-        build_config_resolution_messages(error, fallback_location.clone(), &mut boundary_table);
-    let diagnostic = assert_config_identity_and_location(
+    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
+    let diagnostic = assert_config_identity_and_span(
         &messages,
-        &fallback_location,
+        None,
         "invalid_config.unknown_build_config_input",
-    );
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "unknown-fallback.moth"
     );
 
     let DiagnosticPayload::InvalidConfig {
@@ -254,20 +185,17 @@ fn mapped_unknown_build_config_input_preserves_fallback_location_and_argument_in
 }
 
 #[test]
-fn mapped_config_input_type_mismatch_preserves_contract_location_and_argument_index() {
+fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index() {
     let mut boundary_table = StringTable::new();
     boundary_table.intern("boundary-table-prefix");
-    let contract_location =
-        location_in_boundary_table(&mut boundary_table, "typed-contract.moth", 11, 3, 10);
-    let fallback_location =
-        location_in_boundary_table(&mut boundary_table, "typed-fallback.moth", 1, 0, 1);
+    let contract_span = exact_span(2, 41, 7);
 
     let source_facts = [BuildConfigContractFact::new(
         BuildInputName::new("count").expect("test input name should be valid"),
         BuildInputType::Primitive(PrimitiveBuildInputType::Int),
         true,
         None,
-        contract_location.clone(),
+        Some(contract_span),
     )];
     let mut explicit_inputs = BuildConfigInputSet::new();
     explicit_inputs
@@ -291,21 +219,16 @@ fn mapped_config_input_type_mismatch_preserves_contract_location_and_argument_in
         BuildConfigResolutionError::ValueTypeMismatch { .. }
     ));
 
-    let messages = build_config_resolution_messages(error, fallback_location, &mut boundary_table);
-    let diagnostic = assert_config_identity_and_location(
+    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
+    let diagnostic = assert_config_identity_and_span(
         &messages,
-        &contract_location,
+        Some(contract_span),
         "invalid_config.config_input_type_mismatch",
     );
-    assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&messages.string_table),
-        "typed-contract.moth"
-    );
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 11);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 3);
 
     let DiagnosticPayload::InvalidConfig {
         key: Some(key),
@@ -323,4 +246,48 @@ fn mapped_config_input_type_mismatch_preserves_contract_location_and_argument_in
     assert_eq!(messages.string_table.resolve(*provided), "String");
     assert_eq!(messages.string_table.resolve(*expected), "Int");
     assert_eq!(*provided_argument_index, Some(23));
+}
+
+#[test]
+fn mapped_missing_source_contract_publishes_exact_primary_span() {
+    let mut boundary_table = StringTable::new();
+    boundary_table.intern("boundary-table-prefix");
+    let source_span = exact_span(3, 37, 12);
+
+    let source_facts = [BuildConfigContractFact::new(
+        BuildInputName::new("count").expect("test input name should be valid"),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        true,
+        None,
+        Some(source_span),
+    )];
+    let error = resolve_build_config_values(
+        &source_facts,
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &BuilderConfigGlobalSet::new(),
+    )
+    .expect_err("a required source contract without a value should fail");
+    assert!(matches!(
+        &error,
+        BuildConfigResolutionError::MissingRequiredValue { .. }
+    ));
+
+    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
+    let diagnostic = messages
+        .first_error()
+        .expect("mapped missing config input should contain one error");
+    assert_eq!(diagnostic.primary_span, Some(source_span));
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::MissingConfigInput,
+            ..
+        }
+    ));
 }

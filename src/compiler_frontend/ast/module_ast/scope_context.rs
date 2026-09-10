@@ -58,7 +58,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
-use crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, increment_ast_counter, record_ast_counter_max,
 };
@@ -72,11 +72,12 @@ use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::source::{
+    FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -125,9 +126,16 @@ pub(crate) struct Stage0ResolutionFacts {
 enum Stage0ResolutionFactsBacking {
     Ordinary {
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceFileTable,
+        source_files: Arc<SourceDatabase>,
     },
     FrozenGeneric {
+        /// Explicit owning source identity retained from `StableBodySyntax::donor_file_id`.
+        ///
+        /// WHAT: the concrete `SourceId` that owns every materialised token span and path row.
+        /// WHY: frozen lookups take the retained owner and reject any other identity so donor
+        ///      ranges never alias a requester call-site source and independent package handles
+        ///      stay distinct.
+        owner: SourceId,
         references: FxHashMap<PathSyntaxId, FrozenResolvedFileReference>,
     },
 }
@@ -157,8 +165,8 @@ pub(crate) enum FrozenResolvedFileReferenceOutcome {
 /// One reader-facing resolved file-reference view.
 ///
 /// Ordinary and frozen generic backings both project into this vocabulary. Ordinary content rows
-/// expose their logical path for declaration lookup, while frozen rows expose the captured value
-/// and no longer retain a donor declaration path.
+/// expose an ephemeral logical path for declaration lookup, while frozen rows expose the captured
+/// value and no longer retain a donor declaration path.
 pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
     pub(crate) class: PreparedFileReferenceClass,
     pub(crate) outcome: Stage0ResolvedFileReferenceOutcome<'a>,
@@ -167,7 +175,7 @@ pub(crate) struct Stage0ResolvedFileReferenceView<'a> {
 pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
     NoPhysicalTarget,
     Content {
-        logical_path: Option<&'a InternedPath>,
+        logical_path: Option<InternedPath>,
         value: Option<&'a OwnedFoldedString>,
     },
     Resource {
@@ -181,7 +189,7 @@ pub(crate) enum Stage0ResolvedFileReferenceOutcome<'a> {
 impl Stage0ResolutionFacts {
     pub(crate) fn ordinary(
         resolved_file_references: ResolvedFileReferenceTable,
-        source_files: SourceFileTable,
+        source_files: Arc<SourceDatabase>,
     ) -> Self {
         Self {
             backing: Stage0ResolutionFactsBacking::Ordinary {
@@ -192,6 +200,7 @@ impl Stage0ResolutionFacts {
     }
 
     pub(crate) fn frozen_generic(
+        owner: SourceId,
         references: Vec<FrozenResolvedFileReference>,
     ) -> Result<Self, CompilerError> {
         let mut indexed = FxHashMap::with_capacity_and_hasher(references.len(), Default::default());
@@ -210,6 +219,7 @@ impl Stage0ResolutionFacts {
         }
         Ok(Self {
             backing: Stage0ResolutionFactsBacking::FrozenGeneric {
+                owner,
                 references: indexed,
             },
         })
@@ -217,7 +227,7 @@ impl Stage0ResolutionFacts {
 
     pub(crate) fn lookup(
         &self,
-        source_file: Option<FileId>,
+        source_file: SourceId,
         path_syntax: PathSyntaxId,
     ) -> Result<Option<Stage0ResolvedFileReferenceView<'_>>, CompilerError> {
         match &self.backing {
@@ -225,17 +235,17 @@ impl Stage0ResolutionFacts {
                 resolved_file_references,
                 source_files,
             } => {
-                let source_file = source_file.ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "ordinary Stage 0 file-reference lookup has no declaring FileId",
-                    )
-                })?;
                 let Some(reference) = resolved_file_references.get(source_file, path_syntax) else {
                     return Ok(None);
                 };
                 ordinary_reference_view(reference, source_files).map(Some)
             }
-            Stage0ResolutionFactsBacking::FrozenGeneric { references } => {
+            Stage0ResolutionFactsBacking::FrozenGeneric { owner, references } => {
+                if source_file != *owner {
+                    return Err(CompilerError::compiler_error(
+                        "frozen generic Stage 0 lookup used a non-owning SourceId; donor and requester handles stay distinct",
+                    ));
+                }
                 Ok(references.get(&path_syntax).map(frozen_reference_view))
             }
         }
@@ -244,7 +254,7 @@ impl Stage0ResolutionFacts {
 
 fn ordinary_reference_view<'a>(
     reference: &'a crate::compiler_frontend::paths::file_references::ResolvedFileReference,
-    source_files: &'a SourceFileTable,
+    source_files: &'a SourceDatabase,
 ) -> Result<Stage0ResolvedFileReferenceView<'a>, CompilerError> {
     let outcome = match &reference.outcome {
         ResolvedFileReferenceOutcome::NoPhysicalTarget => {
@@ -259,7 +269,7 @@ fn ordinary_reference_view<'a>(
                 )
             })?;
             Stage0ResolvedFileReferenceOutcome::Content {
-                logical_path: Some(&source_identity.logical_path),
+                logical_path: Some(source_files.legacy_logical_path(source_identity.id)),
                 value: None,
             }
         }
@@ -348,6 +358,7 @@ pub(crate) struct FileValueResolutionServices {
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
 }
 
 impl FileValueResolutionServices {
@@ -364,6 +375,7 @@ impl FileValueResolutionServices {
             stage0_resolution_facts: Some(stage0_resolution_facts),
             module_resources: Rc::clone(&self.module_resources),
             module_origin: self.module_origin.clone(),
+            frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
     }
 }
@@ -391,7 +403,7 @@ pub struct ScopeShared {
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
     pub(crate) resolved_type_aliases: Option<Rc<FxHashMap<InternedPath, ResolvedTypeAlias>>>,
     pub(crate) generic_declarations_by_path:
-        Option<Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>>,
+        Option<Rc<FxHashMap<InternedPath, GenericDeclarationKind>>>,
     pub(crate) resolved_struct_fields_by_path:
         Option<Rc<FxHashMap<InternedPath, Vec<Declaration>>>>,
     pub(crate) choice_variant_shells_by_path:
@@ -409,7 +421,15 @@ pub struct ScopeShared {
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
     /// Optional compiler-owned direct-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
-    pub(crate) declaring_file_id: Option<FileId>,
+    /// Owning source identity for `Stage0` joins and span construction.
+    ///
+    /// WHAT: the exact `SourceId` that owns this scope's token spans and path-table rows
+    ///      (for materialised generics, the retained donor owner).
+    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity,
+    pub(crate) declaring_file_id: SourceId,
+    /// Required late-bound frozen identity for every source-owned scope chain.
+    pub(crate) frozen_identity_handle: FrozenIdentityHandle,
+    /// Per-scope compile-time template expansion limit shared by child contexts.
     pub(crate) template_const_loop_iteration_limit: usize,
 
     // Receiver method catalog for dispatch.
@@ -718,7 +738,8 @@ impl ScopeContext {
             source_build_config_values: None,
             source_build_config_contract_names: None,
             config_resolution: None,
-            declaring_file_id: None,
+            declaring_file_id: SourceId::COMPILATION_ROOT,
+            frozen_identity_handle: FrozenIdentityHandle::new(),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),

@@ -34,6 +34,7 @@ pub(super) fn parse_template_expression(
     value_mode: &ValueMode,
     string_table: &mut StringTable,
 ) -> Result<Option<Expression>, ExpressionParseError> {
+    let template_span = Some(token_stream.current_span());
     let template_context = context.new_template_parsing_context();
     let template = if context.kind.is_constant_context() {
         Template::new_const_required_with_type_interner(
@@ -110,16 +111,12 @@ pub(super) fn parse_template_expression(
             let mut folded_expression = match fold_result.emission {
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
                     ConstStringValue::Text(value),
-                ) => Expression::string_slice(
-                    value,
-                    token_stream.current_location(),
-                    value_mode.as_owned(),
-                ),
+                ) => Expression::string_slice(value, template_span, value_mode.as_owned()),
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
                     ConstStringValue::Pieces(pieces),
                 ) => Expression::new(
                     ExpressionKind::StructuralString { pieces },
-                    token_stream.current_location(),
+                    template_span,
                     crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
                     crate::compiler_frontend::datatypes::DataType::StringSlice,
                     value_mode.as_owned(),
@@ -127,7 +124,7 @@ pub(super) fn parse_template_expression(
                 crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::NoOutput => {
                     Expression::string_slice(
                         fold_context.string_table.intern(""),
-                        token_stream.current_location(),
+                        template_span,
                         value_mode.as_owned(),
                     )
                 }
@@ -159,7 +156,7 @@ pub(super) fn parse_template_expression(
             let diagnostic = CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody,
                 None,
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             );
 
             Err(diagnostic.into())

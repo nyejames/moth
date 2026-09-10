@@ -2,7 +2,6 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::string::{
@@ -82,7 +81,7 @@ fn string_slice_folds_to_text() {
 #[test]
 fn coerced_scalar_delegates_to_inner_value() {
     let table = StringTable::new();
-    let inner_value = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned);
+    let inner_value = Expression::int(42, None, ValueMode::ImmutableOwned);
     let expression = Expression::coerced(inner_value, builtin_type_ids::STRING);
 
     let result = fold_expression_kind_to_string(&expression.kind, &table);

@@ -54,7 +54,7 @@ impl StableResolvedFileReference {
                                 "ordinary content reference had no logical source path before capture",
                             )
                         })?;
-                        capture_public_content_value(content_value_at_path(logical_path)?)?
+                        capture_public_content_value(content_value_at_path(&logical_path)?)?
                     }
                 };
                 StableResolvedFileReferenceOutcome::Content { value }

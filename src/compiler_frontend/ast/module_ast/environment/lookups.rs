@@ -24,9 +24,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
-use crate::compiler_frontend::headers::module_symbols::{
-    GenericDeclarationMetadata, ModuleSymbols,
-};
+use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, ModuleSymbols};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -82,9 +80,8 @@ pub(crate) struct AstModuleLookups {
     // without branching on diagnostic-only `DataType` spelling.
     pub(crate) declaration_semantics: Rc<DeclarationSemanticTable>,
 
-    // Generic declaration metadata.
-    pub(crate) generic_declarations_by_path:
-        Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+    // Generic declaration kinds.
+    pub(crate) generic_declarations_by_path: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
 
     // Canonical TypeId for each nominal struct/choice registered in type_environment.
     // WHY: parsed type resolution and downstream consumers need fast path-to-TypeId lookup.

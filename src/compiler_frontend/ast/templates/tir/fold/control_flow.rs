@@ -8,9 +8,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     const_collection_items,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldResult, TirFoldContext, condition_location_or_loop_location,
-    fold_bool_condition_with_provenance, fold_conditional_loop_const_condition,
-    selected_option_capture_payload_with_provenance,
+    TemplateEmission, TemplateFoldResult, TirFoldContext, fold_bool_condition_with_provenance,
+    fold_conditional_loop_const_condition, selected_option_capture_payload_with_provenance,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
 use crate::compiler_frontend::ast::templates::tir::node::{
@@ -22,7 +21,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use super::estimate::{
     FoldEstimateMode, estimate_loop_aggregate_bytes, estimate_tir_node_output_bytes,
@@ -69,13 +67,13 @@ pub(super) fn fold_tir_branch_chain_with_insertion(
         let selected = match (&branch.selector, effective_expression) {
             (TemplateBranchSelector::Bool(condition), None) => {
                 let (selected, condition_provenance) =
-                    fold_bool_condition_with_provenance(condition, &branch.location, fold_context)?;
+                    fold_bool_condition_with_provenance(condition, branch.span, fold_context)?;
                 output_state.provenance.merge(&condition_provenance);
                 selected
             }
             (TemplateBranchSelector::Bool(_), Some(effective)) => {
                 let (selected, condition_provenance) =
-                    fold_bool_condition_with_provenance(effective, &branch.location, fold_context)?;
+                    fold_bool_condition_with_provenance(effective, branch.span, fold_context)?;
                 output_state.provenance.merge(&condition_provenance);
                 selected
             }
@@ -180,7 +178,7 @@ pub(super) fn fold_tir_loop(
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
-    loop_location: &SourceLocation,
+    loop_span: Option<crate::compiler_frontend::source::SourceSpan>,
     insertion: FoldInsertion<'_>,
 ) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
     let store = fold_input.view.store();
@@ -209,15 +207,14 @@ pub(super) fn fold_tir_loop(
                 .provenance
                 .merge(&condition_ref.synthetic_interface_provenance);
 
-            let condition_value =
-                fold_conditional_loop_const_condition(condition_ref, loop_location)?;
+            let condition_value = fold_conditional_loop_const_condition(condition_ref, loop_span)?;
             if !condition_value {
                 return Ok(None);
             }
 
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
-                condition_location_or_loop_location(condition_ref, loop_location),
+                condition_ref.span.or(loop_span),
             )
             .into());
         }
@@ -271,7 +268,7 @@ pub(super) fn fold_tir_loop(
             let mut cursor = ConstRangeCursor::new(
                 range_ref,
                 fold_context.template_const_loop_iteration_limit,
-                loop_location.clone(),
+                loop_span,
             )?;
             let range_provenance =
                 SyntheticInterfaceProvenance::union_all(range_provenance_expressions(range_ref));
@@ -339,7 +336,7 @@ pub(super) fn fold_tir_loop(
                         InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                             limit: fold_context.template_const_loop_iteration_limit,
                         },
-                        loop_location.clone(),
+                        loop_span,
                     )
                     .into());
                 }

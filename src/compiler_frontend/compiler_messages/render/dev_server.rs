@@ -3,13 +3,16 @@
 //! WHAT: converts structured diagnostics into escaped HTML cards for the dev-server error page.
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, display_column_number, display_line_number,
-    relative_display_path_from_root, render_payload, resolve_source_file_path,
+    DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
+    display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
+    relative_display_path_from_root, render_payload, resolve_label_render_facts_from_root,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
+};
+use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 #[cfg(test)]
 use std::path::Path;
 
@@ -30,56 +33,49 @@ fn render_source_frame(
     project_root: &std::path::Path,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    let string_table = context.string_table;
-    let resolved_path = resolve_source_file_path(&diagnostic.primary_location.scope, string_table);
-    let display_root = match std::fs::canonicalize(project_root) {
-        Ok(canonical_root) => canonical_root,
-        Err(_) => project_root.to_path_buf(),
-    };
-    let relative_path = relative_display_path_from_root(&resolved_path, &display_root);
-    let line = display_line_number(diagnostic.primary_location.start_pos.line_number);
-    let column = display_column_number(diagnostic.primary_location.start_pos.char_column);
-
-    // Use a simple file:// link to the resolved source path. The terminal
-    // renderer works fine with this; browser-hosted dev-server links are a
-    // follow-up once a cross-environment open strategy is settled.
-    let file_href = format!(
-        "file://{}",
-        escape_html(&portable_path_text(&resolved_path))
-    );
-
-    // Read the source line for the source frame. Missing files are handled gracefully.
-    let source_line_index = diagnostic.primary_location.start_pos.line_number.max(0) as usize;
-    let source_line = match std::fs::read_to_string(&resolved_path) {
-        Ok(file) => file
-            .lines()
-            .nth(source_line_index)
-            .unwrap_or("")
-            .to_string(),
-        Err(_) => String::new(),
+    let Some(primary_position) = context.primary_position(diagnostic) else {
+        return String::new();
     };
 
+    let display_root = normalize_path(project_root);
+    let relative_path =
+        relative_display_path_from_root(primary_position.path.as_path(), &display_root);
+    let escaped_relative_path = escape_html(&relative_path);
+    let line = display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
+    let column =
+        display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
+    let source_line = primary_position.line;
     let line_label = line.to_string();
-    let gutter_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-    let escaped_line = escape_html(&source_line);
+    let gutter_width = display_gutter_width(line);
+    let gutter_padding = " ".repeat(gutter_width.saturating_sub(line_label.len()));
+    let empty_line_label = " ".repeat(line_label.len());
+    let escaped_line = escape_html(&expand_tabs_for_display(source_line));
+
+    let location = match primary_position.host_path {
+        Some(host_path) => format!(
+            r#"<a class="source-location" href="file://{}">--> {}:{}:{}</a>"#,
+            escape_html(&portable_path_text(host_path)),
+            escaped_relative_path,
+            line,
+            column,
+        ),
+        None => format!(
+            r#"<span class="source-location">--> {}:{}:{}</span>"#,
+            escaped_relative_path, line, column
+        ),
+    };
 
     if source_line.is_empty() {
-        return format!(
-            r#"<div class="source-frame"><a class="source-location" href="{file_href}">--> {relative_path}:{line}:{column}</a></div>"#
-        );
+        return format!(r#"<div class="source-frame">{location}</div>"#);
     }
 
-    // Underline the primary span with carets.
-    let underline_start = diagnostic.primary_location.start_pos.char_column.max(0) as usize;
-    let underline_length = (diagnostic.primary_location.end_pos.char_column
-        - diagnostic.primary_location.start_pos.char_column
-        + 1)
-    .max(1) as usize;
+    let underline_start = primary_caret_padding(&primary_position, source_line);
+    let underline_length = primary_underline_length(&primary_position, source_line);
     let padding = " ".repeat(underline_start);
     let underlines = "^".repeat(underline_length);
 
     format!(
-        r#"<div class="source-frame"><a class="source-location" href="{file_href}">--> {relative_path}:{line}:{column}</a><br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}  | </span><span class="source-caret">{padding}{underlines}</span></div>"#
+        r#"<div class="source-frame">{location}<br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}{empty_line_label} | </span><span class="source-caret">{padding}{underlines}</span></div>"#
     )
 }
 
@@ -104,24 +100,68 @@ pub(crate) fn render_compiler_messages_html(
     messages: &CompilerMessages,
     project_root: &std::path::Path,
 ) -> String {
-    if messages.diagnostic_slice().is_empty() {
+    // The outer infrastructure failure renders as an error card beside the diagnostics,
+    // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
+    // display order without fabricating a user diagnostic.
+    let mut cards = Vec::new();
+    let mut outer_emitted = messages.infrastructure_error().is_none();
+    for diagnostic_index in messages.diagnostic_display_order() {
+        let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
+        if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
+            if let Some(error) = messages.infrastructure_error() {
+                cards.push(render_compiler_error_card(error));
+            }
+            outer_emitted = true;
+        }
+        cards.push(render_diagnostic_card(
+            diagnostic,
+            project_root,
+            messages.diagnostic_render_context(diagnostic_index),
+        ));
+    }
+    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
+        cards.push(render_compiler_error_card(error));
+    }
+    if cards.is_empty() {
         return String::from("<p>No compiler diagnostics available.</p>");
     }
-
-    messages
-        .diagnostic_display_order()
-        .into_iter()
-        .map(|diagnostic_index| {
-            render_diagnostic_card(
-                &messages.diagnostic_slice()[diagnostic_index],
-                project_root,
-                messages.diagnostic_render_context(diagnostic_index),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    cards.join("\n")
 }
 
+/// Render the outer infrastructure failure as an error card.
+///
+/// Infrastructure failures carry no retained source snapshot at this boundary. Only their host
+/// path, message and structured guidance are rendered; no source frame is synthesized.
+fn render_compiler_error_card(error: &CompilerError) -> String {
+    let (severity_label, severity_visual, badge_class) =
+        severity_display(DiagnosticSeverity::Error);
+
+    let mut body = String::new();
+    body.push_str(&format!(
+        r#"<p class="diagnostic-message">{}</p>"#,
+        escape_html(&error.msg)
+    ));
+    if let Some(host_path) = error.host_path.as_deref() {
+        body.push_str(&format!(
+            r#"<p class="source-path">{}</p>"#,
+            escape_html(&portable_path_text(host_path))
+        ));
+    }
+    for guidance in
+        crate::compiler_frontend::compiler_messages::display_messages::format_error_guidance_lines(
+            error,
+        )
+    {
+        body.push_str(&format!(
+            r#"<p class="guidance">Hint: {}</p>"#,
+            escape_html(&guidance)
+        ));
+    }
+
+    format!(
+        r#"<article class="diagnostic" data-diagnostic-code="MOTH-INFRA-0001"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">Infrastructure failure</span></div>{body}</article>"#
+    )
+}
 fn render_diagnostic_card(
     diagnostic: &CompilerDiagnostic,
     project_root: &std::path::Path,
@@ -159,6 +199,40 @@ fn render_diagnostic_card(
 
     body.push_str(&source_frame);
 
+    let primary_display_path = context
+        .primary_position(diagnostic)
+        .map(|position| relative_display_path_from_root(position.path.as_path(), project_root));
+    for ResolvedDiagnosticLabel {
+        style,
+        path,
+        line,
+        column,
+        message,
+    } in resolve_label_render_facts_from_root(diagnostic, context, project_root)
+    {
+        let style_name = match style {
+            DiagnosticLabelStyle::Secondary => "info",
+        };
+        let escaped_message = escape_html(&message);
+        let rendered_label = match (path.as_deref(), line, column) {
+            (None, None, None) => format!("{style_name}: - {escaped_message}"),
+            (Some(label_path), Some(label_line), Some(label_column)) => {
+                let include_path = primary_display_path
+                    .as_deref()
+                    .is_none_or(|primary_path| primary_path != label_path);
+                let location = if include_path && !label_path.is_empty() {
+                    format!("{}:{label_line}:{label_column}", escape_html(label_path))
+                } else {
+                    format!("{label_line}:{label_column}")
+                };
+                format!("{style_name}: {location} - {escaped_message}")
+            }
+            _ => continue,
+        };
+        body.push_str(&format!(
+            r#"<p class="diagnostic-label">{rendered_label}</p>"#
+        ));
+    }
     format!(
         r#"<article class="diagnostic"{data_code}><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">{title}</span></div>{body}</article>"#,
         title = escape_html(descriptor.title),

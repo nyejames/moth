@@ -6,14 +6,14 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::arena::TokenStats;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-pub use crate::compiler_frontend::compiler_messages::source_location::{
-    CharPosition, SourceLocation,
-};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
+};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+
 use crate::token_log;
 use std::iter::Peekable;
 use std::ops::Deref;
@@ -99,12 +99,18 @@ impl TemplateBodyMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub location: SourceLocation,
+    pub span: LocalSpan,
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, location: SourceLocation) -> Self {
-        Self { kind, location }
+    /// Construct a token from its source-local exact span.
+    pub fn new(kind: TokenKind, span: LocalSpan) -> Self {
+        Self { kind, span }
+    }
+
+    /// Construct a token from a source-local exact span.
+    pub fn with_span(kind: TokenKind, span: LocalSpan) -> Self {
+        Self { kind, span }
     }
 }
 
@@ -246,11 +252,15 @@ pub struct FileTokens {
     /// WHAT: the one file-owned path table lifecycle shared by retained token substreams.
     pub path_syntax: FilePathSyntax,
     pub src_path: InternedPath,
-    /// Stable source-file identity for this token stream.
+    /// Required owning source identity for every token stream, including materialised generics.
     ///
-    /// WHAT: carries frontend file identity into downstream parsing stages.
-    /// WHY: entry-file detection and diagnostics should not rely on comparing path text.
-    pub file_id: Option<FileId>,
+    /// WHAT: the exact `SourceId` that owns this stream's token spans and path-table rows.
+    /// WHY: materialised generic bodies retain their donor identity with an explicit owner
+    ///      (`StableBodySyntax::donor_file_id` + frozen facts owner) instead of detaching to
+    ///      `None`. Spans therefore never silently remap a donor range onto a requester
+    ///      call-site source, and no magic identity is fabricated. Cross-database remap waits
+    ///      for the final `FrozenIdentityContext` migration.
+    pub file_id: SourceId,
     /// Canonical filesystem source path for IO/path-resolution-only logic.
     pub canonical_os_path: Option<PathBuf>,
     // WHAT: Cheap token classification gathered during lexing.
@@ -263,14 +273,14 @@ pub struct FileTokens {
 
 impl FileTokens {
     #[cfg(test)]
-    pub fn new(src_path: InternedPath, tokens: Vec<Token>) -> FileTokens {
-        Self::new_with_identity(src_path, None, None, tokens, PathSyntaxTable::new())
+    pub fn new(src_path: InternedPath, file_id: SourceId, tokens: Vec<Token>) -> FileTokens {
+        Self::new_with_identity(src_path, file_id, None, tokens, PathSyntaxTable::new())
     }
 
     /// Construct the sole mutable path-table owner for a newly tokenized source file.
     pub fn new_with_identity(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
@@ -288,10 +298,12 @@ impl FileTokens {
     ///
     /// This is deliberately separate from source construction: generated generic materialisation
     /// is the only path that receives an independently captured table rather than the prepared
-    /// source's immutable shared table.
-    pub(crate) fn new_frozen_with_identity(
+    /// source's immutable shared table. The caller supplies the retained donor/owner identity
+    /// captured in `StableBodySyntax`; materialisation never fabricates a magic identity, uses
+    /// `None`, or remaps the donor range onto the requester call-site source.
+    pub(crate) fn new_frozen(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: PathSyntaxTable,
@@ -309,7 +321,7 @@ impl FileTokens {
     /// prepared-file owner.
     pub fn new_deferred_with_identity(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -324,7 +336,7 @@ impl FileTokens {
 
     fn with_path_syntax(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         path_syntax: FilePathSyntax,
@@ -348,7 +360,7 @@ impl FileTokens {
     pub fn new_substream(
         source: &FileTokens,
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         tokens: Vec<Token>,
     ) -> FileTokens {
         Self::with_path_syntax(
@@ -370,7 +382,7 @@ impl FileTokens {
     ///      file owner from remapping or rebinding its one table.
     pub(crate) fn new_path_free_substream(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
     ) -> FileTokens {
@@ -387,9 +399,11 @@ impl FileTokens {
     ///
     /// AST consumers use this for defaults, declaration initializers and loop headers. The table
     /// handle is cloned, while path rows and their dense IDs remain owned by the prepared source.
+    /// The caller supplies the owning `SourceId` (for generated bodies, the retained donor/owner
+    /// identity); no `None` or magic identity is accepted.
     pub fn new_from_slice(
         src_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
         tokens: Vec<Token>,
         source_path_syntax: &FilePathSyntax,
@@ -475,25 +489,17 @@ impl FileTokens {
         }
         self.tokens.get(self.index + 1).map(|token| &token.kind)
     }
-
-    pub fn current_location(&self) -> SourceLocation {
-        self.tokens[self.index].location.clone()
+    /// Return the exact global span of the current token.
+    pub fn current_span(&self) -> SourceSpan {
+        SourceSpan::new(self.file_id, self.tokens[self.index].span)
     }
 
-    /// Return the authored span for a one-character postfix operator at the cursor.
+    /// Return the exact global span of the current postfix operator token.
     ///
-    /// WHAT: converts the cursor-based token location used for standalone `!` and `?` tokens
-    ///       into the authored character span consumed by semantic suffix parsing.
-    /// WHY: suffix diagnostics must retain the operator the user wrote even after parsing has
-    ///       advanced to the following delimiter. This keeps source context in the resolved
-    ///       handling fact without rescanning source text.
-    pub fn current_postfix_operator_location(&self) -> SourceLocation {
-        let mut location = self.current_location();
-        if location.start_pos == location.end_pos {
-            location.start_pos.char_column = location.start_pos.char_column.saturating_sub(1);
-            location.end_pos.char_column = location.end_pos.char_column.saturating_sub(1);
-        }
-        location
+    /// Postfix operators are already represented by one-byte token spans. Unlike the removed
+    /// character-position location bridge, this operation does not rewind or infer columns.
+    pub fn current_postfix_operator_span(&self) -> SourceSpan {
+        self.current_span()
     }
 
     pub fn advance(&mut self) {
@@ -523,9 +529,7 @@ impl FileTokens {
         }
     }
 
-    /// Remap all interned string IDs in this token stream into a merged string table.
-    ///
-    /// WHAT: updates `src_path` and every token's kind and location after a string-table merge.
+    /// WHAT: updates `src_path` and every token's kind after a string-table merge.
     /// WHY: tokenization produces per-file local string IDs that must be rewritten before
     ///      module-wide stages consume the token stream.
     ///
@@ -549,6 +553,7 @@ impl FileTokens {
     }
 
     /// Remap a token stream while it still owns its mutable path table.
+    #[allow(dead_code)]
     pub(crate) fn remap_preparing_string_ids(
         &mut self,
         remap: &StringIdRemap,
@@ -565,70 +570,51 @@ impl FileTokens {
 
     /// Rebind this token stream to a new module source identity.
     ///
-    /// WHAT: replaces `src_path`, `file_id`, `canonical_os_path`, every top-level token
-    ///       location scope, and every path-syntax table row location scope with the
-    ///       supplied logical path and file identity.
-    /// WHY: Stage 0 tokenizes each `.moth` file once against a filesystem identity. After the
-    ///      complete module file set is known, `SourceFileTable` assigns the module logical
-    ///      path, deterministic `FileId`, and canonical OS path. Retained tokens must adopt
-    ///      that identity so downstream header parsing, diagnostics, and dependency shells see
-    ///      the same logical source scope as freshly tokenized files.
-    ///
-    /// This method does not change path roots or source spans (`start_pos`/`end_pos`). Only
-    /// the source-scope identity is rebound, once through the owned path syntax table.
+    /// Source-local token spans remain unchanged. Only the owning `SourceId` and path-table rows
+    /// are restamped, so every global path span continues to name the same byte range.
     pub fn rebind_source_identity(
         &mut self,
         logical_path: InternedPath,
-        file_id: Option<FileId>,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) -> Result<(), CompilerError> {
-        // Acquire the unique mutable owner before changing any identity field so an invalid
-        // lifecycle state cannot leave a partially rebound source stream behind.
         self.path_syntax.preparing_table_mut()?;
-        self.src_path = logical_path.clone();
-        self.rebind_file_identity(logical_path, file_id, canonical_os_path);
+        self.src_path = logical_path;
+        self.rebind_file_identity(self.src_path.clone(), file_id, canonical_os_path);
         self.path_syntax
             .preparing_table_mut()?
-            .rebind_source_identity(&self.src_path);
+            .rebind_source_identity(file_id);
         Ok(())
     }
 
     /// Rebind file-owned identity while preserving this stream's semantic path.
     ///
-    /// Header and detached syntax substreams use `src_path` for declaration paths such as
-    /// `module/function`, not only for the owning file. Synthetic discovery therefore needs to
-    /// update their locations and file identity without erasing that semantic suffix.
+    /// Token spans are source-local and therefore remain unchanged. The owner identity is stored
+    /// once on `FileTokens`; path rows are restamped by `rebind_source_identity` before publication.
     pub fn rebind_file_identity(
         &mut self,
-        logical_path: InternedPath,
-        file_id: Option<FileId>,
+        _logical_path: InternedPath,
+        file_id: SourceId,
         canonical_os_path: Option<PathBuf>,
     ) {
         self.file_id = file_id;
         self.canonical_os_path = canonical_os_path;
-
-        for token in &mut self.tokens {
-            token.location.scope = logical_path.clone();
-        }
-
-        // The prepared-file owner rebinds the shared path table once after all retained
-        // substreams have been assembled. Header streams only update their own token locations.
     }
 }
 
 pub struct TokenStream<'a> {
-    pub file_path: &'a InternedPath,
+    pub file_id: SourceId,
     pub chars: Peekable<Chars<'a>>,
-    pub position: CharPosition,
-    pub start_position: CharPosition,
+    /// Byte offset of the next character to consume.
+    pub byte_offset: u32,
+    /// Byte offset where the current token's authored text begins.
+    pub start_byte_offset: u32,
+    /// Byte offset of the character most recently consumed.
+    ///
+    /// The lexer reads a token's first character before deciding the token starts here, so the
+    /// start of that character is the only correct byte start.
+    pub last_char_start: u32,
     pub mode: TokenizeMode,
-    // WHAT: Stack of per-template parsing frames.
-    //
-    // WHY: `]` must restore the exact parent mode for nested templates opened by
-    // `[`, and template-body behaviour must stay local to the template that
-    // declared its head directives.
-    //
-    // A single global mode (for example, `TokenizeMode::Codeblock`) is not enough:
     // nested template heads can appear while parsing another template head/body,
     // and parent/child templates can have different style directives. We therefore
     // keep code-specific state on the current template frame and pop it naturally
@@ -637,6 +623,13 @@ pub struct TokenStream<'a> {
     /// Path syntax rows built while lexing; moved into `FileTokens` when tokenization
     /// completes.
     pub path_syntax: PathSyntaxTable,
+    /// One mutable extended-span builder borrowed from the caller for every token encoded by
+    /// this source stream.
+    ///
+    /// The caller keeps ownership across tokenization, so rows appended by one pass remain
+    /// visible to the next and survive both success and diagnostic exits. The builder stays
+    /// outside [`FileTokens`] because parser substreams clone that value.
+    pub extended_span_builder: &'a mut ExtendedSpanBuilder,
 }
 
 // WHAT: Metadata for one template nesting level in the tokenizer.
@@ -677,8 +670,9 @@ impl TemplateModeFrame {
 impl<'a> TokenStream<'a> {
     pub fn new(
         source_code: &'a str,
-        file_path: &'a InternedPath,
+        file_id: SourceId,
         entry_mode: TokenizerEntryMode,
+        extended_span_builder: &'a mut ExtendedSpanBuilder,
     ) -> Self {
         let mode = entry_mode.initial_tokenize_mode();
         let initial_close_policy = match entry_mode {
@@ -689,31 +683,24 @@ impl<'a> TokenStream<'a> {
         };
 
         Self {
-            file_path,
+            file_id,
             chars: source_code.chars().peekable(),
-            position: CharPosition::default(),
-            start_position: Default::default(),
+            byte_offset: 0,
+            start_byte_offset: 0,
+            last_char_start: 0,
             mode,
             template_mode_stack: vec![TemplateModeFrame::initial(mode, initial_close_policy)],
             path_syntax: PathSyntaxTable::new(),
+            extended_span_builder,
         }
     }
 
+    /// Consume the next character and advance the exact UTF-8 byte cursor.
     pub fn next(&mut self) -> Option<char> {
-        match self.chars.peek() {
-            Some(c) => {
-                if *c == '\n' {
-                    self.position.line_number += 1;
-                    self.position.char_column = 0;
-                } else {
-                    self.position.char_column += 1;
-                }
-
-                self.chars.next()
-            }
-
-            None => None,
-        }
+        let consumed = self.chars.next()?;
+        self.last_char_start = self.byte_offset;
+        self.byte_offset += consumed.len_utf8() as u32;
+        Some(consumed)
     }
 
     pub fn peek(&mut self) -> Option<&char> {
@@ -728,14 +715,62 @@ impl<'a> TokenStream<'a> {
         self.next().expect(invariant_message)
     }
 
-    pub fn new_location(&mut self) -> SourceLocation {
-        let start_pos = self.start_position;
-        self.update_start_position();
-        SourceLocation::new(self.file_path.to_owned(), start_pos, self.position)
+    /// Encode the current anchored token range as a source-local span.
+    pub fn current_local_span(&mut self) -> Result<LocalSpan, SpanCapacityError> {
+        self.local_span_for_bytes(self.start_byte_offset, self.byte_offset)
     }
 
-    pub fn update_start_position(&mut self) {
-        self.start_position = self.position;
+    /// Encode the current anchored token range as a source-qualified span.
+    pub fn current_source_span(&mut self) -> Result<SourceSpan, SpanCapacityError> {
+        Ok(SourceSpan::new(self.file_id, self.current_local_span()?))
+    }
+
+    /// Encode an exact source-qualified byte range.
+    pub fn source_span_for_bytes(
+        &mut self,
+        start: u32,
+        end: u32,
+    ) -> Result<SourceSpan, SpanCapacityError> {
+        Ok(SourceSpan::new(
+            self.file_id,
+            self.local_span_for_bytes(start, end)?,
+        ))
+    }
+
+    fn local_span_for_bytes(
+        &mut self,
+        start: u32,
+        end: u32,
+    ) -> Result<LocalSpan, SpanCapacityError> {
+        let length = end
+            .checked_sub(start)
+            .expect("token byte cursor moved before its anchored start");
+        LocalSpan::exact(start, length, &mut *self.extended_span_builder)
+    }
+
+    /// Mint one authored token and encode its exact byte interval.
+    pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
+        let span = self.current_local_span()?;
+        self.start_byte_offset = self.byte_offset;
+        Ok(Token::with_span(kind, span))
+    }
+
+    /// Anchor the token's byte range at the character already consumed.
+    ///
+    /// WHY: the lexer reads a token's first character before it can classify the token, and it
+    /// skips leading whitespace, comments and discarded template bodies the same way. The
+    /// authored token begins at that character's own offset, never at the cursor sitting after
+    /// it or at the start of the trivia that preceded it.
+    pub fn begin_token_bytes_at_consumed_char(&mut self) {
+        self.start_byte_offset = self.last_char_start;
+    }
+
+    /// Anchor the token's byte range at the cursor: a zero-width insertion point.
+    ///
+    /// `Eof` denotes a position rather than authored text, so it must not inherit the byte start
+    /// of whatever trivia the lexer skipped to reach the end of the source.
+    pub fn begin_token_bytes_at_cursor(&mut self) {
+        self.start_byte_offset = self.byte_offset;
     }
 
     pub fn push_template_mode(&mut self, mode: TokenizeMode) {
@@ -1013,7 +1048,6 @@ pub enum TokenKind {
 impl Token {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.kind.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     /// Remap every interned payload in place through one fallible string-ID walker.
@@ -1021,8 +1055,7 @@ impl Token {
         &mut self,
         map: &mut impl FnMut(StringId) -> Result<StringId, E>,
     ) -> Result<(), E> {
-        self.kind.try_remap_string_ids(map)?;
-        self.location.try_remap_string_ids(map)
+        self.kind.try_remap_string_ids(map)
     }
 }
 

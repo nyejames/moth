@@ -51,6 +51,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 #[cfg(test)]
@@ -200,13 +201,12 @@ impl Template {
         // authoritative TIR identity exists, not mutated throughout parsing.
         let mut build_state = TemplateBuildState::new();
 
-        // Capture the opening token location on the construction context; it
-        // remains the sole location owner so style/directive errors still point
-        // at the template even if parsing later advances deeply.
-        let mut construction_context = TemplateConstructionContext::new(
-            context.template_ir_store.clone(),
-            token_stream.current_location(),
-        );
+        let construction_span = Some(SourceSpan::new(
+            token_stream.file_id,
+            token_stream.current_token().span,
+        ));
+        let mut construction_context =
+            TemplateConstructionContext::new(context.template_ir_store.clone(), construction_span);
 
         // ---------------------
         //  Parse template head
@@ -281,7 +281,6 @@ impl Template {
         } else {
             TemplateTirPhase::Parsed
         };
-        let construction_location = construction_context.location().to_owned();
         let mut tir_reference = construction_context.finish(
             build_state.style.to_owned(),
             build_state.kind.to_owned(),
@@ -405,7 +404,7 @@ impl Template {
         {
             return Err(CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::NonFoldableDocComment,
-                construction_location.clone(),
+                construction_span,
             )
             .into());
         }
@@ -436,7 +435,7 @@ impl Template {
             return Err(CompilerDiagnostic::invalid_template_slot(
                 InvalidTemplateSlotReason::InsertOutsideParentSlot,
                 None,
-                construction_location.clone(),
+                construction_span,
             )
             .into());
         }
@@ -451,7 +450,7 @@ impl Template {
 
         let template = Template {
             tir_reference,
-            location: construction_location.clone(),
+            span: construction_span,
         };
 
         if matches!(

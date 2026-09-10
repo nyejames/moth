@@ -23,6 +23,7 @@ use crate::compiler_frontend::public_call_summary::{PublicCallParameterAccess, P
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, StableModuleOriginIdentity,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -77,9 +78,8 @@ pub(crate) struct PublicReturnTypeSlot {
 /// `TypeEnvironment`'s declaration-site `TraitId` bounds. The identity never carries bounds;
 /// the bounds are a separate fact on this entry.
 /// WHY: the exported generic parameter must carry both identity and bounds so a cross-module
-/// consumer can see the full constraint shape without donor-local `TraitId`,
-/// `GenericParameterId`, `InternedPath`, `StringId`, `FileId`, `CoreTraitKind` registry handle
-/// or source location.
+/// consumer can see the full constraint shape without donor-local `TraitId`, `GenericParameterId`,
+/// `InternedPath`, `StringId`, `SourceId`, `CoreTraitKind` registry handle or source span.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicGenericParameterSurface {
     pub(crate) identity: ExportedGenericParameterIdentity,
@@ -194,7 +194,7 @@ pub(crate) enum PublicDeclarationSemantics {
 /// free function carries no descriptor. The enclosing [`PublicDeclarationRecord`] remains the
 /// stable declaration-origin owner and the enclosing [`PublicFunctionSemantics`] remains the
 /// canonical parameter and return contract owner, so the descriptor does not duplicate origin
-/// or signature types. No raw tokens, donor-local path, source location,
+/// or signature types. No raw tokens, donor-local path, source span,
 /// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local
 /// registry handle enters this descriptor.
 ///
@@ -359,7 +359,7 @@ pub(crate) struct PublicEvidenceRequirementMapping {
 /// a semantic ownership classification, and every trait requirement in authored order mapped
 /// to the stable implementing receiver-method origin. It never embeds
 /// `TraitEvidenceId`, `TraitId`, `TraitRequirementId`, `TypeId`, `InternedPath`, `StringId`,
-/// source location or declaration order. Evidence for a private target or private source trait,
+/// source span or declaration order. Evidence for a private target or private source trait,
 /// or whose requirement methods are absent from the completed public receiver surface, does not
 /// enter the draft.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -379,9 +379,9 @@ pub(crate) struct PublicEvidenceRecord {
 /// `TraitId`, `InternedPath` or `StringId` crosses this boundary.
 ///
 /// It is deliberately not the final `PublicSemanticInterface`. Generic template bodies and
-/// cross-module call lowering remain for later phases. Exported-name diagnostic provenance is
-/// already portable here, and re-export bindings already retain donor-owned origins before the
-/// completed interface is published.
+/// cross-module call lowering remain for later phases. Exported-name diagnostic spans are retained
+/// unchanged here, and re-export bindings retain donor-owned origins before the completed interface
+/// is published.
 /// Folded constant values are owned by each constant declaration record. Reusable evidence is a
 /// separate collection, not a declaration variant. Concrete callable borrow summaries never enter
 /// the pre-HIR draft: [`finalize_after_borrow_validation`](Self::finalize_after_borrow_validation)
@@ -409,32 +409,15 @@ pub(crate) struct PublicBindingExport {
     pub(crate) target: CanonicalBindingSymbolIdentity,
 }
 
-/// Portable source coordinates retained for diagnostics on a completed provider interface.
+/// Exact source span retained for diagnostics on a completed provider interface.
 ///
-/// WHAT: stores authored scope components and character spans as owned values so a provider can
-///       carry declaration provenance without leaking its compiler-local `StringId` table.
-/// WHY: semantic identity must remain independent from diagnostic provenance, while consumers
-///      still need to remap provider declaration locations into their own string table when a
-///      visible-name collision crosses a module boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PublicDiagnosticLocation {
-    pub(crate) scope_components: Vec<String>,
-    pub(crate) start_line: i32,
-    pub(crate) start_column: i32,
-    pub(crate) end_line: i32,
-    pub(crate) end_column: i32,
-}
-
-/// Authored diagnostic provenance for one public export spelling.
-///
-/// WHAT: maps the provider-facing public name to its declaration location without changing the
-///       stable `ExportBinding` identity or declaration semantics.
-/// WHY: aliases and provider re-exports need a diagnostic side table so the visible-name registry
-///      can label the actual declaration that introduced a collision.
+/// Authored declaration spans retain their original [`SourceSpan`] source identity and byte range;
+/// synthetic/generated declarations use `None`. Semantic identity remains independent from this
+/// diagnostic metadata, while consumers can attach the span directly to collision diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicExportDiagnosticProvenance {
     pub(crate) public_name: String,
-    pub(crate) location: PublicDiagnosticLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 /// One completed concrete-local summary record, retained in stable-origin order.

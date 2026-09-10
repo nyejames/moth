@@ -42,6 +42,7 @@ pub(crate) mod module_dependencies;
 pub(crate) mod numeric_text;
 pub(crate) mod plain_markdown;
 pub(crate) mod public_call_summary;
+pub(crate) mod source;
 pub(crate) mod source_packages;
 pub(crate) mod style_directives;
 pub(crate) mod tokenizer;
@@ -67,6 +68,7 @@ pub(crate) mod symbols {
     pub(crate) mod identifier_policy;
     pub(crate) mod identity;
     pub(crate) mod interned_path;
+    pub(crate) mod path_interner;
     pub(crate) mod string_interning;
 
     #[cfg(test)]

@@ -103,7 +103,7 @@ fn expand_tir_slot_placeholders_from_node(
                 TemplateIrNodeKind::Sequence {
                     children: expanded_children,
                 },
-                node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -149,7 +149,7 @@ fn expand_tir_slot_placeholders_from_node(
                 TemplateIrNodeKind::Sequence {
                     children: wrapped_nodes,
                 },
-                node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -188,11 +188,15 @@ fn expand_tir_slot_placeholders_from_node(
                     reference: expanded_reference,
                     occurrence_id,
                 },
-                node.location.to_owned(),
+                node.span,
             )))
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches,
+            fallback,
+            else_marker,
+        } => {
             let mut expanded_branches = Vec::with_capacity(branches.len());
             let mut any_branch_changed = false;
 
@@ -209,7 +213,7 @@ fn expand_tir_slot_placeholders_from_node(
                     expanded_branches.push(TemplateIrBranch::new(
                         branch.selector.to_owned(),
                         expanded_body_id,
-                        branch.location.to_owned(),
+                        branch.span,
                         branch.selector_site_id,
                     ));
                 } else {
@@ -244,8 +248,9 @@ fn expand_tir_slot_placeholders_from_node(
                 TemplateIrNodeKind::BranchChain {
                     branches: expanded_branches,
                     fallback: expanded_fallback,
+                    else_marker: else_marker.to_owned(),
                 },
-                node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -294,7 +299,7 @@ fn expand_tir_slot_placeholders_from_node(
                     body: expanded_body_id,
                     aggregate_wrapper: expanded_aggregate_wrapper,
                 },
-                node.location.to_owned(),
+                node.span,
             )))
         }
 
@@ -479,7 +484,7 @@ fn attach_conditional_wrapper_set(
         )
     })?;
 
-    let (reference, location) = match &node.kind {
+    let (reference, span) = match &node.kind {
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template_id = reference.root;
             let Some(template) = store.get_template(template_id).cloned() else {
@@ -506,7 +511,7 @@ fn attach_conditional_wrapper_set(
             store.set_conditional_child_wrapper_set(copied_id, merged_wrapper_set_id)?;
 
             let new_reference = reference.with_root(copied_id);
-            (new_reference, node.location.to_owned())
+            (new_reference, node.span.to_owned())
         }
 
         TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => {
@@ -518,7 +523,7 @@ fn attach_conditional_wrapper_set(
                 Style::default(),
                 TemplateType::String,
                 summary,
-                node.location.to_owned(),
+                node.span,
             );
             template.conditional_child_wrapper_set = Some(wrapper_set_id);
             let template_id = store.push_template(template);
@@ -528,7 +533,7 @@ fn attach_conditional_wrapper_set(
                 TemplateTirPhase::Parsed,
                 TemplateViewContext::default(),
             );
-            (new_reference, node.location.to_owned())
+            (new_reference, node.span.to_owned())
         }
 
         _ => return Ok(node_id),
@@ -540,7 +545,7 @@ fn attach_conditional_wrapper_set(
             reference,
             occurrence_id,
         },
-        location,
+        span,
     )))
 }
 

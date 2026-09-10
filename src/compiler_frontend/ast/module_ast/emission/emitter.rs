@@ -57,7 +57,7 @@ use crate::compiler_frontend::datatypes::ids::{
 };
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
-use crate::compiler_frontend::symbols::identity::FileId;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::FileTokens;
@@ -70,6 +70,13 @@ use std::rc::Rc;
 #[cfg(feature = "detailed_timers")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::timed_stage_attributed_opt;
+
+fn attach_frozen_identity_handle_to_diagnostic(
+    diagnostic: &mut CompilerDiagnostic,
+    frozen_identity_handle: &FrozenIdentityHandle,
+) {
+    diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+}
 
 pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Typed AST nodes emitted for this module (functions, structs, generic instances).
@@ -101,7 +108,7 @@ struct BaseScopeContextInput<'scope> {
     scope: InternedPath,
     top_level_declarations: &'scope Rc<TopLevelDeclarationTable>,
     visibility: Arc<FileVisibility>,
-    declaring_file_id: Option<FileId>,
+    declaring_file_id: SourceId,
     source_file_scope: InternedPath,
     scope_frame_capacity: usize,
 }
@@ -202,6 +209,7 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
     deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
     validated_generic_template_bodies: Vec<AstNode>,
+    generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
 }
 
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
@@ -222,7 +230,25 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_function_instances_by_key: FxHashMap::default(),
             deferred_generic_requests: Vec::new(),
             validated_generic_template_bodies: Vec::new(),
+            generic_call_site_identity_handle: None,
         }
+    }
+
+    pub(in crate::compiler_frontend::ast) fn with_generic_call_site_identity_handle(
+        mut self,
+        handle: FrozenIdentityHandle,
+    ) -> Self {
+        self.generic_call_site_identity_handle = Some(handle);
+        self
+    }
+
+    fn generic_call_site_identity_handle(&self) -> Option<FrozenIdentityHandle> {
+        self.generic_call_site_identity_handle.clone().or_else(|| {
+            self.context
+                .file_value_resolution
+                .as_ref()
+                .map(|services| services.frozen_identity_handle.clone())
+        })
     }
 
     pub(in crate::compiler_frontend::ast) fn emit_generated_request(
@@ -317,7 +343,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     .visibility_for(&header.source_file)
                     .map_err(|error| self.error_messages(error, string_table))?,
             );
-            let source_file_scope = header.canonical_source_file(string_table);
+            let source_file_scope = header.source_file.clone();
 
             match &header.kind {
                 HeaderKind::Function {
@@ -596,13 +622,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .iter()
             .any(|active_key| active_key == &request.key)
         {
-            return Err(self.diagnostic_messages(
-                recursive_generic_function_instantiation(
-                    request.key.function_path.name(),
-                    request.call_location,
-                ),
-                string_table,
-            ));
+            let mut diagnostic = recursive_generic_function_instantiation(
+                request.key.function_path.name(),
+                request.call_span,
+            );
+            if request.call_span.is_some()
+                && let Some(handle) = self.generic_call_site_identity_handle()
+            {
+                diagnostic = diagnostic.with_primary_frozen_identity_handle(handle);
+            }
+            return Err(self.diagnostic_messages(diagnostic, string_table));
         }
 
         // --------------------------
@@ -634,6 +663,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             return Ok(());
         };
         let mut token_stream = body.tokens().clone();
+        let frozen_identity_handle = body.frozen_identity_handle().cloned();
 
         let Some(mapping) = concrete_argument_mapping(
             template.generic_parameter_list_id,
@@ -689,7 +719,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope: request.instance_path.clone(),
                 top_level_declarations: &Rc::clone(&self.environment.lookups.declaration_table),
                 visibility,
-                declaring_file_id: None,
+                // Materialised bodies carry their retained donor owner; the scope threads it so
+                // Stage 0 lookups validate against the frozen facts owner and never alias the
+                // requester call-site source.
+                declaring_file_id: token_stream.file_id,
                 source_file_scope: template.source_file.clone(),
                 scope_frame_capacity: 0,
             })
@@ -709,6 +742,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 services.with_stage0_resolution_facts(Arc::clone(facts)),
             );
         }
+        if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
+            context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
+        }
         context.expected_result_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
         context.current_function_return_type_ids = context.expected_result_type_ids.clone();
@@ -722,6 +758,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
+        let warning_start = self.warnings.len();
         let body = match function_body_to_ast(
             &mut token_stream,
             context,
@@ -729,13 +766,29 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.warnings,
             string_table,
         ) {
-            Ok(body) => body,
+            Ok(body) => {
+                if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
+                    for warning in &mut self.warnings[warning_start..] {
+                        attach_frozen_identity_handle_to_diagnostic(
+                            warning,
+                            frozen_identity_handle,
+                        );
+                    }
+                }
+                body
+            }
             Err(ExpressionParseError::Diagnostic(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
-                    *diagnostic,
+                    diagnostic,
                     GenericInstantiationDiagnosticContext {
-                        call_location: request.call_location.clone(),
-                        declaration_location: template.declaration_location.clone(),
+                        call_span: request.call_span,
+                        declaration_span: template.declaration_span,
+                        frozen_identity_handle: frozen_identity_handle.clone(),
+                        call_site_frozen_identity_handle: if request.call_span.is_some() {
+                            self.generic_call_site_identity_handle()
+                        } else {
+                            None
+                        },
                         substitutions: substitution_diagnostics,
                     },
                 );
@@ -762,7 +815,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
         self.ast.push(AstNode {
             kind: NodeKind::Function(request.instance_path.clone(), signature, body),
-            location: template.declaration_location,
+            // Generated instance has no consumer-local authored declaration range.
+            span: None,
             scope: request.instance_path,
         });
 
@@ -856,7 +910,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.validated_generic_template_bodies.push(AstNode {
             kind: NodeKind::Function(template.function_path, resolved_signature.signature, body),
-            location: template.declaration_location,
+            // Generic body validation retains no consumer-local authored declaration range.
+            span: None,
             scope: header.tokens.src_path,
         });
         Ok(())
@@ -941,7 +996,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // module-wide, not only within a local scope.
         self.ast.push(AstNode {
             kind: NodeKind::Function(token_stream.src_path, resolved_signature.signature, body),
-            location: header.name_location,
+            span: header.name_span,
             scope: function_scope,
         });
 
@@ -1008,9 +1063,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
             &start_return_type,
             &mut self.environment.type_environment,
-            &header.name_location,
+            None,
         )
-        .map_err(|diagnostic| self.diagnostic_messages(*diagnostic, string_table))?;
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
         let start_signature = FunctionSignature {
             parameters: vec![],
             returns: vec![ReturnSlot {
@@ -1023,7 +1078,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.ast.push(AstNode {
             kind: NodeKind::Function(full_name, start_signature, body),
-            location: header.name_location,
+            // The implicit start function has no authored declaration span.
+            span: None,
             scope: start_scope,
         });
 
@@ -1056,7 +1112,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         self.ast.push(AstNode {
             kind: NodeKind::StructDefinition(header.tokens.src_path.to_owned(), fields),
-            location: header.name_location,
+            span: header.name_span,
             scope: header.tokens.src_path,
         });
 
@@ -1117,13 +1173,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     TemplatePreparationOutcome::Helper(_) => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
-                            template.location,
+                            template.span,
                         )
                     }
                     TemplatePreparationOutcome::Runtime(_) => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                            template.location,
+                            template.span,
                         )
                     }
                     TemplatePreparationOutcome::Foldable => unreachable!(),
@@ -1195,7 +1251,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> CompilerMessages {
         match error {
             TemplateError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
         }
@@ -1209,7 +1265,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> CompilerMessages {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(*diagnostic, string_table)
+                self.diagnostic_messages(diagnostic, string_table)
             }
             ExpressionParseError::Infrastructure(error) => {
                 self.error_messages(*error, string_table)

@@ -18,8 +18,10 @@ use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
     resolve_diagnostic_type_to_type_id, resolve_parsed_type_annotation,
 };
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidCollectionTypeReason, NameNamespace,
+    CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload, InvalidCollectionTypeReason,
+    NameNamespace,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -30,11 +32,10 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     parse_function_signature_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::parse_context::{
     cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
@@ -104,8 +105,14 @@ impl FunctionSignature {
         parent_context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
     ) -> SignatureResult<Self> {
-        let signature_syntax =
-            parse_function_signature_syntax(token_stream, warnings, string_table, function_path)?;
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let signature_syntax = parse_function_signature_syntax(
+            token_stream,
+            warnings,
+            string_table,
+            function_path,
+            &mut span_builder,
+        )?;
 
         let signature_context =
             ScopeContext::new_constant(function_path.to_owned(), parent_context);
@@ -183,7 +190,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             declaration.value.reactive_template =
                 Some(ReactiveTemplateMetadata::from_template_value_parameter(
                     declaration.id.clone(),
-                    parameter.location.clone(),
+                    parameter.span,
                 ));
         }
 
@@ -217,11 +224,12 @@ pub(crate) fn signature_member_to_declaration(
 ) -> SignatureResult<Declaration> {
     let resolved = resolve_signature_type_annotation(
         member.type_annotation.clone(),
-        &member.location,
+        member.span,
         expression_context,
         type_interner,
         string_table,
-    );
+    )
+    .map_err(|error| signature_member_error_with_span(error, member));
 
     let (type_id, data_type) = match resolved {
         Ok(annotation) => (
@@ -246,10 +254,11 @@ pub(crate) fn signature_member_to_declaration(
         Err(diagnostic) => return Err(diagnostic),
     };
 
+    let member_span = member.span;
     let mut value = if member.default_tokens.is_empty() {
         Expression::new(
             ExpressionKind::NoValue,
-            member.location.clone(),
+            member_span,
             type_id,
             data_type,
             member.value_mode.clone(),
@@ -262,7 +271,8 @@ pub(crate) fn signature_member_to_declaration(
             expression_context,
             type_interner,
             string_table,
-        )?
+        )
+        .map_err(|error| signature_member_error_with_span(error, member))?
     };
 
     if member.is_reactive {
@@ -274,8 +284,37 @@ pub(crate) fn signature_member_to_declaration(
     Ok(Declaration {
         id: member.id.clone(),
         value,
+        binding_span: member_span,
         config_qualifier: None,
     })
+}
+
+/// Attach the authored member-name anchor to an AST diagnostic while its declaring source
+/// identity is still available through the active scope.
+///
+/// Source-authored spans are retained directly; nested consumers can refine the exact range.
+fn signature_member_error_with_span(
+    error: ExpressionParseError,
+    member: &SignatureMemberSyntax,
+) -> ExpressionParseError {
+    let ExpressionParseError::Diagnostic(mut diagnostic) = error else {
+        return error;
+    };
+
+    let member_span = member.span;
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = member_span;
+    } else if !diagnostic
+        .labels
+        .iter()
+        .any(|label| label.span == member_span)
+    {
+        diagnostic
+            .labels
+            .push(DiagnosticLabel::secondary(member_span, None));
+    }
+
+    ExpressionParseError::Diagnostic(diagnostic)
 }
 
 /// Resolve a parsed type annotation inside a function-style signature.
@@ -285,7 +324,7 @@ pub(crate) fn signature_member_to_declaration(
 ///      the same fixed-capacity folding rules and alias visibility model.
 fn resolve_signature_type_annotation(
     type_annotation: ParsedTypeRef,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -293,6 +332,7 @@ fn resolve_signature_type_annotation(
     let mut type_resolution_context =
         TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &expression_context.top_level_declarations,
+            declaring_file_id: expression_context.shared.declaring_file_id,
             visible_declaration_ids: expression_context.visible_declaration_ids.as_ref(),
             visible_external_symbols: expression_context
                 .file_visibility
@@ -329,7 +369,7 @@ fn resolve_signature_type_annotation(
 
     Ok(resolve_parsed_type_annotation(
         type_annotation,
-        location,
+        span,
         &mut type_resolution_context,
         string_table,
         Some(expression_context),
@@ -371,7 +411,12 @@ fn parse_signature_default_expression(
     let mut expected_type = parse_expectation_for_type_id(type_id, type_interner.environment());
     let mut cast_target_context =
         cast_target_context_for_type_id(type_id, type_interner.environment(), string_table);
-    let mut expression_stream = token_stream_with_eof(&member.default_tokens, path_syntax)?;
+    let mut expression_stream = token_stream_with_eof(
+        &member.default_tokens,
+        path_syntax,
+        expression_context,
+        member.span,
+    )?;
 
     let input = ExpressionParseInput::new(
         ExpressionParseResources {
@@ -394,27 +439,46 @@ fn parse_signature_default_expression(
 }
 
 /// Wrap a raw token slice in a `FileTokens` stream terminated by EOF.
+///
+/// WHY the context: a default expression's tokens were lexed from the file that declared the
+/// signature, so the substream takes that scope's source identity instead of a caller's argument.
+///
+/// CALLER INVARIANT: callers pass at least one default-expression token. Empty defaults are
+/// represented as `ExpressionKind::NoValue` before this helper is reached; an empty slice is
+/// therefore an internal AST invariant failure, not a source-level unexpected EOF.
 fn token_stream_with_eof(
     tokens: &[Token],
     path_syntax: &FilePathSyntax,
+    context: &ScopeContext,
+    member_span: Option<SourceSpan>,
 ) -> SignatureResult<FileTokens> {
+    debug_assert!(
+        !tokens.is_empty(),
+        "signature default token stream must not be empty"
+    );
     let Some(first_token) = tokens.first() else {
-        return Err(
-            CompilerDiagnostic::unexpected_end_of_file(None, SourceLocation::default()).into(),
-        );
+        return Err(CompilerError::new(
+            "signature default expression token stream was unexpectedly empty",
+            member_span,
+            ErrorType::Compiler,
+        )
+        .into());
     };
 
     let mut tokens_with_eof = tokens.to_vec();
-    let eof_location = tokens
-        .last()
-        .map(|token| token.location.clone())
-        .unwrap_or_else(|| first_token.location.clone());
-    let src_path = first_token.location.scope.clone();
+    let eof_anchor = tokens.last().unwrap_or(first_token);
+    let src_path = context.scope.clone();
+    let eof_token = Token::with_span(TokenKind::Eof, eof_anchor.span);
+    tokens_with_eof.push(eof_token);
 
-    tokens_with_eof.push(Token::new(TokenKind::Eof, eof_location));
-
-    FileTokens::new_from_slice(src_path, None, None, tokens_with_eof, path_syntax)
-        .map_err(ExpressionParseError::from)
+    FileTokens::new_from_slice(
+        src_path,
+        context.shared.declaring_file_id,
+        None,
+        tokens_with_eof,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 /// Build a `ReturnSlot` from parsed syntax.
@@ -432,7 +496,7 @@ fn return_slot_from_syntax(
 
     let resolved = resolve_signature_type_annotation(
         return_slot.value.type_annotation.clone(),
-        &return_slot.value.location,
+        return_slot.value.span,
         expression_context,
         type_interner,
         string_table,

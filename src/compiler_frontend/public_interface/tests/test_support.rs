@@ -3,8 +3,8 @@
 //! WHAT: owns the construction helpers used by two or more focused public-interface test
 //! modules: stable module/trait/struct origins, export bindings, interned paths, synthetic
 //! generic-parameter registration, trait-root construction, struct registration, nominal and
-//! trait origin index maps, constant/free-function/choice origins, struct roots, receiver
-//! entries, default source locations and the immutable value mode.
+//! origin index maps, constant/free-function/choice origins, struct roots, receiver
+//! entries, default synthetic spans and the immutable value mode.
 //! WHY: these fixtures are genuinely shared across the trait-projection, direct-projection,
 //! evidence-projection, local-finalization, declaration-record and folded-value test owners.
 //! One-owner fixtures remain in their owning module; only cross-owner helpers live here.

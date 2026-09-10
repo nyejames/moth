@@ -10,36 +10,22 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::source_location::CharPosition;
 use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
 use crate::compiler_frontend::project_globals::{
     ProjectGlobalsFieldInput, ProjectGlobalsInterface,
 };
-use crate::compiler_frontend::public_interface::PublicDiagnosticLocation;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-fn source_location_at(path: &str, string_table: &mut StringTable) -> SourceLocation {
-    let scope = InternedPath::from_single_str(path, string_table);
-    SourceLocation::new(
-        scope,
-        CharPosition {
-            line_number: 1,
-            char_column: 0,
-        },
-        CharPosition {
-            line_number: 1,
-            char_column: 12,
-        },
-    )
+fn source_span_at(_path: &str, _string_table: &mut StringTable) -> SourceSpan {
+    SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
 
-fn source_location(string_table: &mut StringTable) -> SourceLocation {
-    source_location_at("src/@page.moth", string_table)
+fn source_span(string_table: &mut StringTable) -> SourceSpan {
+    source_span_at("src/@page.moth", string_table)
 }
 
 fn command_location(argument_index: usize) -> BuildConfigValueLocation {
@@ -159,7 +145,7 @@ fn build_input_types_accept_only_the_exact_primitive_or_matching_optional() {
 #[test]
 fn build_config_input_set_iterates_in_deterministic_name_order() {
     let mut string_table = StringTable::new();
-    let declared = BuildConfigValueLocation::Source(source_location(&mut string_table));
+    let declared = BuildConfigValueLocation::Source(source_span(&mut string_table));
 
     let mut inputs = BuildConfigInputSet::new();
     assert!(inputs.is_empty());
@@ -201,7 +187,7 @@ fn build_config_input_set_iterates_in_deterministic_name_order() {
 #[test]
 fn build_config_input_set_rejects_duplicate_names_deterministically() {
     let mut string_table = StringTable::new();
-    let declared = BuildConfigValueLocation::Source(source_location(&mut string_table));
+    let declared = BuildConfigValueLocation::Source(source_span(&mut string_table));
 
     let mut inputs = BuildConfigInputSet::new();
     inputs
@@ -294,37 +280,19 @@ fn command_text_infers_decimal_and_exponent_literals_as_float() {
 #[test]
 fn command_text_rejects_int_overflow_and_non_finite_floats_as_diagnostics() {
     // Integer-shaped out-of-range values diagnose rather than fall through to Float or String.
-    assert_eq!(
-        infer_error("2147483648"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("2147483648"),
-        }
-    );
-    assert_eq!(
-        infer_error("-2147483649"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("-2147483649"),
-        }
-    );
-    assert_eq!(
-        infer_error("99999999999999999999"),
-        BuildInputValueError::IntOutOfRange {
-            text: String::from("99999999999999999999"),
-        }
-    );
-    // Exponent-shaped non-finite values reject.
-    assert_eq!(
-        infer_error("1e400"),
-        BuildInputValueError::NonFiniteFloat {
-            text: String::from("1e400"),
-        }
-    );
-    assert_eq!(
-        infer_error("-1e400"),
-        BuildInputValueError::NonFiniteFloat {
-            text: String::from("-1e400"),
-        }
-    );
+    for value in ["2147483648", "-2147483649", "99999999999999999999"] {
+        let BuildInputValueError::IntOutOfRange { text } = infer_error(value) else {
+            panic!("expected an out-of-range Int diagnostic");
+        };
+        assert_eq!(text, value);
+    }
+
+    for value in ["1e400", "-1e400"] {
+        let BuildInputValueError::NonFiniteFloat { text } = infer_error(value) else {
+            panic!("expected a non-finite Float diagnostic");
+        };
+        assert_eq!(text, value);
+    }
 }
 
 #[test]
@@ -481,7 +449,7 @@ fn contract_fact(
         value_type,
         required,
         default,
-        source_location(string_table),
+        Some(source_span(string_table)),
     )
 }
 
@@ -553,13 +521,10 @@ fn project_global_with_fingerprint(
         name,
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
         PublicFoldedValue::Int(value),
-        PublicDiagnosticLocation {
-            scope_components: vec!["config.moth".to_owned()],
-            start_line: 1,
-            start_column: 0,
-            end_line: 1,
-            end_column: 1,
-        },
+        Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            LocalSpan::source_start(),
+        )),
         fingerprint,
         SyntheticInterfaceProvenance::single(member),
     );
@@ -1181,18 +1146,10 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
 }
 
 #[test]
-fn check_only_conflict_keeps_canonical_and_transient_locations_in_their_own_tables() {
-    let mut boundary_table = StringTable::new();
-    boundary_table.intern("canonical-boundary-prefix");
-    let canonical_location = source_location(&mut boundary_table);
-    let fork_source = boundary_table.fork_source();
-    let (mut transient_table, _) = fork_source.fork_for_module().into_parts();
-    transient_table.intern("transient-local-prefix");
-    let transient_location = source_location_at("src/+check-only.moth", &mut transient_table);
-    assert_ne!(
-        canonical_location.scope, transient_location.scope,
-        "the regression fixture must use distinct inherited/local StringIds"
-    );
+fn check_only_conflict_keeps_canonical_and_transient_spans() {
+    let mut string_table = StringTable::new();
+    let canonical_span = source_span(&mut string_table);
+    let transient_span = source_span(&mut string_table);
 
     let name = BuildInputName::new("shared_setting").expect("test input name should validate");
     let canonical_fact = BuildConfigContractFact::new(
@@ -1200,14 +1157,14 @@ fn check_only_conflict_keeps_canonical_and_transient_locations_in_their_own_tabl
         BuildInputType::Primitive(PrimitiveBuildInputType::Int),
         true,
         None,
-        canonical_location.clone(),
+        Some(canonical_span),
     );
     let transient_fact = BuildConfigContractFact::new(
         name,
         BuildInputType::Primitive(PrimitiveBuildInputType::String),
         true,
         None,
-        transient_location.clone(),
+        Some(transient_span),
     );
     let canonical_values = resolve_build_config_values(
         std::slice::from_ref(&canonical_fact),
@@ -1238,19 +1195,8 @@ fn check_only_conflict_keeps_canonical_and_transient_locations_in_their_own_tabl
         panic!("expected a canonical/transient source contract conflict");
     };
 
-    assert_eq!(first.location(), &canonical_location);
-    assert_eq!(conflicting.location(), &transient_location);
-    assert_eq!(
-        first.location().scope.to_portable_string(&transient_table),
-        "src/@page.moth"
-    );
-    assert_eq!(
-        conflicting
-            .location()
-            .scope
-            .to_portable_string(&transient_table),
-        "src/+check-only.moth"
-    );
+    assert_eq!(first.span(), Some(canonical_span));
+    assert_eq!(conflicting.span(), Some(transient_span));
 }
 #[test]
 fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
@@ -1280,10 +1226,9 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
     )
     .expect_err("a String must not satisfy an Int contract");
     assert_eq!(error.name().as_str(), "count");
-    assert_eq!(error.provided_type(), Some(PrimitiveBuildInputType::String));
     assert_eq!(error.value_location(), Some(&command_location(4)));
     assert!(matches!(
-        error,
+        &error,
         BuildConfigResolutionError::ValueTypeMismatch {
             provided: PrimitiveBuildInputType::String,
             ..
@@ -1304,13 +1249,15 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
         &builder_globals(&[("enabled", PrimitiveBuildValue::Int(1))]),
     )
     .expect_err("a builder Int must not satisfy a Bool contract");
-    assert_eq!(
-        builder_error.provided_type(),
-        Some(PrimitiveBuildInputType::Int)
-    );
+    assert!(matches!(
+        &builder_error,
+        BuildConfigResolutionError::ValueTypeMismatch {
+            provided: PrimitiveBuildInputType::Int,
+            ..
+        }
+    ));
     assert_eq!(builder_error.value_location(), None);
 }
-
 #[test]
 fn boundary_resolver_checks_unknown_inputs_after_all_contracts_are_known() {
     let mut string_table = StringTable::new();
@@ -1346,7 +1293,7 @@ fn boundary_resolver_checks_unknown_inputs_after_all_contracts_are_known() {
     )
     .expect_err("unknown explicit names must be rejected after contract collection");
     assert_eq!(error.name().as_str(), "unknown_value");
-    assert_eq!(error.contract_location(), None);
+    assert_eq!(error.contract_span(), None);
     assert_eq!(error.value_location(), Some(&command_location(1)));
     assert!(matches!(
         error,

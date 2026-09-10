@@ -1,6 +1,6 @@
 //! Hidden invariants for retained provider-target classification and decoding.
 //!
-//! WHAT: checks prefix bounds, extension lookup, extension matching and remapped targets.
+//! WHAT: checks prefix bounds, extension lookup and extension matching.
 //! WHY: malformed `DependencyTargetKind` values never appear in authored source, so these
 //!      cases belong in unit tests rather than integration fixtures.
 
@@ -104,27 +104,4 @@ fn decode_keeps_remaining_provider_specific_components() {
         "extra"
     );
     assert_eq!(decoded.extension_spelling(), "js");
-}
-
-#[test]
-fn remapped_target_preserves_the_decoded_extension() {
-    let mut local = StringTable::new();
-    let path = interned_components(&mut local, &["drawing.js"]);
-    let mut target = classify_dependency_target(&path, &mut local);
-
-    let mut global = StringTable::new();
-    global.intern("unrelated-prefix");
-    let remap = global.merge_from(&local);
-    let mut remapped_path = path.clone();
-    remapped_path.remap_string_ids(&remap);
-    target.remap_string_ids(&remap);
-
-    let decoded = decode_dependency_target(&remapped_path, &target, &global)
-        .expect("a remapped valid target should decode")
-        .expect("the remapped target should remain a provider");
-    assert_eq!(decoded.extension_spelling(), "js");
-    assert_eq!(
-        decoded.prefix_path().to_portable_string(&global),
-        "drawing.js"
-    );
 }

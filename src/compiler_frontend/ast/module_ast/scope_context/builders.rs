@@ -143,13 +143,13 @@ impl ScopeContext {
         self
     }
 
-    /// Register generic declaration metadata by path.
+    /// Register generic declaration kinds by path.
     ///
-    /// WHAT: records generic parameter metadata for nominal declarations.
+    /// WHAT: records which generic declarations are nominal types or functions.
     /// Used during generic function instantiation and type argument validation.
     pub(crate) fn with_generic_declarations(
         mut self,
-        declarations: Rc<FxHashMap<InternedPath, GenericDeclarationMetadata>>,
+        declarations: Rc<FxHashMap<InternedPath, GenericDeclarationKind>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).generic_declarations_by_path = Some(declarations);
         self
@@ -222,12 +222,21 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).source_file_scope = Some(source_file);
         self
     }
-    /// Attach Stage 0 file-value resolution facts and the module-local resource table.
     pub(crate) fn with_file_value_resolution(
         mut self,
         services: Rc<FileValueResolutionServices>,
     ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).file_value_resolution = Some(services);
+        let shared = Rc::make_mut(&mut self.shared);
+        shared.frozen_identity_handle = services.frozen_identity_handle.clone();
+        shared.file_value_resolution = Some(services);
+        self
+    }
+    /// Switch a materialised scope to its donor source identity owner.
+    pub(crate) fn with_frozen_identity_handle(
+        mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) -> ScopeContext {
+        Rc::make_mut(&mut self.shared).frozen_identity_handle = frozen_identity_handle;
         self
     }
     /// Attach immutable source `#Config` values for constant-header materialization.
@@ -257,11 +266,15 @@ impl ScopeContext {
     }
 
     /// Identify the authored source file for path-syntax table joins.
-    pub(crate) fn with_declaring_file_id(mut self, file_id: Option<FileId>) -> ScopeContext {
+    ///
+    /// WHAT: threads the owning `SourceId` (for materialised generics, the retained donor owner)
+    ///       into `Stage0` lookups and span construction.
+    /// WHY: every live scope joins `Stage0` facts and builds spans against this identity.
+    ///      Donor and requester handles stay distinct.
+    pub(crate) fn with_declaring_file_id(mut self, file_id: SourceId) -> ScopeContext {
         Rc::make_mut(&mut self.shared).declaring_file_id = file_id;
         self
     }
-
     pub fn with_template_const_loop_iteration_limit(mut self, limit: usize) -> ScopeContext {
         Rc::make_mut(&mut self.shared).template_const_loop_iteration_limit = limit;
         self

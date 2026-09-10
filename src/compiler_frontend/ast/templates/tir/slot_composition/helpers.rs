@@ -18,10 +18,11 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
+type StoredInsertContributionTemplates = Option<Vec<(TemplateIrId, Option<SourceSpan>)>>;
 
 /// Builds a template infrastructure failure without rendering it into the source-diagnostic lane.
 pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
@@ -37,23 +38,23 @@ pub(super) fn internal_compiler_error(message: &str) -> TemplateError {
 ///      diagnostic semantics at its own error boundary.
 pub(super) fn unknown_slot_target_error(
     target: &SlotKey,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     match target {
         SlotKey::Default => CompilerDiagnostic::invalid_template_slot(
             InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot,
             None,
-            location,
+            span,
         ),
         SlotKey::Named(name) => CompilerDiagnostic::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot,
             Some(*name),
-            location,
+            span,
         ),
         SlotKey::Positional(_) => CompilerDiagnostic::invalid_template_slot(
             InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot,
             None,
-            location,
+            span,
         ),
     }
 }
@@ -61,24 +62,22 @@ pub(super) fn unknown_slot_target_error(
 /// Builds the diagnostic for loose content when the wrapper has no default or
 /// positional slots.
 pub(super) fn loose_content_without_default_slot_error(
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_template_slot(
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot,
         None,
-        location,
+        span,
     )
 }
 
-/// Builds the diagnostic for loose content that exceeds the wrapper's
-/// positional slots without a default slot to absorb the remainder.
 pub(super) fn extra_loose_content_without_default_slot_error(
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_template_slot(
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot,
         None,
-        location,
+        span,
     )
 }
 
@@ -113,19 +112,10 @@ pub(super) fn children_of_node(
     }
 }
 
-/// Returns the direct `$insert(...)` helpers carried by a nested stored-insert
-/// template, when its root contains only insert-contribution nodes.
-///
-/// WHAT: identifies the transparent carrier created by a body reference such as
-///       `[stored_title]` and returns the helper IDs with their authored node
-///       locations.
-/// WHY: the immediate parent owns slot routing. Keeping this structural query
-///      beside the TIR slot-composition helpers prevents the parser and the
-///      post-parse escaped-insert validation from inventing separate shapes.
 pub(crate) fn stored_insert_contribution_templates(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<Option<Vec<(TemplateIrId, SourceLocation)>>, CompilerError> {
+) -> Result<StoredInsertContributionTemplates, CompilerError> {
     let template = store.get_template(template_id).ok_or_else(|| {
         CompilerError::compiler_error(
             "TIR slot composition: stored insert carrier referenced a missing template.",
@@ -154,25 +144,25 @@ pub(crate) fn stored_insert_contribution_templates(
         let TemplateIrNodeKind::InsertContribution { template } = child.kind else {
             return Ok(None);
         };
-        contributions.push((template, child.location.clone()));
+        contributions.push((template, child.span));
     }
 
     Ok(Some(contributions))
 }
 
-/// Returns a template's source location, or an internal error when the template
+/// Returns a template's source span, or an internal error when the template
 /// authority is missing from the store.
 #[cfg(test)]
-pub(super) fn location_for_template(
+pub(super) fn span_for_template(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
-) -> SlotCompositionResult<SourceLocation> {
+) -> SlotCompositionResult<Option<SourceSpan>> {
     store
         .get_template(template_id)
-        .map(|template| template.location.to_owned())
+        .map(|template| template.span)
         .ok_or_else(|| {
             internal_compiler_error(
-                "TIR slot routing: template ID was not present in the store while reading its location.",
+                "TIR slot routing: template ID was not present in the store while reading its span.",
             )
         })
 }
@@ -216,17 +206,16 @@ pub(super) fn rebuild_root_sequence(
         TemplateIrNodeKind::Sequence {
             children: resolved_children,
         },
-        original_root_node.location.to_owned(),
+        original_root_node.span,
     )))
 }
 
-/// Routes fill nodes against a carried layout, then expands or plans the wrapper.
 pub(super) fn compose_wrapper_application(
     store: &mut TemplateIrStore,
     wrapper_reference: TemplateWrapperReference,
     layout: &TirSlotLayout,
     fill_nodes: Vec<TemplateIrNodeId>,
-    fill_location: SourceLocation,
+    fill_span: Option<SourceSpan>,
     string_table: &StringTable,
     allow_runtime_plans: bool,
 ) -> SlotCompositionResult<TemplateTirChildReference> {
@@ -234,7 +223,7 @@ pub(super) fn compose_wrapper_application(
         store,
         &layout.schema,
         &fill_nodes,
-        &fill_location,
+        fill_span,
         string_table,
     )?;
 
@@ -247,7 +236,7 @@ pub(super) fn compose_wrapper_application(
             &layout.schema,
             &routed,
             string_table,
-            &fill_location,
+            fill_span,
         )?
     } else {
         let expanded_root = super::schema::expand_tir_slot_placeholders_into(

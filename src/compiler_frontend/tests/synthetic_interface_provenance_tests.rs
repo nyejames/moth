@@ -26,7 +26,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn member(
@@ -123,7 +122,7 @@ fn provenance_preserved_through_coercion() {
     let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
     let provenance = SyntheticInterfaceProvenance::single(member_identity);
 
-    let inner = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned)
+    let inner = Expression::int(42, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(provenance);
 
     let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
@@ -141,7 +140,7 @@ fn provenance_preserved_through_coercion() {
 #[test]
 fn provenance_preserved_through_cast() {
     let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
-    let source = Expression::int(42, SourceLocation::default(), ValueMode::ImmutableOwned)
+    let source = Expression::int(42, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
             member_identity.clone(),
         ));
@@ -156,7 +155,7 @@ fn provenance_preserved_through_cast() {
             policy: BuiltinCastPolicyId::IntToFloat,
         },
         handling: CastHandling::Infallible,
-        location: SourceLocation::default(),
+        span: None,
     };
 
     let cast_expression = Expression::cast(cast, builtin_type_ids::FLOAT, &type_environment);
@@ -173,14 +172,14 @@ fn aggregate_value_constructors_union_child_provenance() {
     let builder_member = member(SyntheticInterfaceClass::Builder, "assets", "bundle");
     let project_provenance = SyntheticInterfaceProvenance::single(project_member.clone());
     let builder_provenance = SyntheticInterfaceProvenance::single(builder_member.clone());
-    let location = SourceLocation::default();
+    let span = None;
 
     let mut type_environment = TypeEnvironment::new();
     let collection = Expression::collection_with_type_id(
         vec![
-            Expression::int(1, location.clone(), ValueMode::ImmutableOwned)
+            Expression::int(1, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
-            Expression::int(2, location.clone(), ValueMode::ImmutableOwned)
+            Expression::int(2, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
         ],
         CollectionExpressionType {
@@ -190,7 +189,7 @@ fn aggregate_value_constructors_union_child_provenance() {
             collection_type_id: None,
         },
         &mut type_environment,
-        location.clone(),
+        span,
         ValueMode::ImmutableOwned,
     );
     assert_eq!(
@@ -200,9 +199,9 @@ fn aggregate_value_constructors_union_child_provenance() {
 
     let map = Expression::map_literal_with_type_id(
         vec![MapLiteralEntry {
-            key: Expression::int(1, location.clone(), ValueMode::ImmutableOwned)
+            key: Expression::int(1, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
-            value: Expression::int(2, location.clone(), ValueMode::ImmutableOwned)
+            value: Expression::int(2, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(builder_provenance.clone()),
         }],
         MapLiteralExpressionType {
@@ -213,7 +212,7 @@ fn aggregate_value_constructors_union_child_provenance() {
             map_type_id: None,
         },
         &mut type_environment,
-        location.clone(),
+        span,
         ValueMode::ImmutableOwned,
     );
     assert_eq!(
@@ -224,20 +223,22 @@ fn aggregate_value_constructors_union_child_provenance() {
     let mut string_table = StringTable::new();
     let field_a = Declaration {
         id: InternedPath::from_single_str("first", &mut string_table),
-        value: Expression::int(3, location.clone(), ValueMode::ImmutableOwned)
+        value: Expression::int(3, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(project_provenance.clone()),
+        binding_span: None,
         config_qualifier: None,
     };
     let field_b = Declaration {
         id: InternedPath::from_single_str("second", &mut string_table),
-        value: Expression::int(4, location.clone(), ValueMode::ImmutableOwned)
+        value: Expression::int(4, span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(builder_provenance.clone()),
+        binding_span: None,
         config_qualifier: None,
     };
     let struct_expression = Expression::struct_instance(
         InternedPath::from_single_str("Record", &mut string_table),
         vec![field_a, field_b],
-        location.clone(),
+        span,
         ValueMode::ImmutableOwned,
         false,
         None,
@@ -253,13 +254,14 @@ fn aggregate_value_constructors_union_child_provenance() {
         tag: 0,
         fields: vec![Declaration {
             id: InternedPath::from_single_str("payload", &mut string_table),
-            value: Expression::int(5, location.clone(), ValueMode::ImmutableOwned)
+            value: Expression::int(5, span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance),
+            binding_span: None,
             config_qualifier: None,
         }],
         diagnostic_type: DataType::Int,
         type_id: builtin_type_ids::INT,
-        location,
+        span: None,
         value_mode: ValueMode::ImmutableOwned,
     });
     assert_eq!(
@@ -278,7 +280,7 @@ fn provenance_preserved_through_int_to_float_coercion() {
     let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
     let provenance = SyntheticInterfaceProvenance::single(member_identity.clone());
 
-    let int_expr = Expression::int(7, SourceLocation::default(), ValueMode::ImmutableOwned)
+    let int_expr = Expression::int(7, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(provenance);
 
     let type_environment = TypeEnvironment::new();
@@ -305,9 +307,9 @@ fn provenance_unioned_through_constant_folding() {
     let lhs_member = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
     let rhs_member = member(SyntheticInterfaceClass::Builder, "assets", "bundle");
 
-    let lhs = Expression::int(3, SourceLocation::default(), ValueMode::ImmutableOwned)
+    let lhs = Expression::int(3, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(lhs_member));
-    let rhs = Expression::int(4, SourceLocation::default(), ValueMode::ImmutableOwned)
+    let rhs = Expression::int(4, None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(rhs_member));
 
     let rpn = ExpressionRpn {
@@ -316,7 +318,7 @@ fn provenance_unioned_through_constant_folding() {
             ExpressionRpnItem::Operand(rhs),
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
-                location: SourceLocation::default(),
+                span: None,
             },
         ],
     };
@@ -349,7 +351,7 @@ fn provenance_unioned_through_constant_folding() {
 fn empty_expression_has_empty_provenance() {
     let expr = Expression::new(
         crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::Int(1),
-        SourceLocation::default(),
+        None,
         builtin_type_ids::INT,
         DataType::Int,
         ValueMode::ImmutableOwned,

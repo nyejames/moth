@@ -56,7 +56,6 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -70,14 +69,14 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
 }
 
 fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, SourceLocation::default(), ValueMode::ImmutableOwned)
+    Expression::bool(value, None, ValueMode::ImmutableOwned)
 }
 
 /// Builds a runtime (non-const) string reference expression.
 fn runtime_string_expression() -> Expression {
     Expression::new(
         ExpressionKind::Reference(InternedPath::new()),
-        SourceLocation::default(),
+        None,
         builtin_type_ids::STRING,
         DataType::StringSlice,
         ValueMode::ImmutableOwned,
@@ -91,19 +90,14 @@ fn build_text_template(
 ) -> TemplateIrId {
     let text_id = string_table.intern(text);
     let mut builder = TemplateIrBuilder::new(store);
-    let text_node = builder.push_text_node(
-        text_id,
-        text.len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
-    let root = builder.push_sequence_node(vec![text_node], SourceLocation::default());
+    let text_node = builder.push_text_node(text_id, text.len(), TemplateSegmentOrigin::Body, None);
+    let root = builder.push_sequence_node(vec![text_node], None);
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -117,29 +111,18 @@ fn build_slot_wrapper_template(
     let before_id = string_table.intern(before);
     let after_id = string_table.intern(after);
     let mut builder = TemplateIrBuilder::new(store);
-    let before_node = builder.push_text_node(
-        before_id,
-        before.len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
-    let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
-    let after_node = builder.push_text_node(
-        after_id,
-        after.len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
-    let root = builder.push_sequence_node(
-        vec![before_node, slot_node, after_node],
-        SourceLocation::default(),
-    );
+    let before_node =
+        builder.push_text_node(before_id, before.len(), TemplateSegmentOrigin::Body, None);
+    let slot_node = builder.push_slot_node(SlotKey::Default, None);
+    let after_node =
+        builder.push_text_node(after_id, after.len(), TemplateSegmentOrigin::Body, None);
+    let root = builder.push_sequence_node(vec![before_node, slot_node, after_node], None);
     builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -154,30 +137,22 @@ fn build_two_slot_wrapper_template(
     let after_id = string_table.intern("after");
     let named_key = SlotKey::Named(named_id);
     let mut builder = TemplateIrBuilder::new(store);
-    let before_node = builder.push_text_node(
-        before_id,
-        "before".len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
-    let default_slot = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
-    let named_slot = builder.push_slot_node(named_key.clone(), SourceLocation::default());
-    let after_node = builder.push_text_node(
-        after_id,
-        "after".len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
+    let before_node =
+        builder.push_text_node(before_id, "before".len(), TemplateSegmentOrigin::Body, None);
+    let default_slot = builder.push_slot_node(SlotKey::Default, None);
+    let named_slot = builder.push_slot_node(named_key.clone(), None);
+    let after_node =
+        builder.push_text_node(after_id, "after".len(), TemplateSegmentOrigin::Body, None);
     let root = builder.push_sequence_node(
         vec![before_node, default_slot, named_slot, after_node],
-        SourceLocation::default(),
+        None,
     );
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     );
     let named_occurrence_id = match &store
         .get_node(named_slot)
@@ -197,19 +172,15 @@ fn build_expression_wrapper_template_with_expression(
     expression: Expression,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let mut builder = TemplateIrBuilder::new(store);
-    let dynamic_node = builder.push_dynamic_expression_node(
-        expression,
-        TemplateSegmentOrigin::Body,
-        None,
-        SourceLocation::default(),
-    );
-    let root = builder.push_sequence_node(vec![dynamic_node], SourceLocation::default());
+    let dynamic_node =
+        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None, None);
+    let root = builder.push_sequence_node(vec![dynamic_node], None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::empty(),
-        SourceLocation::default(),
+        None,
     );
     let site_id = match &store
         .get_node(dynamic_node)
@@ -230,19 +201,15 @@ fn build_false_no_else_branch_template(
 ) -> TemplateIrId {
     let body_text = string_table.intern("hidden");
     let mut builder = TemplateIrBuilder::new(store);
-    let body_node = builder.push_text_node(
-        body_text,
-        "hidden".len(),
-        TemplateSegmentOrigin::Body,
-        SourceLocation::default(),
-    );
+    let body_node =
+        builder.push_text_node(body_text, "hidden".len(), TemplateSegmentOrigin::Body, None);
     let branch = TemplateIrBranch::new(
         TemplateBranchSelector::Bool(bool_expression(false)),
         body_node,
-        SourceLocation::default(),
+        None,
         builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, SourceLocation::default());
+    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -251,7 +218,7 @@ fn build_false_no_else_branch_template(
             has_control_flow: true,
             ..TemplateIrSummary::empty()
         },
-        SourceLocation::default(),
+        None,
     )
 }
 
@@ -325,15 +292,15 @@ fn build_wrapper_context_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![child_node], None);
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
 
         let wrapper_ref = TemplateWrapperReference::new(
@@ -383,15 +350,15 @@ fn build_expression_wrapper_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![child_node], None);
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
 
         let wrapper_expression_overlay_id = tir
@@ -483,15 +450,15 @@ fn build_slot_resolution_wrapper_fixture(
                 TemplateTirPhase::Composed,
                 empty_overlay,
             ),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![child_node], None);
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
 
         let slot_overlay_id = tir
@@ -573,14 +540,10 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
         let outer_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut tir);
             builder.push_dynamic_expression_node(
-                Expression::string_slice(
-                    outer_expression,
-                    SourceLocation::default(),
-                    ValueMode::ImmutableOwned,
-                ),
+                Expression::string_slice(outer_expression, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                SourceLocation::default(),
+                None,
             )
         };
         let (outer_wrapper_template_id, nested_child_node) = {
@@ -591,26 +554,26 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let slot_node = builder.push_slot_node(SlotKey::Default, SourceLocation::default());
+            let slot_node = builder.push_slot_node(SlotKey::Default, None);
             let after_text = string_table.intern("outer-after");
             let after_node = builder.push_text_node(
                 after_text,
                 "outer-after".len(),
                 TemplateSegmentOrigin::Body,
-                SourceLocation::default(),
+                None,
             );
             let root = builder.push_sequence_node(
                 vec![outer_dynamic_node, nested_child_node, slot_node, after_node],
-                SourceLocation::default(),
+                None,
             );
             let template_id = builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                SourceLocation::default(),
+                None,
             );
             (template_id, nested_child_node)
         };
@@ -623,16 +586,15 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                     TemplateTirPhase::Composed,
                     empty_context,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let root =
-                builder.push_sequence_node(vec![parent_child_node], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![parent_child_node], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                SourceLocation::default(),
+                None,
             )
         };
 
@@ -706,7 +668,7 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 outer_expression_site_id,
                 Box::new(Expression::string_slice(
                     string_table.intern("outer-overlay"),
-                    SourceLocation::default(),
+                    None,
                     ValueMode::ImmutableOwned,
                 )),
             )],
@@ -855,7 +817,7 @@ fn assert_text_body(body: &OwnedRuntimeTemplateBody, expected: &str, string_tabl
         OwnedRuntimeTemplateNode::Text { text, .. } => {
             assert_eq!(text.clone().into_text().as_deref(), Some(expected));
         }
-        OwnedRuntimeTemplateNode::Sequence { children } if children.len() == 1 => {
+        OwnedRuntimeTemplateNode::Sequence { children, .. } if children.len() == 1 => {
             assert_text_node(&children[0], expected, string_table);
         }
         other => panic!("expected Text or single-child sequence, got {:?}", other),
@@ -960,15 +922,15 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
                 TemplateTirPhase::Composed,
                 TemplateViewContext::default(),
             ),
-            SourceLocation::default(),
+            None,
         );
-        let root = builder.push_sequence_node(vec![child_node], SourceLocation::default());
+        let root = builder.push_sequence_node(vec![child_node], None);
         let parent = builder.finish_template(
             root,
             Style::default(),
             TemplateType::String,
             TemplateIrSummary::empty(),
-            SourceLocation::default(),
+            None,
         );
 
         let inner_ref = TemplateWrapperReference::new(
@@ -1028,7 +990,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 
     let handoff = handoff_fixture(&fixture, &mut string_table);
     let outer = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = outer else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = outer else {
         panic!("expected the outer wrapper sequence, got {outer:?}");
     };
     assert_eq!(children.len(), 4);
@@ -1043,6 +1005,7 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 
     let OwnedRuntimeTemplateNode::Sequence {
         children: inner_children,
+        ..
     } = &children[1]
     else {
         panic!("expected the nested occurrence wrapper in the handoff");
@@ -1132,11 +1095,7 @@ fn prepared_fold_applies_wrapper_expression_overlay() {
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(
-            wrapper_text,
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        ),
+        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
         None,
     );
     let emission = fold_fixture(&fixture, &mut string_table);
@@ -1161,7 +1120,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         runtime_string_expression(),
         Some(Expression::string_slice(
             outer_text,
-            SourceLocation::default(),
+            None,
             ValueMode::ImmutableOwned,
         )),
     );
@@ -1183,11 +1142,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     let wrapper_text = string_table.intern("wrapper-local");
     let (runtime_outer_fixture, _) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(
-            wrapper_text,
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        ),
+        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
         Some(runtime_string_expression()),
     );
 
@@ -1210,7 +1165,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
 
     let handoff = handoff_fixture(&runtime_outer_fixture, &mut string_table);
     let wrapped = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = wrapped else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!(
             "expected wrapper sequence in the owned handoff, got {:?}",
             wrapped
@@ -1218,7 +1173,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     };
     let expression_node = match children.first() {
         Some(OwnedRuntimeTemplateNode::DynamicExpression { .. }) => &children[0],
-        Some(OwnedRuntimeTemplateNode::Sequence { children }) if children.len() == 1 => {
+        Some(OwnedRuntimeTemplateNode::Sequence { children, .. }) if children.len() == 1 => {
             &children[0]
         }
         Some(other) => {
@@ -1244,11 +1199,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
     let wrapper_text = string_table.intern("wrapper-overlay");
     let (fixture, site_id) = build_expression_wrapper_fixture(
         &mut string_table,
-        Expression::string_slice(
-            wrapper_text,
-            SourceLocation::default(),
-            ValueMode::ImmutableOwned,
-        ),
+        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
         None,
     );
     let runtime_context = {
@@ -1294,12 +1245,12 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
 
     let handoff = handoff_fixture(&fixture, &mut string_table);
     let wrapped = expect_single_render_child(&handoff.body);
-    let OwnedRuntimeTemplateNode::Sequence { children } = wrapped else {
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!("expected wrapper handoff sequence, got {wrapped:?}");
     };
     let expression_node = match children.first() {
         Some(OwnedRuntimeTemplateNode::DynamicExpression { .. }) => &children[0],
-        Some(OwnedRuntimeTemplateNode::Sequence { children }) if children.len() == 1 => {
+        Some(OwnedRuntimeTemplateNode::Sequence { children, .. }) if children.len() == 1 => {
             &children[0]
         }
         Some(other) => panic!("expected structural wrapper expression, got {other:?}"),
@@ -1342,9 +1293,9 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     {
         let mut tir = fixture.store.borrow_mut();
         let slot_plan_id = tir.push_slot_plan(TemplateSlotPlan {
-            location: SourceLocation::default(),
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
+            span: None,
         });
         tir.attach_runtime_slot_plan(source_template_id, slot_plan_id)
             .expect("source template should accept the committed slot plan");
@@ -1525,15 +1476,15 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
                     TemplateTirPhase::Composed,
                     empty_overlay,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let root = builder.push_sequence_node(vec![child], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![child], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                SourceLocation::default(),
+                None,
             )
         };
 
@@ -1545,15 +1496,15 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
                     TemplateTirPhase::Composed,
                     empty_overlay,
                 ),
-                SourceLocation::default(),
+                None,
             );
-            let root = builder.push_sequence_node(vec![child], SourceLocation::default());
+            let root = builder.push_sequence_node(vec![child], None);
             builder.finish_template(
                 root,
                 Style::default(),
                 TemplateType::String,
                 TemplateIrSummary::empty(),
-                SourceLocation::default(),
+                None,
             )
         };
 

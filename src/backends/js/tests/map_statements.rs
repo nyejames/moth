@@ -36,7 +36,6 @@ fn map_get_statement_lowers_to_helper() {
             args: vec![key],
             result: Some(LocalId(1)),
         },
-        1,
     );
 
     let block = HirBlock {
@@ -113,7 +112,6 @@ fn map_set_statement_without_result_emits_plain_call() {
             args: vec![key, value],
             result: None,
         },
-        1,
     );
 
     let block = HirBlock {
@@ -180,7 +178,6 @@ fn map_infallible_ops_lower_to_plain_helpers() {
             args: vec![key.clone()],
             result: Some(LocalId(1)),
         },
-        1,
     );
 
     let clear_stmt = statement(
@@ -191,7 +188,6 @@ fn map_infallible_ops_lower_to_plain_helpers() {
             args: vec![],
             result: None,
         },
-        2,
     );
 
     let length_stmt = statement(
@@ -202,7 +198,6 @@ fn map_infallible_ops_lower_to_plain_helpers() {
             args: vec![],
             result: Some(LocalId(2)),
         },
-        3,
     );
 
     let block = HirBlock {
@@ -289,7 +284,6 @@ fn map_remove_statement_lowers_to_helper() {
             args: vec![key],
             result: Some(LocalId(1)),
         },
-        1,
     );
 
     let block = HirBlock {

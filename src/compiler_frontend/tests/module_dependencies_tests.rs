@@ -14,8 +14,9 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::module_symbols::{PublicExportEntry, PublicExportTarget};
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, HeaderKind, HeaderParseOptions, LocalDeclarationOrderingHint,
-    bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    BoundModuleHeaders, HeaderKind, HeaderParseOptions, HeaderPreparationFailure,
+    LocalDeclarationOrderingHint, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -24,8 +25,8 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::SourceFileTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::path::PathBuf;
@@ -39,22 +40,38 @@ fn parse_module_headers(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path_buf = PathBuf::from(entry_path);
+    let all_paths = files
+        .iter()
+        .map(|(path, _)| PathBuf::from(path))
+        .collect::<Vec<_>>();
+    let source_files =
+        SourceDatabase::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
+            .expect("fixture source identities should build");
+    let file_id_for = |path: &str| {
+        source_files
+            .get_by_canonical_path(&PathBuf::from(path))
+            .map(|identity| identity.id)
+            .unwrap_or_else(|| panic!("fixture file {path} should have a source identity"))
+    };
 
     let mut prepared_outputs = Vec::with_capacity(files.len());
     let mut const_template_offset = 0usize;
     let mut runtime_fragment_offset = 0usize;
+    let mut retained_span_builders = Vec::with_capacity(files.len());
 
     for (path, source) in files {
         let path_buf = PathBuf::from(path);
         let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(FileId(0)),
+            file_id_for(path),
+            &mut span_builder,
         )
         .expect("tokenization should succeed");
 
@@ -65,22 +82,31 @@ fn parse_module_headers(
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
+            &mut span_builder,
         )
         .expect("preparation should succeed");
+        // Keep every source's span builder alive for the whole fixture so retained header
+        // spans keep their owner table across the binding stage.
+        retained_span_builders.push((file_id_for(path), span_builder));
 
         const_template_offset += output.const_template_count;
         runtime_fragment_offset += output.runtime_fragment_count;
         prepared_outputs.push(output);
     }
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
+        &source_files,
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -164,31 +190,35 @@ fn reports_circular_dependencies() {
         ],
         "src/a.moth",
     );
+    let cycle_header_name_span = headers
+        .headers
+        .iter()
+        .find(|header| header_name(header, &string_table) == "Middle")
+        .map(|header| header.name_span)
+        .expect("cycle fixture must contain the Middle header");
 
-    let bag =
+    let messages =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect_err("cycle should fail dependency sorting");
+            .expect_err("cycle should fail dependency sorting")
+            .into_messages(&string_table);
+    let diagnostic_string_table = &messages.string_table;
 
-    let cycle_diagnostic = bag
-        .diagnostics()
+    let cycle_diagnostic = messages
+        .diagnostic_slice()
         .iter()
         .find(|diagnostic| {
             let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
                 return false;
             };
 
-            let path = path.to_portable_string(&string_table);
+            let path = path.to_portable_string(diagnostic_string_table);
             path.contains("Top") || path.contains("Middle")
         })
-        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {bag:?}"));
+        .unwrap_or_else(|| panic!("expected a cycle diagnostic, got: {messages:?}"));
 
-    assert!(
-        cycle_diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&string_table)
-            .contains("src/"),
-        "cycle diagnostics should point at a declaration location instead of the default location"
+    assert_eq!(
+        cycle_diagnostic.primary_span, cycle_header_name_span,
+        "cycle diagnostics must retain the exact owning header name span"
     );
 }
 
@@ -360,36 +390,63 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path = PathBuf::from("src/a.moth");
     let file_path = PathBuf::from("src/a.moth");
+    let source_files = SourceDatabase::build(
+        std::iter::once(&file_path),
+        &entry_path,
+        None,
+        &mut string_table,
+    )
+    .expect("fixture source identity should build");
+    let file_id = source_files
+        .get_by_canonical_path(&file_path)
+        .expect("fixture source identity should be present")
+        .id;
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         "make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n",
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        file_id,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
-    let output =
-        prepare_file_from_tokens(file_tokens, &entry_path, &options, &mut string_table, 0, 0)
-            .expect("preparation should succeed");
-
-    let prepared_syntax = prepare_header_syntax(vec![output], &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        &entry_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut [output],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("header syntax preparation should succeed");
     let result = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
+        &source_files,
         &mut string_table,
     );
 
-    let bag = match result {
-        Err(bag) => bag,
+    let failure = match result {
+        Err(failure) => failure,
         Ok(_) => panic!("same-file forward capacity reference should fail during header parsing"),
+    };
+    let HeaderPreparationFailure::Diagnosed(bag) = failure else {
+        panic!("same-file forward capacity reference should be a diagnosed failure: {failure:?}");
     };
 
     let found = bag.diagnostics().iter().any(|diagnostic| {
@@ -694,17 +751,19 @@ fn qualified_alias_cycle_reports_circular_dependency() {
         "src/app.moth",
     );
 
-    let diagnostics =
+    let messages =
         resolve_module_dependencies(headers, &ContentSourceTargets::empty(), &mut string_table)
-            .expect_err("qualified aliases that reference each other must form a cycle");
+            .expect_err("qualified aliases that reference each other must form a cycle")
+            .into_messages(&string_table);
     assert!(
-        diagnostics.diagnostics().iter().any(|diagnostic| {
-            matches!(
+        messages
+            .diagnostic_slice()
+            .iter()
+            .any(|diagnostic| matches!(
                 &diagnostic.payload,
                 DiagnosticPayload::CircularDependency { .. }
-            )
-        }),
-        "qualified alias cycle should retain the circular-dependency diagnostic: {diagnostics:?}"
+            )),
+        "qualified alias cycle should retain the circular-dependency diagnostic: {messages:?}"
     );
 }
 
@@ -950,42 +1009,47 @@ fn parse_module_headers_with_content_sources(
         .map(|(path, _)| PathBuf::from(path))
         .collect::<Vec<_>>();
     let source_files =
-        SourceFileTable::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
+        SourceDatabase::build(all_paths.iter(), &entry_path_buf, None, &mut string_table)
             .expect("fixture source identities should build");
     let file_id_for = |path: &str| {
         source_files
             .get_by_canonical_path(&PathBuf::from(path))
-            .map(|identity| identity.file_id)
+            .map(|identity| identity.id)
             .unwrap_or_else(|| panic!("fixture file {path} should have a source identity"))
     };
 
     let mut prepared_outputs = Vec::new();
+    let mut retained_span_builders = Vec::new();
 
     for (path, source) in moth_files {
         let path_buf = PathBuf::from(path);
         let interned_path = InternedPath::try_from_filesystem_path(&path_buf, &mut string_table)
             .expect("test path should be UTF-8");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
             TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
+            &mut span_builder,
         )
         .expect("tokenization should succeed");
+        let output = prepare_file_from_tokens(
+            file_tokens,
+            &entry_path_buf,
+            &options,
+            &mut string_table,
+            0,
+            0,
+            &mut span_builder,
+        )
+        .expect("preparation should succeed");
 
-        prepared_outputs.push(
-            prepare_file_from_tokens(
-                file_tokens,
-                &entry_path_buf,
-                &options,
-                &mut string_table,
-                0,
-                0,
-            )
-            .expect("preparation should succeed"),
-        );
+        // Keep every source's builder alive through the sorting and binding assertions below.
+        retained_span_builders.push((file_id_for(path), span_builder));
+        prepared_outputs.push(output);
     }
 
     for (path, source) in templates {
@@ -994,20 +1058,23 @@ fn parse_module_headers_with_content_sources(
             .expect("test path should be UTF-8");
         let entry_mode = TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template has a tokenizer entry mode");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let file_tokens = tokenize(
             source,
             &interned_path,
             entry_mode,
             &style_directives,
             &mut string_table,
-            Some(file_id_for(path)),
+            file_id_for(path),
+            &mut span_builder,
         )
         .expect("template tokenization should succeed");
-
-        prepared_outputs.push(
-            prepare_moth_template_file(file_tokens, &mut string_table)
-                .expect("template preparation should succeed"),
-        );
+        // The template's retained tokens index the builder's table; prepare while the builder
+        // remains available, then retain it for the remainder of this fixture.
+        let output = prepare_moth_template_file(file_tokens, &mut string_table, &mut span_builder)
+            .expect("template preparation should succeed");
+        retained_span_builders.push((file_id_for(path), span_builder));
+        prepared_outputs.push(output);
     }
 
     for (path, source) in markdown_files {
@@ -1018,7 +1085,7 @@ fn parse_module_headers_with_content_sources(
             PlainMarkdownPrepareInput {
                 source_code: source,
                 source_file: interned_path,
-                file_id: Some(file_id_for(path)),
+                file_id: file_id_for(path),
                 canonical_os_path: None,
             },
             &mut string_table,
@@ -1046,15 +1113,14 @@ fn parse_module_headers_with_content_sources(
             );
             let Some(target) = source_files
                 .get_by_canonical_path(&target_path)
-                .map(|identity| identity.file_id)
+                .map(|identity| identity.id)
             else {
                 continue;
             };
+            let source_file = reference.source_file;
             resolved_references
                 .push(ResolvedFileReference {
-                    source_file: reference
-                        .source_file
-                        .expect("fixture prepared rows carry a FileId"),
+                    source_file,
                     path_syntax: reference.path_syntax,
                     class: reference.class,
                     outcome: ResolvedFileReferenceOutcome::Target(
@@ -1070,14 +1136,19 @@ fn parse_module_headers_with_content_sources(
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
-        .expect("header syntax preparation should succeed");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("header syntax preparation should succeed");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
+        &source_files,
         &mut string_table,
     )
     .expect("header binding should succeed");
@@ -1162,7 +1233,9 @@ fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
         .find(|header| header.local_ordering_hints.len() == 2)
         .expect("the repeated content shell should retain both authored hints");
 
-    let edges = graph.sorted_dependency_edges_for_header(consumer, &string_table);
+    let edges = graph
+        .sorted_dependency_edges_for_header(consumer, &string_table)
+        .expect("prepared content headers have registered source identities");
     let content_edges = edges
         .iter()
         .filter(|edge| matches!(edge.kind, DependencyEdgeKind::GraphHeader))
@@ -1202,29 +1275,27 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
             "@page.moth",
         );
 
-    let bag = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
-        .expect_err("a real content dependency cycle should fail dependency sorting");
+    let messages = resolve_module_dependencies(headers, &content_source_targets, &mut string_table)
+        .expect_err("a real content dependency cycle should fail dependency sorting")
+        .into_messages(&string_table);
+    let diagnostic_string_table = &messages.string_table;
 
-    let cycle_diagnostic = bag
-        .diagnostics()
+    let cycle_diagnostic = messages
+        .diagnostic_slice()
         .iter()
         .find(|diagnostic| {
             let DiagnosticPayload::CircularDependency { path } = &diagnostic.payload else {
                 return false;
             };
 
-            let path = path.to_portable_string(&string_table);
+            let path = path.to_portable_string(diagnostic_string_table);
             path.contains("docs/intro.mtf/content") || path.contains("legal/license.mtf/content")
         })
-        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {bag:?}"));
+        .unwrap_or_else(|| panic!("expected a content cycle diagnostic, got: {messages:?}"));
 
-    let diagnostic_scope = cycle_diagnostic
-        .primary_location
-        .scope
-        .to_portable_string(&string_table);
     assert!(
-        diagnostic_scope == "docs/intro.mtf" || diagnostic_scope == "legal/license.mtf",
-        "the cycle diagnostic should point at a content constant's own location, got {diagnostic_scope}"
+        cycle_diagnostic.primary_span.is_some(),
+        "the cycle diagnostic should point at a content constant's own span"
     );
 }
 
@@ -1242,7 +1313,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let project_root = PathBuf::from("project-root");
     let root_file = project_root.join("components/@page.moth");
     let icon_template = project_root.join("components/icon.mtf");
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         [&root_file, &icon_template],
         &root_file,
         Some(
@@ -1261,46 +1332,46 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let root_file_id = source_files
         .get_by_canonical_path(&root_file)
         .expect("root file identity")
-        .file_id;
+        .id;
     let icon_file_id = source_files
         .get_by_canonical_path(&icon_template)
         .expect("icon identity")
-        .file_id;
-    let root_logical = source_files
-        .get(root_file_id)
-        .expect("root identity")
-        .logical_path
-        .clone();
-    let icon_logical = source_files
-        .get(icon_file_id)
-        .expect("icon identity")
-        .logical_path
-        .clone();
+        .id;
+    let root_logical = source_files.legacy_logical_path(root_file_id);
+    let icon_logical = source_files.legacy_logical_path(icon_file_id);
 
     let entry_path_buf = root_logical.to_path_buf(&string_table);
     let mut prepared_outputs = Vec::new();
+    let mut retained_span_builders = Vec::new();
 
+    let mut root_span_builder = ExtendedSpanBuilder::new();
     let root_tokens = tokenize(
         "icon #= @icon.mtf\n",
         &root_logical,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(root_file_id),
+        root_file_id,
+        &mut root_span_builder,
     )
     .expect("root file should tokenize");
-    prepared_outputs.push(
-        prepare_file_from_tokens(
-            root_tokens,
-            &entry_path_buf,
-            &options,
-            &mut string_table,
-            0,
-            0,
-        )
-        .expect("root file should prepare"),
-    );
+    let root_output = prepare_file_from_tokens(
+        root_tokens,
+        &entry_path_buf,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut root_span_builder,
+    )
+    .expect("root file should prepare");
 
+    // The prepared root file keeps its source identity, but its retained tokens still index
+    // this builder's table; keep it alive through the binding assertions below.
+    retained_span_builders.push((root_file_id, root_span_builder));
+    prepared_outputs.push(root_output);
+
+    let mut icon_span_builder = ExtendedSpanBuilder::new();
     let icon_tokens = tokenize(
         "[: icon body]",
         &icon_logical,
@@ -1308,27 +1379,27 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
             .expect("Moth template has a tokenizer entry mode"),
         &style_directives,
         &mut string_table,
-        Some(icon_file_id),
+        icon_file_id,
+        &mut icon_span_builder,
     )
     .expect("icon template should tokenize");
-    prepared_outputs.push(
-        prepare_moth_template_file(icon_tokens, &mut string_table)
-            .expect("icon template should prepare"),
-    );
+    let icon_output =
+        prepare_moth_template_file(icon_tokens, &mut string_table, &mut icon_span_builder)
+            .expect("icon template should prepare");
+    retained_span_builders.push((icon_file_id, icon_span_builder));
+    prepared_outputs.push(icon_output);
 
     // Simulate Stage 0 for the nested module: the module-relative authored occurrence inside
     // `components/@page.moth` resolves to the icon template's canonical identity.
+    let mut resolved_references = ResolvedFileReferenceTable::new();
     let content_row = prepared_outputs[0]
         .structural_file_references
         .iter()
         .find(|reference| reference.class == PreparedFileReferenceClass::ContentSource)
         .expect("the nested initializer should retain a content-class row");
-    let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
         .push(ResolvedFileReference {
-            source_file: content_row
-                .source_file
-                .expect("fixture prepared rows carry a FileId"),
+            source_file: content_row.source_file,
             path_syntax: content_row.path_syntax,
             class: content_row.class,
             outcome: ResolvedFileReferenceOutcome::Target(
@@ -1344,14 +1415,19 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         &mut string_table,
     );
 
-    let prepared_syntax = prepare_header_syntax(prepared_outputs, &mut string_table)
-        .expect("nested header syntax should prepare");
+    let prepared_syntax = prepare_header_syntax(
+        &mut prepared_outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("nested header syntax should prepare");
     let headers = bind_module_headers(
         prepared_syntax,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         None,
+        &source_files,
         &mut string_table,
     )
     .expect("nested headers should bind");

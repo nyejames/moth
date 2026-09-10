@@ -7,7 +7,6 @@
 use std::process::ExitCode;
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandStatus {
@@ -56,12 +55,7 @@ pub(crate) fn emit_benchmark_status(error_count: usize, warning_count: usize) {
 /// WHY: process status is the authority for infrastructure failures; they must not be presented
 ///      as compiler diagnostic counts in the stable status record.
 pub(crate) fn benchmark_diagnostic_counts(messages: &CompilerMessages) -> Option<(usize, usize)> {
-    if messages.diagnostics().any(|diagnostic| {
-        matches!(
-            &diagnostic.payload,
-            DiagnosticPayload::InfrastructureError { .. }
-        )
-    }) {
+    if messages.has_infrastructure_error() {
         return None;
     }
 

@@ -32,8 +32,6 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     pub(crate) fn emit_statement(&mut self, statement: &HirStatement) -> Result<(), CompilerError> {
-        self.emit_location_comment(&statement.location);
-
         match &statement.kind {
             HirStatementKind::Assign { target, value } => {
                 self.emit_assignment(statement, target, value)?;

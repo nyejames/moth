@@ -1,4 +1,4 @@
-//! Core trait registration unit tests for the AST environment builder.
+//! Trait registration and requirement substitution tests for the AST environment builder.
 //!
 //! WHAT: covers the unified `register_core_cast_traits` path and the
 //!      `core_trait_id_for_name` lookup for both `DISPLAYABLE` and the
@@ -9,19 +9,28 @@
 //!      `builtin_for` can find. Tests here pin that contract without
 //!      touching the full builder pipeline.
 
+use super::{signature_with_trait_this_as_parameter, trait_this_parameter_list};
+use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
+};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic;
+use crate::compiler_frontend::tokenizer::lexer::tokenize;
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, DISPLAYABLE_TRAIT_NAME, TraitEnvironment,
 };
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::syntax::TraitReferenceSyntax;
-
-use crate::compiler_frontend::ast::module_ast::environment::traits::AstModuleEnvironmentBuilder;
 
 #[test]
 fn displayable_registers_through_unified_core_path() {
@@ -51,11 +60,8 @@ fn displayable_resolves_via_core_trait_id_for_name() {
     let mut trait_environment = TraitEnvironment::new();
     trait_environment.register_core_displayable(&mut type_environment, &mut string_table);
 
-    let trait_ref = TraitReferenceSyntax {
-        name: string_table.intern(DISPLAYABLE_TRAIT_NAME),
-        location: SourceLocation::default(),
-    };
-    let resolved = trait_environment.core_trait_id_for_name(trait_ref.name, &string_table);
+    let trait_name = string_table.intern(DISPLAYABLE_TRAIT_NAME);
+    let resolved = trait_environment.core_trait_id_for_name(trait_name, &string_table);
     assert!(
         resolved.is_some(),
         "DISPLAYABLE must resolve without dependency clauses"
@@ -339,4 +345,210 @@ fn register_error_nominal_type(
     };
     let (_, error_type_id) = type_environment.register_nominal_struct(struct_def);
     error_type_id
+}
+
+#[test]
+fn trait_this_substitution_preserves_authored_signature_spans() {
+    let source = "CLONE_VALUE must:\n    clone_value |This, other This| -> This\n;\n";
+    let mut strings = StringTable::new();
+    let path = std::path::PathBuf::from("requirement.moth");
+    let sources =
+        SourceDatabase::build([&path], &path, None, &mut strings).expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&path)
+        .expect("source identity")
+        .id;
+    let scope = InternedPath::try_from_filesystem_path(&path, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("signature tokens");
+    let prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &path,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("trait declaration should prepare");
+    let declaration = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Trait { declaration } => Some(declaration),
+            _ => None,
+        })
+        .expect("authored trait declaration");
+    let signature = &declaration.requirements[0].signature;
+    assert_eq!(signature.parameters.len(), 2);
+    assert_eq!(signature.returns.len(), 1);
+    let concrete_name = strings.intern("Concrete");
+    let original_parameter_type_spans: Vec<_> = signature
+        .parameters
+        .iter()
+        .map(|parameter| match &parameter.type_annotation {
+            ParsedTypeRef::This { span, .. } => *span,
+            other => panic!("expected authored This parameter, got {other:?}"),
+        })
+        .collect();
+    let original_return_type_span = match &signature.returns[0].value.type_annotation {
+        ParsedTypeRef::This { span, .. } => *span,
+        other => panic!("expected authored This return, got {other:?}"),
+    };
+    let this_name = strings.intern("This");
+    let synthetic_parameters = trait_this_parameter_list(this_name, Some(declaration.name_span));
+    let synthetic_parameter = synthetic_parameters
+        .parameters
+        .first()
+        .expect("trait This parameter");
+    assert_eq!(synthetic_parameter.name, this_name);
+    assert_eq!(
+        synthetic_parameter.span,
+        Some(declaration.name_span),
+        "synthetic This must preserve the supplied exact span"
+    );
+    let synthetic_range = synthetic_parameter
+        .span
+        .expect("synthetic This must carry its supplied span")
+        .resolve_with(spans.resolver_for(source_id));
+    assert_eq!(
+        &source[synthetic_range.start() as usize..synthetic_range.end() as usize],
+        "CLONE_VALUE"
+    );
+    let substituted = signature_with_trait_this_as_parameter(signature, concrete_name);
+    assert_eq!(substituted.parameters.len(), signature.parameters.len());
+    assert_eq!(substituted.returns.len(), signature.returns.len());
+    for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {
+        assert_eq!(parameter.span, original.span);
+    }
+    assert_eq!(
+        substituted.returns[0].value.span,
+        signature.returns[0].value.span
+    );
+    let receiver = substituted.parameters[0]
+        .span
+        .expect("substituted receiver should retain its span")
+        .resolve_with(spans.resolver_for(source_id));
+    let result = substituted.returns[0]
+        .value
+        .span
+        .expect("substituted return should retain its span")
+        .resolve_with(spans.resolver_for(source_id));
+    assert_eq!(
+        &source[receiver.start() as usize..receiver.end() as usize],
+        "This"
+    );
+    assert_eq!(
+        &source[result.start() as usize..result.end() as usize],
+        "This"
+    );
+    for (parameter, expected_span) in substituted
+        .parameters
+        .iter()
+        .zip(&original_parameter_type_spans)
+    {
+        let (span, range) = match &parameter.type_annotation {
+            ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
+                let span = *span;
+                let range = span
+                    .expect("substituted parameter type should retain its span")
+                    .resolve_with(spans.resolver_for(source_id));
+                (span, range)
+            }
+            other => panic!("expected substituted Named parameter, got {other:?}"),
+        };
+        assert_eq!(span, *expected_span);
+        assert_eq!(
+            &source[range.start() as usize..range.end() as usize],
+            "This"
+        );
+    }
+    let (return_type_span, return_type_range) = match &substituted.returns[0].value.type_annotation
+    {
+        ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
+            let span = *span;
+            let range = span
+                .expect("substituted return type should retain its span")
+                .resolve_with(spans.resolver_for(source_id));
+            (span, range)
+        }
+        other => panic!("expected substituted Named return, got {other:?}"),
+    };
+    assert_eq!(return_type_span, original_return_type_span);
+    assert_eq!(
+        &source[return_type_range.start() as usize..return_type_range.end() as usize],
+        "This"
+    );
+}
+
+#[test]
+fn duplicate_trait_requirement_diagnostic_retains_exact_requirement_spans() {
+    let source =
+        "-- é🦋\nRENDERABLE must:\n    render |This| -> String\n    render |This| -> String\n;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let primary_span = diagnostic
+        .primary_span
+        .expect("duplicate requirement should retain its exact primary span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+
+    let empty_span_builder = ExtendedSpanBuilder::new();
+    let resolver = empty_span_builder.resolver_for(SourceId::COMPILATION_ROOT);
+    let primary_range = primary_span.resolve_with(resolver);
+    assert_eq!(
+        &source[primary_range.start() as usize..primary_range.end() as usize],
+        "render"
+    );
+    assert_eq!(diagnostic.labels.len(), 1);
+
+    let first_span = diagnostic.labels[0]
+        .span
+        .expect("previous requirement label should retain its exact span");
+    assert_eq!(first_span.source(), SourceId::COMPILATION_ROOT);
+    let first_span_builder = ExtendedSpanBuilder::new();
+    let first_range =
+        first_span.resolve_with(first_span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[first_range.start() as usize..first_range.end() as usize],
+        "render"
+    );
+}
+
+#[test]
+fn conformance_target_diagnostic_retains_exact_target_span() {
+    let source = "DISPLAYABLE must:\n;\nInt must DISPLAYABLE\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let target_span = diagnostic
+        .primary_span
+        .expect("conformance target diagnostics should retain their target span");
+    assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
+
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(&source[range.start() as usize..range.end() as usize], "Int");
+}
+
+#[test]
+fn unknown_trait_reference_diagnostic_retains_exact_reference_span() {
+    let source = "Thing = | value Int |\nThing must UNKNOWN\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let trait_span = diagnostic
+        .primary_span
+        .unwrap_or_else(|| panic!("unknown trait reference diagnostic lacks span: {diagnostic:?}"));
+    assert_eq!(trait_span.source(), SourceId::COMPILATION_ROOT);
+
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = trait_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "UNKNOWN"
+    );
 }

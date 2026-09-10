@@ -16,9 +16,8 @@ pub(crate) fn transfer_terminator(
     value_fact_buffer: &mut ValueFactBuffer,
 ) -> Result<(), BorrowCheckError> {
     let mut tracker = StatementAccessTracker::new(layout.local_count());
-    let location = context
-        .diagnostics
-        .terminator_error_location(block_id, terminator);
+    // Forward the side-table authored terminator span; generated terminators stay spanless.
+    let location = context.diagnostics.terminator_error_span(block_id);
     let conflicts_before = stats.conflicts_checked;
     let terminator_order = layout.terminator_order_or_unknown(block_id);
 
@@ -33,7 +32,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -41,7 +40,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 condition,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -53,7 +52,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -61,7 +60,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 result,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -74,7 +73,7 @@ pub(crate) fn transfer_terminator(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -82,7 +81,7 @@ pub(crate) fn transfer_terminator(
                 record_shared_reads_in_expression(
                     &mut read_env,
                     scrutinee,
-                    location.clone(),
+                    location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
             }
@@ -94,7 +93,7 @@ pub(crate) fn transfer_terminator(
                     state,
                     block_id,
                     tracker: &mut tracker,
-                    location: location.clone(),
+                    location,
                     current_order: terminator_order,
                     stats,
                     value_fact_buffer,
@@ -112,7 +111,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -120,7 +119,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 value,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }
@@ -132,7 +131,7 @@ pub(crate) fn transfer_terminator(
                 state,
                 block_id,
                 tracker: &mut tracker,
-                location: location.clone(),
+                location,
                 current_order: terminator_order,
                 stats,
                 value_fact_buffer,
@@ -140,7 +139,7 @@ pub(crate) fn transfer_terminator(
             record_shared_reads_in_expression(
                 &mut read_env,
                 message,
-                location.clone(),
+                location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
         }

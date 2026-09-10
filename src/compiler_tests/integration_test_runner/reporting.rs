@@ -11,9 +11,7 @@ use super::{
     SummaryCounts, TestCaseSpec, WarningExpectation,
 };
 use super::{PolicyEvaluation, PolicyFinding};
-use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, terminal, terse,
-};
+use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticCategory, DiagnosticSeverity,
 };
@@ -714,15 +712,6 @@ pub(crate) fn render_case_result(
                 );
             }
         }
-    } else if let Some(build_result) = &result.build_result
-        && show_warnings
-    {
-        for warning in &build_result.warnings {
-            crate::compiler_frontend::compiler_messages::render::terminal::print_diagnostic(
-                warning,
-                &build_result.string_table,
-            );
-        }
     }
 }
 
@@ -962,16 +951,6 @@ fn format_terse_failure_lines(
             lines.push(terse::format_terse_diagnostic_with_context(
                 diagnostic,
                 messages.diagnostic_render_context(diagnostic_index),
-            ));
-        }
-    }
-
-    if show_warnings && let Some(build_result) = &result.build_result {
-        let render_context = DiagnosticRenderContext::new(&build_result.string_table);
-        for warning in &build_result.warnings {
-            lines.push(terse::format_terse_diagnostic_with_context(
-                warning,
-                render_context,
             ));
         }
     }

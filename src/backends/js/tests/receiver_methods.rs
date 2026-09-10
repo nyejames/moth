@@ -43,7 +43,6 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
             target: HirPlace::Local(LocalId(0)),
             value: int_expression(1, 7, types.int, region),
         },
-        1,
     );
     let call_bump = statement(
         2,
@@ -58,7 +57,6 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
             )],
             result: Some(LocalId(1)),
         },
-        2,
     );
     let caller_block = HirBlock {
         id: BlockId(1),
@@ -162,7 +160,6 @@ fn receiver_method_call_assigns_value_for_return() {
             )],
             result: Some(LocalId(1)),
         },
-        1,
     );
     let caller_block = HirBlock {
         id: BlockId(1),

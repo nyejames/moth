@@ -7,19 +7,18 @@
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::is_camel_case_type_name;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Boxed diagnostic result for generic-parameter scope validation.
+/// Diagnostic result for generic-parameter scope validation.
 ///
-/// WHAT: keeps `from_parameter_list` on a small error boundary so the large
-///       `CompilerDiagnostic` value does not inflate every successful scope build.
-/// WHY: both declaration-syntax parsing and AST type-resolution already box
-///      their generic-parameter diagnostic boundaries; this owner should match.
-type GenericParameterScopeResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// WHAT: keeps `from_parameter_list` on a small error boundary so the diagnostic value does not
+/// inflate every successful scope build.
+/// WHY: both declaration-syntax parsing and AST type-resolution use this shared boundary.
+type GenericParameterScopeResult<T> = Result<T, CompilerDiagnostic>;
 
 // -----------------------------------------------------------
 //  Generic Parameter Declarations
@@ -32,7 +31,7 @@ pub struct TypeParameterId(pub u32);
 pub struct GenericParameter {
     pub id: TypeParameterId,
     pub name: StringId,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
     pub trait_bounds: Vec<GenericTraitBound>,
 }
 
@@ -44,7 +43,7 @@ pub struct GenericParameter {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GenericTraitBound {
     pub trait_name: StringId,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -53,21 +52,22 @@ pub struct GenericParameterList {
 }
 
 impl GenericParameter {
-    /// Remap the parameter name and source location into a merged string table.
+    /// Remap the parameter name and all bound names into a merged string table.
     ///
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.name = remap.get(self.name);
-        self.location.remap_string_ids(remap);
         for trait_bound in &mut self.trait_bounds {
             trait_bound.remap_string_ids(remap);
         }
     }
 
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
+    pub fn rebind_source_identity(&mut self, source_id: SourceId) {
+        if let Some(span) = &mut self.span {
+            *span = SourceSpan::new(source_id, span.local());
+        }
         for trait_bound in &mut self.trait_bounds {
-            trait_bound.rebind_source_identity(logical_path);
+            trait_bound.rebind_source_identity(source_id);
         }
     }
 }
@@ -82,18 +82,14 @@ impl GenericParameterList {
         }
     }
 
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
+    pub fn rebind_source_identity(&mut self, source_id: SourceId) {
         for parameter in &mut self.parameters {
-            parameter.rebind_source_identity(logical_path);
+            parameter.rebind_source_identity(source_id);
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
         self.parameters.is_empty()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.parameters.len()
     }
 
     pub(crate) fn contains_name(&self, name: StringId) -> bool {
@@ -106,11 +102,12 @@ impl GenericParameterList {
 impl GenericTraitBound {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.trait_name = remap.get(self.trait_name);
-        self.location.remap_string_ids(remap);
     }
 
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
+    pub fn rebind_source_identity(&mut self, source_id: SourceId) {
+        if let Some(span) = &mut self.span {
+            *span = SourceSpan::new(source_id, span.local());
+        }
     }
 }
 
@@ -148,7 +145,7 @@ pub(crate) struct ScopedGenericParameter {
     pub(crate) local_id: TypeParameterId,
     pub(crate) canonical_id: Option<GenericParameterId>,
     pub(crate) name: StringId,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl GenericParameterScope {
@@ -169,44 +166,44 @@ impl GenericParameterScope {
 
         for parameter in &parameter_list.parameters {
             if scope.parameters_by_name.contains_key(&parameter.name) {
-                return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+                return Err(CompilerDiagnostic::invalid_declaration(
                     InvalidDeclarationReason::DuplicateGenericParameter {
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.to_owned(),
-                )));
+                    parameter.span,
+                ));
             }
 
             if forbidden_names.contains(&parameter.name) {
-                return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+                return Err(CompilerDiagnostic::invalid_declaration(
                     InvalidDeclarationReason::GenericParameterNameCollision {
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.to_owned(),
-                )));
+                    parameter.span,
+                ));
             }
 
             let parameter_name = string_table.resolve(parameter.name);
             if is_reserved_generic_parameter_name(parameter_name) {
-                return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+                return Err(CompilerDiagnostic::invalid_declaration(
                     InvalidDeclarationReason::ReservedGenericParameterName {
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.to_owned(),
-                )));
+                    parameter.span,
+                ));
             }
 
             if !is_generic_parameter_name(parameter_name) {
-                return Err(Box::new(CompilerDiagnostic::invalid_declaration(
+                return Err(CompilerDiagnostic::invalid_declaration(
                     InvalidDeclarationReason::InvalidGenericParameterName {
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.to_owned(),
-                )));
+                    parameter.span,
+                ));
             }
 
             scope.parameters_by_name.insert(
@@ -239,7 +236,7 @@ impl GenericParameterScope {
                     local_id: TypeParameterId(parameter.id.0),
                     canonical_id: Some(parameter.id),
                     name: parameter.name,
-                    location: SourceLocation::default(),
+                    span: None,
                 },
             );
         }
@@ -264,7 +261,7 @@ fn scoped_parameter(
         local_id: parameter.id,
         canonical_id: canonical_by_local.and_then(|mapping| mapping.get(&parameter.id).copied()),
         name: parameter.name,
-        location: parameter.location.clone(),
+        span: parameter.span,
     }
 }
 

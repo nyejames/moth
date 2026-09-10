@@ -4,7 +4,7 @@ use super::{
     HtmlSiteConfig, PageUrlStyle, parse_html_site_config, prefix_origin, strip_origin_prefix,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::path::PathBuf;
@@ -134,52 +134,39 @@ fn parser_rejects_invalid_page_url_style() {
 }
 
 #[test]
-fn parser_uses_precise_location_from_setting_locations() {
-    use crate::compiler_frontend::compiler_errors::SourceLocation;
-
+fn parser_uses_precise_span_from_setting_spans() {
     let mut config = Config::new(PathBuf::from("project"));
     config.html_section.origin = Some(String::from("invalid"));
 
-    // Store a precise location for the origin key
+    // Store an authored span for the origin key.
     let mut string_table = StringTable::new();
-    let precise_location = SourceLocation::new(
-        InternedPath::try_from_filesystem_path(
-            PathBuf::from("project/config.moth").as_path(),
-            &mut string_table,
-        )
-        .expect("test path should be UTF-8"),
-        Default::default(),
-        Default::default(),
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let precise_span = SourceSpan::new(
+        SourceId::from_index(2),
+        LocalSpan::exact(0, 7, &mut span_builder).expect("test span should fit"),
     );
     config
-        .setting_locations
-        .insert(String::from("origin"), precise_location.clone());
+        .setting_spans
+        .insert(String::from("origin"), precise_span);
 
     let error =
         parse_html_site_config(&config, &mut string_table).expect_err("invalid origin should fail");
 
-    // Verify the error uses the precise location from setting_locations
     let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(diagnostic.primary_location.scope, precise_location.scope);
+    assert_eq!(diagnostic.primary_span, Some(precise_span));
 }
 
 #[test]
-fn parser_falls_back_to_file_location_when_key_not_in_setting_locations() {
+fn parser_uses_no_span_when_setting_has_no_authored_source() {
     let mut config = Config::new(PathBuf::from("project"));
     config.html_section.origin = Some(String::from("invalid"));
-
-    // Don't add the key to setting_locations
 
     let mut string_table = StringTable::new();
     let error =
         parse_html_site_config(&config, &mut string_table).expect_err("invalid origin should fail");
 
-    // Verify the error falls back to file-level location
     let diagnostic = error.diagnostic().expect("config error should be typed");
-    assert_eq!(
-        diagnostic.primary_location.scope.to_path_buf(&string_table),
-        PathBuf::from("project/config.moth")
-    );
+    assert_eq!(diagnostic.primary_span, None);
 }
 
 #[test]

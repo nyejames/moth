@@ -5,25 +5,30 @@
 //! WHY: this API is intentionally not wired into project builds yet, so module-local tests protect
 //! the tooling-facing boundary without adding integration artifacts.
 
+use super::bundle::prepare_file_value_bundle;
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticPayload, ImportDiagnosticKind, InvalidConfigReason,
+    DiagnosticKind, DiagnosticLabelStyle, DiagnosticPayload, ImportDiagnosticKind,
+    InvalidConfigReason, SyntaxDiagnosticKind,
 };
+use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceOutcome;
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
     MothTemplateInput, MothTemplatePathScope, MothTemplateScopeConstant, MothTemplateSource,
     compile_moth_template,
 };
+use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -53,6 +58,69 @@ fn compile_ok(input: MothTemplateInput) -> MothTemplateCompileOutput {
     let mut string_table = StringTable::new();
     compile_moth_template(request(input), &mut string_table)
         .expect("Moth template input should compile")
+}
+
+#[test]
+fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
+    let first_source = "[$html: <script>first_snapshot()</script>]";
+    let second_source = "[$html: <script>second_snapshot()</script>]";
+    let temp_dir = temp_project(&[
+        ("a/page.mtf", first_source),
+        ("b/page.mtf", second_source),
+        ("c/page.mtf", "]"),
+    ]);
+
+    for include_failure in [false, true] {
+        let mut inputs = vec![
+            temp_dir.path().join("a/page.mtf"),
+            temp_dir.path().join("b/page.mtf"),
+        ];
+        if include_failure {
+            inputs.push(temp_dir.path().join("c/page.mtf"));
+        }
+        let mut string_table = StringTable::new();
+        let result =
+            compile_moth_template(request(MothTemplateInput::Files(inputs)), &mut string_table);
+        let messages = if include_failure {
+            result.expect_err("the third document should fail preparation")
+        } else {
+            let output = result.expect("both HTML documents should fold with warnings");
+            let mut messages = CompilerMessages::from_diagnostics(output.warnings, string_table);
+            messages.install_source_contexts(output.warning_source_contexts, 0);
+            messages
+        };
+
+        let mut expected_kinds = vec![
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
+        ];
+        let mut expected_sources = vec![first_source, second_source];
+        if include_failure {
+            expected_kinds.push(DiagnosticKind::Syntax(
+                SyntaxDiagnosticKind::UnescapedImplicitTemplateClose,
+            ));
+            expected_sources.push("]");
+        }
+        assert_eq!(
+            messages
+                .diagnostics()
+                .map(|diagnostic| diagnostic.kind)
+                .collect::<Vec<_>>(),
+            expected_kinds,
+        );
+
+        // Every document has the same logical filename in a separate source domain. A missing
+        // range shift or a substituted current-document context would show the wrong snapshot.
+        for (index, (diagnostic, expected_source)) in
+            messages.diagnostics().zip(expected_sources).enumerate()
+        {
+            let position = messages
+                .diagnostic_render_context(index)
+                .primary_position(diagnostic)
+                .expect("warning should retain its authored source span");
+            assert_eq!(position.line, expected_source);
+        }
+    }
 }
 
 #[test]
@@ -504,6 +572,247 @@ fn files_input_markdown_content_value_is_inlined() {
 }
 
 #[test]
+fn files_input_repeated_markdown_content_value_is_inlined_twice() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let temp_dir = temp_project(&[
+        ("page.mtf", "About\n\n[@docs/legal.md]\n\n[@docs/legal.md]"),
+        ("docs/legal.md", "Plain legal text."),
+    ]);
+    let entry_path =
+        fs::canonicalize(temp_dir.path().join("page.mtf")).expect("entry should canonicalize");
+    let content_path = fs::canonicalize(temp_dir.path().join("docs/legal.md"))
+        .expect("content should canonicalize");
+    let tracked_root = fs::canonicalize(temp_dir.path()).expect("fixture root should canonicalize");
+    crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&tracked_root);
+
+    let output = compile_ok(MothTemplateInput::Files(vec![entry_path.clone()]));
+
+    // Both references resolve to one source identity, so the source is registered and loaded
+    // once and its retained snapshot is reused. Loading it a second time fails the slot's
+    // single-write guard and aborts a valid compile.
+    assert_eq!(output.documents.len(), 1);
+    assert_eq!(
+        output.documents[0]
+            .content
+            .matches("Plain legal text.")
+            .count(),
+        2,
+        "a source referenced twice should inline twice: {}",
+        output.documents[0].content
+    );
+    assert_eq!(
+        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&entry_path),
+        1,
+        "the direct entry should be prepared once across bundle construction and folding",
+    );
+    assert_eq!(
+        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&content_path),
+        1,
+        "a repeated content source should be prepared once and reused",
+    );
+}
+
+/// A lexical `.mtf` spelling can resolve onto a `.md` target, so the entry's authored kind and the
+/// kind its own canonical extension names disagree. A content reference that lands back on that
+/// same canonical path must reuse the registered identity rather than assert the second kind,
+/// which the source database rejects as a conflict.
+#[cfg(unix)]
+#[test]
+fn content_reference_onto_the_entry_reuses_its_registered_kind() {
+    let temp_dir = temp_project(&[("page.md", "# Page\n\n[@page.md]")]);
+    std::os::unix::fs::symlink(
+        temp_dir.path().join("page.md"),
+        temp_dir.path().join("entry.mtf"),
+    )
+    .expect("the template spelling should symlink onto its Markdown target");
+    let mut string_table = StringTable::new();
+
+    let result = compile_moth_template(
+        request(MothTemplateInput::Files(vec![
+            temp_dir.path().join("entry.mtf"),
+        ])),
+        &mut string_table,
+    );
+
+    if let Err(messages) = result {
+        let conflicts: Vec<_> = messages
+            .diagnostics()
+            .filter(|diagnostic| format!("{:?}", diagnostic.payload).contains("conflicting kinds"))
+            .collect();
+        assert!(
+            conflicts.is_empty(),
+            "the entry's own canonical path must not be registered under a second kind: {conflicts:?}"
+        );
+    }
+}
+
+/// `zeta.mtf` names `gamma` then `alpha`, so BFS/reference order is zeta, gamma, alpha.
+/// Canonical logical order is alpha, gamma, zeta. Identities must follow the latter.
+#[test]
+fn content_source_identities_follow_canonical_logical_order_not_reference_order() {
+    let temp_dir = temp_project(&[
+        ("zeta.mtf", "# Zeta\n\n[@gamma.mtf]\n\n[@alpha.mtf]"),
+        ("gamma.mtf", "# Gamma"),
+        ("alpha.mtf", "# Alpha"),
+    ]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("zeta.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+    assert_eq!(units.len(), 1);
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let bundle = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    )
+    .expect("the content closure should prepare");
+
+    let id_for = |name: &str| {
+        let path = fs::canonicalize(temp_dir.path().join(name))
+            .unwrap_or_else(|error| panic!("{name} should canonicalize: {error}"));
+        bundle
+            .source_files
+            .sources()
+            .get_by_canonical_path(&path)
+            .unwrap_or_else(|| panic!("{name} should have a source identity"))
+            .id
+    };
+
+    let alpha = id_for("alpha.mtf");
+    let gamma = id_for("gamma.mtf");
+    let zeta = id_for("zeta.mtf");
+    assert!(
+        alpha < gamma && gamma < zeta,
+        "canonical order is alpha, gamma, zeta; got alpha={alpha:?}, gamma={gamma:?}, zeta={zeta:?}"
+    );
+}
+
+/// A content source is registered before it is prepared, so a failure raised during its
+/// preparation must retain both its exact source snapshot and final logical identity. The
+/// diagnosed boundary owns the finalized source database after the walk stops.
+#[test]
+fn content_source_preparation_failures_name_the_logical_source() {
+    let temp_dir = temp_project(&[
+        ("page.mtf", "# Page\n\n[@docs/broken.mtf]"),
+        ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
+    ]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let Err(messages) = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    ) else {
+        panic!("an unterminated string in a content source should fail preparation");
+    };
+
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("the preparation diagnostic should be present");
+    let source_database = messages
+        .source_database_for_diagnostic(0)
+        .expect("preparation diagnostics should retain their source database");
+    let span = diagnostic
+        .primary_span
+        .expect("the preparation diagnostic should retain its source span");
+    assert_eq!(
+        source_database.retained_text(span.source()),
+        Some("# Broken\n\n[$insert(\"unterminated]\n"),
+        "the diagnosed boundary should retain the exact content snapshot",
+    );
+    let scope = source_database
+        .legacy_logical_path(span.source())
+        .to_path_buf(&string_table);
+    assert_eq!(
+        scope,
+        Path::new("docs/broken.mtf"),
+        "the failure should name the logical content source, got {scope:?}"
+    );
+}
+
+/// Discovery and final registration use the same resolver for logical source paths, while a
+/// resolved diagnostic remains separately owned from its reference row. Keep its source scope
+/// aligned with the final logical source as the bundle settles its identities.
+#[test]
+fn retained_resolution_diagnostics_name_the_final_logical_source() {
+    let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
+    let mut string_table = StringTable::new();
+    let mut units = request(MothTemplateInput::Files(vec![
+        temp_dir.path().join("page.mtf"),
+    ]))
+    .collect_sources(&mut string_table)
+    .expect("the template unit should collect");
+
+    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
+        .expect("style directives should merge");
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let bundle = prepare_file_value_bundle(
+        &mut units[0],
+        &style_directives,
+        &mut string_table,
+        &mut resource_inputs,
+    )
+    .expect("an unresolvable reference is a retained diagnostic, not a bundle failure");
+
+    let diagnostic = bundle
+        .resolved_file_references
+        .iter()
+        .find_map(|reference| match &reference.outcome {
+            ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => Some(diagnostic),
+            _ => None,
+        })
+        .expect("a reference to an absent target should retain a diagnostic");
+
+    assert!(
+        diagnostic.primary_span.is_some(),
+        "the retained resolution diagnostic should keep its authored source span",
+    );
+}
+
+#[test]
+fn unreadable_content_value_surfaces_its_own_read_failure() {
+    let temp_dir = temp_project(&[("page.mtf", "About\n\n[@docs/legal.md]")]);
+    let unreadable = temp_dir.path().join("docs/legal.md");
+    fs::create_dir_all(unreadable.parent().expect("content parent should exist"))
+        .expect("content parent should be created");
+    fs::write(&unreadable, [b'o', b'k', 0xff, b'\n']).expect("invalid UTF-8 should be written");
+    let mut string_table = StringTable::new();
+
+    let messages = compile_moth_template(
+        request(MothTemplateInput::Files(vec![
+            temp_dir.path().join("page.mtf"),
+        ])),
+        &mut string_table,
+    )
+    .expect_err("an unreadable content source should fail the compile");
+
+    // The read now happens before preparation, so the recorded failure must be replayed at the
+    // preparation boundary. Reporting the slot's own "no retained text" state instead would
+    // replace the user-facing read failure with an internal compiler error.
+    let error = messages
+        .infrastructure_error()
+        .expect("the read failure should be reported");
+    assert_eq!(error.error_type, ErrorType::File);
+}
+
+#[test]
 fn file_input_compiles_one_moth_template_file() {
     let temp_dir = temp_project(&[("intro.mtf", "# Intro")]);
     let source_path = temp_dir.path().join("intro.mtf");
@@ -657,6 +966,8 @@ fn duplicate_source_paths_are_diagnostics() {
         diagnostic.payload,
         DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
     ));
+    assert_eq!(diagnostic.labels.len(), 1);
+    assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Secondary);
 }
 
 #[test]

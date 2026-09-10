@@ -5,10 +5,10 @@
 //! WHY: HTML builder mistakes are user-facing project feedback, not infrastructure failures.
 
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::path::Path;
@@ -51,9 +51,9 @@ pub(crate) fn duplicate_html_output_path_messages(
 pub(crate) fn resource_output_path_collision_messages(
     output_path: &Path,
     existing_origin: &str,
-    existing_location: &SourceLocation,
+    existing_span: Option<SourceSpan>,
     conflicting_origin: &str,
-    conflicting_location: &SourceLocation,
+    conflicting_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     let reason = InvalidConfigReason::ResourceOutputPathCollision {
@@ -61,15 +61,11 @@ pub(crate) fn resource_output_path_collision_messages(
         existing_origin: string_table.intern(existing_origin),
         conflicting_origin: string_table.intern(conflicting_origin),
     };
-    let diagnostic =
-        CompilerDiagnostic::invalid_config_reason(None, reason, conflicting_location.clone())
-            .with_labels(vec![
-                DiagnosticLabel::primary(conflicting_location.clone()),
-                DiagnosticLabel::secondary(
-                    existing_location.clone(),
-                    Some(DiagnosticLabelMessage::PreviousDeclaration),
-                ),
-            ]);
+    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, conflicting_span)
+        .with_labels(vec![DiagnosticLabel::secondary(
+            existing_span,
+            Some(DiagnosticLabelMessage::PreviousDeclaration),
+        )]);
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }
@@ -79,7 +75,7 @@ pub(crate) fn resource_output_path_reserved_messages(
     output_path: &Path,
     origin: &str,
     artefact_kind: &str,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     let reason = InvalidConfigReason::ResourceOutputPathReserved {
@@ -87,19 +83,17 @@ pub(crate) fn resource_output_path_reserved_messages(
         origin: string_table.intern(origin),
         artefact_kind: string_table.intern(artefact_kind),
     };
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, location.clone());
+    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, span);
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }
 
 fn html_config_messages(
-    location_path: &Path,
+    _location_path: &Path,
     reason: impl FnOnce(&mut StringTable) -> InvalidConfigReason,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
-    let location = SourceLocation::from_path(location_path, string_table);
-    let diagnostic =
-        CompilerDiagnostic::invalid_config_reason(None, reason(string_table), location);
+    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason(string_table), None);
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }

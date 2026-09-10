@@ -9,16 +9,15 @@
 //!      preparation, and that a Stage 0 root role reaches interface projection intact. The
 //!      semantic stages behind that call are tested with their own owners.
 
-use super::super::prepared_source::PreparedSourceInput;
+use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticPayload};
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions,
-    PreparedHeaderSyntax, parse_file_headers_with_table, prepare_header_syntax,
+    FileFrontendPrepareOutput, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
+    SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
@@ -30,13 +29,16 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::identity::{FileId, SourceFileTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
+use crate::compiler_frontend::tokenizer::tokens::{TokenKind, TokenizerEntryMode};
 use crate::compiler_frontend::{
     FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
@@ -46,26 +48,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Retain tokens under their registered source identity; the caller owns their span builder.
 fn moth_prepared_input(
-    source_path: PathBuf,
-    source_code: &str,
+    source_files: &SourceDatabase,
+    source_path: &Path,
     tokens: FileTokens,
 ) -> PreparedSourceInput {
-    PreparedSourceInput::Moth {
-        source_byte_len: source_code.len(),
-        source_path,
-        tokens: Box::new(tokens),
+    let source_id = source_files
+        .get_by_canonical_path(source_path)
+        .expect("test source should have a registered identity")
+        .id;
+    PreparedSourceInput {
+        source_id,
+        source: PreparedSourceKind::Moth {
+            tokens: Box::new(tokens),
+        },
     }
 }
 
-/// Tokenize source text against a source file table and string table, then build a Moth
-/// `PreparedSourceInput` carrying the retained token stream.
+/// Tokenize the registered source while borrowing its caller-owned span builder.
 fn tokenized_moth_prepared_input(
-    source_files: &SourceFileTable,
+    source_files: &SourceDatabase,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
     source_path: PathBuf,
     source_code: &str,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> PreparedSourceInput {
     let tokens = CompilerFrontend::tokenize_source(
         source_files,
@@ -74,22 +82,37 @@ fn tokenized_moth_prepared_input(
         &source_path,
         TokenizerEntryMode::SourceFile,
         string_table,
+        span_builder,
     )
     .expect("test source should tokenize");
-    moth_prepared_input(source_path, source_code, tokens)
+    moth_prepared_input(source_files, &source_path, tokens)
 }
 
-fn source_byte_count(input_files: &[PreparedSourceInput]) -> usize {
+fn source_byte_count(input_files: &[PreparedSourceInput], source_files: &SourceDatabase) -> usize {
     input_files
         .iter()
-        .map(PreparedSourceInput::source_byte_len)
+        .map(|input| {
+            source_files
+                .retained_text(input.source_id())
+                .expect("test source should retain its snapshot")
+                .len()
+        })
         .sum()
+}
+
+struct FrontendPreparationInputs {
+    style_directives: StyleDirectiveRegistry,
+    string_table: StringTable,
+    project_path_resolver: Option<ProjectPathResolver>,
+    source_files: Arc<SourceDatabase>,
 }
 
 struct FrontendPreparationFixture {
     _temp_dir: tempfile::TempDir,
-    frontend: CompilerFrontend,
+    frontend: FrontendPreparationInputs,
     input_files: Vec<PreparedSourceInput>,
+    /// Original source builders retained across file preparation and merge.
+    span_builders: SourceDatabaseBuilder,
     entry_file_path: PathBuf,
 }
 
@@ -110,47 +133,59 @@ fn frontend_preparation_fixture(file_sources: &[(&str, &str)]) -> FrontendPrepar
         .clone();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
         None,
         &mut string_table,
     )
     .expect("source file table should build");
+    for (canonical, (_, source)) in canonical_paths.iter().zip(file_sources) {
+        let source_id = source_files
+            .get_by_canonical_path(canonical)
+            .expect("test source should have a registered identity")
+            .id;
+        source_files
+            .retain_text(source_id, (*source).to_owned())
+            .expect("test source snapshot should be retained");
+    }
 
-    // Tokenize each source file once so the retained token stream is available for header
-    // preparation, mirroring the single Stage 0 lexical pass in production discovery.
+    let mut span_builders = SourceDatabaseBuilder::new(source_files);
+    let (source_files, mut source_spans) = span_builders.split();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let input_files = canonical_paths
-        .iter()
-        .zip(file_sources)
-        .map(|(canonical, (_, source))| {
-            let tokens = CompilerFrontend::tokenize_source(
-                &source_files,
-                &style_directives,
-                source,
-                canonical,
-                TokenizerEntryMode::SourceFile,
-                &mut string_table,
-            )
-            .expect("fixture source should tokenize");
-            moth_prepared_input(canonical.clone(), source, tokens)
-        })
-        .collect();
+    let mut input_files = Vec::with_capacity(canonical_paths.len());
+    for (canonical, (_, source)) in canonical_paths.iter().zip(file_sources) {
+        let source_id = source_files
+            .get_by_canonical_path(canonical)
+            .expect("test source should have a registered identity")
+            .id;
+        let mut span_builder = source_spans.take_span_builder(source_id);
+        let tokens = CompilerFrontend::tokenize_source(
+            source_files,
+            &style_directives,
+            source,
+            canonical,
+            TokenizerEntryMode::SourceFile,
+            &mut string_table,
+            &mut span_builder,
+        )
+        .expect("fixture source should tokenize");
+        input_files.push(moth_prepared_input(source_files, canonical, tokens));
+        source_spans.retain_span_builder(source_id, span_builder);
+    }
 
-    let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
-        string_table,
+    let frontend = FrontendPreparationInputs {
         style_directives,
-        Arc::new(ExternalPackageRegistry::new()),
-        None,
-    );
-    frontend.set_source_files(source_files);
+        string_table,
+        project_path_resolver: None,
+        source_files: Arc::clone(source_files),
+    };
 
     FrontendPreparationFixture {
         _temp_dir: temp_dir,
         frontend,
         input_files,
+        span_builders,
         entry_file_path,
     }
 }
@@ -207,59 +242,76 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let canonical_b = fs::canonicalize(&file_b).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
-        &[&canonical_a, &canonical_b],
-        &canonical_a,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build");
+    let source_files = Arc::new(
+        SourceDatabase::build(
+            &[&canonical_a, &canonical_b],
+            &canonical_a,
+            None,
+            &mut string_table,
+        )
+        .expect("source file table should build"),
+    );
 
     let module_table_size_before = string_table.len();
 
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
+        &source_files,
     );
-    frontend.set_source_files(source_files);
 
     let options = HeaderParseOptions {
         entry_file_id: frontend
             .source_files
             .get_by_canonical_path(&canonical_a)
-            .map(|i| i.file_id),
-        project_path_resolver: frontend.project_path_resolver.clone(),
+            .map(|i| i.id),
+        project_path_resolver: frontend.project_path_resolver,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
 
     // Helper to prepare one file using the local-table variant and merge its delta back
-    // into the module string table, returning the remapped output.
+    // into the module string table, returning the remapped output. Tokenization borrows the
+    // source's span builder, and preparation returns it inside the delta before any outcome
+    // can escape.
+    let mut retained_span_builders = Vec::new();
     let mut prepare_and_merge = |source_code: &str,
                                  source_path: &std::path::PathBuf,
                                  const_template_offset: usize,
                                  runtime_fragment_offset: usize| {
-        // Tokenize against the module string table before forking, mirroring Stage 0 retention.
+        let source_id = frontend
+            .source_files
+            .get_by_canonical_path(source_path)
+            .expect("test source should have a registered identity")
+            .id;
+        let mut span_builder = ExtendedSpanBuilder::new();
         let retained_tokens = CompilerFrontend::tokenize_source(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             source_code,
             source_path,
             TokenizerEntryMode::SourceFile,
             &mut frontend.string_table,
+            &mut span_builder,
         )
         .expect("test source should tokenize");
 
         let fork_source = frontend.string_table.fork_source();
         let (mut local_string_table, base_len) = fork_source.fork_for_module().into_parts();
 
-        let result = {
+        let SourcePreparationDelta {
+            span_builder,
+            result,
+            ..
+        } = {
             let prepare_context = FrontendFilePrepareContext {
-                source_files: &frontend.source_files,
-                style_directives: &frontend.style_directives,
+                source_files: frontend.source_files,
+                style_directives: frontend.style_directives,
                 entry_file_path: &canonical_a,
                 options: &options,
             };
@@ -268,6 +320,8 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                     source_path: source_path.clone(),
                     tokens: Box::new(retained_tokens),
                 },
+                source_id,
+                span_builder,
                 const_template_offset,
                 runtime_fragment_offset,
             };
@@ -278,6 +332,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
                 &mut local_string_table,
             )
         };
+        retained_span_builders.push((source_id, span_builder));
 
         let remap = frontend
             .string_table
@@ -332,8 +387,12 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     // Aggregate the remapped outputs. Preparation is where Stage 0's merge finishes, so every
     // assertion below reads the prepared syntax directly: binding against provider interfaces
     // would add a provider-dependent stage that cannot change a string identity.
-    let headers = prepare_header_syntax(vec![output_a, output_b], &mut frontend.string_table)
-        .expect("header syntax preparation should succeed");
+    let headers = prepare_header_syntax(
+        &mut [output_a, output_b],
+        &mut frontend.string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("header syntax preparation should succeed");
 
     // Verify source text string "beta" resolves through the module table in file B headers.
     let beta_header = headers
@@ -419,37 +478,58 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let entry_file = temp_dir.path().join("entry.moth");
-    let source = "export:\n\
-    identity type T |value T| -> T:\n\
-        return value\n\
-    ;\n\
-;\n";
-    fs::write(&entry_file, source).unwrap();
+    let parameter_name = format!("value_{}", "x".repeat(1_500));
+    let source = format!(
+        "export:\n\
+        identity type T |{parameter_name} T| -> T:\n\
+            return {parameter_name}\n\
+        ;\n\
+        ;\n"
+    );
+    fs::write(&entry_file, &source).unwrap();
     let canonical_entry = fs::canonicalize(&entry_file).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
         None,
         &mut string_table,
     )
     .expect("source file table should build");
+    let source_id = source_files
+        .get_by_canonical_path(&canonical_entry)
+        .expect("test source should have a registered identity")
+        .id;
+    source_files
+        .retain_text(source_id, source.to_owned())
+        .expect("test source snapshot should be retained");
 
     let style_directives = StyleDirectiveRegistry::built_ins();
+    // Tokenization is the source's first producer: it borrows the builder that discovery would
+    // own. The builder stays live until preparation's last producer returns it into the owner.
+    let mut source_span_builder = ExtendedSpanBuilder::new();
     let input_files = vec![tokenized_moth_prepared_input(
         &source_files,
         &style_directives,
         &mut string_table,
         canonical_entry.clone(),
-        source,
+        &source,
+        &mut source_span_builder,
     )];
+
+    // The builder owns every span the retained token stream indexes. Hand it to the exclusive
+    // source owner before module preparation; preparation adopts the original builder through
+    // the source owner and returns it there.
+    let mut source_files = SourceDatabaseBuilder::new(source_files);
+    source_files.retain_span_builder(source_id, source_span_builder);
+    let (source_files_view, mut span_owners) = source_files.split();
 
     // Fork a local module string table sharing the fixture base so retained token StringIds
     // stay valid, mirroring the production per-module fork.
     let local_table = string_table.fork_source().fork_for_module().into_parts().0;
 
-    let source_byte_count = source_byte_count(&input_files);
+    let source_byte_count = source_byte_count(&input_files, source_files_view);
 
     let external_packages = Arc::new(ExternalPackageRegistry::new());
     let resolution_table = ExternalImportResolutionTable::default();
@@ -478,6 +558,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     // directives and the project path resolver — so it can run before any provider interface
     // exists.
     let preparation_context = super::ModulePreparationContext {
+        source_files: source_files_view,
         style_directives: &style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -496,6 +577,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let prepared_result = preparation_context.prepare_module(
         stable_origin.clone(),
         input_files,
+        &mut span_owners,
         &canonical_entry,
         local_table,
         source_byte_count,
@@ -505,47 +587,47 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let prepared_result = preparation_context.prepare_module(
         stable_origin.clone(),
         input_files,
+        &mut span_owners,
         &canonical_entry,
         local_table,
         source_byte_count,
     );
     let prepared = prepared_result.expect("module preparation should succeed");
 
-    assert!(
+    let return_name_span = prepared
+        .semantic
+        .prepared_header_syntax
+        .headers
+        .iter()
+        .filter(|header| matches!(header.kind, HeaderKind::Function { .. }))
+        .flat_map(|header| &header.tokens.tokens)
+        .find_map(|token| match token.kind {
+            TokenKind::Symbol(id)
+                if prepared.semantic.string_table.resolve(id) == parameter_name =>
+            {
+                Some(SourceSpan::new(source_id, token.span))
+            }
+            _ => None,
+        })
+        .expect("retained function body should contain its extended parameter-use span");
+    assert_eq!(
         prepared
             .semantic
-            .prepared_header_syntax
-            .headers
-            .iter()
-            .any(|header| matches!(header.kind, HeaderKind::Function { .. })),
-        "retained PreparedHeaderSyntax should carry the parsed public generic function declaration"
-    );
-    assert_eq!(
-        prepared.semantic.source_files.iter().count(),
-        1,
-        "retained source identity table should carry the one source file"
-    );
-    assert_eq!(prepared.semantic.source_file_count, 1);
-    assert_eq!(prepared.semantic.source_byte_count, source_byte_count);
-    assert_eq!(
-        prepared
-            .semantic
-            .entry_file_path()
+            .entry_file_path(source_files_view)
             .expect("preparation retains the active root identity"),
         canonical_entry.as_path(),
-        "the entry file is derived from the retained active root, not carried as a second argument"
+        "the entry file is resolved through the shared source database"
     );
 
-    // Semantic compilation is one compiler service call. Stage 0 supplies completed provider
-    // interfaces and immutable generated views; the retained payload carries no source text or
-    // tokens, so the service cannot rerun file preparation.
+    // Provider binding and semantic compilation consume the retained prepared syntax.
     let source_provider_dependencies = Default::default();
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
+        source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
-        project_path_resolver: Some(project_path_resolver),
+        project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         external_packages: Arc::clone(&external_packages),
         build_config_values: Arc::new(Default::default()),
@@ -570,6 +652,27 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         generated_store.known_generated(),
     );
     let draft = semantic_result.expect("semantic compilation should succeed");
+    // Semantic compilation is the source's last producer. With no span producer outstanding,
+    // the owner freezes the original builder tables before the escaped-source assertions below.
+    let finalized_source_files = source_files
+        .finish()
+        .expect("source builder should finalize after the last producer returned");
+    let range = return_name_span.byte_range(&finalized_source_files);
+    let snapshot = finalized_source_files
+        .retained_text(source_id)
+        .expect("retained source");
+    assert_eq!(
+        range.start() as usize,
+        source
+            .rfind(&parameter_name)
+            .expect("return-site parameter"),
+        "the retained token must resolve to the return use, not the earlier parameter declaration"
+    );
+    assert_eq!(
+        &snapshot[range.start() as usize..range.end() as usize],
+        parameter_name,
+        "the original tokenizer overflow row must survive preparation and semantic compilation"
+    );
 
     let draft = match draft {
         ModuleCompilationOutcome::Success(draft) => draft,
@@ -581,14 +684,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     assert_eq!(
         draft.public_interface.module_origin, stable_origin,
         "the semantic draft should retain the module's stable origin"
-    );
-    assert!(
-        !draft.module.executable.hir.functions.is_empty(),
-        "the semantic draft should retain validated base HIR"
-    );
-    assert!(
-        draft.string_table.len() > 0,
-        "the semantic draft should retain its diagnostic render identities"
     );
     assert_eq!(
         draft.module.metadata.entry_point, canonical_entry,
@@ -632,21 +727,37 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let mut source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.as_path()),
         &canonical_entry,
         None,
         &mut string_table,
     )
     .expect("source file table should build");
+    let source_id = source_files
+        .get_by_canonical_path(&canonical_entry)
+        .expect("test source should have a registered identity")
+        .id;
+    source_files
+        .retain_text(source_id, source.to_owned())
+        .expect("test source snapshot should be retained");
+    // Tokenization is the source's first producer and borrows the builder the owner adopts.
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut source_span_builder = ExtendedSpanBuilder::new();
     let input_files = vec![tokenized_moth_prepared_input(
         &source_files,
         &style_directives,
         &mut string_table,
         canonical_entry.clone(),
         source,
+        &mut source_span_builder,
     )];
+
+    // Hand the original builder to the exclusive source owner; module preparation then runs
+    // against the owner's split view and returns the builder into it.
+    let mut source_files = SourceDatabaseBuilder::new(source_files);
+    source_files.retain_span_builder(source_id, source_span_builder);
+    let (source_files_view, mut span_owners) = source_files.split();
     let local_table = string_table.fork_source().fork_for_module().into_parts().0;
 
     let project_root = canonical_entry
@@ -670,8 +781,9 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         root_role,
     )
     .expect("API-only stable origin should construct");
-    let source_byte_count = source_byte_count(&input_files);
+    let source_byte_count = source_byte_count(&input_files, source_files_view);
     let preparation_context = super::ModulePreparationContext {
+        source_files: source_files_view,
         style_directives: &style_directives,
         project_path_resolver: Some(project_path_resolver.clone()),
     };
@@ -679,6 +791,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let prepared_result = preparation_context.prepare_module(
         stable_origin.clone(),
         input_files,
+        &mut span_owners,
         &canonical_entry,
         local_table,
         source_byte_count,
@@ -688,6 +801,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let prepared_result = preparation_context.prepare_module(
         stable_origin.clone(),
         input_files,
+        &mut span_owners,
         &canonical_entry,
         local_table,
         source_byte_count,
@@ -699,10 +813,11 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let source_provider_dependencies = Default::default();
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
+        source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
-        project_path_resolver: Some(project_path_resolver),
+        project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         external_packages,
         build_config_values: Arc::new(Default::default()),
@@ -727,6 +842,10 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     );
     let outcome =
         semantic_result.expect("API-only semantic compilation should not fail internally");
+    // Finalization also verifies that semantic compilation released every private source reader.
+    let _source_files = source_files
+        .finish()
+        .expect("API-only fixture should finalize after its last producer returned");
     let draft = match outcome {
         ModuleCompilationOutcome::Success(draft) => draft,
         ModuleCompilationOutcome::Diagnosed(diagnostics) => {
@@ -857,63 +976,136 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let canonical_c = fs::canonicalize(&file_c).unwrap();
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let mut source_files = SourceDatabase::build(
         &[&canonical_a, &canonical_b, &canonical_c],
         &canonical_a,
         None,
         &mut string_table,
     )
     .expect("source file table should build");
+    for (path, source) in [
+        (&canonical_a, "alpha = 1\n#[hello]\n[runtime]\n"),
+        (&canonical_b, "Beta #= 2\n"),
+        (&canonical_c, "Gamma #= 3\n"),
+    ] {
+        let source_id = source_files
+            .get_by_canonical_path(path)
+            .expect("test source should have a registered identity")
+            .id;
+        source_files
+            .retain_text(source_id, source.to_owned())
+            .expect("test source snapshot should be retained");
+    }
+    // R6 gives every builder its own exclusive database: rebuild the same deterministic
+    // registration for the span owner below instead of sharing the frontend handle. Identical
+    // inputs keep source identities aligned across both tables.
+    let mut span_owner_sources = SourceDatabase::build(
+        &[&canonical_a, &canonical_b, &canonical_c],
+        &canonical_a,
+        None,
+        &mut string_table,
+    )
+    .expect("span owner source table should build");
+    for (path, source) in [
+        (&canonical_a, "alpha = 1\n#[hello]\n[runtime]\n"),
+        (&canonical_b, "Beta #= 2\n"),
+        (&canonical_c, "Gamma #= 3\n"),
+    ] {
+        let source_id = span_owner_sources
+            .get_by_canonical_path(path)
+            .expect("span owner source should have a registered identity")
+            .id;
+        span_owner_sources
+            .retain_text(source_id, source.to_owned())
+            .expect("span owner source snapshot should be retained");
+    }
+    let source_files = Arc::new(source_files);
 
     let module_table_size_before = string_table.len();
 
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
+        &source_files,
     );
-    frontend.set_source_files(source_files);
 
+    // Each tokenization borrows the source's original builder; the owner retains all three and
+    // lends them back to preparation, which returns every builder before merging.
+    let mut span_builder_a = ExtendedSpanBuilder::new();
+    let mut span_builder_b = ExtendedSpanBuilder::new();
+    let mut span_builder_c = ExtendedSpanBuilder::new();
     let input_files = vec![
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_a.clone(),
             "alpha = 1\n#[hello]\n[runtime]\n",
+            &mut span_builder_a,
         ),
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_b.clone(),
             "Beta #= 2\n",
+            &mut span_builder_b,
         ),
         tokenized_moth_prepared_input(
-            &frontend.source_files,
-            &frontend.style_directives,
+            frontend.source_files,
+            frontend.style_directives,
             &mut frontend.string_table,
             canonical_c.clone(),
             "Gamma #= 3\n",
+            &mut span_builder_c,
         ),
     ];
-    let source_byte_count = source_byte_count(&input_files);
+    let mut span_owners = SourceDatabaseBuilder::new(span_owner_sources);
+    span_owners.retain_span_builder(
+        frontend
+            .source_files
+            .get_by_canonical_path(&canonical_a)
+            .unwrap()
+            .id,
+        span_builder_a,
+    );
+    span_owners.retain_span_builder(
+        frontend
+            .source_files
+            .get_by_canonical_path(&canonical_b)
+            .unwrap()
+            .id,
+        span_builder_b,
+    );
+    span_owners.retain_span_builder(
+        frontend
+            .source_files
+            .get_by_canonical_path(&canonical_c)
+            .unwrap()
+            .id,
+        span_builder_c,
+    );
+    let source_byte_count = source_byte_count(&input_files, &source_files);
     assert_eq!(
         super::FilePreparationStrategy::for_module(input_files.len(), source_byte_count),
         super::FilePreparationStrategy::Serial
     );
 
     let preparation_context = super::ModulePreparationContext {
-        style_directives: &frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.clone(),
+        source_files: frontend.source_files,
+        style_directives: frontend.style_directives,
+        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &frontend.source_files,
             input_files,
+            &mut span_owners.split().1,
             &canonical_a,
             ModuleRootRole::Normal,
             source_byte_count,
@@ -1073,55 +1265,99 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
         .first()
         .expect("test should create an entry file")
         .clone();
-
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let mut source_files = SourceDatabase::build(
         canonical_paths.iter().map(PathBuf::as_path),
         &entry_file_path,
         None,
         &mut string_table,
     )
     .expect("source file table should build");
+    for (canonical, source) in canonical_paths.iter().zip(&sources) {
+        let source_id = source_files
+            .get_by_canonical_path(canonical)
+            .expect("test source should have a registered identity")
+            .id;
+        source_files
+            .retain_text(source_id, source.clone())
+            .expect("test source snapshot should be retained");
+    }
+    // R6 gives every builder its own exclusive database: rebuild the same deterministic
+    // registration for the span owner below instead of sharing the frontend handle. Identical
+    // inputs keep source identities aligned across both tables.
+    let mut span_owner_sources = SourceDatabase::build(
+        canonical_paths.iter().map(PathBuf::as_path),
+        &entry_file_path,
+        None,
+        &mut string_table,
+    )
+    .expect("span owner source table should build");
+    for (canonical, source) in canonical_paths.iter().zip(&sources) {
+        let source_id = span_owner_sources
+            .get_by_canonical_path(canonical)
+            .expect("span owner source should have a registered identity")
+            .id;
+        span_owner_sources
+            .retain_text(source_id, source.clone())
+            .expect("span owner source snapshot should be retained");
+    }
+    let source_files = Arc::new(source_files);
 
     let style_directives = StyleDirectiveRegistry::built_ins();
+    // Each tokenization borrows its source's original builder; the owner retains all of them
+    // and lends the split view to preparation, which returns every builder before merging.
+    let mut builders = Vec::new();
     let input_files = canonical_paths
         .iter()
         .zip(&sources)
         .map(|(canonical, source)| {
-            tokenized_moth_prepared_input(
+            let mut span_builder = ExtendedSpanBuilder::new();
+            let input = tokenized_moth_prepared_input(
                 &source_files,
                 &style_directives,
                 &mut string_table,
                 canonical.clone(),
                 source,
-            )
+                &mut span_builder,
+            );
+            builders.push((
+                source_files.get_by_canonical_path(canonical).unwrap().id,
+                span_builder,
+            ));
+            input
         })
         .collect::<Vec<PreparedSourceInput>>();
+    let mut span_owners = SourceDatabaseBuilder::new(span_owner_sources);
+    for (source_id, builder) in builders {
+        span_owners.retain_span_builder(source_id, builder);
+    }
 
+    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
         Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
-        style_directives,
-        Arc::new(ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
+        &source_files,
     );
-    frontend.set_source_files(source_files);
 
-    let source_byte_count = source_byte_count(&input_files);
+    let source_byte_count = source_byte_count(&input_files, &source_files);
     assert_eq!(
         super::FilePreparationStrategy::for_module(input_files.len(), source_byte_count),
         super::FilePreparationStrategy::ParallelChunked
     );
 
     let preparation_context = super::ModulePreparationContext {
-        style_directives: &frontend.style_directives,
-        project_path_resolver: frontend.project_path_resolver.clone(),
+        source_files: frontend.source_files,
+        style_directives: frontend.style_directives,
+        project_path_resolver: frontend.project_path_resolver.cloned(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut frontend.string_table,
-            &frontend.source_files,
             input_files,
+            &mut span_owners.split().1,
             &entry_file_path,
             ModuleRootRole::Normal,
             source_byte_count,
@@ -1181,8 +1417,8 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| identity.file_id),
-        project_path_resolver: fixture.frontend.project_path_resolver.clone(),
+            .map(|identity| identity.id),
+        project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -1191,8 +1427,9 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     let input_file_count = fixture.input_files.len();
 
     let mut chunks = {
+        let (source_files_view, mut span_owners) = fixture.span_builders.split();
         let prepare_context = FrontendFilePrepareContext {
-            source_files: &fixture.frontend.source_files,
+            source_files: source_files_view,
             style_directives: &fixture.frontend.style_directives,
             entry_file_path: &fixture.entry_file_path,
             options: &options,
@@ -1205,8 +1442,14 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             0,
             0,
             super::FilePreparationStrategy::ParallelChunked,
+            &mut span_owners,
         )
     };
+    for chunk in &mut chunks {
+        for (source, builder) in chunk.span_builders.drain(..) {
+            fixture.span_builders.retain_span_builder(source, builder);
+        }
+    }
     chunks.reverse();
 
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
@@ -1247,18 +1490,19 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let file_sources = chunked_fixture_sources();
     let file_source_refs = fixture_source_refs(&file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
-    let source_byte_count = source_byte_count(&fixture.input_files);
+    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
+            &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
             source_byte_count,
@@ -1288,6 +1532,116 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     }
 }
 
+/// Every prepared output carries the `SourceId` its input already held, under all three
+/// preparation strategies.
+///
+/// WHAT: identity is assigned at the source-registration barrier, before a strategy is selected,
+///       so preparation reads an identity rather than producing one.
+/// WHY: a worker that allocated or re-derived an identity would make `SourceId` depend on the
+///      scheduling strategy. The prepared-file invariant gate checks that a file's identity
+///      agrees with its own header streams, not that it agrees with the database, so a
+///      consistently wrong identity satisfies it. `ParallelPerFile` has no other end-to-end
+///      preparation coverage at all.
+#[test]
+fn every_preparation_strategy_stamps_the_registered_source_identity() {
+    for strategy in [
+        super::FilePreparationStrategy::Serial,
+        super::FilePreparationStrategy::ParallelPerFile,
+        super::FilePreparationStrategy::ParallelChunked,
+    ] {
+        // Descending names make input order the reverse of canonical logical order, so an
+        // identity re-derived from a file's position in the module would not match the one the
+        // database assigned.
+        let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
+            .rev()
+            .map(|index| {
+                (
+                    format!("{index}.moth"),
+                    format!("value_{index} #= {index}\n"),
+                )
+            })
+            .collect();
+        let file_source_refs = fixture_source_refs(&file_sources);
+        let mut fixture = frontend_preparation_fixture(&file_source_refs);
+
+        // The identity each input carries was assigned by the source database at registration,
+        // before any strategy existed to influence it.
+        let registered_ids: Vec<SourceId> = fixture
+            .input_files
+            .iter()
+            .map(PreparedSourceInput::source_id)
+            .collect();
+        assert!(
+            registered_ids.windows(2).any(|pair| pair[0] > pair[1]),
+            "the fixture must not present inputs in identity order, or a position-derived \
+             identity would pass: {registered_ids:?}"
+        );
+
+        let options = HeaderParseOptions {
+            entry_file_id: fixture
+                .frontend
+                .source_files
+                .get_by_canonical_path(&fixture.entry_file_path)
+                .map(|record| record.id),
+            project_path_resolver: fixture.frontend.project_path_resolver.as_ref(),
+            entry_file_role: None,
+            active_root_role: ModuleRootRole::Normal,
+        };
+        let fork_source = fixture.frontend.string_table.fork_source();
+
+        let chunks = {
+            let (source_files_view, mut span_owners) = fixture.span_builders.split();
+            let prepare_context = FrontendFilePrepareContext {
+                source_files: source_files_view,
+                style_directives: &fixture.frontend.style_directives,
+                entry_file_path: &fixture.entry_file_path,
+                options: &options,
+            };
+
+            super::ModulePreparationContext::prepare_module_file_chunks(
+                std::mem::take(&mut fixture.input_files),
+                &fork_source,
+                &prepare_context,
+                0,
+                0,
+                strategy,
+                &mut span_owners,
+            )
+        };
+
+        if strategy == super::FilePreparationStrategy::ParallelChunked {
+            assert!(
+                chunks.len() > 1,
+                "the chunked arm is vacuous unless the fixture spans several chunks, got \
+                 {} for {} files",
+                chunks.len(),
+                registered_ids.len()
+            );
+        }
+
+        let mut stamped_file_count = 0usize;
+        for chunk in &chunks {
+            for prepared_file in &chunk.results {
+                let Ok(output) = &prepared_file.result else {
+                    panic!("every fixture source should prepare under {strategy:?}");
+                };
+                assert_eq!(
+                    output.file_id, registered_ids[prepared_file.file_index],
+                    "{strategy:?} must stamp the registered identity on file index {}",
+                    prepared_file.file_index
+                );
+                stamped_file_count += 1;
+            }
+        }
+
+        assert_eq!(
+            stamped_file_count,
+            registered_ids.len(),
+            "{strategy:?} should prepare every selected source once"
+        );
+    }
+}
+
 #[test]
 fn chunked_file_preparation_preserves_warning_source_order() {
     let file_sources: Vec<_> = (0..super::FILE_PREPARATION_ALWAYS_PARALLEL_FILE_COUNT)
@@ -1300,18 +1654,19 @@ fn chunked_file_preparation_preserves_warning_source_order() {
         .collect();
     let file_source_refs = fixture_source_refs(&file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
-    let source_byte_count = source_byte_count(&fixture.input_files);
+    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
+            &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
             source_byte_count,
@@ -1341,29 +1696,12 @@ fn chunked_file_preparation_preserves_warning_source_order() {
 //  Malformed file-preparation payload rejection
 //  ----------------------------------------------------------------------
 
-/// Build a `PreparedFileResult` carrying a dummy error so the validation path can inspect
-/// `file_index` without needing a full prepared output.
-fn dummy_prepared_file_result(file_index: usize) -> super::PreparedFileResult {
-    super::PreparedFileResult {
-        file_index,
-        string_domain: super::PreparedFileStringDomain::ChunkLocal,
-        result: Err(
-            crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure::Diagnosed(
-                FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic: Box::new(CompilerDiagnostic::unreachable_match_arm(
-                        SourceLocation::default(),
-                    )),
-                },
-            ),
-        ),
-    }
-}
-
 fn parsed_prepared_output(
     source_name: &str,
     source_code: &str,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
+    source_id: SourceId,
 ) -> FileFrontendPrepareOutput {
     let source_path = PathBuf::from(source_name);
     let source_identity =
@@ -1379,7 +1717,8 @@ fn parsed_prepared_output(
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(FileId(0)),
+        source_id,
+        span_builder,
     )
     .expect("test source should tokenize");
 
@@ -1390,29 +1729,45 @@ fn parsed_prepared_output(
         string_table,
         0,
         0,
+        span_builder,
     )
     .expect("test source should prepare")
 }
 
-/// Build a chunk with the given file range and one result per supplied file index.
-///
-/// Pass explicit `file_indexes` to create a wrong-index malformation or a length mismatch.
+/// Build a chunk with one successful result per supplied file index.
 fn dummy_preparation_chunk(
     chunk_index: usize,
-    file_range: std::ops::Range<usize>,
     file_indexes: Vec<usize>,
 ) -> super::FilePreparationChunk {
+    let mut local_string_table = StringTable::new();
+    let mut span_builders = Vec::with_capacity(file_indexes.len());
+    let results = file_indexes
+        .into_iter()
+        .map(|file_index| {
+            let mut builder = ExtendedSpanBuilder::new();
+            let output = parsed_prepared_output(
+                &format!("file_{file_index}.moth"),
+                "x #= 1\n",
+                &mut local_string_table,
+                &mut builder,
+                SourceId::COMPILATION_ROOT,
+            );
+            span_builders.push((SourceId::COMPILATION_ROOT, builder));
+            super::PreparedFileResult {
+                file_index,
+                string_domain: super::PreparedFileStringDomain::ChunkLocal,
+                result: Ok(output),
+            }
+        })
+        .collect();
+
     super::FilePreparationChunk {
         chunk_index,
-        file_range,
-        local_string_table: StringTable::new(),
-        results: file_indexes
-            .into_iter()
-            .map(dummy_prepared_file_result)
-            .collect(),
+        local_string_table,
+        results,
+        span_builders,
     }
 }
-
 /// Merge malformed chunks through the real merge path and assert the boundary returns an
 /// infrastructure `CompilerError` whose message contains `expected_fragment`.
 fn assert_malformed_chunks_rejected(
@@ -1420,87 +1775,62 @@ fn assert_malformed_chunks_rejected(
     module_file_count: usize,
     expected_fragment: &str,
 ) {
-    let mut fixture = frontend_preparation_fixture(&[("a.moth", "x #= 1\n")]);
-    let base_len = fixture.frontend.string_table.fork_source().base_len();
+    use crate::compiler_frontend::compiler_messages::PremergeFailure;
 
-    let error_messages = match super::ModulePreparationContext::merge_file_preparation_chunks(
-        &mut fixture.frontend.string_table,
+    let mut string_table = StringTable::new();
+
+    let error = match super::ModulePreparationContext::merge_file_preparation_chunks(
+        &mut string_table,
         chunks,
         module_file_count,
-        base_len,
+        0,
     ) {
-        Err(messages) => messages,
+        Err(PremergeFailure::Infrastructure(error)) => error,
+        Err(PremergeFailure::Mixed { error, .. }) => error,
+        Err(PremergeFailure::Diagnosed(_)) => {
+            panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
+        }
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
     };
 
     assert!(
-        error_messages.has_errors(),
-        "malformed chunks should produce at least one error diagnostic"
+        error.msg.contains(expected_fragment),
+        "error message `{}` should contain `{expected_fragment}`",
+        error.msg,
     );
-
-    let infrastructure_error = error_messages.diagnostics.iter().find(|diagnostic| {
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InfrastructureError { .. }
-        )
-    });
-    let infrastructure_error = infrastructure_error
-        .expect("malformed chunks should produce an infrastructure CompilerError");
-
-    match &infrastructure_error.payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => {
-            assert!(
-                msg.contains(expected_fragment),
-                "error message `{msg}` should contain `{expected_fragment}`"
-            );
-        }
-        _ => unreachable!("already matched InfrastructureError"),
-    }
 }
 
 #[test]
-fn merge_rejects_chunk_gap_in_file_indexes() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let chunk_one = dummy_preparation_chunk(1, 5..8, (5..8).collect::<Vec<_>>());
+fn merge_rejects_unfilled_file_slot() {
+    let chunk = dummy_preparation_chunk(0, vec![0, 1, 2]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero, chunk_one], 8, "but expected 4");
+    assert_malformed_chunks_rejected(vec![chunk], 4, "left file index 3 unfilled");
 }
 
 #[test]
-fn merge_rejects_chunk_overlap_in_file_indexes() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let chunk_one = dummy_preparation_chunk(1, 3..8, (3..8).collect::<Vec<_>>());
+fn merge_rejects_occupied_file_slot() {
+    let chunk = dummy_preparation_chunk(0, vec![0, 0]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero, chunk_one], 8, "but expected 4");
+    assert_malformed_chunks_rejected(vec![chunk], 1, "occupies file index 0 more than once");
 }
 
 #[test]
-fn merge_rejects_wrong_internal_file_index_in_chunk() {
-    let chunk = dummy_preparation_chunk(0, 0..4, vec![0, 1, 2, 7]);
+fn merge_rejects_out_of_range_file_index() {
+    let chunk = dummy_preparation_chunk(0, vec![4]);
 
-    assert_malformed_chunks_rejected(vec![chunk], 4, "but expected 3");
+    assert_malformed_chunks_rejected(vec![chunk], 4, "has only 4 files");
 }
 
 #[test]
-fn merge_rejects_missing_tail_coverage() {
-    let chunk_zero = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
+fn merge_rejects_duplicate_chunk_indexes() {
+    let chunk_zero = dummy_preparation_chunk(0, vec![0]);
+    let duplicate_zero = dummy_preparation_chunk(0, vec![1]);
 
-    assert_malformed_chunks_rejected(vec![chunk_zero], 8, "cover 4 files but the module has 8");
-}
-
-#[test]
-fn merge_rejects_chunk_range_past_module_tail() {
-    let chunk = dummy_preparation_chunk(0, 0..5, (0..5).collect::<Vec<_>>());
-
-    assert_malformed_chunks_rejected(vec![chunk], 4, "module has only 4 files");
-}
-
-#[test]
-fn merge_rejects_reversed_chunk_range() {
-    let chunk = dummy_preparation_chunk(0, 0..4, (0..4).collect::<Vec<_>>());
-    let reversed = dummy_preparation_chunk(1, std::ops::Range { start: 4, end: 3 }, Vec::new());
-
-    assert_malformed_chunks_rejected(vec![chunk, reversed], 4, "has reversed range");
+    assert_malformed_chunks_rejected(
+        vec![chunk_zero, duplicate_zero],
+        2,
+        "two file preparation chunks claim chunk index 0",
+    );
 }
 
 #[test]
@@ -1522,10 +1852,45 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
     let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::build(
+        [
+            PathBuf::from("synthetic.moth"),
+            PathBuf::from("first.moth"),
+            PathBuf::from("second.moth"),
+        ],
+        Path::new("synthetic.moth"),
+        None,
+        &mut string_table,
+    )
+    .expect("merge fixture source identities should register");
+    let synthetic_id = source_files
+        .get_by_canonical_path(Path::new("synthetic.moth"))
+        .unwrap()
+        .id;
+    let first_id = source_files
+        .get_by_canonical_path(Path::new("first.moth"))
+        .unwrap()
+        .id;
+    let second_id = source_files
+        .get_by_canonical_path(Path::new("second.moth"))
+        .unwrap()
+        .id;
+    source_files
+        .retain_text(
+            synthetic_id,
+            "io.line([: [@docs/synthetic.md]])\n".to_owned(),
+        )
+        .unwrap();
+    source_files.retain_text(first_id, String::new()).unwrap();
+    source_files.retain_text(second_id, String::new()).unwrap();
+    let mut source_owner = SourceDatabaseBuilder::new(source_files);
+    let mut synthetic_spans = ExtendedSpanBuilder::new();
     let mut synthetic_output = parsed_prepared_output(
-        "synthetic.moth",
+        "synthetic-output.moth",
         "io.line([: [@docs/synthetic.md]])\n",
         &mut string_table,
+        &mut synthetic_spans,
+        synthetic_id,
     );
     synthetic_output
         .freeze_path_syntax(&string_table)
@@ -1538,22 +1903,35 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     let base_len = fork_source.base_len();
     let (mut first_local_table, _) = fork_source.fork_for_module().into_parts();
     let (mut second_local_table, _) = fork_source.fork_for_module().into_parts();
-    let first_output = parsed_prepared_output("first.moth", "", &mut first_local_table);
-    let second_output = parsed_prepared_output("second.moth", "", &mut second_local_table);
+    let mut first_spans = ExtendedSpanBuilder::new();
+    let mut second_spans = ExtendedSpanBuilder::new();
+    let first_output = parsed_prepared_output(
+        "first-output.moth",
+        "",
+        &mut first_local_table,
+        &mut first_spans,
+        first_id,
+    );
+    let second_output = parsed_prepared_output(
+        "second-output.moth",
+        "",
+        &mut second_local_table,
+        &mut second_spans,
+        second_id,
+    );
 
     let first_chunk = super::FilePreparationChunk {
         chunk_index: 0,
-        file_range: 0..1,
         local_string_table: first_local_table,
         results: vec![super::PreparedFileResult {
             file_index: 0,
             string_domain: super::PreparedFileStringDomain::ChunkLocal,
             result: Ok(first_output),
         }],
+        span_builders: Vec::new(),
     };
     let second_chunk = super::FilePreparationChunk {
         chunk_index: 1,
-        file_range: 1..3,
         local_string_table: second_local_table,
         results: vec![
             super::PreparedFileResult {
@@ -1567,8 +1945,12 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
                 result: Ok(second_output),
             },
         ],
+        span_builders: Vec::new(),
     };
 
+    source_owner.retain_span_builder(synthetic_id, synthetic_spans);
+    source_owner.retain_span_builder(first_id, first_spans);
+    source_owner.retain_span_builder(second_id, second_spans);
     let (headers, warnings) = super::ModulePreparationContext::merge_file_preparation_chunks(
         &mut string_table,
         vec![first_chunk, second_chunk],
@@ -1617,7 +1999,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
     let mut string_table = StringTable::new();
-    let source_files = SourceFileTable::build(
+    let source_files = SourceDatabase::build(
         std::iter::once(canonical_entry.clone()),
         &canonical_entry,
         None,
@@ -1651,33 +2033,17 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
         &string_table,
     );
 
-    let error_messages = match result {
-        Err(messages) => messages,
+    let error = match result {
+        Err(error) => error,
         Ok(_) => panic!("a mismatched expected active origin must be rejected"),
     };
     assert!(
-        error_messages.has_errors(),
-        "an origin mismatch must produce at least one error diagnostic"
+        error
+            .msg
+            .contains("does not match the expected active origin"),
+        "error message `{}` should state the origin mismatch",
+        error.msg,
     );
-    let mismatch_error = error_messages
-        .diagnostics
-        .iter()
-        .find(|diagnostic| {
-            matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InfrastructureError { .. }
-            )
-        })
-        .expect("an origin mismatch must produce an infrastructure error");
-    match &mismatch_error.payload {
-        DiagnosticPayload::InfrastructureError { msg, .. } => {
-            assert!(
-                msg.contains("does not match the expected active origin"),
-                "error message `{msg}` should state the origin mismatch"
-            );
-        }
-        _ => unreachable!("already matched InfrastructureError"),
-    }
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -1701,18 +2067,19 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     ];
     let mut fixture = frontend_preparation_fixture(&file_sources);
     let selected_source_count = fixture.input_files.len() as f64;
-    let source_byte_count = source_byte_count(&fixture.input_files);
+    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
+            &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
             source_byte_count,
@@ -1751,18 +2118,19 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let file_sources = chunked_fixture_sources();
     let file_source_refs = fixture_source_refs(&file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
-    let source_byte_count = source_byte_count(&fixture.input_files);
+    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
     let input_files = std::mem::take(&mut fixture.input_files);
 
     let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
         project_path_resolver: fixture.frontend.project_path_resolver.clone(),
     };
     preparation_context
         .prepare_module_files(
             &mut fixture.frontend.string_table,
-            &fixture.frontend.source_files,
             input_files,
+            &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
             ModuleRootRole::Normal,
             source_byte_count,

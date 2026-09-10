@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMap
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Computes the maximum inline map nesting depth for a parsed type reference.
 ///
@@ -48,7 +48,6 @@ pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
         ParsedTypeRef::Applied { arguments, .. } => {
             arguments.iter().map(map_nesting_depth).max().unwrap_or(0)
         }
-        ParsedTypeRef::Result { ok, err, .. } => map_nesting_depth(ok).max(map_nesting_depth(err)),
         _ => 0,
     }
 }
@@ -62,8 +61,8 @@ pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
 pub(crate) fn validate_map_key_type(
     key_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    location: &SourceLocation,
-) -> Result<(), Box<CompilerDiagnostic>> {
+    span: Option<SourceSpan>,
+) -> Result<(), CompilerDiagnostic> {
     let builtins = type_environment.builtins();
     let is_supported_scalar = key_type_id == builtins.string
         || key_type_id == builtins.int
@@ -74,10 +73,10 @@ pub(crate) fn validate_map_key_type(
         return Ok(());
     }
 
-    Err(Box::new(CompilerDiagnostic::invalid_map_type(
+    Err(CompilerDiagnostic::invalid_map_type(
         InvalidMapTypeReason::UnsupportedKeyType {
             key_type: key_type_id,
         },
-        location.clone(),
-    )))
+        span,
+    ))
 }

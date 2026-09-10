@@ -15,7 +15,8 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTraitKeywordUsageReason,
 };
-use crate::compiler_frontend::tokenizer::tokens::{SourceLocation, TokenKind};
+use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,30 +49,25 @@ pub(crate) fn reserved_trait_keyword(token_kind: &TokenKind) -> Option<ReservedT
 /// relying on nearby `expect(...)` assumptions.
 pub(crate) fn reserved_trait_keyword_or_dispatch_mismatch(
     token_kind: &TokenKind,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     compilation_stage: &'static str,
     parser_context: &'static str,
 ) -> Result<ReservedTraitKeyword, CompilerError> {
     reserved_trait_keyword(token_kind).ok_or_else(|| {
-        reserved_trait_dispatch_mismatch_error(
-            token_kind,
-            location,
-            compilation_stage,
-            parser_context,
-        )
+        reserved_trait_dispatch_mismatch_error(token_kind, span, compilation_stage, parser_context)
     })
 }
 
 pub(crate) fn reserved_trait_keyword_error(
     keyword: ReservedTraitKeyword,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> CompilerDiagnostic {
-    CompilerDiagnostic::invalid_trait_keyword_usage(keyword.invalid_usage_reason(), location)
+    CompilerDiagnostic::invalid_trait_keyword_usage(keyword.invalid_usage_reason(), span)
 }
 
 pub(crate) fn reserved_trait_dispatch_mismatch_error(
     token_kind: &TokenKind,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     compilation_stage: &'static str,
     parser_context: &'static str,
 ) -> CompilerError {
@@ -87,7 +83,7 @@ pub(crate) fn reserved_trait_dispatch_mismatch_error(
 
     let mut error = CompilerError::new(
         format!("Reserved trait token dispatch mismatch in {parser_context}: {token_kind:?}"),
-        location,
+        span,
         ErrorType::Compiler,
     );
     error.metadata = metadata;

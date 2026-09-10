@@ -50,8 +50,8 @@ fn reports_a_project_file_that_constructs_an_ast_or_lowers_hir() {
 fn accepts_stage_zero_source_preparation() {
     // Deciding which source belongs to a module and when to prepare it is scheduling policy, and
     // the canonical architecture boundary records it as an allowed direction.
-    let source = "let prepared = prepare_header_syntax(outputs, string_table)?;\n\
-                  let tokens = tokenize(&source, &scope, mode, directives, table, None)?;\n\
+    let source = "let prepared = prepare_header_syntax(&mut outputs, string_table)?;\n\
+                  let tokens = tokenize(&source, &scope, mode, directives, table, source_id)?;\n\
                   CompilerFrontend::prepare_file_frontend_local(&context, input, table)\n";
 
     assert!(

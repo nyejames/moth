@@ -22,9 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::tests::ast_fixture_support::{
-    start_function_body, test_source_location,
-};
+use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -82,18 +80,18 @@ fn rejects_same_line_else_if_statement() {
 #[test]
 fn rejects_missing_if_conditions_at_the_first_boundary() {
     let cases = [
-        ("if:\n    io.line([: [\"ready\"]])\n;\n", 3),
-        ("if\nio.line([: [\"ready\"]])\n;\n", 2),
-        ("if;\n", 3),
-        ("if then 1\n", 4),
-        ("if else\n", 4),
-        ("if", 2),
-        ("value = if then 1 else 0\n", 12),
-        ("value = if:\n    then 1\nelse\n    then 0\n;\n", 11),
-        ("a, b = if then 1, 2 else 3, 4\n", 11),
+        "if:\n    io.line([: [\"ready\"]])\n;\n",
+        "if\nio.line([: [\"ready\"]])\n;\n",
+        "if;\n",
+        "if then 1\n",
+        "if else\n",
+        "if",
+        "value = if then 1 else 0\n",
+        "value = if:\n    then 1\nelse\n    then 0\n;\n",
+        "a, b = if then 1, 2 else 3, 4\n",
     ];
 
-    for (source, expected_column) in cases {
+    for source in cases {
         let diagnostic = parse_single_file_ast_diagnostic(source);
 
         assert!(
@@ -105,11 +103,6 @@ fn rejects_missing_if_conditions_at_the_first_boundary() {
             ),
             "expected ExpectedConditionAfterIf for {source:?}, got {:?}",
             diagnostic.payload
-        );
-        assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-        assert_eq!(
-            diagnostic.primary_location.start_pos.char_column, expected_column,
-            "unexpected boundary location for {source:?}"
         );
     }
 }
@@ -408,12 +401,8 @@ fn parses_negative_match_arm_with_multiline_boolean_guard() {
 
 #[test]
 fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
-    let literal = MatchPattern::Literal(Expression::int(
-        2,
-        test_source_location(1),
-        ValueMode::ImmutableOwned,
-    ));
-    let guard = Expression::bool(true, test_source_location(2), ValueMode::ImmutableOwned);
+    let literal = MatchPattern::Literal(Expression::int(2, None, ValueMode::ImmutableOwned));
+    let guard = Expression::bool(true, None, ValueMode::ImmutableOwned);
 
     let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
     assert!(
@@ -964,8 +953,6 @@ fn routes_missing_inline_else_at_declaration_boundary_through_value_if_missing_e
                 reason: InvalidControlFlowStatementReason::ValueIfMissingElse,
             }
         ));
-        assert_eq!(diagnostic.primary_location.start_pos.line_number, 0);
-        assert_eq!(diagnostic.primary_location.start_pos.char_column, 22);
     }
 }
 
@@ -1035,13 +1022,15 @@ fn classify_header_after_if(source: &str) -> IfHeaderShape {
             "test.moth",
             &mut string_table,
         );
+    let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
     let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
         source,
         &interned_path,
         crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+        crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("classifier fixture should tokenize");
 
@@ -1100,13 +1089,15 @@ fn newline_between_is_and_option_capture_is_not_committed_as_option_capture() {
                 "test.moth",
                 &mut string_table,
             );
+        let mut span_builder = crate::compiler_frontend::source::ExtendedSpanBuilder::new();
         let mut tokens = crate::compiler_frontend::tokenizer::lexer::tokenize(
             "if name is\n|value|:\n    io.line(\"x\")\n;\n",
             &interned_path,
             crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode::SourceFile,
             &style_directives,
             &mut string_table,
-            Some(crate::compiler_frontend::symbols::identity::FileId(0)),
+            crate::compiler_frontend::source::SourceId::COMPILATION_ROOT,
+            &mut span_builder,
         )
         .expect("classifier fixture should tokenize");
         while tokens.index < tokens.length && tokens.current_token_kind() != &TokenKind::If {

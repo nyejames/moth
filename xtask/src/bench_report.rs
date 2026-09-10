@@ -315,6 +315,7 @@ pub(crate) fn calculate_benchmark_report(
     for suite_kind in [
         BenchmarkSuiteKind::EndToEndCli,
         BenchmarkSuiteKind::FrontendPhases,
+        BenchmarkSuiteKind::DataLayout,
     ] {
         let Some(selection) = select_latest_run(runs, suite_kind, current_system) else {
             continue;

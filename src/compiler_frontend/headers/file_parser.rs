@@ -36,20 +36,20 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use rustc_hash::FxHashSet;
 
-/// Boxed diagnostic result for file-local header-item orchestration.
+/// Stage-local result for file-local header-item orchestration.
 ///
-/// WHAT: gives the connected helper family one small error boundary.
-/// WHY: the header loop passes structured diagnostics through several item handlers
-///      without carrying the large value inline at every return.
+/// The boundary carries a plain `CompilerDiagnostic` diagnosis or a typed
+/// infrastructure failure through `HeaderParseFailure`.
 type FileParserResult<T> = Result<T, HeaderParseFailure>;
 
 fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
-    HeaderParseFailure::Diagnostic(Box::new(diagnostic))
+    HeaderParseFailure::Diagnostic(diagnostic)
 }
 
 // Top-level declarations are same-module-visible by default; cross-module public visibility
@@ -57,6 +57,7 @@ fn diagnostic_failure(diagnostic: CompilerDiagnostic) -> HeaderParseFailure {
 // implicit start-function header for that file.
 pub(super) fn parse_headers_in_file(
     token_stream: &mut FileTokens,
+    file_id: SourceId,
     context: &mut HeaderParseContext<'_>,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let mut state = HeaderFileParseState::new(token_stream.length);
@@ -64,9 +65,9 @@ pub(super) fn parse_headers_in_file(
     let result = parse_headers_in_file_inner(token_stream, context, &mut state);
 
     match result {
-        Ok(()) => finish_file_output(token_stream, context, state),
+        Ok(()) => finish_file_output(token_stream, file_id, context, state),
         Err(HeaderParseFailure::Diagnostic(diagnostic)) => Err(
-            FileFrontendPrepareFailure::Diagnosed(state.into_error(*diagnostic)),
+            FileFrontendPrepareFailure::Diagnosed(state.into_error(diagnostic)),
         ),
         Err(HeaderParseFailure::Infrastructure(error)) => {
             Err(FileFrontendPrepareFailure::Infrastructure(error))
@@ -81,7 +82,7 @@ fn parse_headers_in_file_inner(
 ) -> FileParserResult<()> {
     loop {
         let current_token = token_stream.current_token();
-        let current_location = token_stream.current_location();
+        let current_span = token_stream.current_span();
         token_stream.advance();
 
         match classify_current_item(token_stream, &current_token) {
@@ -92,7 +93,7 @@ fn parse_headers_in_file_inner(
                     context,
                     current_token,
                     name_id,
-                    current_location,
+                    current_span,
                 )?;
             }
 
@@ -104,25 +105,20 @@ fn parse_headers_in_file_inner(
                     context,
                     current_token,
                     name_id,
-                    current_location,
+                    current_span,
                 )?;
             }
 
             HeaderFileItem::Dependency => {
-                parse_and_record_private_dependency(
-                    token_stream,
-                    state,
-                    context,
-                    current_location,
-                )?;
+                parse_and_record_private_dependency(token_stream, state, context, current_span)?;
             }
 
             HeaderFileItem::Export => {
-                reject_non_block_export(token_stream, context, current_location)?;
+                reject_non_block_export(token_stream, context, current_span)?;
             }
 
             HeaderFileItem::ExportBlock => {
-                handle_export_block(token_stream, state, context, current_location)?;
+                handle_export_block(token_stream, state, context, current_span)?;
             }
 
             HeaderFileItem::Hash {
@@ -133,13 +129,13 @@ fn parse_headers_in_file_inner(
                     state,
                     context,
                     current_token,
-                    current_location,
+                    current_span,
                     at_statement_boundary,
                 )?;
             }
 
             HeaderFileItem::ReservedTraitSyntax => {
-                handle_trait_keyword_header_item(&current_token, current_location)?;
+                handle_trait_keyword_header_item(&current_token, current_span)?;
             }
 
             HeaderFileItem::RuntimeTemplate => {
@@ -163,12 +159,12 @@ fn parse_headers_in_file_inner(
 fn reject_non_block_export(
     token_stream: &mut FileTokens,
     context: &mut HeaderParseContext<'_>,
-    export_location: SourceLocation,
+    export_span: SourceSpan,
 ) -> FileParserResult<()> {
     // `export` is valid only as the module-root `export:` block.
     if !context.file_role.is_export_capable() || context.is_config_file {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::export_outside_module_root(export_location),
+            CompilerDiagnostic::export_outside_module_root(Some(export_span)),
         ));
     }
 
@@ -177,7 +173,7 @@ fn reject_non_block_export(
     Err(diagnostic_failure(CompilerDiagnostic::expected_token(
         TokenKind::Colon,
         Some(token_stream.current_token_kind().to_owned()),
-        export_location,
+        Some(export_span),
     )))
 }
 
@@ -185,17 +181,17 @@ fn handle_export_block(
     token_stream: &mut FileTokens,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
-    export_location: SourceLocation,
+    export_span: SourceSpan,
 ) -> FileParserResult<()> {
     if !context.file_role.is_export_capable() || context.is_config_file {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::export_outside_module_root(export_location),
+            CompilerDiagnostic::export_outside_module_root(Some(export_span)),
         ));
     }
 
     if state.seen_export_block.is_some() {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::duplicate_export_block(export_location),
+            CompilerDiagnostic::duplicate_export_block(Some(export_span)),
         ));
     }
 
@@ -205,10 +201,10 @@ fn handle_export_block(
         return Err(diagnostic_failure(CompilerDiagnostic::expected_token(
             TokenKind::Colon,
             Some(token_stream.current_token_kind().to_owned()),
-            export_location,
+            Some(export_span),
         )));
     }
-    state.seen_export_block = Some(export_location.clone());
+    state.seen_export_block = Some(export_span);
     state.export_mode = HeaderExportMode::Public;
     token_stream.advance();
 
@@ -222,7 +218,7 @@ fn handle_export_block(
         }
 
         let current_token = token_stream.current_token();
-        let current_location = token_stream.current_location();
+        let current_span = token_stream.current_span();
         token_stream.advance();
 
         let item = classify_export_block_item(token_stream, &current_token);
@@ -232,7 +228,7 @@ fn handle_export_block(
             context,
             item,
             current_token,
-            current_location,
+            current_span,
         )?;
         state.export_block_item_count += 1;
     }
@@ -241,7 +237,7 @@ fn handle_export_block(
         return Err(diagnostic_failure(
             CompilerDiagnostic::unexpected_end_of_file(
                 Some(context.string_table.intern(";")),
-                token_stream.current_location(),
+                Some(token_stream.current_span()),
             ),
         ));
     }
@@ -253,7 +249,7 @@ fn handle_export_block(
 
     if state.export_block_item_count == 0 {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(export_location),
+            CompilerDiagnostic::invalid_export_target(Some(export_span)),
         ));
     }
 
@@ -266,7 +262,7 @@ fn parse_export_block_item(
     context: &mut HeaderParseContext<'_>,
     item: HeaderFileItem,
     current_token: Token,
-    current_location: SourceLocation,
+    current_span: SourceSpan,
 ) -> FileParserResult<()> {
     match item {
         HeaderFileItem::Symbol(name_id) => handle_symbol_item(
@@ -275,7 +271,7 @@ fn parse_export_block_item(
             context,
             current_token,
             name_id,
-            current_location,
+            current_span,
         ),
 
         HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
@@ -286,50 +282,52 @@ fn parse_export_block_item(
                 context,
                 current_token,
                 name_id,
-                current_location,
+                current_span,
             )
         }
 
         HeaderFileItem::Dependency => {
-            parse_and_record_public_dependency(token_stream, state, context, current_location)
+            parse_and_record_public_dependency(token_stream, state, context, current_span)
         }
 
         HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(current_location),
+            CompilerDiagnostic::invalid_export_target(Some(current_span)),
         )),
 
         HeaderFileItem::Hash {
             at_statement_boundary,
-        } => Ok(handle_hash_item(
+        } => handle_hash_item(
             token_stream,
             state,
             context,
             current_token,
-            current_location,
+            current_span,
             at_statement_boundary,
-        )?),
-
-        HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => Err(
-            diagnostic_failure(CompilerDiagnostic::invalid_export_target(current_location)),
         ),
+
+        HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => {
+            Err(diagnostic_failure(
+                CompilerDiagnostic::invalid_export_target(Some(current_span)),
+            ))
+        }
 
         HeaderFileItem::ReservedTraitSyntax => {
             if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
                 return Err(diagnostic_failure(reserved_trait_keyword_error(
                     keyword,
-                    current_location,
+                    Some(current_span),
                 )));
             }
 
             Err(diagnostic_failure(
-                CompilerDiagnostic::invalid_export_target(current_location),
+                CompilerDiagnostic::invalid_export_target(Some(current_span)),
             ))
         }
 
         HeaderFileItem::Eof => Err(diagnostic_failure(
             CompilerDiagnostic::unexpected_end_of_file(
                 Some(context.string_table.intern(";")),
-                current_location,
+                Some(current_span),
             ),
         )),
     }
@@ -386,7 +384,7 @@ fn handle_symbol_item(
     context: &mut HeaderParseContext<'_>,
     current_token: Token,
     name_id: StringId,
-    current_location: SourceLocation,
+    current_span: SourceSpan,
 ) -> FileParserResult<()> {
     let import_index = token_stream.index.saturating_sub(1);
     if let Some(start) =
@@ -394,9 +392,8 @@ fn handle_symbol_item(
     {
         return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
             token_stream,
-            context.string_table,
-            current_location,
-            context.is_config_file,
+            context,
+            current_span,
             start,
         )?));
     }
@@ -408,7 +405,7 @@ fn handle_symbol_item(
         context,
         current_token,
         name_id,
-        current_location,
+        current_span,
         export_mode,
     )
 }
@@ -419,30 +416,36 @@ fn handle_symbol_item(
 /// Filtered namespaces and nested groups deliberately require an author choice.
 fn legacy_dependency_clause_diagnostic(
     token_stream: &FileTokens,
-    string_table: &mut StringTable,
-    current_location: SourceLocation,
-    is_config_file: bool,
+    context: &mut HeaderParseContext<'_>,
+    current_span: SourceSpan,
     start: LegacyDependencyStart,
 ) -> Result<CompilerDiagnostic, HeaderParseFailure> {
-    let mut clause_location = token_stream
+    let start_span = token_stream
         .tokens
         .get(start.import_index)
-        .map(|token| token.location.clone())
-        .unwrap_or(current_location);
-    let clause_end = legacy_dependency_clause_end(&token_stream.tokens, start.path_index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        .unwrap_or(current_span);
+    let end_span = legacy_dependency_clause_end(&token_stream.tokens, start.path_index)
         .and_then(|index| token_stream.tokens.get(index))
-        .map_or(clause_location.end_pos, |token| token.location.end_pos);
-    clause_location.end_pos = clause_end;
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
+        .unwrap_or(start_span);
+    let clause_span = start_span
+        .join(end_span, context.span_builder)
+        .map_err(|error| {
+            HeaderParseFailure::Infrastructure(CompilerError::compiler_error(format!(
+                "legacy dependency clause span could not be joined: {error:?}"
+            )))
+        })?;
 
-    let replacement = if is_config_file {
+    let replacement = if context.is_config_file {
         None
     } else {
-        legacy_dependency_replacement(token_stream, string_table, start.path_index)?
-            .map(|replacement| string_table.intern(&replacement))
+        legacy_dependency_replacement(token_stream, context.string_table, start.path_index)?
+            .map(|replacement| context.string_table.intern(&replacement))
     };
     Ok(CompilerDiagnostic::legacy_dependency_clause(
         replacement,
-        clause_location,
+        Some(clause_span),
     ))
 }
 
@@ -478,7 +481,10 @@ fn legacy_dependency_replacement(
     };
     let path = token_stream
         .path_syntax_table()?
-        .try_path_for_token(path_id, &path_token.location)?
+        .try_path_for_token(
+            path_id,
+            SourceSpan::new(token_stream.file_id, path_token.span),
+        )?
         .root
         .to_owned();
     if path.is_empty() {
@@ -591,16 +597,16 @@ fn handle_symbol_item_with_export_mode(
     context: &mut HeaderParseContext<'_>,
     current_token: Token,
     name_id: StringId,
-    current_location: SourceLocation,
+    current_span: SourceSpan,
     export_mode: HeaderExportMode,
 ) -> FileParserResult<()> {
     if export_mode.is_public() && !starts_duplicate_top_level_header_declaration(token_stream) {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(current_location),
+            CompilerDiagnostic::invalid_export_target(Some(current_span)),
         ));
     }
 
-    if let Some(first_location) = state.encountered_symbols.get(&name_id) {
+    if let Some(first_span) = state.encountered_symbols.get(&name_id) {
         let is_conformance_declaration = (token_stream.current_token_kind() == &TokenKind::Must
             && !starts_trait_declaration_after_must(token_stream))
             || starts_specialized_generic_conformance_declaration(token_stream);
@@ -614,8 +620,8 @@ fn handle_symbol_item_with_export_mode(
             return Err(diagnostic_failure(
                 CompilerDiagnostic::duplicate_declaration(
                     name_id,
-                    Some(first_location.clone()),
-                    current_location,
+                    Some(*first_span),
+                    Some(current_span),
                 ),
             ));
         }
@@ -649,9 +655,10 @@ fn handle_symbol_item_with_export_mode(
     let header = create_header(
         token_stream.src_path.append(name_id),
         token_stream,
-        current_location.clone(),
+        &current_token,
         export_mode,
         &mut build_context,
+        context.span_builder,
     )?;
 
     if export_mode.is_public()
@@ -663,7 +670,7 @@ fn handle_symbol_item_with_export_mode(
         )
     {
         return Err(diagnostic_failure(
-            CompilerDiagnostic::invalid_export_target(current_location),
+            CompilerDiagnostic::invalid_export_target(Some(current_span)),
         ));
     }
 
@@ -674,12 +681,12 @@ fn handle_symbol_item_with_export_mode(
         return Err(diagnostic_failure(
             CompilerDiagnostic::invalid_receiver_declaration(
                 InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
-                current_location,
+                Some(current_span),
             ),
         ));
     }
 
-    match header.kind {
+    match &header.kind {
         HeaderKind::StartFunction => {
             state.push_start_body_token(current_token);
             state.register_start_body_symbol(name_id);
@@ -692,9 +699,11 @@ fn handle_symbol_item_with_export_mode(
         }
 
         _ => {
-            let name_location = header.name_location.clone();
+            let name_span = header
+                .name_span
+                .expect("authored declaration headers carry a source span");
             state.register_header(header);
-            state.encountered_symbols.insert(name_id, name_location);
+            state.encountered_symbols.insert(name_id, name_span);
         }
     }
 
@@ -703,12 +712,12 @@ fn handle_symbol_item_with_export_mode(
 
 fn handle_trait_keyword_header_item(
     current_token: &Token,
-    current_location: SourceLocation,
+    current_span: SourceSpan,
 ) -> FileParserResult<()> {
     if let Some(keyword) = reserved_trait_keyword(&current_token.kind) {
         return Err(diagnostic_failure(reserved_trait_keyword_error(
             keyword,
-            current_location,
+            Some(current_span),
         )));
     }
 
@@ -740,23 +749,28 @@ fn handle_runtime_template_item(
 
 fn finish_file_output(
     token_stream: &mut FileTokens,
+    file_id: SourceId,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     if context.file_role == FileRole::ImportedModuleRoot
-        && let Some((location, adjacent)) =
-            find_config_qualifier_marker(&state.start_function_body, context.string_table)
+        && let Some((marker_span, adjacent)) = find_config_qualifier_marker(
+            &state.start_function_body,
+            context.string_table,
+            file_id,
+            context.span_builder,
+        )
     {
         let diagnostic = if adjacent {
             CompilerDiagnostic::invalid_config_reason(
                 None,
                 InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                location,
+                Some(marker_span),
             )
         } else {
             CompilerDiagnostic::common_syntax_mistake(
                 CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                location,
+                Some(marker_span),
             )
         };
         return Err(FileFrontendPrepareFailure::Diagnosed(
@@ -775,18 +789,16 @@ fn finish_file_output(
         ));
     }
 
-    // Ordinary source files have no semantic consumer for an implicit start. Dependency-reached roots are
-    // intentionally parsed for declarations and exports only; their root body is discarded.
     if matches!(
         context.file_role,
         FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot
     ) && state.has_non_trivial_start_body()
     {
-        let location = state
-            .first_executable_start_body_location()
-            .unwrap_or_default();
+        let span = state
+            .first_executable_start_body_span(file_id)
+            .expect("non-trivial start body has an executable token span");
         return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
-            CompilerDiagnostic::invalid_top_level_runtime_statement(location),
+            CompilerDiagnostic::invalid_top_level_runtime_statement(Some(span)),
         )));
     }
 
@@ -943,7 +955,7 @@ fn dependency_generic_parameter_collision(
                         parameter_name: parameter.name,
                     },
                     None,
-                    parameter.location.clone(),
+                    parameter.span,
                 ));
             }
         }

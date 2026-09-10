@@ -46,9 +46,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_parameters::{
-    GenericParameter, GenericParameterList, TypeParameterId,
-};
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
@@ -63,7 +61,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
@@ -132,11 +129,12 @@ fn param_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::default(),
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -168,11 +166,12 @@ fn field_declaration(name: &str, type_id: TypeId, string_table: &mut StringTable
     Declaration {
         id: path(name, string_table),
         value: Expression::no_value_with_type_id(
-            SourceLocation::default(),
+            None,
             DataType::Inferred,
             type_id,
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -181,7 +180,7 @@ fn field_def(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Fie
     FieldDefinition {
         name: path(name, string_table),
         type_id,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -317,7 +316,7 @@ fn unit_variant(name: &str, string_table: &mut StringTable) -> ChoiceVariantDefi
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Unit,
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -330,7 +329,7 @@ fn record_variant(
         name: string_table.intern(name),
         tag: 0,
         payload: ChoiceVariantPayloadDefinition::Record { fields },
-        location: SourceLocation::default(),
+        span: None,
     }
 }
 
@@ -339,19 +338,14 @@ fn register_param_list(
     string_table: &mut StringTable,
     param_names: &[&str],
 ) -> GenericParameterListId {
-    let parameters = param_names
-        .iter()
-        .enumerate()
-        .map(|(position, name)| GenericParameter {
-            id: TypeParameterId(position as u32),
-            name: string_table.intern(name),
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        })
-        .collect();
-    let list = GenericParameterList { parameters };
-    env.register_generic_parameter_list(&list, &FxHashMap::default())
-        .list_id
+    env.register_generic_parameter_list(
+        param_names
+            .iter()
+            .enumerate()
+            .map(|(position, name)| (TypeParameterId(position as u32), string_table.intern(name))),
+        &FxHashMap::default(),
+    )
+    .list_id
 }
 
 fn register_single_param_list(
@@ -368,17 +362,13 @@ fn register_param_list_with_bounds(
     param_name: &str,
     bound_trait_ids: Vec<TraitId>,
 ) -> GenericParameterListId {
-    let parameters = vec![GenericParameter {
-        id: TypeParameterId(0),
-        name: string_table.intern(param_name),
-        location: SourceLocation::default(),
-        trait_bounds: Vec::new(),
-    }];
-    let list = GenericParameterList { parameters };
     let mut bounds_by_local: FxHashMap<TypeParameterId, Vec<TraitId>> = FxHashMap::default();
     bounds_by_local.insert(TypeParameterId(0), bound_trait_ids);
-    env.register_generic_parameter_list(&list, &bounds_by_local)
-        .list_id
+    env.register_generic_parameter_list(
+        [(TypeParameterId(0), string_table.intern(param_name))].into_iter(),
+        &bounds_by_local,
+    )
+    .list_id
 }
 
 fn root_table(
@@ -466,6 +456,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table),
         value,
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -2243,7 +2234,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let field_definitions = Box::new([field_def("x", int_id, &mut string_table)]);
     let default_value = Expression::string_slice(
         string_table.intern("wrong"),
-        SourceLocation::default(),
+        None,
         ValueMode::ImmutableOwned,
     );
     let retained_fields = vec![field_declaration_with_default(

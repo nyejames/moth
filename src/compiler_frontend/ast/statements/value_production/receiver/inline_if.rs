@@ -34,7 +34,8 @@ pub(super) fn parse_inline_value_if(
         target,
         string_table,
         condition,
-        location,
+        span,
+        ..
     } = input;
 
     let output = parse_inline_then_else(InlineThenElseInput {
@@ -48,12 +49,12 @@ pub(super) fn parse_inline_value_if(
 
     let then_body = vec![then_value_node(
         output.then_values,
-        location.clone(),
+        output.then_span,
         context.scope.clone(),
     )];
     let else_body = vec![then_value_node(
         output.else_values,
-        location.clone(),
+        output.else_span,
         context.scope.clone(),
     )];
 
@@ -63,7 +64,7 @@ pub(super) fn parse_inline_value_if(
         else_body,
         then_scope: context.scope.clone(),
         else_scope: context.scope.clone(),
-        location,
+        span,
         generic_request_ranges: output.generic_request_ranges,
         result_type_ids: output.result_type_ids,
     };
@@ -71,9 +72,13 @@ pub(super) fn parse_inline_value_if(
     Ok(match output.result_type_id {
         Some(result_type_id) => ParsedReceiverValue::Complete(build_value_if_expression(
             value_if,
+            span,
             result_type_id,
             type_interner.environment(),
         )),
-        None => ParsedReceiverValue::NeedsSlotInference(ValueBlock::If(value_if)),
+        None => ParsedReceiverValue::NeedsSlotInference {
+            block: ValueBlock::If(value_if),
+            span,
+        },
     })
 }

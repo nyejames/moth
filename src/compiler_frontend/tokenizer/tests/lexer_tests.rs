@@ -10,11 +10,17 @@ use crate::compiler_frontend::compiler_messages::{
     SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralSign;
+use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
+};
+
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 
@@ -33,20 +39,32 @@ fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
     tokenize_source_with_registry(source, &style_directives)
 }
 
+fn expect_lexical_diagnostic(failure: TokenizeFailure) -> CompilerDiagnostic {
+    match failure {
+        TokenizeFailure::Diagnosed(diagnostic) => diagnostic,
+        TokenizeFailure::Infrastructure(error) => {
+            panic!("lexical diagnosis fixture encountered infrastructure failure: {error:?}")
+        }
+    }
+}
+
 fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let diagnostic = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
-    )
-    .expect_err("tokenization should fail");
-    (*diagnostic, string_table)
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) else {
+        panic!("tokenization should fail");
+    };
+    (expect_lexical_diagnostic(diagnostic), string_table)
 }
 
 fn tokenize_source_with_registry(
@@ -55,13 +73,15 @@ fn tokenize_source_with_registry(
 ) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
     (file_tokens, string_table)
@@ -75,13 +95,15 @@ fn tokenize_source_with_directives(
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
     let registry = StyleDirectiveRegistry::merged(directives)
         .expect("test style directives should merge with core directives");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &registry,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
     (file_tokens, string_table)
@@ -91,6 +113,7 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
     let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &source_path,
@@ -98,7 +121,8 @@ fn tokenize_moth_template_source(source: &str) -> (FileTokens, StringTable) {
             .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("Moth template tokenization should succeed");
     (file_tokens, string_table)
@@ -108,17 +132,20 @@ fn tokenize_moth_template_error(source: &str) -> (CompilerDiagnostic, StringTabl
     let mut string_table = StringTable::new();
     let style_directives = frontend_test_style_directives();
     let source_path = InternedPath::from_single_str("test.mtf", &mut string_table);
-    let diagnostic = tokenize(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
         source,
         &source_path,
         TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
             .expect("Moth template should tokenize"),
         &style_directives,
         &mut string_table,
-        None,
-    )
-    .expect_err("Moth template tokenization should fail");
-    (*diagnostic, string_table)
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) else {
+        panic!("Moth template tokenization should fail");
+    };
+    (expect_lexical_diagnostic(diagnostic), string_table)
 }
 
 fn find_token_index(tokens: &[Token], predicate: impl Fn(&TokenKind) -> bool) -> usize {
@@ -126,6 +153,23 @@ fn find_token_index(tokens: &[Token], predicate: impl Fn(&TokenKind) -> bool) ->
         .iter()
         .position(|token| predicate(&token.kind))
         .expect("expected token to be present")
+}
+
+fn span_byte_range(span: LocalSpan) -> (u32, u32) {
+    let resolver = ExtendedSpanBuilder::new();
+    let resolved = span.resolve_with(resolver.resolver());
+    (resolved.start(), resolved.end())
+}
+
+fn token_byte_range(token: &Token) -> (u32, u32) {
+    span_byte_range(token.span)
+}
+
+fn diagnostic_byte_range(diagnostic: &CompilerDiagnostic) -> (u32, u32) {
+    let span = diagnostic
+        .primary_span
+        .expect("tokenizer diagnostics should retain an authored source span");
+    span_byte_range(span.local())
 }
 
 fn assert_invalid_number_literal(
@@ -301,16 +345,8 @@ fn assert_invalid_string_escape(source: &str, expected_reason: InvalidStringEsca
         DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidStringEscape)
     );
     assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0034");
-    assert_eq!(
-        diagnostic.primary_location.start_pos.line_number,
-        diagnostic.primary_location.end_pos.line_number
-    );
-    assert_eq!(
-        diagnostic.primary_location.end_pos.char_column
-            - diagnostic.primary_location.start_pos.char_column
-            + 1,
-        expected_span_width
-    );
+    let (start, end) = diagnostic_byte_range(&diagnostic);
+    assert_eq!(end - start, expected_span_width);
 
     match &diagnostic.payload {
         DiagnosticPayload::InvalidStringEscape { reason } => {
@@ -394,7 +430,8 @@ fn raw_string_preserves_backslashes_and_newlines_without_escape_decoding() {
 
 #[test]
 fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
-    let (diagnostic, string_table) = tokenize_moth_template_error("]");
+    let source = "]";
+    let (diagnostic, string_table) = tokenize_moth_template_error(source);
 
     assert_eq!(
         diagnostic.kind,
@@ -406,12 +443,11 @@ fn moth_template_entry_body_rejects_unescaped_outer_template_close() {
             source_kind: SourceFileKind::MothTemplate
         }
     ));
+    let (start, end) = diagnostic_byte_range(&diagnostic);
     assert_eq!(
-        diagnostic
-            .primary_location
-            .scope
-            .to_portable_string(&string_table),
-        "test.mtf"
+        source.get(start as usize..end as usize),
+        Some("]"),
+        "unescaped template close should retain its authored byte",
     );
 
     let guidance = format_payload_guidance(
@@ -1581,15 +1617,20 @@ fn rejects_legacy_reset_style_directive_name() {
     let mut string_table = StringTable::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
-    let error = tokenize(
-        "[$reset: body]",
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let source = "[$reset: body]";
+    let Err(diagnostic) = tokenize(
+        source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
-    )
-    .expect_err("legacy reset directive should be rejected");
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) else {
+        panic!("legacy reset directive should be rejected");
+    };
+    let error = expect_lexical_diagnostic(diagnostic);
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -1597,7 +1638,12 @@ fn rejects_legacy_reset_style_directive_name() {
         }
         payload => panic!("expected invalid style directive payload, found {payload:?}"),
     }
-    assert!(error.primary_location.start_pos.char_column > 0);
+    let (start, end) = diagnostic_byte_range(&error);
+    assert_eq!(
+        source.get(start as usize..end as usize),
+        Some("$reset"),
+        "legacy directive diagnostic should cover the authored directive name",
+    );
 }
 
 #[test]
@@ -1682,13 +1728,15 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
+    let mut span_builder = ExtendedSpanBuilder::new();
     let result = tokenize(
         "[$[:prefix], $md:\nhello\n]",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     );
     assert!(
         result.is_err(),
@@ -1743,15 +1791,20 @@ fn unknown_style_directives_fail_under_strict_registry() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
-    let result = tokenize(
-        "[$unknown: value]",
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let source = "[$unknown: value]";
+    let Err(diagnostic) = tokenize(
+        source,
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
-    );
-    let error = result.expect_err("unknown directive should fail during tokenization");
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    ) else {
+        panic!("unknown directive should fail during tokenization");
+    };
+    let error = expect_lexical_diagnostic(diagnostic);
 
     match &error.payload {
         DiagnosticPayload::InvalidStyleDirective { directive_name, .. } => {
@@ -1759,7 +1812,12 @@ fn unknown_style_directives_fail_under_strict_registry() {
         }
         payload => panic!("expected invalid style directive payload, found {payload:?}"),
     }
-    assert!(error.primary_location.start_pos.char_column > 0);
+    let (start, end) = diagnostic_byte_range(&error);
+    assert_eq!(
+        source.get(start as usize..end as usize),
+        Some("$unknown"),
+        "unknown directive diagnostic should cover the authored directive name",
+    );
 }
 
 #[test]
@@ -1794,13 +1852,15 @@ fn rejects_numeric_slot_directive_prefixes() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_path = InternedPath::from_single_str("test.moth", &mut string_table);
 
+    let mut span_builder = ExtendedSpanBuilder::new();
     let result = tokenize(
         "[wrapper: [$1: first]]",
         &source_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     );
     assert!(
         result.is_err(),
@@ -2148,5 +2208,573 @@ fn ordinary_import_identifier_does_not_receive_path_correction() {
             .iter()
             .any(|token| matches!(token.kind, TokenKind::As)),
         "ordinary `import` followed by `as` should tokenize both words independently"
+    );
+}
+
+/// Token start lines must use the same LF, CRLF and bare-CR boundaries as the lazy line index.
+///
+/// The fixture drives every path that consumes a carriage return: a whitespace tail, a CRLF
+/// statement break, a physical CR inside a quoted string and one inside a template body. Those
+/// paths reach the stream through different helpers, so a table that disagreed with only one of
+/// them would still pass a single-shape fixture.
+///
+/// Exact token spans are resolved to bytes before line-index checks; columns are intentionally
+/// derived by the line index rather than reconstructed as legacy tokenizer state.
+#[test]
+fn token_start_lines_match_line_index_across_newline_shapes() {
+    let source =
+        "name = \"café😀\"  \r  next\nvalue = 'q'\r\ntext = \"a\rb\"\nbody = [:one\rtwo]\nlast = 2";
+    let (file_tokens, _string_table) = tokenize_source(source);
+    let line_starts = line_start_offsets(source);
+    let line_index = LineIndex::new(source, &line_starts);
+
+    let mut lines_with_token_starts: Vec<u32> = Vec::new();
+    let mut columns_checked = 0;
+
+    for token in &file_tokens.tokens {
+        let (start_byte, end_byte) = token_byte_range(token);
+        let line = line_index
+            .line_of_offset(start_byte)
+            .expect("every token start, including EOF, must be addressable");
+        if lines_with_token_starts.last() != Some(&line) {
+            lines_with_token_starts.push(line);
+        }
+
+        if start_byte == end_byte {
+            continue;
+        }
+
+        let authored = source
+            .get(start_byte as usize..end_byte as usize)
+            .expect("token byte ranges must stay on UTF-8 boundaries");
+        let first_authored_scalar = authored
+            .chars()
+            .next()
+            .expect("non-empty token ranges must contain a scalar");
+        if matches!(first_authored_scalar, '\r' | '\n') {
+            continue;
+        }
+
+        // A column names an offset inside one line's visible text, so the reported column must
+        // round-trip back to the token's own byte start.
+        let position = line_index
+            .position(start_byte)
+            .expect("the token start position must resolve");
+        let line_text = line_index
+            .line_text(line)
+            .expect("a token on a non-empty line must have visible text");
+        let line_start = line_index
+            .line_byte_range(line)
+            .expect("a line carrying a token must have a byte range")
+            .start;
+        let (offset_in_line, scalar_at_column) = line_text
+            .char_indices()
+            .nth(position.column as usize)
+            .expect("a reported column must name a scalar in that line's visible text");
+        assert_eq!(
+            scalar_at_column, first_authored_scalar,
+            "{:?}: line-index column must point at the token's first authored scalar",
+            token.kind
+        );
+        assert_eq!(
+            line_start + offset_in_line as u32,
+            start_byte,
+            "{:?}: line-index column must round-trip to the token's byte start",
+            token.kind
+        );
+        columns_checked += 1;
+    }
+
+    // Every authored line carries a token start, including the two that a multi-line string and
+    // a multi-line template body end on, so no CR shape in the fixture goes unmeasured.
+    assert_eq!(
+        lines_with_token_starts,
+        (0..=7).collect::<Vec<u32>>(),
+        "every authored line must carry a token start"
+    );
+    // The column check skips newline and multi-line tokens, so a future tokenizer change that
+    // skipped everything would leave it vacuous.
+    assert!(
+        columns_checked >= 10,
+        "the column check ran on only {columns_checked} tokens"
+    );
+}
+
+/// A discarded template body still anchors its closing bracket at the authored byte.
+///
+/// The lexer skips a discarded body's text, so the close span is checked directly against its
+/// authored byte range and then mapped through the lazy line index.
+#[test]
+fn discarded_template_body_close_resolves_to_its_authored_line() {
+    let source = "[$note:one\rtwo]x = 1";
+    let (file_tokens, _string_table) = tokenize_source(source);
+    let line_starts = line_start_offsets(source);
+    let line_index = LineIndex::new(source, &line_starts);
+
+    let close = file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::TemplateClose))
+        .expect("a discarded body must still emit its closing bracket");
+
+    let (start_byte, end_byte) = token_byte_range(close);
+    assert_eq!(
+        source.get(start_byte as usize..end_byte as usize),
+        Some("]")
+    );
+    assert_eq!(
+        line_index.line_of_offset(start_byte),
+        Some(1),
+        "the closing bracket is authored on the line after the discarded body's carriage return"
+    );
+}
+
+/// Every token's exact span must recover exactly the text its author wrote.
+///
+/// The expectations are authored lexemes sliced from the byte range carried by each token.
+#[test]
+fn token_byte_ranges_recover_the_authored_text() {
+    let source = "name = \"café\"\n[outer: a\r\nb[inner: nested]c\rd]\n";
+    let (file_tokens, _string_table) = tokenize_source(source);
+
+    let authored: Vec<&str> = file_tokens
+        .tokens
+        .iter()
+        .map(|token| {
+            let (start, end) = token_byte_range(token);
+            &source[start as usize..end as usize]
+        })
+        .collect();
+
+    assert_eq!(
+        authored,
+        vec![
+            "", // ModuleStart, before any authored byte
+            "name",
+            "=",
+            "\"café\"", // multi-byte scalar inside the quoted span
+            "\n",
+            "[",
+            "outer",
+            ":",
+            " a\r\nb", // template body text spanning a CRLF
+            "[",
+            "inner",
+            ":",
+            " nested",
+            "]",
+            // The body's token value normalizes `\r` to `\n`; the byte range still covers the
+            // carriage return the author actually wrote.
+            "c\rd",
+            "]",
+            "\n",
+            "", // Eof
+        ],
+        "token byte ranges must slice the authored lexemes"
+    );
+
+    let source_len = source.len() as u32;
+    let mut previous_end = 0u32;
+    for token in &file_tokens.tokens {
+        let (start_byte, end_byte) = token_byte_range(token);
+
+        assert!(
+            start_byte <= end_byte,
+            "token byte range must be half-open and well-ordered: {start_byte}..{end_byte}"
+        );
+        assert!(
+            end_byte <= source_len,
+            "token end_byte {end_byte} exceeds source length {source_len}"
+        );
+        assert!(
+            start_byte >= previous_end,
+            "token ranges must not overlap: {start_byte} precedes the previous end {previous_end}"
+        );
+        previous_end = end_byte;
+    }
+}
+
+/// Tokens returned while skipping trivia must span the token, never the trivia before it.
+///
+/// Whitespace runs, comments and discarded template bodies are consumed without producing a
+/// token, so each of these sources previously left the following token anchored at the start of
+/// the discarded text.
+#[test]
+fn skipped_trivia_is_excluded_from_the_following_token_range() {
+    let cases: &[(&str, &[&str])] = &[
+        ("name   ", &["", "name", ""]),
+        ("a  \nb", &["", "a", "\n", "b", ""]),
+        // A run of blank lines is one boundary token spanning exactly that run.
+        ("\n\n  \nz", &["", "\n\n  \n", "z", ""]),
+        ("-- hi\n", &["", "\n", ""]),
+        ("-- hi", &["", ""]),
+        // The discarded body is skipped; only its closing bracket is emitted.
+        ("[$note: abc]", &["", "[", "$note", ":", "]", ""]),
+        ("y!", &["", "y", "!", ""]),
+        ("`raw`", &["", "`raw`", ""]),
+    ];
+
+    for (source, expected) in cases {
+        let (file_tokens, _string_table) = tokenize_source(source);
+        let authored: Vec<&str> = file_tokens
+            .tokens
+            .iter()
+            .map(|token| {
+                let (start, end) = token_byte_range(token);
+                &source[start as usize..end as usize]
+            })
+            .collect();
+        assert_eq!(authored, *expected, "{source:?}: token byte ranges");
+
+        let end_of_source = source.len() as u32;
+        let final_token = file_tokens
+            .tokens
+            .last()
+            .expect("tokenization always emits Eof");
+        assert_eq!(
+            token_byte_range(final_token),
+            (end_of_source, end_of_source),
+            "{source:?}: Eof is a zero-width insertion point at the end of the source"
+        );
+    }
+}
+
+#[test]
+fn malformed_and_unclosed_diagnostics_keep_recorded_byte_ranges() {
+    let string_source = "prefix = 1\r\nvalue = \"authored text";
+    let (string_diagnostic, _string_table) = tokenize_source_error(string_source);
+
+    assert_eq!(
+        string_diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnterminatedStringLiteral)
+    );
+    let (string_start, string_end) = diagnostic_byte_range(&string_diagnostic);
+    assert_eq!(
+        string_source.get(string_start as usize..string_end as usize),
+        Some("\"authored text"),
+        "unterminated-string diagnostics must retain the authored byte range"
+    );
+    let string_line_starts = line_start_offsets(string_source);
+    let string_line_index = LineIndex::new(string_source, &string_line_starts);
+
+    assert_eq!(string_line_index.line_of_offset(string_start), Some(1));
+    assert_eq!(string_line_index.line_of_offset(string_end), Some(1));
+
+    // The lexer's own end-of-source path: a style directive name that never arrives.
+    let template_source = "prefix = 1\r\nvalue = [$";
+    let (template_diagnostic, _template_string_table) = tokenize_source_error(template_source);
+
+    assert_eq!(
+        template_diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+    );
+    let (template_start, template_end) = diagnostic_byte_range(&template_diagnostic);
+    assert_eq!(
+        template_source.get(template_start as usize..template_end as usize),
+        Some("$"),
+        "an end-of-source diagnostic names the authored character it could not complete"
+    );
+
+    let template_line_starts = line_start_offsets(template_source);
+    let template_line_index = LineIndex::new(template_source, &template_line_starts);
+
+    assert_eq!(
+        template_line_index.line_of_offset(template_start),
+        Some(1),
+        "the reported range belongs to the line the author left unfinished"
+    );
+}
+
+/// The token span is resolved against the producer's exact byte table, and the recovered slice is
+/// compared against the lexeme the author wrote.
+///
+/// Token starts must not run backwards, but they may leave gaps, which is where the tokenizer
+/// skipped trivia or discarded a template body.
+#[test]
+fn every_token_span_matches_authored_bytes() {
+    let source = "name = \"café😀\"\r\nvalue = \"quoted\"\rbody = [$md:\nbody\r]\n[$note:\ndiscarded\r]\nlast = 2";
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("span-bridge.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
+        source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("span bridge fixture should tokenize");
+    let resolver = span_builder.resolver();
+
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::TemplateHead))
+    );
+    assert!(
+        file_tokens
+            .tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+    );
+
+    let mut previous_end = 0u32;
+    let authored: Vec<&str> = file_tokens
+        .tokens
+        .iter()
+        .map(|token| {
+            let resolved = token.span.resolve_with(resolver);
+            assert!(
+                resolved.start() >= previous_end,
+                "{:?} must not start before the previous token ended",
+                token.kind
+            );
+            previous_end = resolved.end();
+
+            source
+                .get(resolved.start() as usize..resolved.end() as usize)
+                .expect("a span must name a character-boundary range of its own source")
+        })
+        .collect();
+
+    assert_eq!(
+        authored,
+        vec![
+            "", // ModuleStart, before any authored byte
+            "name",
+            "=",
+            "\"café😀\"", // an astral scalar inside the quoted span
+            "\r\n",
+            "value",
+            "=",
+            "\"quoted\"",
+            "\r", // a bare carriage return ends the line on its own
+            "body",
+            "=",
+            "[",
+            "$md",
+            ":",
+            "\nbody\r", // template body text spanning a bare carriage return
+            "]",
+            "\n",
+            "[",
+            "$note",
+            ":",
+            "]", // the discarded body's closing bracket, anchored past the skipped run
+            "\n",
+            "last",
+            "=",
+            "2",
+            "", // Eof
+        ],
+        "resolved spans must slice the authored lexemes"
+    );
+}
+
+#[test]
+fn extended_token_span_resolves_exactly_through_live_builder() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("long-token.moth", &mut string_table);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("long token should tokenize");
+    let resolver = span_builder.resolver();
+    let token = file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("long string token");
+    let resolved = token.span.resolve_with(resolver);
+
+    assert_eq!(
+        span_builder.len(),
+        1,
+        "the long string is the only token past the inline length limit, so it owns the one row"
+    );
+    let expected_start = source.find('"').expect("quoted token start") as u32;
+    assert_eq!(resolved.start(), expected_start);
+    assert_eq!(resolved.end(), expected_start + quoted.len() as u32 + 2);
+    assert_eq!(
+        resolved.end() - resolved.start(),
+        u32::try_from(quoted.len() + 2).expect("fixture length fits in u32")
+    );
+}
+
+#[test]
+fn lexical_failure_retains_extended_token_span_builder_rows() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"'");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("failed-long-token.moth", &mut string_table);
+    let canonical_path = source_path.to_path_buf(&string_table);
+    let sources =
+        SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
+            .expect("the physical fixture should register");
+    let expected_file_id = sources
+        .get_by_canonical_path(&canonical_path)
+        .expect("the fixture should have a source identity")
+        .id;
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let Err(diagnostic) = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        expected_file_id,
+        &mut span_builder,
+    ) else {
+        panic!("the malformed trailing character should abort tokenization");
+    };
+    let diagnostic = expect_lexical_diagnostic(diagnostic);
+
+    let (diagnostic_start, _diagnostic_end) = diagnostic_byte_range(&diagnostic);
+    assert_eq!(diagnostic_start, (source.len() - 1) as u32);
+    assert_eq!(
+        span_builder.len(),
+        1,
+        "the already-emitted long string token must retain its extended row on failure"
+    );
+
+    // Encode the expected long range at index zero in an independent builder, then resolve that
+    // handle through the failure's retained builder. This checks the row's exact range rather than
+    // only proving that some capacity was retained.
+    let mut probe_builder = ExtendedSpanBuilder::new();
+    let expected_span = LocalSpan::exact(8, (quoted.len() + 2) as u32, &mut probe_builder)
+        .expect("the expected long string range should be representable");
+    let resolved = expected_span.resolve_with(span_builder.resolver());
+    assert_eq!(resolved.start(), 8);
+    assert_eq!(resolved.end(), (8 + quoted.len() + 2) as u32);
+}
+
+#[test]
+fn diagnostic_span_allocates_exactly_when_needed() {
+    let source = "x".repeat(3000);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut stream = TokenStream::new(
+        &source,
+        SourceId::COMPILATION_ROOT,
+        TokenizerEntryMode::SourceFile,
+        &mut span_builder,
+    );
+
+    for _ in 0..1500 {
+        stream.next();
+    }
+    stream.start_byte_offset = 0;
+    stream
+        .new_token(TokenKind::StringSliceLiteral(StringId::from_index(0)))
+        .expect("the long authored token should encode");
+    assert_eq!(
+        stream.extended_span_builder.len(),
+        1,
+        "the long authored token should require one extended row"
+    );
+
+    for _ in 0..1500 {
+        stream.next();
+    }
+    let diagnostic_span = stream
+        .source_span_for_bytes(1500, 3000)
+        .expect("the diagnostic range should be representable");
+    let diagnostic_range = diagnostic_span
+        .local()
+        .resolve_with(stream.extended_span_builder.resolver());
+    assert_eq!(
+        (diagnostic_range.start(), diagnostic_range.end()),
+        (1500, 3000)
+    );
+    assert_eq!(
+        stream.extended_span_builder.len(),
+        2,
+        "the authored token and exact diagnostic range each retain their extended row"
+    );
+}
+
+/// The returned diagnostic keeps exact UTF-8 bounds after a long token has used the original table.
+#[test]
+fn preparation_diagnostics_carry_exact_spans_through_the_original_builder() {
+    let quoted = "😀".repeat(600);
+    let source = format!("value = \"{quoted}\"\nx = \"\\🦋");
+    let mut string_table = StringTable::new();
+    let source_path = InternedPath::from_single_str("diagnosed-long-token.moth", &mut string_table);
+    let canonical_path = source_path.to_path_buf(&string_table);
+    let sources =
+        SourceDatabase::build([&canonical_path], &canonical_path, None, &mut string_table)
+            .expect("the physical fixture should register");
+    let file_id = sources
+        .get_by_canonical_path(&canonical_path)
+        .expect("the fixture should have a source identity")
+        .id;
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let diagnostic = tokenize(
+        &source,
+        &source_path,
+        TokenizerEntryMode::SourceFile,
+        &frontend_test_style_directives(),
+        &mut string_table,
+        file_id,
+        &mut span_builder,
+    )
+    .expect_err("the unsupported escape should abort tokenization");
+    let diagnostic = expect_lexical_diagnostic(diagnostic);
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidStringEscape {
+            reason: InvalidStringEscapeReason::UnsupportedEscape { escaped: '🦋' }
+        }
+    ));
+    assert_eq!(
+        span_builder.len(),
+        1,
+        "the preceding long token uses an extended row"
+    );
+
+    let expected_start = source
+        .find("\\🦋")
+        .expect("fixture should contain the escape") as u32;
+    let expected_end = expected_start + "\\🦋".len() as u32;
+    let span = diagnostic
+        .primary_span
+        .expect("tokenize must capture its diagnosed range");
+    assert_eq!(span.source(), file_id);
+    let resolved = span.local().resolve_with(span_builder.resolver());
+    assert_eq!(
+        (resolved.start(), resolved.end()),
+        (expected_start, expected_end),
+    );
+
+    let mut database_builder = SourceDatabaseBuilder::new(sources);
+    database_builder
+        .sources_mut()
+        .retain_text(file_id, source.clone())
+        .expect("the diagnosed source should retain its snapshot");
+    database_builder.retain_span_builder(file_id, span_builder);
+    let installed = database_builder
+        .finish()
+        .expect("the original builder should install once");
+    let resolved = span.byte_range(&installed);
+    assert_eq!(
+        (resolved.start(), resolved.end()),
+        (expected_start, expected_end)
+    );
+    assert_eq!(
+        &source[resolved.start() as usize..resolved.end() as usize],
+        "\\🦋"
     );
 }

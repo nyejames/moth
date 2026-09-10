@@ -39,7 +39,8 @@ use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
     OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::identity::{DependencyShellId, FileId};
+use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::symbols::identity::DependencyShellId;
 
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -293,7 +294,7 @@ fn rejects_binding_target_with_wrong_symbol_category_on_consumer_admission() {
     });
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-            shell: DependencyShellId::new(FileId(0), 0),
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
         },
         interface: &interface,
     }])
@@ -701,7 +702,7 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
     ];
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
         kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::Authored {
-            shell: DependencyShellId::new(FileId(0), 0),
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
         },
         interface: &provider,
     }])

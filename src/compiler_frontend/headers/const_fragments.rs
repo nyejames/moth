@@ -4,26 +4,23 @@
 //! WHY: const fragments are folded by AST but ordered by header parsing through runtime insertion
 //! indices, so this logic must stay in the header stage.
 
-use crate::compiler_frontend::compiler_errors::compiler_error_to_diagnostic;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::ordering_hints::dependency_path_for_local_name;
 use crate::compiler_frontend::headers::types::{
-    Header, HeaderBuildContext, HeaderExportMode, HeaderKind, LocalDeclarationOrderingHint,
+    Header, HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseFailure,
+    LocalDeclarationOrderingHint,
+};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanJoinError,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
 use crate::compiler_frontend::utilities::token_scan::{
     InitializerReference, NestingDepth, collect_symbol_references,
 };
 use crate::projects::settings::TOP_LEVEL_CONST_TEMPLATE_NAME;
 use std::collections::HashSet;
-
-/// Boxed diagnostic result for top-level const-template header creation.
-///
-/// WHAT: keeps the const-template parser on one small error boundary.
-/// WHY: const-template scanning can preserve structured diagnostics without
-///      carrying the large value inline through every successful header build.
-type ConstFragmentResult<T> = Result<T, Box<CompilerDiagnostic>>;
 
 pub(super) fn create_top_level_const_template(
     scope: InternedPath,
@@ -31,7 +28,8 @@ pub(super) fn create_top_level_const_template(
     const_template_number: usize,
     token_stream: &mut FileTokens,
     context: &mut HeaderBuildContext<'_>,
-) -> ConstFragmentResult<Header> {
+    span_builder: &mut ExtendedSpanBuilder,
+) -> Result<Header, HeaderParseFailure> {
     let const_template_name = context.string_table.intern(&format!(
         "{TOP_LEVEL_CONST_TEMPLATE_NAME}{const_template_number}"
     ));
@@ -42,8 +40,11 @@ pub(super) fn create_top_level_const_template(
     // can treat const templates exactly like regular templates.
     let mut body = Vec::with_capacity(10);
     body.push(opening_template_token);
-
-    let start_location = token_stream.current_location();
+    let start_span = SourceSpan::new(
+        token_stream.file_id,
+        token_stream.tokens[token_stream.index].span,
+    );
+    let source_start = SourceSpan::new(token_stream.file_id, LocalSpan::source_start());
 
     let closing_bracket = context.string_table.intern("]");
     crate::compiler_frontend::utilities::token_scan::consume_balanced_template_region(
@@ -68,32 +69,36 @@ pub(super) fn create_top_level_const_template(
             }
             body.push(token);
         },
-        |location| {
-            Box::new(CompilerDiagnostic::unexpected_end_of_file(
-                Some(closing_bracket),
-                location,
-            ))
-        },
+        |span| CompilerDiagnostic::unexpected_end_of_file(Some(closing_bracket), Some(span)),
     )?;
 
     if let Some(error) = selection_error {
-        return Err(Box::new(compiler_error_to_diagnostic(&error)));
+        return Err(error.into());
     }
 
-    // Add an EOF sentinel so downstream parsers can safely terminate even if
-    // expression parsing consumed to the end of this synthetic token stream.
-    body.push(Token {
-        kind: TokenKind::Eof,
-        location: token_stream.current_location(),
-    });
-    let condition_references = collect_template_if_condition_references(&body);
+    let eof_anchor = token_stream.current_token();
+    let end_span = SourceSpan::new(token_stream.file_id, eof_anchor.span);
+    body.push(Token::with_span(TokenKind::Eof, eof_anchor.span));
+    let condition_references =
+        collect_template_if_condition_references(&body, token_stream.file_id);
 
     let full_name = scope.append(const_template_name);
-    let name_location = SourceLocation {
-        scope,
-        start_pos: start_location.start_pos,
-        end_pos: token_stream.current_location().end_pos,
-    };
+
+    // Placement metadata retains the same range as the header: first interior token through
+    // the post-close token. A long join appends to this source's original extended table.
+    let name_span = start_span
+        .join(end_span, span_builder)
+        .map_err(|error| match error {
+            SpanJoinError::Capacity(error) => {
+                match CompilerDiagnostic::from_span_capacity_error(error, Some(source_start)) {
+                    Ok(diagnostic) => HeaderParseFailure::Diagnostic(diagnostic),
+                    Err(error) => HeaderParseFailure::Infrastructure(error),
+                }
+            }
+            SpanJoinError::DifferentSources { .. } => HeaderParseFailure::Infrastructure(
+                CompilerError::compiler_error("const-template span join crossed source identities"),
+            ),
+        })?;
 
     let template_tokens =
         FileTokens::new_substream(token_stream, full_name, token_stream.file_id, body);
@@ -105,14 +110,17 @@ pub(super) fn create_top_level_const_template(
         file_role: context.file_role,
         export_mode: HeaderExportMode::Private,
         local_ordering_hints,
-        name_location,
+        name_span: Some(name_span),
         tokens: template_tokens,
         source_file: context.source_file.to_owned(),
         capacity_references: Vec::new(),
     })
 }
 
-fn collect_template_if_condition_references(tokens: &[Token]) -> Vec<InitializerReference> {
+fn collect_template_if_condition_references(
+    tokens: &[Token],
+    source_id: SourceId,
+) -> Vec<InitializerReference> {
     let mut references = Vec::new();
     let mut index = 0;
 
@@ -122,6 +130,7 @@ fn collect_template_if_condition_references(tokens: &[Token]) -> Vec<Initializer
             let condition_end = find_template_if_condition_end(tokens, condition_start);
             references.extend(collect_symbol_references(
                 &tokens[condition_start..condition_end],
+                source_id,
             ));
             index = condition_end;
             continue;

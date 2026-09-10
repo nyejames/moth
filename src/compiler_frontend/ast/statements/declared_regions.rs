@@ -17,15 +17,15 @@ pub(crate) fn classify_deferred_declared_region_header(
         return None;
     }
 
-    let location = token_stream.current_location();
+    let span = Some(token_stream.current_span());
     match token_stream.current_token_kind() {
         TokenKind::Symbol(_) => Some(CompilerDiagnostic::deferred_feature_reason(
             DeferredFeatureReason::DeclaredRegion,
-            location,
+            span,
         )),
         TokenKind::Wildcard => Some(CompilerDiagnostic::invalid_statement_position(
             InvalidStatementPositionReason::AnonymousDeclaredRegion,
-            location,
+            span,
         )),
         _ => None,
     }

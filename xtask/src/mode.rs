@@ -17,7 +17,8 @@ Modes:
   bench-report         Print a local-only benchmark drilldown report
   bench-frontend-check Run the focused frontend benchmark suite without writing history
   bench-frontend       Run the focused frontend benchmark suite and record
-  bench-validate       Validate all benchmark cases compile without errors
+  bench-data-layout-check Run diagnostic/data-layout frontend benchmarks without writing history
+  bench-data-layout    Run diagnostic/data-layout frontend benchmarks and record
   bench-profile        Run Samply-backed profiling (use --help for options)
   stress               Repeat the unit and integration suites across thread counts
                        (use --repeats <n>; default 3)
@@ -26,7 +27,8 @@ Modes:
   feature-lane-check   Check feature-lane coverage and write the coverage report
   source-audit         Apply the broad-source architecture bans and write their report
   honesty-audit        Classify the test-honesty findings and write the canonical inventory
-                       (use --update-evidence to refresh the tracked durable copy)";
+                       (use --update-evidence to refresh the tracked durable copy)
+  span-census          Measure LocalSpan bit-split candidates over the corpus";
 
 /// Distinguishes the supported xtask benchmark modes.
 ///
@@ -50,6 +52,10 @@ pub enum BenchmarkMode {
     BenchFrontend,
     /// Run the focused frontend benchmark suite without writing history.
     BenchFrontendCheck,
+    /// Run the diagnostic/data-layout frontend suite and record.
+    BenchDataLayout,
+    /// Run the diagnostic/data-layout frontend suite without writing history.
+    BenchDataLayoutCheck,
     /// Validate all benchmark cases compile without errors (no timing).
     BenchValidate,
     /// Fit and check the growth exponent of every declared scaling series.
@@ -64,6 +70,8 @@ pub enum BenchmarkMode {
     FeatureLaneCheck,
     /// Apply the broad-source architecture bans across the workspace.
     SourceAudit,
+    /// Measure LocalSpan bit-split candidates over the representative corpus.
+    SpanCensus,
     /// Classify the test-honesty findings and write the canonical honesty inventory.
     ///
     /// `update_evidence` additionally replaces the tracked durable copy. It is off by default so
@@ -110,12 +118,15 @@ impl BenchmarkMode {
             "bench-report" => Some(BenchmarkMode::BenchReport),
             "bench-frontend" => Some(BenchmarkMode::BenchFrontend),
             "bench-frontend-check" => Some(BenchmarkMode::BenchFrontendCheck),
+            "bench-data-layout" => Some(BenchmarkMode::BenchDataLayout),
+            "bench-data-layout-check" => Some(BenchmarkMode::BenchDataLayoutCheck),
             "bench-validate" => Some(BenchmarkMode::BenchValidate),
             "bench-scaling" => Some(BenchmarkMode::BenchScaling),
             "timers-erasure-check" => Some(BenchmarkMode::TimersErasureCheck),
             "feature-matrix" => Some(BenchmarkMode::FeatureMatrix),
             "feature-lane-check" => Some(BenchmarkMode::FeatureLaneCheck),
             "source-audit" => Some(BenchmarkMode::SourceAudit),
+            "span-census" => Some(BenchmarkMode::SpanCensus),
             _ => None,
         };
 

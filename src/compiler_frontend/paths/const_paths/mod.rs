@@ -1,20 +1,19 @@
 //! Moth path syntax parsing for path literals.
 //!
 //! This parser sits directly on tokenizer tokens and returns typed `CompilerDiagnostic` values for
-//! user-authored path mistakes. Connected helpers and the public `parse_file_path` entry point
-//! share one boxed diagnostic shape that flows directly into the tokenizer's result family.
+//! user-authored path mistakes. The lexical entry point also propagates token span infrastructure
+//! failures through the shared tokenizer result; component grammar helpers own only diagnostics.
 //!
 //! Path tokens are terminated by unquoted whitespace. Dependency selections are ordinary
 //! identifier and punctuation tokens parsed by the header-owned dependency-clause parser,
 //! never part of a path row.
 
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PathKind};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{
-    CharPosition, SourceLocation, Token, TokenKind, TokenStream,
-};
-use crate::return_token;
+use crate::compiler_frontend::tokenizer::lexer::{TokenizeResult, current_source_span, mint_token};
+use crate::compiler_frontend::tokenizer::tokens::{Token, TokenKind, TokenStream};
 
 mod components;
 type PathComponents = Vec<StringId>;
@@ -27,14 +26,13 @@ pub(crate) fn can_serialize_path_component_bare(component: &str) -> bool {
 #[derive(Debug)]
 struct ParsedPathPrefix {
     components: PathComponents,
-    last_component_end: Option<CharPosition>,
     ended_with_separator: bool,
 }
 
 pub fn parse_file_path(
     stream: &mut TokenStream,
     string_table: &mut StringTable,
-) -> Result<Token, Box<CompilerDiagnostic>> {
+) -> TokenizeResult<Token> {
     // Path syntax accepted by the tokenizer.
     //
     // Canonical examples:
@@ -44,40 +42,22 @@ pub fn parse_file_path(
     // WHAT: Tokenize exact `@/` as the empty canonical path.
     // WHY: in dependency position `@/` stays a rejected spelling whose owner reports its own
     //      diagnostic, while expression position now accepts bare `@/` as the structural
-    //      site-root value. Tokenizing the spelling here lets each owner act on it instead of
-    //      failing as an unrecognised path introducer.
+    //      site-root value.
     if stream.peek() == Some(&'/') {
         stream.next();
 
         match stream.peek().copied() {
-            None => {
-                let path_id = stream.path_syntax.push(
-                    InternedPath::new(),
-                    SourceLocation::new(
-                        stream.file_path.to_owned(),
-                        stream.start_position,
-                        stream.position,
-                    ),
-                );
-                return_token!(TokenKind::Path(path_id), stream);
-            }
+            None => return mint_path_token(stream, InternedPath::new()),
             Some(next) => {
                 if next.is_whitespace() || matches!(next, ':' | ']' | ')' | '}' | ',' | ';') {
-                    let path_id = stream.path_syntax.push(
-                        InternedPath::new(),
-                        SourceLocation::new(
-                            stream.file_path.to_owned(),
-                            stream.start_position,
-                            stream.position,
-                        ),
-                    );
-                    return_token!(TokenKind::Path(path_id), stream);
+                    return mint_path_token(stream, InternedPath::new());
                 }
 
-                return Err(Box::new(CompilerDiagnostic::invalid_path(
+                return Err(CompilerDiagnostic::invalid_path(
                     PathKind::OnlyRootSlashSupported,
-                    stream.new_location(),
-                )));
+                    Some(current_source_span(stream)?),
+                )
+                .into());
             }
         }
     }
@@ -85,30 +65,32 @@ pub fn parse_file_path(
     let parsed_prefix = parse_path_prefix(stream, string_table)?;
 
     if parsed_prefix.components.is_empty() {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::Empty,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     }
 
     if parsed_prefix.ended_with_separator {
-        return Err(Box::new(CompilerDiagnostic::invalid_path(
+        return Err(CompilerDiagnostic::invalid_path(
             PathKind::TrailingSeparator,
-            stream.new_location(),
-        )));
+            Some(current_source_span(stream)?),
+        )
+        .into());
     }
 
     let root = InternedPath::from_components(parsed_prefix.components);
-    let path_location = SourceLocation::new(
-        stream.file_path.to_owned(),
-        stream.start_position,
-        parsed_prefix
-            .last_component_end
-            .expect("a non-empty path has a final component position"),
-    );
+    mint_path_token(stream, root)
+}
 
-    let path_id = stream.path_syntax.push(root, path_location);
-    return_token!(TokenKind::Path(path_id), stream)
+/// Mint one span and share it between the path token and its source-owned syntax row.
+fn mint_path_token(stream: &mut TokenStream<'_>, root: InternedPath) -> TokenizeResult<Token> {
+    let mut token = mint_token(stream, TokenKind::Path(PathSyntaxId::NONE))?;
+    let source_span = crate::compiler_frontend::source::SourceSpan::new(stream.file_id, token.span);
+    let id = stream.path_syntax.push(root, source_span);
+    token.kind = TokenKind::Path(id);
+    Ok(token)
 }
 
 /// WHAT: Parses the path components of one path token.
@@ -117,11 +99,10 @@ pub fn parse_file_path(
 fn parse_path_prefix(
     stream: &mut TokenStream,
     string_table: &mut StringTable,
-) -> Result<ParsedPathPrefix, Box<CompilerDiagnostic>> {
+) -> TokenizeResult<ParsedPathPrefix> {
     let mut components = Vec::with_capacity(2);
     let mut seen_non_relative_component = false;
     let mut ended_with_separator = false;
-    let mut last_component_end = None;
     let mut expect_component = true;
 
     loop {
@@ -129,7 +110,6 @@ fn parse_path_prefix(
             let Some(next) = stream.peek().copied() else {
                 return Ok(ParsedPathPrefix {
                     components,
-                    last_component_end,
                     ended_with_separator,
                 });
             };
@@ -140,21 +120,22 @@ fn parse_path_prefix(
                 } else {
                     PathKind::TrailingSeparator
                 };
-                return Err(Box::new(CompilerDiagnostic::invalid_path(
+                return Err(CompilerDiagnostic::invalid_path(
                     path_kind,
-                    stream.new_location(),
-                )));
+                    Some(current_source_span(stream)?),
+                )
+                .into());
             }
 
             if matches!(next, '/' | '\\') {
-                return Err(Box::new(CompilerDiagnostic::invalid_path(
+                return Err(CompilerDiagnostic::invalid_path(
                     PathKind::EmptyComponent,
-                    stream.new_location(),
-                )));
+                    Some(current_source_span(stream)?),
+                )
+                .into());
             }
 
             let parsed_component = components::parse_component(stream, string_table)?;
-            let component_end = parsed_component.end_position;
             components::push_validated_component(
                 &mut components,
                 parsed_component,
@@ -163,7 +144,6 @@ fn parse_path_prefix(
                 stream,
                 string_table,
             )?;
-            last_component_end = Some(component_end);
 
             expect_component = false;
             ended_with_separator = false;
@@ -173,17 +153,14 @@ fn parse_path_prefix(
         let Some(next) = stream.peek().copied() else {
             return Ok(ParsedPathPrefix {
                 components,
-                last_component_end,
                 ended_with_separator,
             });
         };
 
-        // Unquoted whitespace terminates the path token. The consuming parser diagnoses
-        // a likely unquoted path component with a quote suggestion.
+        // Unquoted whitespace terminates the path token.
         if next.is_whitespace() {
             return Ok(ParsedPathPrefix {
                 components,
-                last_component_end,
                 ended_with_separator,
             });
         }
@@ -195,11 +172,10 @@ fn parse_path_prefix(
             continue;
         }
 
-        // Any other character ends the path token: structural delimiters, old selection
-        // braces, template-head delimiters or an unrelated operator.
+        // Any other character ends the path token: structural delimiters, old selection braces,
+        // template-head delimiters or an unrelated operator.
         return Ok(ParsedPathPrefix {
             components,
-            last_component_end,
             ended_with_separator,
         });
     }

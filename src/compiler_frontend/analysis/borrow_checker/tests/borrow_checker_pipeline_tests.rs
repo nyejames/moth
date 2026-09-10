@@ -15,6 +15,8 @@ use crate::compiler_frontend::module_compilation::artefact::{
 };
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -55,11 +57,13 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::reference(
+                    Expression::reference_with_type_id(
                         x.clone(),
                         DataType::Int,
+                        builtin_type_ids::INT,
                         test_source_location(2),
                         ValueMode::MutableReference,
+                        crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     ),
                 )),
                 test_source_location(2),
@@ -77,7 +81,7 @@ fn frontend_check_borrows_propagates_failures() {
                 test_source_location(3),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(
@@ -85,22 +89,38 @@ fn frontend_check_borrows_propagates_failures() {
         &mut string_table,
     );
 
-    let frontend = CompilerFrontend::new(
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let external_package_registry =
+        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
+    let source_files = Arc::new(SourceDatabase::empty());
+    let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
-        StyleDirectiveRegistry::built_ins(),
-        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new()),
+        &style_directives,
+        &external_package_registry,
         None,
+        &source_files,
     );
-    let messages = frontend
-        .check_borrows(&hir)
+    let generated_owner =
+        FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("generated"));
+    let failure = frontend
+        .check_borrows_premerge(&hir, Some(&generated_owner))
         .expect_err("borrow checking should fail");
+    let messages = failure.into_messages(&StringTable::new());
 
-    assert!(
-        messages
-            .error_diagnostics()
-            .any(|diagnostic| diagnostic.kind
-                == DiagnosticKind::Borrow(BorrowDiagnosticKind::SharedMutableConflict))
+    let diagnostic = messages
+        .error_diagnostics()
+        .find(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Borrow(BorrowDiagnosticKind::SharedMutableConflict)
+        })
+        .expect("borrow checking should preserve the diagnosed conflict");
+    assert_eq!(
+        diagnostic
+            .primary_frozen_identity_handle
+            .as_ref()
+            .and_then(FrozenIdentityHandle::domain),
+        Some(&StablePackageIdentity::project_local("generated")),
+        "generated borrow diagnostics must retain their HIR owner domain"
     );
 }
 
@@ -139,7 +159,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
                 test_source_location(2),
             ),
         ],
-        test_source_location(1),
+        None,
     );
 
     let hir = lower_hir(

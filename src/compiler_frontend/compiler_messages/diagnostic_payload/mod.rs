@@ -5,11 +5,10 @@
 //! pre-rendered strings or generic argument maps.
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
 
 mod reason_keys;
 mod remap;
@@ -29,12 +28,12 @@ pub enum DiagnosticPayload {
     //  General Syntax
     // -----------------
     ExpectedToken {
-        expected: TokenKind,
-        found: Option<TokenKind>,
+        expected: DiagnosticToken,
+        found: Option<DiagnosticToken>,
     },
 
     UnexpectedToken {
-        found: TokenKind,
+        found: DiagnosticToken,
     },
 
     UnexpectedTrailingComma,
@@ -56,7 +55,6 @@ pub enum DiagnosticPayload {
 
     DuplicateDeclaration {
         name: StringId,
-        first_location: Option<SourceLocation>,
     },
 
     // -----------------
@@ -80,7 +78,6 @@ pub enum DiagnosticPayload {
 
     ImportNameCollision {
         name: StringId,
-        previous_location: Option<SourceLocation>,
     },
 
     NotExportedBySourceFile {
@@ -154,7 +151,6 @@ pub enum DiagnosticPayload {
 
     DuplicateMothTemplateInputPath {
         path: InternedPath,
-        first_location: SourceLocation,
     },
 
     UnsupportedExternalExtension {
@@ -179,7 +175,6 @@ pub enum DiagnosticPayload {
     MultipleMutableBorrows {
         place: DiagnosticPlace,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
     },
 
     SharedMutableConflict {
@@ -187,31 +182,26 @@ pub enum DiagnosticPayload {
         existing_access: BorrowAccessKind,
         requested_access: BorrowAccessKind,
         conflicting_place: Option<DiagnosticPlace>,
-        existing_location: Option<SourceLocation>,
     },
 
     UseAfterPossibleMove {
         place: DiagnosticPlace,
-        move_location: Option<SourceLocation>,
     },
 
     MoveWhileBorrowed {
         place: DiagnosticPlace,
         existing_access: BorrowAccessKind,
-        borrow_location: Option<SourceLocation>,
     },
 
     WholeObjectBorrowConflict {
         whole_place: DiagnosticPlace,
         part_place: DiagnosticPlace,
-        part_location: Option<SourceLocation>,
     },
 
     InvalidMutableAccess {
         place: DiagnosticPlace,
         reason: InvalidMutableAccessReason,
         conflicting_place: Option<DiagnosticPlace>,
-        conflicting_location: Option<SourceLocation>,
     },
 
     UseOfUninitializedLocal {
@@ -262,10 +252,15 @@ pub enum DiagnosticPayload {
     // -----------------
     //  Syntax Payloads
     // -----------------
+    SourceSpanCapacity {
+        start: u32,
+        length: u32,
+        resource: SourceSpanCapacityResource,
+    },
+
     InvalidCharacter {
         character: char,
     },
-
     InvalidStringEscape {
         reason: InvalidStringEscapeReason,
     },
@@ -372,7 +367,6 @@ pub enum DiagnosticPayload {
 
     ShadowedName {
         name: StringId,
-        first_location: SourceLocation,
     },
 
     ReservedNameCollision {
@@ -403,7 +397,6 @@ pub enum DiagnosticPayload {
         target_type: Option<TypeId>,
         field_name: Option<StringId>,
         root_binding_name: Option<StringId>,
-        declaration_location: Option<SourceLocation>,
     },
 
     InvalidMultiBind {
@@ -549,7 +542,6 @@ pub enum DiagnosticPayload {
     DuplicateTraitRequirement {
         trait_name: StringId,
         requirement_name: StringId,
-        first_location: SourceLocation,
     },
 
     TraitPrivateSurfaceLeak {
@@ -573,7 +565,6 @@ pub enum DiagnosticPayload {
 
     DuplicatePublicExport {
         name: StringId,
-        first_location: SourceLocation,
     },
 
     PrivateTypeInExportedApi {
@@ -632,20 +623,6 @@ pub enum DiagnosticPayload {
 
     CommonSyntaxMistake {
         reason: CommonSyntaxMistakeReason,
-    },
-
-    // -------------------------
-    //  Infrastructure Payloads
-    // -------------------------
-    /// Boundary payload for direct internal/tooling `CompilerError` rendering.
-    /// User-facing source diagnostics must use typed payload variants instead.
-    InfrastructureError {
-        msg: String,
-        error_type: crate::compiler_frontend::compiler_errors::ErrorType,
-        metadata: std::collections::HashMap<
-            crate::compiler_frontend::compiler_errors::CompilerErrorMetadataKey,
-            String,
-        >,
     },
 }
 

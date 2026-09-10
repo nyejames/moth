@@ -61,8 +61,6 @@ struct ExportScanner<'a> {
     source: &'a str,
     bytes: &'a [u8],
     pos: usize,
-    line: usize,
-    column: usize,
     exports: Vec<JsExport>,
     runtime_imports: Vec<ParsedRuntimeImport>,
     diagnostics: Vec<JsParserDiagnostic>,
@@ -75,8 +73,6 @@ impl<'a> ExportScanner<'a> {
             source,
             bytes: source.as_bytes(),
             pos: 0,
-            line: 1,
-            column: 1,
             exports: Vec::new(),
             runtime_imports: Vec::new(),
             diagnostics: Vec::new(),
@@ -130,15 +126,13 @@ impl<'a> ExportScanner<'a> {
 
     fn read_export_statement(&mut self) {
         let export_start_byte = self.pos;
-        let export_start_line = self.line;
-        let export_start_column = self.column;
 
         // Consume `export`
         self.advance_chars("export".len());
         self.skip_whitespace();
 
         if self.consume_str("default") {
-            let span = self.make_span(export_start_byte, export_start_line, export_start_column);
+            let span = self.make_span(export_start_byte);
             self.emit_diagnostic(
                 "Default exports are not supported in Moth JS modules.",
                 JsDiagnosticKind::DefaultExport,
@@ -149,7 +143,7 @@ impl<'a> ExportScanner<'a> {
         }
 
         if self.consume_char('{') {
-            let span = self.make_span(export_start_byte, export_start_line, export_start_column);
+            let span = self.make_span(export_start_byte);
             self.emit_diagnostic(
                 "Re-export forms such as `export { name }` are not supported in Moth JS modules.",
                 JsDiagnosticKind::ReExport,
@@ -165,8 +159,7 @@ impl<'a> ExportScanner<'a> {
                 self.skip_whitespace();
                 if self.consume_char('(') {
                     let parameter_count = self.count_plain_parameters();
-                    let span =
-                        self.make_span(export_start_byte, export_start_line, export_start_column);
+                    let span = self.make_span(export_start_byte);
                     self.exports.push(JsExport {
                         js_name,
                         kind: JsExportKind::Function,
@@ -191,11 +184,7 @@ impl<'a> ExportScanner<'a> {
                         let parameter_count = self.count_plain_parameters();
                         self.skip_whitespace();
                         if !self.consume_str("=>") {
-                            let span = self.make_span(
-                                export_start_byte,
-                                export_start_line,
-                                export_start_column,
-                            );
+                            let span = self.make_span(export_start_byte);
                             self.emit_diagnostic(
                                 "`export const` must be bound to an arrow function in Moth JS modules.",
                                 JsDiagnosticKind::UnsupportedParameterPattern,
@@ -206,11 +195,7 @@ impl<'a> ExportScanner<'a> {
                         }
                         self.skip_whitespace();
                         if !self.consume_char('{') {
-                            let span = self.make_span(
-                                export_start_byte,
-                                export_start_line,
-                                export_start_column,
-                            );
+                            let span = self.make_span(export_start_byte);
                             self.emit_diagnostic(
                                 "Expression-bodied arrow exports are not supported in Moth JS modules. \
                                  Use a block body `=> { ... }`.",
@@ -220,11 +205,7 @@ impl<'a> ExportScanner<'a> {
                             self.skip_to_statement_end();
                             return;
                         }
-                        let span = self.make_span(
-                            export_start_byte,
-                            export_start_line,
-                            export_start_column,
-                        );
+                        let span = self.make_span(export_start_byte);
                         self.exports.push(JsExport {
                             js_name,
                             kind: JsExportKind::ConstArrow,
@@ -235,11 +216,7 @@ impl<'a> ExportScanner<'a> {
                         return;
                     } else {
                         // `export const name = value` where value is not an arrow function
-                        let span = self.make_span(
-                            export_start_byte,
-                            export_start_line,
-                            export_start_column,
-                        );
+                        let span = self.make_span(export_start_byte);
                         self.emit_diagnostic(
                             "`export const` must be bound to an arrow function in Moth JS modules.",
                             JsDiagnosticKind::UnsupportedParameterPattern,
@@ -255,7 +232,7 @@ impl<'a> ExportScanner<'a> {
         }
 
         if self.consume_str("class") && self.is_word_boundary_at(0) {
-            let span = self.make_span(export_start_byte, export_start_line, export_start_column);
+            let span = self.make_span(export_start_byte);
             self.emit_diagnostic(
                 "Class exports are not supported in Moth JS modules.",
                 JsDiagnosticKind::ClassExport,
@@ -275,8 +252,6 @@ impl<'a> ExportScanner<'a> {
 
     fn read_import_statement(&mut self) {
         let import_start_byte = self.pos;
-        let import_start_line = self.line;
-        let import_start_column = self.column;
 
         self.advance_chars("import".len());
         self.skip_whitespace();
@@ -286,12 +261,7 @@ impl<'a> ExportScanner<'a> {
             self.emit_diagnostic(
                 "Dynamic `import()` is not supported in Moth JS modules.",
                 JsDiagnosticKind::DynamicImport,
-                JsSourceSpan::range(
-                    import_start_byte,
-                    self.pos,
-                    import_start_line,
-                    import_start_column,
-                ),
+                JsSourceSpan::range(import_start_byte, self.pos),
             );
             self.skip_to_statement_end();
             return;
@@ -306,12 +276,7 @@ impl<'a> ExportScanner<'a> {
                 "JavaScript static import is not supported in Moth JS module files yet. \
                  Only registered Moth core runtime modules are supported.",
                 JsDiagnosticKind::ArbitraryImport,
-                JsSourceSpan::range(
-                    import_start_byte,
-                    self.pos,
-                    import_start_line,
-                    import_start_column,
-                ),
+                JsSourceSpan::range(import_start_byte, self.pos),
             );
             self.advance_to_byte(statement_end);
             self.skip_to_statement_end();
@@ -319,12 +284,7 @@ impl<'a> ExportScanner<'a> {
         };
 
         if self.registry.is_registered(&specifier) {
-            let span = JsSourceSpan::range(
-                import_start_byte,
-                statement_end,
-                import_start_line,
-                import_start_column,
-            );
+            let span = JsSourceSpan::range(import_start_byte, statement_end);
 
             match parse_named_import_names(statement) {
                 Ok(names) if !names.is_empty() => {
@@ -370,12 +330,7 @@ impl<'a> ExportScanner<'a> {
                      Only registered Moth core runtime modules are supported."
                 ),
                 JsDiagnosticKind::ArbitraryImport,
-                JsSourceSpan::range(
-                    import_start_byte,
-                    self.pos,
-                    import_start_line,
-                    import_start_column,
-                ),
+                JsSourceSpan::range(import_start_byte, self.pos),
             );
         }
 
@@ -849,12 +804,6 @@ impl<'a> ExportScanner<'a> {
         }
         let ch = self.current_char();
         self.pos += ch.len_utf8();
-        if ch == '\n' {
-            self.line += 1;
-            self.column = 1;
-        } else {
-            self.column += 1;
-        }
     }
 
     fn advance_chars(&mut self, count: usize) {
@@ -869,12 +818,12 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    fn make_span(&self, start_byte: usize, start_line: usize, start_column: usize) -> JsSourceSpan {
-        JsSourceSpan::range(start_byte, self.pos, start_line, start_column)
+    fn make_span(&self, start_byte: usize) -> JsSourceSpan {
+        JsSourceSpan::range(start_byte, self.pos)
     }
 
     fn emit_diagnostic_at_current(&mut self, message: impl Into<String>, kind: JsDiagnosticKind) {
-        let span = JsSourceSpan::at(self.pos, self.line, self.column);
+        let span = JsSourceSpan::at(self.pos);
         self.diagnostics.push(JsParserDiagnostic {
             message: message.into(),
             span,

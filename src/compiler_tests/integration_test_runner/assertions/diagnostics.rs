@@ -8,18 +8,14 @@
 
 use super::super::{DiagnosticAssertion, DiagnosticMatchMode, FailureExpectation};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::{
-    display_column_number, display_line_number, relative_display_path_from_root,
-    resolve_source_file_path, terminal, terse,
-};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
+use crate::compiler_frontend::compiler_messages::render::{terminal, terse};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticLabelStyle, DiagnosticSeverity,
+    InfrastructureDiagnosticKind,
 };
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-
+use std::path::Path;
 pub(super) fn validate_diagnostics(
     messages: &CompilerMessages,
     expectation: &FailureExpectation,
@@ -31,10 +27,19 @@ pub(super) fn validate_diagnostics(
     // stream; this is a local selection owner, not a second boundary view.
     let error_diagnostics = error_diagnostics_with_render_indices(messages);
 
-    let diagnostic_codes: Vec<&str> = error_diagnostics
+    let mut diagnostic_codes: Vec<&str> = error_diagnostics
         .iter()
         .map(|(_, diagnostic)| diagnostic.identity().code)
         .collect();
+    // The outer infrastructure failure carries no user diagnostic, but its stable code stays
+    // observable at the failure boundary exactly like a rendered error diagnostic code.
+    if messages.has_infrastructure_error() {
+        diagnostic_codes.push(
+            DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure)
+                .descriptor()
+                .code,
+        );
+    }
 
     if let Some(reason) = compare_diagnostic_code_multisets(
         &expectation.diagnostic_codes,
@@ -66,10 +71,14 @@ pub(super) fn validate_diagnostics(
                 .join("\n")
             })
             .collect();
-
-        rendered_messages.extend(error_diagnostics.iter().flat_map(|(_, diagnostic)| {
-            terminal::format_label_messages(diagnostic, &messages.string_table)
-        }));
+        rendered_messages.extend(error_diagnostics.iter().flat_map(
+            |(diagnostic_index, diagnostic)| {
+                terminal::format_label_messages_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(*diagnostic_index),
+                )
+            },
+        ));
 
         rendered_messages.extend(
             error_diagnostics
@@ -81,7 +90,11 @@ pub(super) fn validate_diagnostics(
                     )
                 }),
         );
-
+        // The outer failure has no rendered diagnostic of its own; its message stays
+        // searchable so message fragments can still pin an infrastructure failure.
+        if let Some(error) = messages.infrastructure_error() {
+            rendered_messages.push(error.msg.clone());
+        }
         if !rendered_messages.iter().any(|message| {
             super::contains_ordered_substrings(message, &expectation.message_contains)
         }) {
@@ -125,7 +138,6 @@ fn validate_structured_diagnostic_assertions(
         let matching_diagnostics = error_diagnostics
             .iter()
             .filter(|(_, diagnostic)| diagnostic.identity().code == assertion.code)
-            .map(|(_, diagnostic)| *diagnostic)
             .collect::<Vec<_>>();
         let actual_count = matching_diagnostics.len();
 
@@ -141,10 +153,10 @@ fn validate_structured_diagnostic_assertions(
             );
         }
 
-        let Some(diagnostic) = assertion
+        let Some(&(diagnostic_index, diagnostic)) = assertion
             .occurrence
             .checked_sub(1)
-            .and_then(|index| matching_diagnostics.get(index))
+            .and_then(|index| matching_diagnostics.get(index).copied())
         else {
             append_structured_mismatch(
                 &mut mismatches,
@@ -174,7 +186,7 @@ fn validate_structured_diagnostic_assertions(
         }
 
         if let Some(expected_path) = &assertion.path {
-            let actual_path = diagnostic_path(diagnostic, messages, fixture_root);
+            let actual_path = diagnostic_path(diagnostic_index, diagnostic, messages, fixture_root);
             if actual_path != *expected_path {
                 append_structured_mismatch(
                     &mut mismatches,
@@ -186,30 +198,41 @@ fn validate_structured_diagnostic_assertions(
             }
         }
 
+        let primary_position = messages
+            .diagnostic_render_context(diagnostic_index)
+            .primary_position(diagnostic);
         if let Some(expected_line) = assertion.line {
-            let actual_line =
-                display_line_number(diagnostic.primary_location.start_pos.line_number);
-            if !position_matches(expected_line, actual_line) {
+            let actual_line = primary_position
+                .as_ref()
+                .map(|position| position.start.line.saturating_add(1) as usize);
+            if actual_line != Some(expected_line) {
                 append_structured_mismatch(
                     &mut mismatches,
                     assertion,
                     "line",
                     expected_line.to_string(),
-                    actual_line.to_string(),
+                    actual_line.map_or_else(
+                        || String::from("<no source position>"),
+                        |line| line.to_string(),
+                    ),
                 );
             }
         }
 
         if let Some(expected_column) = assertion.column {
-            let actual_column =
-                display_column_number(diagnostic.primary_location.start_pos.char_column);
-            if !position_matches(expected_column, actual_column) {
+            let actual_column = primary_position
+                .as_ref()
+                .map(|position| position.start.column.saturating_add(1) as usize);
+            if actual_column != Some(expected_column) {
                 append_structured_mismatch(
                     &mut mismatches,
                     assertion,
                     "column",
                     expected_column.to_string(),
-                    actual_column.to_string(),
+                    actual_column.map_or_else(
+                        || String::from("<no source position>"),
+                        |column| column.to_string(),
+                    ),
                 );
             }
         }
@@ -217,6 +240,7 @@ fn validate_structured_diagnostic_assertions(
         validate_secondary_label_assertions(
             &mut mismatches,
             assertion,
+            diagnostic_index,
             diagnostic,
             messages,
             fixture_root,
@@ -229,6 +253,7 @@ fn validate_structured_diagnostic_assertions(
 fn validate_secondary_label_assertions(
     mismatches: &mut Vec<String>,
     assertion: &DiagnosticAssertion,
+    diagnostic_index: usize,
     diagnostic: &CompilerDiagnostic,
     messages: &CompilerMessages,
     fixture_root: &Path,
@@ -259,9 +284,15 @@ fn validate_secondary_label_assertions(
             continue;
         };
 
+        let label_position = messages
+            .diagnostic_render_context(diagnostic_index)
+            .label_position(label);
+
         if let Some(expected_path) = &secondary_assertion.path {
-            let actual_path =
-                diagnostic_path_from_location(&label.location, messages, fixture_root);
+            let actual_path = label_position
+                .as_ref()
+                .map(|position| display_path(&position.path, fixture_root))
+                .unwrap_or_else(|| String::from("<no source position>"));
             if actual_path != *expected_path {
                 append_secondary_mismatch(
                     mismatches,
@@ -275,29 +306,39 @@ fn validate_secondary_label_assertions(
         }
 
         if let Some(expected_line) = secondary_assertion.line {
-            let actual_line = display_line_number(label.location.start_pos.line_number);
-            if !position_matches(expected_line, actual_line) {
+            let actual_line = label_position
+                .as_ref()
+                .map(|position| position.start.line.saturating_add(1) as usize);
+            if actual_line != Some(expected_line) {
                 append_secondary_mismatch(
                     mismatches,
                     assertion,
                     secondary_assertion.occurrence,
                     "line",
                     expected_line.to_string(),
-                    actual_line.to_string(),
+                    actual_line.map_or_else(
+                        || String::from("<no source position>"),
+                        |line| line.to_string(),
+                    ),
                 );
             }
         }
 
         if let Some(expected_column) = secondary_assertion.column {
-            let actual_column = display_column_number(label.location.start_pos.char_column);
-            if !position_matches(expected_column, actual_column) {
+            let actual_column = label_position
+                .as_ref()
+                .map(|position| position.start.column.saturating_add(1) as usize);
+            if actual_column != Some(expected_column) {
                 append_secondary_mismatch(
                     mismatches,
                     assertion,
                     secondary_assertion.occurrence,
                     "column",
                     expected_column.to_string(),
-                    actual_column.to_string(),
+                    actual_column.map_or_else(
+                        || String::from("<no source position>"),
+                        |column| column.to_string(),
+                    ),
                 );
             }
         }
@@ -317,10 +358,6 @@ fn append_structured_mismatch(
     ));
 }
 
-fn position_matches(expected: usize, actual: i32) -> bool {
-    usize::try_from(actual).ok() == Some(expected)
-}
-
 fn append_secondary_mismatch(
     mismatches: &mut Vec<String>,
     assertion: &DiagnosticAssertion,
@@ -336,37 +373,32 @@ fn append_secondary_mismatch(
 }
 
 fn diagnostic_path(
+    diagnostic_index: usize,
     diagnostic: &CompilerDiagnostic,
     messages: &CompilerMessages,
     fixture_root: &Path,
 ) -> String {
-    diagnostic_path_from_location(&diagnostic.primary_location, messages, fixture_root)
+    messages
+        .diagnostic_render_context(diagnostic_index)
+        .primary_position(diagnostic)
+        .map(|position| display_path(&position.path, fixture_root))
+        .unwrap_or_else(|| String::from("<no source position>"))
 }
 
-fn diagnostic_path_from_location(
-    location: &SourceLocation,
-    messages: &CompilerMessages,
-    fixture_root: &Path,
-) -> String {
-    let resolved_source_file = resolve_source_file_path(&location.scope, &messages.string_table);
-    let source_file = resolve_fixture_source_path(&resolved_source_file, fixture_root);
-    let relative_path = relative_display_path_from_root(&source_file, fixture_root);
-    portable_path_text(&relative_path)
-}
-
-fn resolve_fixture_source_path(source_file: &Path, fixture_root: &Path) -> PathBuf {
-    if source_file.is_absolute() {
-        return source_file.to_owned();
+/// Convert a resolved render-context path into the fixture-relative spelling used by assertions.
+///
+/// Source spans are resolved only through the retained source database or frozen identity context.
+/// The compiler's project identity is entry-root-relative, while canonical fixtures store sources
+/// below `input/`; this helper adds that fixture-only prefix after lookup. It never probes the
+/// filesystem or reconstructs a source location from a path.
+fn display_path(path: &Path, fixture_root: &Path) -> String {
+    let relative = path.strip_prefix(fixture_root).unwrap_or(path);
+    let normalized = portable_path_text(relative);
+    if normalized == "input" || normalized.starts_with("input/") {
+        normalized
+    } else {
+        format!("input/{normalized}")
     }
-
-    // Canonical integration scopes may stay relative to the case input root after resolution.
-    let input_root = fixture_root.join(super::super::INPUT_DIR_NAME);
-    let input_prefix = Path::new(super::super::INPUT_DIR_NAME);
-    let source_relative_to_input = source_file
-        .strip_prefix(input_prefix)
-        .unwrap_or(source_file);
-
-    input_root.join(source_relative_to_input)
 }
 
 fn compare_diagnostic_code_multisets(

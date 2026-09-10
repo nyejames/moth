@@ -12,7 +12,7 @@ use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeFailure};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -26,13 +26,14 @@ use crate::compiler_frontend::public_call_summary::{
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::timed_stage_attributed;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 use crate::compiler_frontend::module_compilation::generated::transaction::GeneratedFunctionTransaction;
 use crate::compiler_frontend::module_compilation::stages::check_borrows;
+use crate::timed_stage_attributed;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ConvergenceNode {
@@ -305,14 +306,14 @@ fn add_model_edges(
 
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
-    compiler: &CompilerFrontend,
+    compiler: &mut CompilerFrontend<'_>,
     hir_module: &mut HirModule,
     function_link_facts: &HirModuleLinkFacts,
     generated_transaction: &mut GeneratedFunctionTransaction<'_>,
     bootstrap_borrow_analysis: BorrowCheckReport,
     warnings: &[CompilerDiagnostic],
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<BorrowCheckReport, CompilerMessages> {
+) -> Result<BorrowCheckReport, PremergeFailure> {
     let base_public_origins = hir_module
         .function_ids_by_origin
         .keys()
@@ -377,7 +378,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                 let report = timed_stage_attributed!(
                     crate::timing::TimingMetric::FrontendBorrowConverge,
                     timing_context,
-                    check_borrows(compiler, hir_module, warnings)
+                    check_borrows(compiler, hir_module, warnings, None)
                 )?;
                 let summary_changes =
                     base_summary_changes(hir_module, current_borrow_analysis, &report).map_err(
@@ -398,6 +399,9 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             }
             ConvergenceNode::Generated(identity) => {
                 let identity = *identity;
+                let source_identity_handle = FrozenIdentityHandle::for_domain(
+                    identity.declaration().module_origin().package().clone(),
+                );
                 let summary = {
                     let sidecar =
                         generated_transaction
@@ -421,6 +425,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                             compiler,
                             &sidecar.module.executable.hir,
                             &sidecar.module.metadata.warnings,
+                            Some(&source_identity_handle),
                         )
                     )?;
                     sidecar.module.executable.borrow_analysis = report;
@@ -445,12 +450,14 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         }
     }
 
-    borrow_analysis.ok_or_else(|| {
-        CompilerMessages::from_error_ref(
-            CompilerError::compiler_error("Convergence queue did not analyze the base module"),
-            &compiler.string_table,
-        )
-    })
+    borrow_analysis
+        .ok_or_else(|| {
+            CompilerMessages::from_error_ref(
+                CompilerError::compiler_error("Convergence queue did not analyze the base module"),
+                &compiler.string_table,
+            )
+        })
+        .map_err(PremergeFailure::from)
 }
 
 /// Stable base identities whose exact summaries widened during one borrow pass.

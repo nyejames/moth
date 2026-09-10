@@ -11,7 +11,6 @@ use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -66,7 +65,6 @@ struct BuildOutcome {
 
 enum BuildFailure {
     CompilerMessages(CompilerMessages),
-    RuntimeError { title: String, details: String },
 }
 
 /// Adapter for build execution used by the dev loop.
@@ -122,10 +120,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                     output_root: project_root.join("dev"),
                     project_root: Some(project_root),
                     owner: build_result.output_owner,
-                    setting_location: SourceLocation::from_path(
-                        entry_file,
-                        &mut build_result.string_table,
-                    ),
+                    setting_span: None,
                 })
             };
             write_project_outputs(
@@ -137,8 +132,14 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 &mut build_result.string_table,
             )
         });
-        if let Err(mut messages) = output_result {
-            messages.extend_diagnostics(build_result.warnings);
+        if let Err(messages) = output_result {
+            let messages = match build_result.take_output_failure_messages(messages) {
+                Ok(messages) => messages,
+                Err(error) => CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                ),
+            };
             return Err(messages);
         }
         Ok(build_result)
@@ -203,12 +204,6 @@ pub fn run_single_build_cycle(
                 Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
                     &messages,
                     &project_root,
-                    &build_state.html_site_config.origin,
-                    build_state.last_build_version,
-                ),
-                Some(BuildFailure::RuntimeError { title, details }) => render_runtime_error_page(
-                    &title,
-                    &details,
                     &build_state.html_site_config.origin,
                     build_state.last_build_version,
                 ),
@@ -416,7 +411,42 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
-                let messages = error.into_messages(build_result.string_table.clone());
+                let config_string_table = build_result.string_table.clone();
+                let config_source_database = build_result.source_database.as_ref().map(Arc::clone);
+                let mut messages = error.into_messages(config_string_table);
+                if let Some(source_database) = config_source_database {
+                    messages.set_source_database(source_database);
+                }
+                let warning_messages = match build_result.take_warning_messages_before_freeze() {
+                    Ok(warnings) => warnings,
+                    Err(error) => {
+                        let messages = CompilerMessages::from_error(
+                            error,
+                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                        );
+                        return BuildOutcome {
+                            build_succeeded: false,
+                            build_duration,
+                            entry_page_rel: None,
+                            html_site_config: None,
+                            diagnostics_summary: format_compiler_messages(&messages),
+                            success_messages: None,
+                            failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                            watch_scope: Some(watch_scope),
+                            output_dir: Some(output_dir),
+                        };
+                    }
+                };
+                if let Some(warnings) = warning_messages {
+                    messages.append_messages_preserving_context(warnings);
+                }
+                let messages = match messages.freeze_source_contexts() {
+                    Ok(messages) => messages,
+                    Err(error) => CompilerMessages::from_error(
+                        error,
+                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                    ),
+                };
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -445,15 +475,26 @@ fn build_once(
             format!("Build succeeded with warnings:\n{warnings_summary}")
         };
 
-        let success_messages = if build_result.warnings.is_empty() {
-            None
-        } else {
-            Some(CompilerMessages::from_diagnostics(
-                build_result.warnings,
-                build_result.string_table,
-            ))
+        let success_messages = match build_result.take_warning_messages() {
+            Ok(messages) => messages,
+            Err(error) => {
+                let messages = CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                );
+                return BuildOutcome {
+                    build_succeeded: false,
+                    build_duration,
+                    entry_page_rel: None,
+                    html_site_config: None,
+                    diagnostics_summary: format_compiler_messages(&messages),
+                    success_messages: None,
+                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                    watch_scope: Some(watch_scope),
+                    output_dir: Some(output_dir),
+                };
+            }
         };
-
         BuildOutcome {
             build_succeeded: true,
             build_duration,
@@ -466,21 +507,32 @@ fn build_once(
             output_dir: Some(output_dir),
         }
     } else {
+        let mut messages = dev_server_error_messages(
+            entry_file,
+            "Build completed, but the project builder did not declare a dev entry page.",
+        );
+        match build_result.take_warning_messages() {
+            Ok(Some(mut warnings)) => {
+                warnings.append_messages_preserving_context(messages);
+                messages = warnings;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                messages = CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                );
+            }
+        }
+        let diagnostics_summary = format_compiler_messages(&messages);
         BuildOutcome {
             build_succeeded: false,
             build_duration,
             entry_page_rel: None,
             html_site_config: None,
-            diagnostics_summary: String::from(
-                "Build completed, but the project builder did not declare a dev entry page.",
-            ),
+            diagnostics_summary,
             success_messages: None,
-            failed_build: Some(BuildFailure::RuntimeError {
-                title: String::from("Missing Dev Entry"),
-                details: String::from(
-                    "Build completed, but the project builder did not declare a dev entry page.",
-                ),
-            }),
+            failed_build: Some(BuildFailure::CompilerMessages(messages)),
             watch_scope: Some(watch_scope),
             output_dir: Some(output_dir),
         }
@@ -505,10 +557,8 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
 }
 
 pub fn dev_server_error_messages(path: &Path, msg: impl Into<String>) -> CompilerMessages {
-    let mut string_table = Default::default();
-    let error = CompilerError::file_error(path, msg.into(), &mut string_table)
-        .with_error_type(ErrorType::DevServer);
-    CompilerMessages::from_error(error, string_table)
+    let error = CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer);
+    CompilerMessages::from_error(error, Default::default())
 }
 
 #[cfg(test)]

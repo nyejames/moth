@@ -10,7 +10,7 @@
 //! `ast/expressions/parse_expression_identifiers.rs` and is intentionally separate.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::compiler_errors::{CompilerError, compiler_error_to_diagnostic};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::DeferredFeatureReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
@@ -24,19 +24,24 @@ use crate::compiler_frontend::declaration_syntax::record_body::parse_record_body
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::headers::HeaderParseFailure;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 use rustc_hash::FxHashMap;
 
 #[derive(Clone, Debug)]
 pub struct ChoiceVariant {
     pub id: StringId,
     pub payload: ChoiceVariantPayload,
-    pub location: SourceLocation,
+    /// Exact authored variant-name span, when this shell still has its source identity.
+    ///
+    /// Header/import/materialisation boundaries use `None` when no owning source exists.
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,7 +56,7 @@ pub enum ChoiceVariantPayload {
 pub struct ChoiceVariantSyntax {
     pub id: StringId,
     pub payload: ChoiceVariantPayloadSyntax,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -68,7 +73,6 @@ impl ChoiceVariantSyntax {
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.id = remap.get(self.id);
         self.payload.remap_string_ids(remap);
-        self.location.remap_string_ids(remap);
     }
 
     pub fn validate_required_source_prefixes(
@@ -77,17 +81,6 @@ impl ChoiceVariantSyntax {
     ) -> Result<(), CompilerError> {
         self.payload
             .validate_required_source_prefixes(provisional_source_file)
-    }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        self.payload
-            .rebind_source_identity(logical_path, provisional_source_file)?;
-        self.location.rebind_source_identity(logical_path);
-        Ok(())
     }
 }
 
@@ -115,22 +108,6 @@ impl ChoiceVariantPayloadSyntax {
             Self::Record { fields } => {
                 for field in fields {
                     field.validate_required_source_prefix(provisional_source_file)?;
-                }
-                Ok(())
-            }
-        }
-    }
-
-    pub fn rebind_source_identity(
-        &mut self,
-        logical_path: &InternedPath,
-        provisional_source_file: &InternedPath,
-    ) -> Result<(), CompilerError> {
-        match self {
-            Self::Unit => Ok(()),
-            Self::Record { fields } => {
-                for field in fields {
-                    field.rebind_source_identity(logical_path, provisional_source_file)?;
                 }
                 Ok(())
             }
@@ -167,11 +144,12 @@ pub(crate) fn parse_choice_shell(
     choice_path: &InternedPath,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
-) -> Result<Vec<ChoiceVariantSyntax>, DiagnosticBag> {
+    span_builder: &mut ExtendedSpanBuilder,
+) -> Result<Vec<ChoiceVariantSyntax>, HeaderParseFailure> {
     // Mutation: EOF diagnostic payloads intern delimiter symbols that are not present
     // in the source text.
     let mut variants = Vec::new();
-    let mut seen_variants: FxHashMap<StringId, SourceLocation> = FxHashMap::default();
+    let mut seen_variants: FxHashMap<StringId, SourceSpan> = FxHashMap::default();
     let mut bag = DiagnosticBag::new();
 
     // Caller is positioned on the `::` token.
@@ -179,45 +157,41 @@ pub(crate) fn parse_choice_shell(
 
     loop {
         token_stream.skip_newlines();
-        let current_location = token_stream.current_location();
+        let current_span = token_stream
+            .tokens
+            .get(token_stream.index)
+            .map(|token| SourceSpan::new(token_stream.file_id, token.span));
         let current_token = token_stream.current_token_kind().to_owned();
 
         match current_token {
-            // RESERVED SYNTAX ERROR
             TokenKind::Must | TokenKind::TraitThis => {
                 let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                     token_stream.current_token_kind(),
-                    current_location.clone(),
+                    current_span,
                     "Header Parsing",
                     "choice header payload parsing",
-                )
-                .map_err(|error| compiler_error_to_diagnostic(&error))?;
+                )?;
 
-                return Err(reserved_trait_keyword_error(keyword, current_location).into());
+                return Err(reserved_trait_keyword_error(keyword, current_span).into());
             }
 
             TokenKind::Symbol(variant_name) => {
-                ensure_not_keyword_shadow_identifier(
-                    variant_name,
-                    current_location.to_owned(),
-                    string_table,
-                )
-                .map_err(|diagnostic| *diagnostic)?;
+                ensure_not_keyword_shadow_identifier(variant_name, current_span, string_table)?;
 
-                // Make sure this is not a duplicate variant name
-                if let Some(first_location) = seen_variants.get(&variant_name) {
+                // Make sure this is not a duplicate variant name.
+                if let Some(first_span) = seen_variants.get(&variant_name) {
                     bag.push(CompilerDiagnostic::duplicate_declaration(
                         variant_name,
-                        Some(first_location.clone()),
-                        current_location.clone(),
+                        Some(*first_span),
+                        current_span,
                     ));
-                } else {
-                    seen_variants.insert(variant_name, current_location.clone());
+                } else if let Some(variant_span) = current_span {
+                    seen_variants.insert(variant_name, variant_span);
                 }
 
                 if let Some(warning) = naming_warning_for_identifier(
                     variant_name,
-                    current_location.to_owned(),
+                    current_span,
                     IdentifierNamingKind::TypeLike,
                     string_table,
                 ) {
@@ -233,7 +207,7 @@ pub(crate) fn parse_choice_shell(
                 if let Some(keyword) = reserved_trait_keyword(token_stream.current_token_kind()) {
                     return Err(reserved_trait_keyword_error(
                         keyword,
-                        token_stream.current_location(),
+                        current_source_span(token_stream),
                     )
                     .into());
                 }
@@ -248,16 +222,15 @@ pub(crate) fn parse_choice_shell(
                             warnings,
                             SignatureMemberContext::ChoicePayloadField,
                             choice_path,
-                        )
-                        .map_err(|diagnostic| *diagnostic)?;
-
+                            span_builder,
+                        )?;
                         if fields.is_empty() {
                             return Err(CompilerDiagnostic::invalid_choice_variant(
                                 InvalidChoiceVariantReason::EmptyRecordBody,
                                 None,
                                 None,
                                 vec![],
-                                current_location.clone(),
+                                current_span,
                             )
                             .into());
                         }
@@ -277,7 +250,7 @@ pub(crate) fn parse_choice_shell(
                                     None,
                                     None,
                                     vec![],
-                                    field.location.clone(),
+                                    field.span,
                                 )
                                 .into());
                             }
@@ -292,15 +265,15 @@ pub(crate) fn parse_choice_shell(
                             None,
                             None,
                             vec![],
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         )
                         .into());
                     }
 
                     TokenKind::Assign => {
-                        return Err(choice_variant_default_value_diagnostic(
-                            token_stream.current_location(),
-                        )
+                        return Err(choice_variant_default_value_diagnostic(current_source_span(
+                            token_stream,
+                        ))
                         .into());
                     }
 
@@ -310,7 +283,7 @@ pub(crate) fn parse_choice_shell(
                             None,
                             None,
                             vec![],
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         )
                         .into());
                     }
@@ -322,7 +295,7 @@ pub(crate) fn parse_choice_shell(
                 variants.push(ChoiceVariantSyntax {
                     id: variant_name,
                     payload,
-                    location: current_location.clone(),
+                    span: current_span,
                 });
 
                 // Handle the separator after the variant (or after its record body).
@@ -336,9 +309,9 @@ pub(crate) fn parse_choice_shell(
                         break;
                     }
                     TokenKind::Assign => {
-                        return Err(choice_variant_default_value_diagnostic(
-                            token_stream.current_location(),
-                        )
+                        return Err(choice_variant_default_value_diagnostic(current_source_span(
+                            token_stream,
+                        ))
                         .into());
                     }
                     TokenKind::Newline => {
@@ -355,15 +328,14 @@ pub(crate) fn parse_choice_shell(
                             TokenKind::Must | TokenKind::TraitThis => {
                                 let keyword = reserved_trait_keyword_or_dispatch_mismatch(
                                     token_stream.current_token_kind(),
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                     "Header Parsing",
                                     "choice header payload parsing",
-                                )
-                                .map_err(|error| compiler_error_to_diagnostic(&error))?;
+                                )?;
 
                                 return Err(reserved_trait_keyword_error(
                                     keyword,
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                 )
                                 .into());
                             }
@@ -376,13 +348,13 @@ pub(crate) fn parse_choice_shell(
                                     None,
                                     None,
                                     vec![],
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                 )
                                 .into());
                             }
                             TokenKind::Assign => {
                                 return Err(choice_variant_default_value_diagnostic(
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                 )
                                 .into());
                             }
@@ -394,7 +366,7 @@ pub(crate) fn parse_choice_shell(
                                     None,
                                     None,
                                     vec![],
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                 )
                                 .into());
                             }
@@ -404,7 +376,7 @@ pub(crate) fn parse_choice_shell(
                                     None,
                                     None,
                                     vec![],
-                                    token_stream.current_location(),
+                                    current_source_span(token_stream),
                                 )
                                 .into());
                             }
@@ -413,7 +385,7 @@ pub(crate) fn parse_choice_shell(
                     TokenKind::Eof => {
                         return Err(CompilerDiagnostic::unexpected_end_of_file(
                             Some(string_table.intern(";")),
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         )
                         .into());
                     }
@@ -423,7 +395,7 @@ pub(crate) fn parse_choice_shell(
                             None,
                             None,
                             vec![],
-                            token_stream.current_location(),
+                            current_source_span(token_stream),
                         )
                         .into());
                     }
@@ -435,7 +407,7 @@ pub(crate) fn parse_choice_shell(
                     None,
                     None,
                     vec![],
-                    current_location,
+                    current_span,
                 )
                 .into());
             }
@@ -446,7 +418,7 @@ pub(crate) fn parse_choice_shell(
                         None,
                         None,
                         vec![],
-                        current_location,
+                        current_span,
                     )
                     .into());
                 }
@@ -457,30 +429,42 @@ pub(crate) fn parse_choice_shell(
             TokenKind::Eof => {
                 return Err(CompilerDiagnostic::unexpected_end_of_file(
                     Some(string_table.intern(";")),
-                    current_location,
+                    current_span,
                 )
                 .into());
             }
             _ => {
                 return Err(
-                    CompilerDiagnostic::unexpected_token(current_token, current_location).into(),
+                    CompilerDiagnostic::unexpected_token(current_token, current_span).into(),
                 );
             }
         }
     }
 
     if bag.has_errors() {
-        return Err(bag);
+        let first = bag
+            .into_diagnostics()
+            .into_iter()
+            .next()
+            .expect("choice duplicate bag holds at least one diagnostic");
+        return Err(HeaderParseFailure::Diagnostic(first));
     }
 
     Ok(variants)
 }
 
-fn choice_variant_default_value_diagnostic(location: SourceLocation) -> CompilerDiagnostic {
+fn choice_variant_default_value_diagnostic(span: Option<SourceSpan>) -> CompilerDiagnostic {
     CompilerDiagnostic::deferred_feature_reason(
         DeferredFeatureReason::ChoiceVariantDefaultValue,
-        location,
+        span,
     )
+}
+
+fn current_source_span(token_stream: &FileTokens) -> Option<SourceSpan> {
+    token_stream
+        .tokens
+        .get(token_stream.index)
+        .map(|token| SourceSpan::new(token_stream.file_id, token.span))
 }
 
 fn contains_non_generic_choice_self_reference(
@@ -496,10 +480,6 @@ fn contains_non_generic_choice_self_reference(
         ParsedTypeRef::Applied { arguments, .. } => arguments
             .iter()
             .any(|argument| contains_non_generic_choice_self_reference(argument, choice_name)),
-        ParsedTypeRef::Result { ok, err, .. } => {
-            contains_non_generic_choice_self_reference(ok, choice_name)
-                || contains_non_generic_choice_self_reference(err, choice_name)
-        }
         _ => false,
     }
 }

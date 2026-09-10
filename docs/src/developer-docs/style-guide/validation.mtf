@@ -327,9 +327,9 @@ configurations:
 ]
 
 Eight package-scoped standard lanes cover the default configuration, `timers`, `detailed_timers`,
-`benchmark_counters`, `timers` with `benchmark_counters`, the scoped-block feature lane, every `show_*`
-feature and the `xtask` package. `testing.mtf > Feature and platform lanes` owns the lane table and
-what each lane uniquely covers.
+`benchmark_counters`, `timers` with `benchmark_counters` (including the retained-layout memory
+probe), the scoped-block feature lane, every `show_*` feature and the `xtask` package.
+`testing.mtf > Feature and platform lanes` owns the lane table and what each lane uniquely covers.
 
 The `boracle` feature is an opt-in developer lane. `just boracle` owns its formatting check,
 feature-enabled Clippy and smoke test. The `boracle-campaign` lane, using `boracle_campaign`, is a
@@ -614,8 +614,8 @@ Audit that:
 
 - stage ownership remains narrow
 - AST and HIR type representation still respect `TypeEnvironment` and `TypeId`
-- user-facing failures use `CompilerDiagnostic`
-- internal and infrastructure failures use `CompilerError`
+- diagnosed failures remain plain `CompilerDiagnostic` values
+- internal and infrastructure failures remain in the typed `CompilerError` lane
 - no obsolete API or duplicated path remains
 - no backend reparses source syntax
 - no analysis mutates HIR when its contract is side-table based

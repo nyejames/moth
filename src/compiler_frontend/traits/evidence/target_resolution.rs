@@ -26,12 +26,11 @@ use crate::compiler_frontend::traits::syntax::{
 };
 use rustc_hash::FxHashMap;
 
-/// Boxed diagnostics for the connected conformance-target resolution family.
+/// Result for the connected conformance-target resolution family.
 ///
-/// Target and trait lookup feed directly into the already boxed evidence
-/// validation boundary. Keeping the result family boxed avoids large local
-/// `Result` values without changing diagnostic construction or propagation.
-type TargetResolutionResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Target and trait lookup keep diagnosed failures as plain
+/// `CompilerDiagnostic` values without a separate local representation.
+type TargetResolutionResult<T> = Result<T, CompilerDiagnostic>;
 
 #[derive(Clone)]
 pub(super) struct ConformanceTarget {
@@ -61,9 +60,8 @@ pub(super) fn resolve_conformance_target(
             DeferredFeatureReason::NamedFeature {
                 feature: target.name,
             },
-            target.location.clone(),
-        )
-        .into());
+            None,
+        ));
     }
 
     if is_builtin_scalar_target(target.name, context.string_table) {
@@ -71,10 +69,9 @@ pub(super) fn resolve_conformance_target(
             target.name,
             None,
             InvalidTraitConformanceReason::BuiltinTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     if let Some(symbol_id) = context
@@ -87,10 +84,9 @@ pub(super) fn resolve_conformance_target(
             target.name,
             None,
             InvalidTraitConformanceReason::ExternalOpaqueTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     if context
@@ -102,26 +98,22 @@ pub(super) fn resolve_conformance_target(
             target.name,
             None,
             InvalidTraitConformanceReason::AliasTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into());
+        ));
     }
 
     let Some(target_path) = context.visibility.visible_source_names.get(&target.name) else {
-        return Err(
-            CompilerDiagnostic::unknown_type_name(target.name, target.location.clone()).into(),
-        );
+        return Err(CompilerDiagnostic::unknown_type_name(target.name, None));
     };
     let Some(type_id) = context.nominal_type_ids_by_path.get(target_path).copied() else {
         return Err(invalid_conformance(
             target.name,
             None,
             InvalidTraitConformanceReason::NonCanonicalTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into());
+        ));
     };
 
     let Some(definition) = context.type_environment.get(type_id) else {
@@ -129,10 +121,9 @@ pub(super) fn resolve_conformance_target(
             target.name,
             None,
             InvalidTraitConformanceReason::NonCanonicalTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into());
+        ));
     };
 
     match definition {
@@ -146,10 +137,9 @@ pub(super) fn resolve_conformance_target(
                     target.name,
                     None,
                     InvalidTraitConformanceReason::NonlocalSourceTarget,
-                    target.location.clone(),
+                    None,
                     Vec::new(),
-                )
-                .into());
+                ));
             }
 
             Ok(ConformanceTarget {
@@ -171,10 +161,9 @@ pub(super) fn resolve_conformance_target(
                     target.name,
                     None,
                     InvalidTraitConformanceReason::NonlocalSourceTarget,
-                    target.location.clone(),
+                    None,
                     Vec::new(),
-                )
-                .into());
+                ));
             }
 
             Ok(ConformanceTarget {
@@ -190,10 +179,9 @@ pub(super) fn resolve_conformance_target(
             target.name,
             None,
             InvalidTraitConformanceReason::NonCanonicalTarget,
-            target.location.clone(),
+            None,
             Vec::new(),
-        )
-        .into()),
+        )),
     }
 }
 
@@ -220,5 +208,5 @@ pub(super) fn resolve_trait_reference(
         return Ok(id);
     }
 
-    Err(CompilerDiagnostic::unknown_trait_name(trait_ref.name, trait_ref.location.clone()).into())
+    Err(CompilerDiagnostic::unknown_trait_name(trait_ref.name, None))
 }

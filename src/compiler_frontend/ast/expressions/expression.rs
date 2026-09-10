@@ -33,10 +33,10 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstant
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// The kind determines the runtime shape and constant-foldability of the value.
@@ -73,8 +73,8 @@ pub struct Expression {
     /// WHY: mutability and reference semantics are tracked separately from the
     ///      diagnostic type so that lowering stages can make ownership decisions.
     pub value_mode: ValueMode,
-    /// Source location where this expression was parsed.
-    pub location: SourceLocation,
+    /// Exact authored source span, when the owning file has an identity.
+    pub span: Option<SourceSpan>,
     /// Reactive source identity carried independently of the expression type.
     ///
     /// WHAT: marks declarations and parameter references that are stable reactive sources.
@@ -140,15 +140,12 @@ pub struct ReactiveSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReactiveTemplateParameterDependency {
     pub parameter: InternedPath,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
 }
 
 impl ReactiveTemplateParameterDependency {
-    pub fn new(parameter: InternedPath, location: SourceLocation) -> Self {
-        Self {
-            parameter,
-            location,
-        }
+    pub fn new(parameter: InternedPath, span: Option<SourceSpan>) -> Self {
+        Self { parameter, span }
     }
 }
 
@@ -175,11 +172,11 @@ impl ReactiveTemplateMetadata {
 
     pub fn from_template_value_parameter(
         parameter: InternedPath,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let mut metadata = Self::template_backed();
         metadata.push_template_value_parameter(ReactiveTemplateParameterDependency::new(
-            parameter, location,
+            parameter, span,
         ));
         metadata
     }
@@ -330,7 +327,7 @@ pub(crate) struct HandledFallibleHostFunctionCallInput {
     pub(crate) result_type_ids: Vec<TypeId>,
     pub(crate) error_type_id: TypeId,
     pub(crate) handling: FallibleExpressionHandling,
-    pub(crate) location: SourceLocation,
+    pub(crate) span: Option<SourceSpan>,
 }
 
 impl ResolvedCallTypes {
@@ -380,7 +377,7 @@ pub struct ChoiceConstructInput {
     pub fields: Vec<Declaration>,
     pub diagnostic_type: DataType,
     pub type_id: TypeId,
-    pub location: SourceLocation,
+    pub span: Option<SourceSpan>,
     pub value_mode: ValueMode,
 }
 
@@ -388,7 +385,7 @@ impl Expression {
     /// Generic constructor for an expression with the given kind and type metadata.
     pub fn new(
         kind: ExpressionKind,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         type_id: TypeId,
         diagnostic_type: DataType,
         value_mode: ValueMode,
@@ -398,7 +395,7 @@ impl Expression {
             diagnostic_type,
             function_receiver: None,
             kind,
-            location,
+            span,
             value_mode,
             reactive_source: None,
             reactive_template: None,
@@ -459,16 +456,16 @@ impl Expression {
         kind: ExpressionKind,
         type_id: TypeId,
         diagnostic_type: DataType,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
-        Self::new(kind, location, type_id, diagnostic_type, value_mode)
+        Self::new(kind, span, type_id, diagnostic_type, value_mode)
     }
 
     fn call_expression_with_resolved_types(
         kind: ExpressionKind,
         resolved_types: ResolvedCallTypes,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let ResolvedCallTypes {
             result_type_ids: _,
@@ -478,7 +475,7 @@ impl Expression {
 
         Self::new(
             kind,
-            location,
+            span,
             expression_type_id,
             diagnostic_type,
             // Planned: derive ownership from alias-aware return signatures once
@@ -494,7 +491,7 @@ impl Expression {
         rpn: ExpressionRpn,
         data_type: DataType,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         let contains_regular_division = rpn.contains_regular_division();
@@ -506,7 +503,7 @@ impl Expression {
 
         Self::new(
             ExpressionKind::Runtime(rpn),
-            location,
+            span,
             type_id,
             data_type,
             value_mode,
@@ -515,56 +512,56 @@ impl Expression {
     }
 
     /// Constructs an integer literal expression.
-    pub fn int(value: i32, location: SourceLocation, value_mode: ValueMode) -> Self {
+    pub fn int(value: i32, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Int(value),
             builtin_type_ids::INT,
             DataType::Int,
-            location,
+            span,
             value_mode,
         )
     }
 
     /// Constructs a floating-point literal expression.
-    pub fn float(value: f64, location: SourceLocation, value_mode: ValueMode) -> Self {
+    pub fn float(value: f64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Float(value),
             builtin_type_ids::FLOAT,
             DataType::Float,
-            location,
+            span,
             value_mode,
         )
     }
 
     /// Constructs a string slice literal expression.
-    pub fn string_slice(value: StringId, location: SourceLocation, value_mode: ValueMode) -> Self {
+    pub fn string_slice(value: StringId, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::StringSlice(value),
             builtin_type_ids::STRING,
             DataType::StringSlice,
-            location,
+            span,
             value_mode,
         )
     }
 
     /// Constructs a boolean literal expression.
-    pub fn bool(value: bool, location: SourceLocation, value_mode: ValueMode) -> Self {
+    pub fn bool(value: bool, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Bool(value),
             builtin_type_ids::BOOL,
             DataType::Bool,
-            location,
+            span,
             value_mode,
         )
     }
 
     /// Constructs a character literal expression.
-    pub fn char(value: char, location: SourceLocation, value_mode: ValueMode) -> Self {
+    pub fn char(value: char, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
         Self::scalar_literal(
             ExpressionKind::Char(value),
             builtin_type_ids::CHAR,
             DataType::Char,
-            location,
+            span,
             value_mode,
         )
     }
@@ -574,13 +571,13 @@ impl Expression {
         id: InternedPath,
         data_type: DataType,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
         const_record_state: ConstRecordState,
     ) -> Self {
         let mut expression = Self::new(
             ExpressionKind::Reference(id),
-            location,
+            span,
             type_id,
             data_type,
             value_mode,
@@ -594,12 +591,12 @@ impl Expression {
         receiver: Option<ReceiverKey>,
         signature: FunctionSignature,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let function_data_type = DataType::Function(Box::new(receiver.clone()), signature.clone());
         let mut expression = Self::new(
             ExpressionKind::Function(signature),
-            location,
+            span,
             type_id,
             function_data_type,
             ValueMode::ImmutableReference,
@@ -614,7 +611,7 @@ impl Expression {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -626,7 +623,7 @@ impl Expression {
                 result_type_ids,
             },
             resolved_types,
-            location,
+            span,
         )
     }
 
@@ -637,7 +634,7 @@ impl Expression {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -648,10 +645,10 @@ impl Expression {
                 method_path,
                 args,
                 result_type_ids,
-                location: location.clone(),
+                span,
             },
             resolved_types,
-            location,
+            span,
         )
     }
 
@@ -662,7 +659,7 @@ impl Expression {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -673,10 +670,10 @@ impl Expression {
                 op,
                 args,
                 result_type_ids,
-                location: location.clone(),
+                span,
             },
             resolved_types,
-            location,
+            span,
         )
     }
 
@@ -688,7 +685,7 @@ impl Expression {
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -700,13 +697,12 @@ impl Expression {
                 receiver_requires_mutable,
                 args,
                 result_type_ids,
-                location: location.clone(),
+                span,
             },
             resolved_types,
-            location,
+            span,
         )
     }
-
     /// Constructs a resolved fallible function call with explicit error handling.
     pub(crate) fn handled_fallible_function_call_with_typed_arguments(
         name: InternedPath,
@@ -714,7 +710,7 @@ impl Expression {
         result_type_ids: Vec<TypeId>,
         handling: FallibleExpressionHandling,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -725,20 +721,19 @@ impl Expression {
                 args,
                 result_type_ids,
                 handling,
-                propagation_location: None,
+                propagation_span: None,
             },
             resolved_types,
-            location,
+            span,
         )
     }
-
     /// Constructs a resolved host function call expression.
     pub(crate) fn host_function_call_with_typed_arguments(
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -750,7 +745,7 @@ impl Expression {
                 result_type_ids,
             },
             resolved_types,
-            location,
+            span,
         )
     }
 
@@ -765,7 +760,7 @@ impl Expression {
             result_type_ids,
             error_type_id,
             handling,
-            location,
+            span,
         } = input;
         let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
 
@@ -777,13 +772,12 @@ impl Expression {
                 result_type_ids,
                 error_type_id,
                 handling,
-                propagation_location: None,
+                propagation_span: None,
             },
             resolved_types,
-            location,
+            span,
         )
     }
-
     /// Constructs a resolved explicit `cast` expression.
     ///
     /// WHAT: builds the AST value for a cast whose evidence and handling have
@@ -796,14 +790,14 @@ impl Expression {
         target_type_id: TypeId,
         type_environment: &TypeEnvironment,
     ) -> Self {
-        let location = cast.location.clone();
+        let span = cast.span;
         let diagnostic_type = diagnostic_type_spelling(target_type_id, type_environment);
         let value_mode = cast.source.value_mode.to_owned();
         let synthetic_interface_provenance = cast.source.synthetic_interface_provenance.clone();
 
         let mut expression = Self::new(
             ExpressionKind::Cast(cast),
-            location,
+            span,
             target_type_id,
             diagnostic_type,
             value_mode,
@@ -811,16 +805,17 @@ impl Expression {
         expression.synthetic_interface_provenance = synthetic_interface_provenance;
         expression
     }
-
+    /// Build an explicit contextual coercion node.
     /// Build an explicit contextual coercion node.
     ///
     /// WHAT: wraps `value` in a `Coerced` expression kind that carries the
     /// target type explicitly in the AST.
     /// WHY: contextual conversions such as `Int` → `Float` and `T` → `T?` must
-    /// be represented deliberately so lowering stages can emit the correct
-    /// conversion rather than silently mistyping the inner value.
+    ///      be represented deliberately so lowering stages can emit the correct
+    ///      conversion rather than silently mistyping the inner value.
+    ///      An explicit `Coerced` node makes the coercion visible and auditable.
     pub fn coerced(value: Expression, to_type: TypeId) -> Self {
-        let location = value.location.clone();
+        let span = value.span;
         let value_mode = value.value_mode.to_owned();
         let reactive_source = value.reactive_source.clone();
         let reactive_template = value.reactive_template.clone();
@@ -832,7 +827,7 @@ impl Expression {
                 value: Box::new(value),
                 to_type,
             },
-            location,
+            span,
             to_type,
             // diagnostic_type is non-authoritative; Inferred is sufficient for a
             // coercion node because semantic identity comes from type_id alone.
@@ -854,7 +849,7 @@ impl Expression {
         value: Expression,
         diagnostic_type: DataType,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         let contains_regular_division = value.contains_regular_division;
@@ -864,7 +859,7 @@ impl Expression {
                 variant,
                 value: Box::new(value),
             },
-            location,
+            span,
             type_id,
             diagnostic_type,
             value_mode,
@@ -879,7 +874,7 @@ impl Expression {
         handling: FallibleExpressionHandling,
         result_type_id: TypeId,
         diagnostic_type: DataType,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let contains_regular_division = value.contains_regular_division;
         let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
@@ -887,9 +882,9 @@ impl Expression {
             ExpressionKind::HandledFallibleExpression {
                 value: Box::new(value),
                 handling,
-                propagation_location: None,
+                propagation_span: None,
             },
-            location,
+            span,
             result_type_id,
             diagnostic_type,
             ValueMode::ImmutableOwned,
@@ -898,59 +893,53 @@ impl Expression {
         .with_synthetic_interface_provenance(synthetic_interface_provenance)
     }
 
-    /// Attach the authored postfix propagation location to a handled expression.
+    /// Attach the authored postfix propagation span to a handled expression.
     ///
-    /// WHAT: records the `!` token separately from the expression's ordinary source location.
-    /// WHY: call/value source maps and propagation diagnostics have different source owners.
-    ///
-    /// The parser is the only production caller. A propagation location on a recovery or
-    /// unrelated expression is an internal construction error and is rejected in debug builds.
-    pub(crate) fn with_propagation_location(mut self, location: SourceLocation) -> Self {
+    /// The parser is the only production caller. A propagation span on a recovery or unrelated
+    /// expression is an internal construction error and is rejected in debug builds.
+    pub(crate) fn with_propagation_span(mut self, span: Option<SourceSpan>) -> Self {
         match &mut self.kind {
             ExpressionKind::HandledFallibleFunctionCall {
-                propagation_location,
+                propagation_span,
                 handling,
                 ..
             }
             | ExpressionKind::HandledFallibleHostFunctionCall {
-                propagation_location,
+                propagation_span,
                 handling,
                 ..
             }
             | ExpressionKind::HandledFallibleExpression {
-                propagation_location,
+                propagation_span,
                 handling,
                 ..
             } => {
                 debug_assert!(
                     matches!(handling, FallibleExpressionHandling::Propagate),
-                    "only propagating fallible expressions carry a postfix location"
+                    "only propagating fallible expressions carry a postfix span"
                 );
-                *propagation_location = Some(location);
+                *propagation_span = span;
             }
             _ => debug_assert!(
                 false,
-                "postfix propagation location attached to a non-fallible expression"
+                "postfix propagation span attached to a non-fallible expression"
             ),
         }
         self
     }
 
-    /// Returns the authored postfix propagation location, if this is a handled fallible value.
-    pub(crate) fn propagation_location(&self) -> Option<&SourceLocation> {
+    /// Returns the authored postfix propagation span, if this is a handled fallible value.
+    pub(crate) fn propagation_span(&self) -> Option<SourceSpan> {
         match &self.kind {
             ExpressionKind::HandledFallibleFunctionCall {
-                propagation_location,
-                ..
+                propagation_span, ..
             }
             | ExpressionKind::HandledFallibleHostFunctionCall {
-                propagation_location,
-                ..
+                propagation_span, ..
             }
             | ExpressionKind::HandledFallibleExpression {
-                propagation_location,
-                ..
-            } => propagation_location.as_ref(),
+                propagation_span, ..
+            } => *propagation_span,
             _ => None,
         }
     }
@@ -960,7 +949,7 @@ impl Expression {
         value: Expression,
         inner_type_id: TypeId,
         diagnostic_type: DataType,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let contains_regular_division = value.contains_regular_division;
         let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
@@ -968,7 +957,7 @@ impl Expression {
             ExpressionKind::OptionPropagation {
                 value: Box::new(value),
             },
-            location,
+            span,
             inner_type_id,
             diagnostic_type,
             ValueMode::ImmutableOwned,
@@ -982,7 +971,7 @@ impl Expression {
         items: Vec<Expression>,
         collection_type: CollectionExpressionType,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         let collection_type_id = collection_type.collection_type_id.unwrap_or_else(|| {
@@ -1006,7 +995,7 @@ impl Expression {
         };
         Self::new(
             ExpressionKind::Collection(items),
-            location,
+            span,
             collection_type_id,
             diagnostic_type,
             value_mode,
@@ -1020,7 +1009,7 @@ impl Expression {
         entries: Vec<MapLiteralEntry>,
         map_type: MapLiteralExpressionType,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         let map_type_id = map_type.map_type_id.unwrap_or_else(|| {
@@ -1040,7 +1029,7 @@ impl Expression {
             DataType::map(map_type.key_diagnostic_type, map_type.value_diagnostic_type);
         Self::new(
             ExpressionKind::MapLiteral(entries),
-            location,
+            span,
             map_type_id,
             diagnostic_type,
             value_mode,
@@ -1053,7 +1042,7 @@ impl Expression {
     pub fn struct_instance(
         nominal_path: InternedPath,
         args: Vec<Declaration>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
         const_record: bool,
         generic_instance_key: Option<GenericInstantiationKey>,
@@ -1078,7 +1067,7 @@ impl Expression {
         };
         let mut expression = Self::new(
             ExpressionKind::StructInstance(args),
-            location,
+            span,
             type_id,
             struct_type,
             value_mode,
@@ -1094,12 +1083,12 @@ impl Expression {
     /// Constructs a struct definition expression.
     pub fn struct_definition(
         args: Vec<Declaration>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         Self::new(
             ExpressionKind::StructDefinition(args),
-            location,
+            span,
             builtin_type_ids::NONE,
             DataType::Inferred,
             value_mode,
@@ -1114,7 +1103,7 @@ impl Expression {
     ///      group rather than a runtime struct value.
     pub fn anonymous_const_record(
         fields: Vec<Declaration>,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
         record_type_id: TypeId,
     ) -> Self {
@@ -1129,7 +1118,7 @@ impl Expression {
 
         let mut expression = Self::new(
             ExpressionKind::AnonymousConstRecord { fields },
-            location,
+            span,
             record_type_id,
             DataType::None,
             value_mode,
@@ -1142,15 +1131,14 @@ impl Expression {
 
     /// Constructs a template expression without provisional reactive metadata.
     ///
-    /// WHAT: records the template value while leaving
-    /// `reactive_template` unset.
+    /// WHAT: records the template value while leaving `reactive_template` unset.
     /// WHY: AST finalization owns the module store and recomputes authoritative
-    /// metadata through TIR before normalization and HIR lowering.
+    ///      metadata through TIR before normalization and HIR lowering.
     pub fn template(template: Template, value_mode: ValueMode) -> Self {
-        let location = template.location.to_owned();
+        let span = template.span;
         Self::new(
             ExpressionKind::Template(Box::new(template)),
-            location,
+            span,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
@@ -1158,11 +1146,6 @@ impl Expression {
     }
 
     /// Constructs the final AST-owned payload for an ordinary runtime template.
-    ///
-    /// WHAT: records the neutral owned handoff shape directly on the expression while preserving
-    /// the existing `String`/template value metadata used by callers.
-    /// WHY: Phase 11 introduces the final AST shape before consumer cutover, so construction is
-    /// explicit and testable without changing HIR lowering behavior.
     #[allow(
         dead_code,
         reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
@@ -1171,10 +1154,10 @@ impl Expression {
         handoff: OwnedRuntimeTemplateHandoff,
         value_mode: ValueMode,
     ) -> Self {
-        let location = handoff.location.to_owned();
+        let span = handoff.span;
         let mut expression = Self::new(
             ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
-            location,
+            span,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
@@ -1184,10 +1167,6 @@ impl Expression {
     }
 
     /// Constructs the final AST-owned payload for a runtime slot application.
-    ///
-    /// WHAT: stores routed slot application data as neutral owned AST payload.
-    /// WHY: later HIR cutover can lower slot applications from this variant without reaching
-    /// through `Template::runtime_slot_handoff` or any TIR-internal reference.
     #[allow(
         dead_code,
         reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
@@ -1196,10 +1175,10 @@ impl Expression {
         handoff: OwnedRuntimeSlotApplicationHandoff,
         value_mode: ValueMode,
     ) -> Self {
-        let location = handoff.location.to_owned();
+        let span = handoff.span;
         let mut expression = Self::new(
             ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(handoff)),
-            location,
+            span,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
@@ -1208,18 +1187,17 @@ impl Expression {
         expression
     }
 
-    /// Constructs a copy expression from an AST node place.
     /// Constructs a copy expression from a frontend place expression.
     pub fn copy_with_type_id(
         place: PlaceExpression,
         data_type: DataType,
         type_id: TypeId,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Self {
         Self::new(
             ExpressionKind::Copy(place),
-            location,
+            span,
             type_id,
             data_type,
             value_mode.as_owned(),
@@ -1228,24 +1206,21 @@ impl Expression {
 
     /// Internal sentinel used for declarations/signature defaults that do not
     /// provide a value expression in source.
-    pub fn no_value(location: SourceLocation, data_type: DataType, value_mode: ValueMode) -> Self {
+    pub fn no_value(span: Option<SourceSpan>, data_type: DataType, value_mode: ValueMode) -> Self {
         let type_id = type_id_hint_for_diagnostic_type(&data_type);
-        Self::no_value_with_type_id(location, data_type, type_id, value_mode)
+        Self::no_value_with_type_id(span, data_type, type_id, value_mode)
     }
 
     /// Internal sentinel for declarations whose canonical type is already known.
-    ///
-    /// Constructed and nominal types cannot be recovered from diagnostic spelling alone, so parser
-    /// sites that already resolved a `TypeId` should preserve it here for later expression typing.
     pub fn no_value_with_type_id(
-        location: SourceLocation,
+        span: Option<SourceSpan>,
         data_type: DataType,
         type_id: TypeId,
         value_mode: ValueMode,
     ) -> Self {
         Self::new(
             ExpressionKind::NoValue,
-            location,
+            span,
             type_id,
             data_type,
             value_mode,
@@ -1257,13 +1232,13 @@ impl Expression {
         inner_type_id: TypeId,
         inner_diagnostic_type: DataType,
         type_environment: &mut TypeEnvironment,
-        location: SourceLocation,
+        span: Option<SourceSpan>,
     ) -> Self {
         let option_type_id = type_environment.intern_option(inner_type_id);
         // `diagnostic_type` is display-only; semantic identity comes from `option_type_id`.
         Self::new(
             ExpressionKind::OptionNone,
-            location,
+            span,
             option_type_id,
             DataType::Option(Box::new(inner_diagnostic_type)),
             ValueMode::ImmutableOwned,
@@ -1288,7 +1263,7 @@ impl Expression {
                 tag: input.tag,
                 fields: input.fields,
             },
-            input.location,
+            input.span,
             input.type_id,
             input.diagnostic_type,
             input.value_mode,

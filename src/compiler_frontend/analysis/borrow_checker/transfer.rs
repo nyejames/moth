@@ -115,9 +115,7 @@ pub(super) fn transfer_block(
         | HirTerminator::ReturnSuccess(value)
         | HirTerminator::ReturnError(value) => {
             let terminator_order = layout.terminator_order_or_unknown(block.id);
-            let location = context
-                .diagnostics
-                .terminator_error_location(block.id, &block.terminator);
+            let location = context.diagnostics.terminator_error_span(block.id);
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
@@ -130,9 +128,7 @@ pub(super) fn transfer_block(
         }
         HirTerminator::FallibleBranch { result, .. } => {
             let terminator_order = layout.terminator_order_or_unknown(block.id);
-            let location = context
-                .diagnostics
-                .terminator_error_location(block.id, &block.terminator);
+            let location = context.diagnostics.terminator_error_span(block.id);
             transfer_aggregate_expression_ownership(
                 layout,
                 state,

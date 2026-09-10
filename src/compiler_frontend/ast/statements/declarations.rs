@@ -52,15 +52,14 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::{
 use crate::compiler_frontend::declaration_syntax::r#struct::{
     parse_struct_shell, validate_struct_default_values,
 };
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::signature_position::check_signature_common_mistake;
-use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind,
-};
+use crate::compiler_frontend::tokenizer::tokens::{FilePathSyntax, FileTokens, Token, TokenKind};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
@@ -139,12 +138,13 @@ fn reject_config_qualifiers_on_record_fields(
 
     for field in fields {
         if let Some(qualifier) = &field.config_qualifier {
-            return Err(CompilerDiagnostic::invalid_config_reason(
+            let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
                 field.id.name(),
                 InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                qualifier.qualifier_location.clone(),
-            )
-            .into());
+                qualifier.qualifier_span,
+            );
+            diagnostic.primary_span = qualifier.qualifier_span;
+            return Err(diagnostic.into());
         }
     }
 
@@ -182,7 +182,7 @@ pub(crate) struct ResolvedDeclaration {
     pub(crate) declaration: Declaration,
     pub(crate) statement_kind: ResolvedDeclarationStatementKind,
     pub(crate) is_compile_time_binding: bool,
-    pub(crate) binding_location: SourceLocation,
+    pub(crate) binding_span: Option<SourceSpan>,
 }
 
 /// Statement-level shape that declaration parsing discovered alongside the binding value.
@@ -211,21 +211,23 @@ pub(crate) fn new_declaration(
     string_table: &mut StringTable,
 ) -> DeclarationResult<ResolvedDeclaration> {
     let declaration_name = string_table.resolve(symbol_id).to_owned();
-    ensure_not_keyword_shadow_identifier(symbol_id, token_stream.current_location(), string_table)?;
+    ensure_not_keyword_shadow_identifier(
+        symbol_id,
+        Some(token_stream.current_span()),
+        string_table,
+    )?;
 
     if is_reserved_builtin_symbol(&declaration_name) {
         return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::ReservedBuiltinName,
             Some(symbol_id),
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
         )
         .into());
     }
 
-    // Capture the authored binding-name location before advancing past the name token.
-    // This differs from `declaration.value.location` (the initializer expression location)
-    // and is used for immutable-assignment secondary labels pointing at the original binding.
-    let binding_location = token_stream.current_location();
+    // Capture the authored binding-name span before advancing past the name token.
+    let binding_span = Some(token_stream.current_span());
 
     // Move past the name
     token_stream.advance();
@@ -240,7 +242,7 @@ pub(crate) fn new_declaration(
     if token_stream.current_token_kind() == &TokenKind::TypeParameterBracket {
         if let Some(warning) = naming_warning_for_identifier(
             symbol_id,
-            token_stream.current_location(),
+            Some(token_stream.current_span()),
             IdentifierNamingKind::ValueLike,
             string_table,
         ) {
@@ -271,7 +273,7 @@ pub(crate) fn new_declaration(
         let function_type_id = resolve_diagnostic_type_to_type_id_checked(
             &function_data_type,
             type_interner.environment_mut_for_derived_types(),
-            &token_stream.current_location(),
+            Some(token_stream.current_span()),
         )?;
 
         return Ok(ResolvedDeclaration {
@@ -281,8 +283,9 @@ pub(crate) fn new_declaration(
                     receiver,
                     function_signature.to_owned(),
                     function_type_id,
-                    token_stream.current_location(),
+                    binding_span,
                 ),
+                binding_span,
                 config_qualifier: None,
             },
             statement_kind: ResolvedDeclarationStatementKind::Function {
@@ -290,7 +293,7 @@ pub(crate) fn new_declaration(
                 body: function_body,
             },
             is_compile_time_binding: false,
-            binding_location,
+            binding_span,
         });
     }
 
@@ -301,7 +304,9 @@ pub(crate) fn new_declaration(
     // ----------------------------
     //  Parse declaration syntax
     // ----------------------------
-    let declaration_syntax = parse_declaration_syntax(token_stream, symbol_id, string_table)?;
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let declaration_syntax =
+        parse_declaration_syntax(token_stream, symbol_id, string_table, &mut span_builder)?;
 
     // Heuristic: a leading type-parameter pipe after the binding marker indicates
     // a struct or generic type definition, which uses type-like naming conventions.
@@ -319,15 +324,14 @@ pub(crate) fn new_declaration(
 
     if let Some(warning) = naming_warning_for_identifier(
         symbol_id,
-        declaration_syntax.location.to_owned(),
+        declaration_syntax.span,
         naming_kind,
         string_table,
     ) {
         context.emit_warning(warning);
     }
-
     let is_compile_time_binding = declaration_syntax.binding_mode.is_compile_time();
-    let declaration = resolve_declaration_syntax(
+    let mut declaration = resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
         &token_stream.path_syntax,
@@ -335,6 +339,10 @@ pub(crate) fn new_declaration(
         type_interner,
         string_table,
     )?;
+    // The binding anchor is the declaration-name token captured on entry, not the
+    // initializer value span. `resolve_declaration_syntax` leaves it empty for this
+    // body-local path; restore the exact anchor here.
+    declaration.binding_span = binding_span;
     let statement_kind = match &declaration.value.kind {
         ExpressionKind::StructDefinition(params) => {
             ResolvedDeclarationStatementKind::StructDefinition(params.to_owned())
@@ -346,10 +354,9 @@ pub(crate) fn new_declaration(
         declaration,
         statement_kind,
         is_compile_time_binding,
-        binding_location,
+        binding_span,
     })
 }
-
 /// Extract the receiver key from a function signature when the first parameter is named `this`.
 fn function_signature_receiver(
     signature: &FunctionSignature,
@@ -378,6 +385,7 @@ pub fn resolve_declaration_syntax(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
 ) -> DeclarationResult<Declaration> {
+    let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
     let has_config_resolution = context.shared.config_resolution.is_some();
@@ -399,12 +407,13 @@ pub fn resolve_declaration_syntax(
         && !config_resolution_context
         && !source_build_config_context
     {
-        return Err(CompilerDiagnostic::invalid_config_reason(
+        let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
             qualified_name.name(),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            qualifier.qualifier_location.clone(),
-        )
-        .into());
+            qualifier.qualifier_span,
+        );
+        diagnostic.primary_span = qualifier.qualifier_span;
+        return Err(diagnostic.into());
     }
 
     // ----------------------------
@@ -416,7 +425,7 @@ pub fn resolve_declaration_syntax(
         return Err(CompilerDiagnostic::invalid_declaration(
             InvalidDeclarationReason::ConstantCannotBeMutable,
             None,
-            declaration_syntax.location.clone(),
+            declaration_syntax.span,
         )
         .into());
     }
@@ -424,37 +433,28 @@ pub fn resolve_declaration_syntax(
     // ----------------------------
     //  Resolve declared type
     // ----------------------------
-    let declaration_location = declaration_syntax.location.clone();
 
-    // Capacity-only shorthand (`{N}`) requires special handling: the element type must be
-    // inferred from the initializer literal, so we intercept before normal resolution.
     if let Some(capacity) = capacity_only_shorthand(&declaration_syntax.type_annotation) {
         let folded_capacity = fold_collection_capacity(
             capacity,
-            Some(context),
+            Some(&*context),
             type_interner.environment_mut_for_derived_types(),
         )
-        .map_err(|diagnostic| diagnostic.into_boxed())?;
+        .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
-        let mut initializer_tokens = declaration_syntax.initializer_tokens.clone();
-        initializer_tokens.push(Token::new(
-            TokenKind::Eof,
-            declaration_syntax.location.to_owned(),
-        ));
-        let mut initializer_stream = FileTokens::new_from_slice(
-            qualified_name.to_owned(),
-            None,
-            None,
-            initializer_tokens,
+        let mut initializer_stream = declaration_initializer_stream(
+            &qualified_name,
+            declaration_syntax.span,
+            declaration_syntax.initializer_tokens.clone(),
             path_syntax,
-        )
-        .map_err(ExpressionParseError::from)?;
+            context,
+        )?;
 
         // Shorthand requires an immediate collection literal initializer.
         if initializer_stream.current_token_kind() != &TokenKind::OpenCurly {
             return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::ShorthandNonLiteralRhs,
-                initializer_stream.current_location(),
+                Some(initializer_stream.current_span()),
             )
             .into());
         }
@@ -493,7 +493,7 @@ pub fn resolve_declaration_syntax(
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 qualified_name.name(),
-                declaration_syntax.location.clone(),
+                declaration_syntax.span,
             )
             .into());
         }
@@ -502,7 +502,7 @@ pub fn resolve_declaration_syntax(
         if initializer_stream.current_token_kind() != &TokenKind::Eof {
             return Err(CompilerDiagnostic::unexpected_token(
                 initializer_stream.current_token_kind().to_owned(),
-                initializer_stream.current_location(),
+                Some(initializer_stream.current_span()),
             )
             .into());
         }
@@ -516,6 +516,7 @@ pub fn resolve_declaration_syntax(
         return Ok(Declaration {
             id: qualified_name,
             value: parsed_initializer,
+            binding_span: None,
             config_qualifier,
         });
     }
@@ -524,6 +525,7 @@ pub fn resolve_declaration_syntax(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
+                declaring_file_id: context.shared.declaring_file_id,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -555,7 +557,7 @@ pub fn resolve_declaration_syntax(
             .with_active_generic_type_context(context.active_generic_type_context());
         resolve_parsed_type_annotation(
             declaration_syntax.semantic_type(),
-            &declaration_location,
+            declaration_syntax.span,
             &mut type_resolution_context,
             string_table,
             Some(context),
@@ -586,8 +588,8 @@ pub fn resolve_declaration_syntax(
         let value = expression_for_resolved_build_config_value(
             resolved,
             declaration_syntax.config_qualifier.as_ref().map_or_else(
-                || declaration_location.clone(),
-                |qualifier| qualifier.qualifier_location.clone(),
+                || declaration_syntax.span,
+                |qualifier| qualifier.qualifier_span,
             ),
             type_interner,
             string_table,
@@ -595,23 +597,17 @@ pub fn resolve_declaration_syntax(
         return Ok(Declaration {
             id: qualified_name,
             value,
+            binding_span: None,
             config_qualifier: None,
         });
     }
-
-    let mut initializer_tokens = declaration_syntax.initializer_tokens;
-    initializer_tokens.push(Token::new(
-        TokenKind::Eof,
-        declaration_syntax.location.to_owned(),
-    ));
-    let mut initializer_stream = FileTokens::new_from_slice(
-        qualified_name.to_owned(),
-        None,
-        None,
-        initializer_tokens,
+    let mut initializer_stream = declaration_initializer_stream(
+        &qualified_name,
+        declaration_syntax.span,
+        declaration_syntax.initializer_tokens,
         path_syntax,
-    )
-    .map_err(ExpressionParseError::from)?;
+        context,
+    )?;
 
     // Check the first token before dispatching so we don't wastefully call
     // `create_expression` recursively when the initializer is a struct definition.
@@ -632,13 +628,14 @@ pub fn resolve_declaration_syntax(
             // in a dedicated constant context.
             let constant_context =
                 ScopeContext::new_constant(initializer_stream.src_path.to_owned(), context);
-            let owner_path = initializer_stream.src_path.to_owned();
             let mut field_warnings = Vec::new();
+            let owner_path = initializer_stream.src_path.to_owned();
             let field_syntax = parse_struct_shell(
                 &mut initializer_stream,
                 string_table,
                 &mut field_warnings,
                 &owner_path,
+                &mut span_builder,
             )?;
             for warning in field_warnings {
                 context.emit_warning(warning);
@@ -659,11 +656,7 @@ pub fn resolve_declaration_syntax(
             validate_struct_default_values(&params, &context.template_ir_store)
                 .map_err(ExpressionParseError::from)?;
 
-            Expression::struct_definition(
-                params,
-                initializer_stream.current_location(),
-                value_mode.to_owned(),
-            )
+            Expression::struct_definition(params, declaration_syntax.span, value_mode.to_owned())
         }
 
         _ => {
@@ -767,7 +760,7 @@ pub fn resolve_declaration_syntax(
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
             qualified_name.name(),
-            declaration_syntax.location.clone(),
+            declaration_syntax.span,
         )
         .into());
     }
@@ -784,7 +777,7 @@ pub fn resolve_declaration_syntax(
     {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::DirectOptionFallbackSyntax,
-            initializer_stream.current_location(),
+            Some(initializer_stream.current_span()),
         )
         .into());
     }
@@ -801,14 +794,14 @@ pub fn resolve_declaration_syntax(
             // inline nested `|...|` that the parser already closed.
             return Err(CompilerDiagnostic::invalid_expression(
                 InvalidExpressionReason::NestedAnonymousConstRecord,
-                initializer_stream.current_location(),
+                Some(initializer_stream.current_span()),
             )
             .into());
         }
 
         return Err(CompilerDiagnostic::unexpected_token(
             initializer_stream.current_token_kind().to_owned(),
-            initializer_stream.current_location(),
+            Some(initializer_stream.current_span()),
         )
         .into());
     }
@@ -825,7 +818,7 @@ pub fn resolve_declaration_syntax(
         {
             return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::EmptyImmutableFixedCollection,
-                parsed_initializer.location.clone(),
+                parsed_initializer.span,
             )
             .into());
         }
@@ -852,8 +845,42 @@ pub fn resolve_declaration_syntax(
     Ok(Declaration {
         id: qualified_name,
         value: parsed_initializer,
+        binding_span: None,
         config_qualifier,
     })
+}
+
+/// Wrap a declaration's initializer tokens in a stream terminated at the declaration's location.
+///
+/// WHY the context: the initializer was lexed from the file that declared it, so the substream
+/// takes that scope's source identity rather than an identity a caller could pass wrongly.
+fn declaration_initializer_stream(
+    qualified_name: &InternedPath,
+    declaration_span: Option<SourceSpan>,
+    mut initializer_tokens: Vec<Token>,
+    path_syntax: &FilePathSyntax,
+    context: &ScopeContext,
+) -> DeclarationResult<FileTokens> {
+    let Some(eof_span) = declaration_span
+        .map(SourceSpan::local)
+        .or_else(|| initializer_tokens.last().map(|token| token.span))
+    else {
+        return Err(CompilerDiagnostic::invalid_declaration(
+            InvalidDeclarationReason::MissingInitializerExpression,
+            qualified_name.name(),
+            None,
+        )
+        .into());
+    };
+    initializer_tokens.push(Token::with_span(TokenKind::Eof, eof_span));
+    FileTokens::new_from_slice(
+        qualified_name.to_owned(),
+        context.shared.declaring_file_id,
+        None,
+        initializer_tokens,
+        path_syntax,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 #[cfg(test)]

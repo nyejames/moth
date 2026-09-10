@@ -8,13 +8,13 @@
 use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind, DiagnosticPayload,
-    InvalidChoiceVariantReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidDependencyClauseReason, InvalidFunctionSignatureReason, InvalidSignatureMemberReason,
-    InvalidThisUsageReason, InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind,
-    SyntaxDiagnosticKind,
+    CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticToken, InvalidChoiceVariantReason,
+    InvalidConfigReason, InvalidDeclarationReason, InvalidDependencyClauseReason,
+    InvalidFunctionSignatureReason, InvalidSignatureMemberReason, InvalidThisUsageReason,
+    InvalidTypeAnnotationReason, ReservedNameOwner, RuleDiagnosticKind, SyntaxDiagnosticKind,
 };
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
@@ -24,22 +24,43 @@ use crate::compiler_frontend::external_packages::{
     ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
     ExternalTypeDef, ExternalTypeId, external_success_returns,
 };
+use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::headers::types::{
-    DependencyBindingSyntax, DependencySelectionRange, HeaderExportMode, RetainedDependencyClause,
+    DependencyBindingSyntax, DependencySelectionRange, HeaderBuildContext, HeaderExportMode,
+    HeaderParseFailure, RetainedDependencyClause,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::source::test_support::TestSourceContext;
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
-use crate::compiler_frontend::symbols::identity::FileId;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
-    FilePathSyntax, FileTokens, SourceLocation, Token, TokenKind, TokenizerEntryMode,
+    FilePathSyntax, FileTokens, Token, TokenKind, TokenizerEntryMode,
 };
-use crate::compiler_frontend::traits::syntax::TraitThisUsage;
+use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
+
+fn source_span_for(source: &str, needle: &str, occurrence: usize) -> SourceSpan {
+    let (start, matched) = source
+        .match_indices(needle)
+        .nth(occurrence)
+        .unwrap_or_else(|| panic!("expected occurrence {occurrence} of {needle:?}"));
+    let mut span_builder = ExtendedSpanBuilder::new();
+    SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(start as u32, matched.len() as u32, &mut span_builder)
+            .expect("test source span should fit"),
+    )
+}
+
+use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -50,8 +71,9 @@ struct HeaderTestDiagnostics {
 }
 
 struct HeaderTestPrepareContext<'a> {
+    source_id: SourceId,
     entry_file_path: &'a Path,
-    options: &'a HeaderParseOptions,
+    options: &'a HeaderParseOptions<'a>,
     style_directives: &'a StyleDirectiveRegistry,
 }
 
@@ -60,23 +82,34 @@ pub(crate) fn prepare_single_file(
     file_path: &Path,
     entry_file_path: &Path,
     string_table: &mut StringTable,
-) -> FileFrontendPrepareOutput {
+) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = InternedPath::try_from_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         string_table,
-        Some(FileId(0)),
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
-    prepare_file_from_tokens(file_tokens, entry_file_path, &options, string_table, 0, 0)
-        .expect("preparation should succeed")
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        entry_file_path,
+        &options,
+        string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed");
+    (output, span_builder)
 }
 
 fn prepare_test_source_file(
@@ -86,27 +119,20 @@ fn prepare_test_source_file(
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let interned_path = InternedPath::try_from_filesystem_path(file_path, string_table)
         .expect("test path should be UTF-8");
-    let file_tokens = match tokenize(
+    let file_tokens = tokenize(
         source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         context.style_directives,
         string_table,
-        Some(FileId(0)),
-    ) {
-        Ok(file_tokens) => file_tokens,
-        Err(diagnostic) => {
-            return Err(FileFrontendPrepareFailure::Diagnosed(
-                FileFrontendPrepareError {
-                    warnings: Vec::new(),
-                    diagnostic,
-                },
-            ));
-        }
-    };
+        context.source_id,
+        span_builder,
+    )
+    .map_err(FileFrontendPrepareFailure::from_tokenization)?;
 
     prepare_file_from_tokens(
         file_tokens,
@@ -115,49 +141,403 @@ fn prepare_test_source_file(
         string_table,
         const_template_offset,
         runtime_fragment_offset,
+        span_builder,
     )
 }
 
+/// Extended token spans keep their source-owned table through aggregation. Later span producers
+/// may append to that same builder without invalidating the retained header's earlier handles.
 #[test]
-fn dependency_shell_without_retained_file_identity_fails_preparation() {
+fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"\n");
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
-    let style_directives = StyleDirectiveRegistry::built_ins();
     let file_tokens = tokenize(
-        "@core/math\n",
+        &source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        None,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
+    let mut outputs = [prepare_file_from_tokens(
+        file_tokens,
+        &file_path,
+        &options,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed")];
+    let prepared = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("header syntax should aggregate");
+    let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
+        .expect("a later source span should fit");
+    let resolver = span_builder.resolver();
+    let literal = prepared
+        .headers
+        .iter()
+        .flat_map(|header| header.tokens.tokens.iter())
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the retained header must keep its long string literal");
+    let resolved = literal.span.resolve_with(resolver);
 
-    let error = match prepare_file_from_tokens(
+    assert_eq!(
+        source.get(resolved.start() as usize..resolved.end() as usize),
+        Some(format!("\"{quoted}\"").as_str()),
+        "the retained token's span must resolve through the prepared output's own table"
+    );
+    let whole_range = whole_source.resolve_with(resolver);
+    assert_eq!(whole_range.start(), 0);
+    assert_eq!(whole_range.end(), source.len() as u32);
+}
+
+#[test]
+fn diagnosed_aggregation_preserves_the_source_span_builder() {
+    let quoted = "é".repeat(2 * 1024 * 1024);
+    let source =
+        format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of Int = 1\n;\n");
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let file_tokens = tokenize(
+        &source,
+        &interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("tokenization should succeed");
+    let mut outputs = [prepare_file_from_tokens(
         file_tokens,
         &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
         0,
         0,
+        &mut span_builder,
+    )
+    .expect("preparation should succeed")];
+    let literal_span = outputs[0]
+        .headers
+        .iter()
+        .flat_map(|header| header.tokens.tokens.iter())
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("the function body should retain its long literal")
+        .span;
+
+    let diagnostics = match prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
     ) {
-        Ok(_) => {
-            panic!("a dependency shell without a retained file identity must fail preparation")
+        Err(failure) => expect_aggregation_diagnostics(failure),
+        Ok(_) => panic!("a nested config qualifier should fail aggregation"),
+    };
+    assert!(diagnostics.errors().any(|diagnostic| matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidConfig {
+            reason: InvalidConfigReason::ConfigQualifierInvalidPlacement,
+            ..
         }
-        Err(FileFrontendPrepareFailure::Diagnosed(error)) => panic!(
-            "missing shell identity must not become a source diagnostic: {:?}",
-            error.diagnostic.payload
-        ),
-        Err(FileFrontendPrepareFailure::Infrastructure(error)) => error,
+    )));
+    let primary_span = diagnostics
+        .errors()
+        .next()
+        .expect("config placement diagnostic")
+        .primary_span
+        .expect("aggregation captures its primary span");
+    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
+    let marker_range =
+        primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert!(marker_range.start() >= 4 * 1024 * 1024);
+    assert_eq!(
+        &source[marker_range.start() as usize..marker_range.end() as usize],
+        "#"
+    );
+    let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
+        .expect("the diagnosed source builder should remain live");
+    let resolver = span_builder.resolver();
+    let literal_range = literal_span.resolve_with(resolver);
+    assert_eq!(
+        source.get(literal_range.start() as usize..literal_range.end() as usize),
+        Some(format!("\"{quoted}\"").as_str())
+    );
+    let whole_range = whole_source.resolve_with(resolver);
+    assert_eq!(whole_range.start(), 0);
+    assert_eq!(whole_range.end(), source.len() as u32);
+}
+
+#[test]
+fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
+    let sources = [
+        "helper ||:\n setting #Config of Int = 1\n;\n",
+        "other ||:\n setting #Config of Int = 2\n;\n",
+    ];
+    let mut string_table = StringTable::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let entry = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        entry_file_path: entry,
+        options: &options,
+        style_directives: &styles,
+    };
+    let mut builders = [ExtendedSpanBuilder::new(), ExtendedSpanBuilder::new()];
+    let mut outputs = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        outputs.push(
+            prepare_test_source_file(
+                source,
+                Path::new(if index == 0 {
+                    "src/@page.moth"
+                } else {
+                    "src/helper.moth"
+                }),
+                &HeaderTestPrepareContext {
+                    source_id: SourceId::from_index(index + 1),
+                    ..context
+                },
+                &mut string_table,
+                0,
+                0,
+                &mut builders[index],
+            )
+            .expect("declaration shells prepare"),
+        );
+    }
+    let failure = prepare_header_syntax(
+        &mut outputs,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .err()
+    .expect("nested qualifiers fail aggregation");
+    let diagnostics = expect_aggregation_diagnostics(failure).into_diagnostics();
+    assert_eq!(diagnostics.len(), 2);
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        let span = diagnostic
+            .primary_span
+            .expect("aggregation retains primary source span");
+        assert_eq!(span.source(), SourceId::from_index(index + 1));
+        let range = span.resolve_with(builders[index].resolver_for(span.source()));
+        assert_eq!(
+            &sources[index][range.start() as usize..range.end() as usize],
+            "#"
+        );
+    }
+}
+
+#[test]
+fn preparation_related_labels_keep_the_continuation_comma_and_name() {
+    let source = "-- é🦋\n@core/math sin,\nvalue = 1\n";
+    let mut strings = StringTable::new();
+    let mut spans = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let path = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::from_index(4),
+        entry_file_path: path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let failure = prepare_test_source_file(source, path, &context, &mut strings, 0, 0, &mut spans)
+        .err()
+        .expect("continued clause must diagnose statement");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected source diagnostic");
+    };
+    let primary_span = error
+        .diagnostic
+        .primary_span
+        .expect("per-file preparation captures the primary name span");
+    assert_eq!(primary_span.source(), context.source_id);
+    let primary_range = primary_span.resolve_with(spans.resolver_for(primary_span.source()));
+    assert_eq!(
+        &source[primary_range.start() as usize..primary_range.end() as usize],
+        "value"
+    );
+    assert_eq!(error.diagnostic.labels.len(), 1);
+    let comma_label = &error.diagnostic.labels[0];
+    let span = comma_label
+        .span
+        .expect("per-file preparation captures related labels");
+    assert_eq!(span.source(), context.source_id);
+    let range = span.resolve_with(spans.resolver_for(span.source()));
+    assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
+}
+
+#[test]
+fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
+    let comment = "é".repeat(700);
+    let source = format!("-- 🦋\nimport -- {comment}\n    @core/math {{ sin }}\n");
+    let mut strings = StringTable::new();
+    let mut spans = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let path = Path::new("src/@page.moth");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        entry_file_path: path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let failure = match prepare_test_source_file(
+        &source,
+        path,
+        &HeaderTestPrepareContext {
+            source_id: SourceId::from_index(3),
+            ..context
+        },
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    ) {
+        Ok(_) => panic!("legacy joined clause should be diagnosed"),
+        Err(failure) => failure,
+    };
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected source diagnostic");
+    };
+    let span = error
+        .diagnostic
+        .primary_span
+        .expect("per-file producer captures joined clause");
+    let range = span.resolve_with(spans.resolver_for(span.source()));
+    assert_eq!(span.source(), SourceId::from_index(3));
+    assert_eq!(range.start() as usize, source.find("import").unwrap());
+    assert_eq!(range.end() as usize, source.find('}').unwrap() + 1);
+    assert!(range.end() - range.start() > 1022);
+}
+
+#[test]
+fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
+    let quoted = "x".repeat(1500);
+    let source = format!("value = \"{quoted}\"\nexport:\n;\n");
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let source_id = SourceId::from_index(7);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let mut file_tokens = tokenize(
+        &source,
+        &interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        source_id,
+        &mut span_builder,
+    )
+    .expect("source should tokenize");
+    let long_span = file_tokens
+        .tokens
+        .iter()
+        .find(|token| matches!(token.kind, TokenKind::StringSliceLiteral(_)))
+        .expect("tokenized source should retain the long string literal")
+        .span;
+    let expected_range = long_span.resolve_with(span_builder.resolver_for(source_id));
+
+    let error = match parse_file_headers_with_table(
+        &mut file_tokens,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    ) {
+        Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
+        Ok(_) => panic!("an empty export block should diagnose during header preparation"),
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("header syntax should diagnose, not fail infrastructure: {error:?}")
+        }
     };
 
     assert!(
-        error
-            .msg
-            .contains("cannot be stamped without a retained source file identity"),
-        "unexpected infrastructure error: {error:?}"
+        error.warnings.is_empty(),
+        "empty export block should not emit preparation warnings"
+    );
+    let diagnostic_span = error
+        .diagnostic
+        .primary_span
+        .expect("empty export block should retain its source span");
+    assert_eq!(diagnostic_span.source(), source_id);
+    let diagnostic_range =
+        diagnostic_span.resolve_with(span_builder.resolver_for(diagnostic_span.source()));
+    assert_eq!(
+        source.get(diagnostic_range.start() as usize..diagnostic_range.end() as usize),
+        Some("export"),
+        "the empty export diagnostic should cover the authored export keyword"
+    );
+    let retained_range = long_span.resolve_with(span_builder.resolver_for(source_id));
+    assert_eq!(retained_range, expected_range);
+    assert_eq!(
+        source.get(retained_range.start() as usize..retained_range.end() as usize),
+        Some(format!("\"{quoted}\"").as_str()),
+        "the diagnosed header must retain the builder that owns its extended token span"
+    );
+}
+
+#[test]
+fn dependency_shell_with_compilation_root_identity_prepares() {
+    let mut string_table = StringTable::new();
+    let file_path = PathBuf::from("src/@page.moth");
+    let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
+        .expect("test path should be UTF-8");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens = tokenize(
+        "@core/math\n",
+        &interned_path,
+        TokenizerEntryMode::SourceFile,
+        &style_directives,
+        &mut string_table,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("tokenization should succeed");
+
+    let output = prepare_file_from_tokens(
+        file_tokens,
+        &file_path,
+        &HeaderParseOptions::default(),
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .expect("a dependency shell with a compilation-root identity should prepare");
+
+    assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);
+    assert_eq!(
+        output.file_dependency_clauses[0]
+            .dependency
+            .dependency_shell_id
+            .source,
+        SourceId::COMPILATION_ROOT
     );
 }
 
@@ -167,13 +547,15 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let mut file_tokens = tokenize(
         source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
     let path_token = file_tokens
@@ -192,6 +574,7 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     ) {
         Ok(_) => panic!("a tampered path handle must fail preparation"),
         Err(error) => error,
@@ -201,10 +584,12 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
 fn expect_prepare_infrastructure(error: FileFrontendPrepareFailure, case: &str) {
     match error {
         FileFrontendPrepareFailure::Infrastructure(_) => {}
-        FileFrontendPrepareFailure::Diagnosed(error) => panic!(
-            "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
-            error.diagnostic.payload
-        ),
+        FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError { diagnostic, .. }) => {
+            panic!(
+                "{case}: malformed path lookup must not fabricate a user diagnostic: {:?}",
+                diagnostic.payload
+            )
+        }
     }
 }
 
@@ -231,31 +616,37 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         "@core/math sin\n",
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
     let other_path = InternedPath::from_single_str("other.moth", &mut string_table);
+    let mut other_span_builder = ExtendedSpanBuilder::new();
     let other_tokens = tokenize(
         "@other/path sin\n",
         &other_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(1)),
+        SourceId::COMPILATION_ROOT,
+        &mut other_span_builder,
     )
     .expect("other file should tokenize");
+    let other_path_syntax = (*other_tokens.path_syntax).clone();
+    // The stream keeps its own identity; only the path table is another file's.
     let swapped = FileTokens::new_with_identity(
         file_tokens.src_path,
         file_tokens.file_id,
         file_tokens.canonical_os_path,
         file_tokens.tokens,
-        (*other_tokens.path_syntax).clone(),
+        other_path_syntax,
     );
 
     expect_prepare_infrastructure(
@@ -266,6 +657,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
             &mut string_table,
             0,
             0,
+            &mut span_builder,
         ) {
             Ok(_) => panic!("a wrong file-owned path table must fail preparation"),
             Err(error) => error,
@@ -279,6 +671,7 @@ fn prepare_active_root_with_role(
     file_path: &Path,
     active_root_role: ModuleRootRole,
     string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let options = HeaderParseOptions {
         entry_file_id: None,
@@ -288,40 +681,68 @@ fn prepare_active_root_with_role(
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
     };
 
-    prepare_test_source_file(source, file_path, &context, string_table, 0, 0)
+    prepare_test_source_file(
+        source,
+        file_path,
+        &context,
+        string_table,
+        0,
+        0,
+        span_builder,
+    )
+}
+
+fn expect_aggregation_diagnostics(failure: HeaderPreparationFailure) -> DiagnosticBag {
+    match failure {
+        HeaderPreparationFailure::Diagnosed(bag) => bag,
+        HeaderPreparationFailure::Infrastructure(error) => {
+            panic!("aggregation fixture infrastructure failure: {error:?}")
+        }
+    }
 }
 
 /// Test helper: run both header preparation and binding, returning the raw result.
 fn prepare_and_bind_headers_result(
-    prepared_outputs: Vec<FileFrontendPrepareOutput>,
+    mut prepared_outputs: Vec<FileFrontendPrepareOutput>,
+    _span_builders: &mut [ExtendedSpanBuilder],
     external_package_registry: &ExternalPackageRegistry,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
     project_path_resolver: Option<&ProjectPathResolver>,
     string_table: &mut StringTable,
 ) -> Result<BoundModuleHeaders, DiagnosticBag> {
-    let prepared = prepare_header_syntax(prepared_outputs, string_table)?;
+    let prepared = prepare_header_syntax(
+        &mut prepared_outputs,
+        string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .map_err(expect_aggregation_diagnostics)?;
     bind_module_headers(
         prepared,
         external_package_registry,
         external_dependency_resolution_table,
         &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
         project_path_resolver,
+        &crate::compiler_frontend::source::SourceDatabase::empty(),
         string_table,
     )
+    .map_err(expect_aggregation_diagnostics)
 }
 
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    let (output, mut span_builder) =
+        prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -338,11 +759,13 @@ fn parse_single_file_headers_with_warnings(
 ) {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    let (output, mut span_builder) =
+        prepare_single_file(source, &file_path, &file_path, &mut string_table);
     let warnings = output.warnings.clone();
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -358,10 +781,12 @@ pub(crate) fn parse_single_file_headers_with_table(
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    let (output, mut span_builder) =
+        prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -385,13 +810,15 @@ fn parse_single_file_headers_with_entry(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = InternedPath::try_from_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
+    let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
         source,
         &interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
         &mut string_table,
-        Some(FileId(0)),
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
     )
     .expect("tokenization should succeed");
 
@@ -402,13 +829,16 @@ fn parse_single_file_headers_with_entry(
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     );
 
     let output = match prepare_result {
         Ok(output) => output,
-        Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
+        Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+            diagnostic, ..
+        })) => {
             return Err(HeaderTestDiagnostics {
-                diagnostics: vec![*error.diagnostic],
+                diagnostics: vec![diagnostic],
                 string_table,
             });
         }
@@ -419,9 +849,10 @@ fn parse_single_file_headers_with_entry(
 
     prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .map_err(|bag| HeaderTestDiagnostics {
@@ -487,96 +918,6 @@ fn symbol_tokens_in_header_body(header: &Header, string_table: &StringTable) -> 
 }
 
 #[test]
-fn prepare_header_syntax_produces_retained_syntax_without_provider_inputs() {
-    // WHAT: `prepare_header_syntax` must succeed with only a string table — no external package
-    //       registry, resolution table, or project path resolver is supplied.
-    // WHY: syntax preparation is provider-independent; it owns retained header/dependency shells,
-    //      order-independent symbol facts, and statistics before provider interfaces exist.
-    let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
-        "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
-        &file_path,
-        &file_path,
-        &mut string_table,
-    );
-
-    let prepared = prepare_header_syntax(vec![output], &mut string_table)
-        .expect("header syntax preparation should succeed without provider inputs");
-
-    // Retained declaration shells are present.
-    assert!(
-        !prepared.headers.is_empty(),
-        "PreparedHeaderSyntax should retain parsed header shells"
-    );
-    // Order-independent symbol facts are present.
-    assert!(
-        !prepared.module_symbols.module_file_paths.is_empty(),
-        "PreparedHeaderSyntax should carry module symbol facts"
-    );
-    // Root-activity and statistics metadata are populated.
-    assert_eq!(
-        prepared.const_fragment_count,
-        prepared.top_level_const_fragments.len()
-    );
-    assert!(prepared.token_stats.total_tokens > 0);
-    assert!(prepared.header_stats.functions >= 1);
-    // No header binding environment exists yet — that is binding-phase output.
-    assert!(
-        prepared
-            .module_symbols
-            .source_package_public_exports
-            .is_empty()
-    );
-}
-
-#[test]
-fn bind_module_headers_consumes_prepared_syntax_and_produces_binding_environment() {
-    // WHAT: `bind_module_headers` consumes `PreparedHeaderSyntax` and produces
-    //       `BoundModuleHeaders` with a completed header binding environment.
-    // WHY: binding is the only phase that resolves retained dependency shells against provider
-    //      interfaces. It must not retokenize or reparse — it consumes the retained output.
-    let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
-        "const_a #Int = 1\nimport_b |x Int| -> Int:\n    return x\n;\n",
-        &file_path,
-        &file_path,
-        &mut string_table,
-    );
-
-    let prepared = prepare_header_syntax(vec![output], &mut string_table)
-        .expect("header syntax preparation should succeed");
-    let header_count_before_binding = prepared.headers.len();
-    let source_file = prepared.headers[0].source_file.to_owned();
-
-    let bound = bind_module_headers(
-        prepared,
-        &ExternalPackageRegistry::new(),
-        &ExternalImportResolutionTable::default(),
-        &crate::compiler_frontend::public_interface::SourceProviderDependencySet::default(),
-        None,
-        &mut string_table,
-    )
-    .expect("header binding should succeed");
-
-    // Binding preserves retained header shells — no retokenization or reparsing.
-    assert_eq!(
-        bound.headers.len(),
-        header_count_before_binding,
-        "binding must not add or remove header shells"
-    );
-    // Binding produces the header binding environment that preparation cannot.
-    assert!(
-        bound
-            .binding_environment
-            .file_visibility_by_source
-            .contains_key(&source_file),
-        "BoundModuleHeaders should carry a completed header binding environment"
-    );
-}
-
-#[test]
 fn start_function_dependencies_stay_empty_even_with_imported_runtime_template_tokens() {
     let headers = parse_single_file_headers("func basic()\n[basic]\n");
     let start_header = headers
@@ -606,8 +947,13 @@ fn compile_time_constant_headers_are_parsed() {
 fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
-    prepare_header_syntax(vec![output], &mut string_table)
+    let (output, _) = prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    prepare_header_syntax(
+        &mut [output],
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .map_err(expect_aggregation_diagnostics)
 }
 
 #[test]
@@ -800,7 +1146,7 @@ fn source_config_contracts_stay_out_of_header_topology_and_provider_symbols() {
 fn source_config_initializer_paths_stay_out_of_structural_file_references() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "asset #Config of String = @assets/missing.mtf\n",
         &file_path,
         &file_path,
@@ -889,20 +1235,30 @@ fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error()
 #[test]
 fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
     let cases = [
-        ("import @core/math\n", "@core/math"),
-        ("import @core/math as maths\n", "@core/math as maths"),
-        ("import @core/math { sin, cos }\n", "@core/math sin, cos"),
+        ("import @core/math\n", "@core/math", "import @core/math"),
+        (
+            "import @core/math as maths\n",
+            "@core/math as maths",
+            "import @core/math as maths",
+        ),
+        (
+            "import @core/math { sin, cos }\n",
+            "@core/math sin, cos",
+            "import @core/math { sin, cos }",
+        ),
         (
             "import @core/math { sin as sine }\n",
             "@core/math sin as sine",
+            "import @core/math { sin as sine }",
         ),
         (
             "export:\n    import @core/math { sin }\n;\n",
             "@core/math sin",
+            "import @core/math { sin }",
         ),
     ];
 
-    for (source, expected_replacement) in cases {
+    for (source, expected_replacement, expected_clause) in cases {
         let result =
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors = expect_header_error(result, "legacy import syntax should be diagnosed");
@@ -922,11 +1278,10 @@ fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
             errors.string_table.resolve(replacement),
             expected_replacement
         );
-        assert!(
-            diagnostic.primary_location.end_pos.char_column
-                > diagnostic.primary_location.start_pos.char_column
-                || diagnostic.primary_location.end_pos.line_number
-                    > diagnostic.primary_location.start_pos.line_number
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(source_span_for(source, expected_clause, 0)),
+            "legacy dependency diagnostic should cover the authored clause",
         );
     }
 }
@@ -1016,12 +1371,9 @@ fn legacy_multiline_import_clause_reports_migration_with_flat_replacement() {
 
 #[test]
 fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
+    let source = "import -- keep the old clause visible\n    @core/math { sin }\n";
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(
-            "import -- keep the old clause visible\n    @core/math { sin }\n",
-            "src/@page.moth",
-            "src/@page.moth",
-        ),
+        parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
         "a comment between import and the path must still be a legacy clause",
     );
     let DiagnosticPayload::LegacyDependencyClause {
@@ -1032,6 +1384,11 @@ fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
         panic!("expected a replacement after comment trivia");
     };
     assert_eq!(errors.string_table.resolve(replacement), "@core/math sin");
+    assert_eq!(
+        errors.diagnostics[0].primary_span,
+        Some(source_span_for(source, source.trim_end(), 0)),
+        "comment-separated legacy clause should cover the authored clause",
+    );
 }
 
 #[test]
@@ -1041,15 +1398,19 @@ fn legacy_dependency_span_covers_import_through_closing_brace() {
         parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
         "legacy import syntax should be diagnosed",
     );
-    let location = &errors.diagnostics[0].primary_location;
     let close_brace = source
         .find('}')
         .expect("the fixture must include a closing brace");
-    assert_eq!(location.start_pos.char_column, 1);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let expected_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(0, (close_brace + 1) as u32, &mut span_builder)
+            .expect("legacy clause span should fit"),
+    );
     assert_eq!(
-        location.end_pos.char_column as usize,
-        close_brace + 1,
-        "the primary span must end at the closing brace, got {location:?}"
+        errors.diagnostics[0].primary_span,
+        Some(expected_span),
+        "the primary span must end at the closing brace"
     );
 }
 
@@ -1203,7 +1564,7 @@ fn generic_declaration_headers_parse_parameter_lists() {
             }
             | HeaderKind::Choice {
                 generic_parameters, ..
-            } => generic_parameter_counts.push(generic_parameters.len()),
+            } => generic_parameter_counts.push(generic_parameters.parameters.len()),
             _ => {}
         }
     }
@@ -1215,23 +1576,114 @@ fn generic_declaration_headers_parse_parameter_lists() {
         "only declarations with generic parameters should be registered as generic declarations"
     );
 
-    let generic_names = headers
-        .module_symbols
-        .generic_declarations_by_path
-        .values()
-        .flat_map(|metadata| {
-            metadata
-                .parameters
+    let generic_declarations = &headers.module_symbols.generic_declarations_by_path;
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Function))
+            .count(),
+        1,
+        "the generic function must be registered by declaration kind"
+    );
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Struct))
+            .count(),
+        1,
+        "the generic struct must be registered by declaration kind"
+    );
+    assert_eq!(
+        generic_declarations
+            .values()
+            .filter(|kind| matches!(kind, GenericDeclarationKind::Choice))
+            .count(),
+        1,
+        "the generic choice must be registered by declaration kind"
+    );
+
+    let parsed_generic_names = headers
+        .headers
+        .iter()
+        .filter_map(|header| match &header.kind {
+            HeaderKind::Function {
+                generic_parameters, ..
+            }
+            | HeaderKind::Struct {
+                generic_parameters, ..
+            }
+            | HeaderKind::Choice {
+                generic_parameters, ..
+            } => Some(generic_parameters),
+            _ => None,
+        })
+        .flat_map(|generic_parameters| {
+            generic_parameters
                 .parameters
                 .iter()
                 .map(|parameter| string_table.resolve(parameter.name).to_owned())
         })
         .collect::<Vec<_>>();
+    assert_eq!(
+        parsed_generic_names,
+        vec!["T", "Item", "OkType", "ErrType"],
+        "parameter names remain owned by the parsed HeaderKind lists"
+    );
+}
 
-    assert!(generic_names.contains(&"T".to_owned()));
-    assert!(generic_names.contains(&"Item".to_owned()));
-    assert!(generic_names.contains(&"OkType".to_owned()));
-    assert!(generic_names.contains(&"ErrType".to_owned()));
+#[test]
+fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
+    let long_bound = format!("d{}", "é".repeat(600));
+    let source = format!("-- é🦋\nidentity type T is {long_bound} |value T| -> T:\n;\n");
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let options = HeaderParseOptions::default();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let file_path = Path::new("src/@page.moth");
+    let source_id = SourceId::from_index(12);
+    let context = HeaderTestPrepareContext {
+        source_id,
+        entry_file_path: file_path,
+        options: &options,
+        style_directives: &style_directives,
+    };
+
+    let failure = prepare_test_source_file(
+        &source,
+        file_path,
+        &context,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    )
+    .err()
+    .expect("a lowercase generic bound should be rejected");
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected the malformed generic bound to remain a source diagnostic");
+    };
+
+    assert!(matches!(
+        error.diagnostic.payload,
+        DiagnosticPayload::InvalidDeclaration {
+            reason: InvalidDeclarationReason::InvalidTraitName,
+            ..
+        }
+    ));
+    let span = error
+        .diagnostic
+        .primary_span
+        .expect("generic-bound diagnostics should retain their token span");
+    assert_eq!(span.source(), source_id);
+    let range = span.resolve_with(span_builder.resolver_for(source_id));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        long_bound
+    );
+    assert!(
+        range.end() - range.start() > 1023,
+        "the multibyte bound should exercise the extended span table"
+    );
 }
 
 #[test]
@@ -1293,10 +1745,165 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 }
 
 #[test]
+fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
+    let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
+    let source = format!("value #Config of Int = 1\n#[{long_fragment_name}]\n");
+    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let file_path = source_context.path().to_path_buf();
+    let interned_path = source_context.source_path().clone();
+    let source_id = source_context.source_id();
+    let tokenizer_span_count = {
+        let (string_table, span_builder) = source_context.preparation_parts();
+        let file_tokens = tokenize(
+            &source,
+            &interned_path,
+            TokenizerEntryMode::SourceFile,
+            &StyleDirectiveRegistry::built_ins(),
+            string_table,
+            source_id,
+            span_builder,
+        )
+        .expect("source should tokenize");
+        let count = span_builder.len();
+        let output = prepare_file_from_tokens(
+            file_tokens,
+            &file_path,
+            &HeaderParseOptions::default(),
+            string_table,
+            0,
+            0,
+            span_builder,
+        )
+        .expect("headers should prepare");
+
+        let header_name_span = output
+            .headers
+            .iter()
+            .find_map(|header| {
+                matches!(header.kind, HeaderKind::Constant { .. }).then_some(header.name_span)
+            })
+            .expect("source config header");
+        let fragment_span = output
+            .top_level_const_fragments
+            .first()
+            .expect("const fragment metadata")
+            .span;
+        let mut outputs = [output];
+        let prepared =
+            prepare_header_syntax(&mut outputs, string_table, &mut |source, diagnostic| {
+                diagnostic.capture_preparation_span(source)
+            })
+            .expect("header syntax should aggregate");
+
+        let resolver = span_builder.resolver_for(source_id);
+        let header_range = header_name_span
+            .expect("source config header must retain its declaration-name span")
+            .resolve_with(resolver);
+        assert_eq!(
+            source.get(header_range.start() as usize..header_range.end() as usize),
+            Some("value"),
+            "header name span should retain the declaration-name token"
+        );
+
+        let fragment_range = fragment_span.resolve_with(resolver);
+        assert_eq!(fragment_span.source(), SourceId::COMPILATION_ROOT);
+        assert_eq!(
+            fragment_range.start() as usize,
+            source.find(&long_fragment_name).expect("fragment name")
+        );
+        assert_eq!(fragment_range.end() as usize, source.len());
+        let expected_fragment = format!("{long_fragment_name}]\n");
+        assert_eq!(
+            source.get(fragment_range.start() as usize..fragment_range.end() as usize),
+            Some(expected_fragment.as_str()),
+            "const fragment span should include the post-close source boundary"
+        );
+
+        let contract = prepared
+            .source_build_config_contracts
+            .first()
+            .expect("source config contract");
+        let contract_range = contract.span.resolve_with(resolver);
+        assert_eq!(contract.span.source(), SourceId::COMPILATION_ROOT);
+        assert_eq!(
+            source.get(contract_range.start() as usize..contract_range.end() as usize),
+            Some("#"),
+            "source config contract span should use the qualifier anchor"
+        );
+
+        count
+    };
+
+    assert_eq!(
+        source_context.span_builder().len(),
+        tokenizer_span_count + 1,
+        "joining the long const fragment should append exactly one source-owned row"
+    );
+}
+
+#[test]
+fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
+    let source = "#[value]\n";
+    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let scope = source_context.source_path().clone();
+    let source_id = source_context.source_id();
+    let (string_table, span_builder) = source_context.preparation_parts();
+    let mut token_stream = tokenize(
+        source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        string_table,
+        source_id,
+        span_builder,
+    )
+    .expect("source should tokenize");
+    let opening_index = token_stream
+        .tokens
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::TemplateHead))
+        .expect("template opener");
+    let opening_token = token_stream.tokens[opening_index].clone();
+    token_stream.index = opening_index + 1;
+
+    let malformed_clause = malformed_direct_selection_clause(DependencySelectionRange::new(0, 1));
+    let mut warnings = Vec::new();
+    let mut context = HeaderBuildContext {
+        warnings: &mut warnings,
+        source_file: &scope,
+        file_dependency_clauses: std::slice::from_ref(&malformed_clause),
+        dependency_selections: &[],
+        string_table,
+        file_role: FileRole::ActiveModuleRoot,
+    };
+    let failure = create_top_level_const_template(
+        scope.clone(),
+        opening_token,
+        0,
+        &mut token_stream,
+        &mut context,
+        span_builder,
+    )
+    .expect_err("malformed retained selection should fail");
+
+    match failure {
+        HeaderParseFailure::Infrastructure(error) => {
+            assert!(
+                error.msg.contains("outside a table"),
+                "unexpected error: {error:?}"
+            );
+        }
+        HeaderParseFailure::Diagnostic(diagnostic) => {
+            panic!("retained-data corruption must not become a source diagnostic: {diagnostic:?}");
+        }
+    }
+}
+
+#[test]
 fn top_level_const_template_uses_selected_dependency_alias_path() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@widgets content as panel\n#[panel]\n",
         &file_path,
         &file_path,
@@ -1917,12 +2524,12 @@ fn trait_declaration_headers_parse_requirement_shells() {
     assert_eq!(string_table.resolve(declaration.name), "DISPLAYABLE");
     assert_eq!(declaration.requirements.len(), 3);
     assert_eq!(
-        declaration.requirements[0].this_usage,
-        TraitThisUsage::Immutable
+        declaration.requirements[0].signature.parameters[0].value_mode,
+        ValueMode::ImmutableOwned
     );
     assert_eq!(
-        declaration.requirements[1].this_usage,
-        TraitThisUsage::Mutable
+        declaration.requirements[1].signature.parameters[0].value_mode,
+        ValueMode::MutableOwned
     );
 
     let copy_requirement = &declaration.requirements[2];
@@ -2483,11 +3090,8 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
     // `MissingTraitRequirementReturnType`, which never tells a bodyless requirement to add
     // the function-body `:` terminator. The diagnostic points at the first missing-type
     // boundary after the arrow, not at the requirement name or `This` receiver.
-    let result = parse_single_file_headers_with_entry(
-        "DISPLAYABLE must:\n    display |This| -> :\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "DISPLAYABLE must:\n    display |This| -> :\n;\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "a trait requirement arrow followed by ':' must fail"
@@ -2507,8 +3111,11 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
         })
         .expect("expected MissingTraitRequirementReturnType");
 
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 23);
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, ":", 1)),
+        "missing return type should point at the authored boundary after `->`",
+    );
 }
 
 #[test]
@@ -2516,23 +3123,31 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
     // A newline after `->` is also a missing-return-type boundary for a trait requirement.
     // The requirement-specific reason is used so the guidance never suggests the function
     // body `:` terminator.
-    let result = parse_single_file_headers_with_entry(
-        "DISPLAYABLE must:\n    display |This| ->\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "DISPLAYABLE must:\n    display |This| ->\n;\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "a trait requirement arrow followed by a newline must fail"
     );
     let errors = result.err().expect("expected parse errors");
 
-    assert!(errors.diagnostics.iter().any(|diagnostic| matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidFunctionSignature {
-            reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
-        }
-    )));
+    let diagnostic = errors
+        .diagnostics
+        .iter()
+        .find(|diagnostic| {
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidFunctionSignature {
+                    reason: InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
+                }
+            )
+        })
+        .expect("expected MissingTraitRequirementReturnType");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "\n", 1)),
+        "missing return type should point at the authored newline boundary",
+    );
 }
 
 #[test]
@@ -2570,17 +3185,18 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
     let status = string_table.intern("Status");
     let ready = string_table.intern("Ready");
     let write = string_table.intern("write");
-    let location = SourceLocation::default();
+    let span = LocalSpan::source_start();
 
     let mut token_stream = FileTokens::new(
         source_file,
+        SourceId::COMPILATION_ROOT,
         vec![
-            Token::new(TokenKind::Symbol(status), location.clone()),
-            Token::new(TokenKind::DoubleColon, location.clone()),
-            Token::new(TokenKind::Symbol(ready), location.clone()),
-            Token::new(TokenKind::FatArrow, location.clone()),
-            Token::new(TokenKind::Symbol(write), location.clone()),
-            Token::new(TokenKind::Eof, location),
+            Token::new(TokenKind::Symbol(status), span),
+            Token::new(TokenKind::DoubleColon, span),
+            Token::new(TokenKind::Symbol(ready), span),
+            Token::new(TokenKind::FatArrow, span),
+            Token::new(TokenKind::Symbol(write), span),
+            Token::new(TokenKind::Eof, span),
         ],
     );
     token_stream.index = 1;
@@ -3053,37 +3669,46 @@ pub(crate) fn parse_multi_file_headers(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
 
     let mut prepared_outputs = Vec::new();
+    let mut span_builders = Vec::with_capacity(sources.len());
     let mut const_template_offset = 0usize;
     let mut runtime_fragment_offset = 0usize;
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let mut span_builder = ExtendedSpanBuilder::new();
         let output = prepare_test_source_file(
             source,
             &file_path,
-            &prepare_context,
+            &HeaderTestPrepareContext {
+                source_id: SourceId::from_index(span_builders.len()),
+                ..prepare_context
+            },
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
+            &mut span_builder,
         )
         .expect("preparation should succeed");
 
         const_template_offset += output.const_template_count;
         runtime_fragment_offset += output.runtime_fragment_count;
         prepared_outputs.push(output);
+        span_builders.push(span_builder);
     }
 
     prepare_and_bind_headers_result(
         prepared_outputs,
+        &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     )
     .expect("headers should parse")
@@ -3146,12 +3771,14 @@ fn parse_multi_file_headers_with_result(
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
 
     let mut prepared_outputs = Vec::new();
+    let mut span_builders = Vec::with_capacity(sources.len());
     let mut warnings = Vec::new();
     let mut diagnostic_bag = DiagnosticBag::new();
     let mut const_template_offset = 0usize;
@@ -3159,13 +3786,18 @@ fn parse_multi_file_headers_with_result(
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let mut span_builder = ExtendedSpanBuilder::new();
         match prepare_test_source_file(
             source,
             &file_path,
-            &prepare_context,
+            &HeaderTestPrepareContext {
+                source_id: SourceId::from_index(span_builders.len()),
+                ..prepare_context
+            },
             &mut string_table,
             const_template_offset,
             runtime_fragment_offset,
+            &mut span_builder,
         ) {
             Ok(output) => {
                 const_template_offset += output.const_template_count;
@@ -3173,14 +3805,19 @@ fn parse_multi_file_headers_with_result(
                 warnings.extend(output.warnings.clone());
                 prepared_outputs.push(output);
             }
-            Err(FileFrontendPrepareFailure::Diagnosed(error)) => {
-                warnings.extend(error.warnings);
-                diagnostic_bag.push(*error.diagnostic);
+            Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                warnings: file_warnings,
+                diagnostic,
+                ..
+            })) => {
+                warnings.extend(file_warnings);
+                diagnostic_bag.push(diagnostic);
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 panic!("multi-file header test hit infrastructure failure: {error:?}")
             }
         }
+        span_builders.push(span_builder);
     }
 
     if diagnostic_bag.has_errors() {
@@ -3189,9 +3826,10 @@ fn parse_multi_file_headers_with_result(
 
     let result = prepare_and_bind_headers_result(
         prepared_outputs,
+        &mut span_builders,
         &external_package_registry,
         &ExternalImportResolutionTable::default(),
-        options.project_path_resolver.as_ref(),
+        options.project_path_resolver,
         &mut string_table,
     );
 
@@ -3387,23 +4025,40 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let helper_output = prepare_single_file(
+    let (helper_output, _) = prepare_single_file(
         "@core/math\n",
         &file_path,
         &entry_file_path,
         &mut string_table,
     );
 
-    let page_output = prepare_single_file(
+    let options = HeaderParseOptions::default();
+    let styles = StyleDirectiveRegistry::built_ins();
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::from_index(1),
+        entry_file_path: &entry_file_path,
+        options: &options,
+        style_directives: &styles,
+    };
+    let mut page_spans = ExtendedSpanBuilder::new();
+    let page_output = prepare_test_source_file(
         "value #= 1\n",
-        &PathBuf::from("src/@page.moth"),
         &entry_file_path,
+        &context,
         &mut string_table,
-    );
+        0,
+        0,
+        &mut page_spans,
+    )
+    .expect("entry source should prepare");
 
     let mut prepared_files = vec![helper_output, page_output];
-    let module_symbols = build_module_symbols(&mut prepared_files, &mut string_table)
-        .expect("module symbols should build");
+    let module_symbols = build_module_symbols(
+        &mut prepared_files,
+        &mut string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+    )
+    .expect("module symbols should build");
 
     let helper_path = InternedPath::try_from_filesystem_path(
         &PathBuf::from("src/helper.moth"),
@@ -3447,7 +4102,7 @@ fn per_file_prepare_output_preserves_file_role_and_dependencies_on_output() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@core/math\n",
         &file_path,
         &entry_file_path,
@@ -3468,7 +4123,7 @@ fn per_file_prepare_output_preserves_file_role_and_dependencies_on_output() {
 #[test]
 fn retained_js_provider_path_records_external_target() {
     let mut string_table = StringTable::new();
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@drawing.js as drawing\n",
         &PathBuf::from("src/@page.moth"),
         &PathBuf::from("src/@page.moth"),
@@ -3515,10 +4170,12 @@ fn dependency_clause_is_rejected_in_config_source() {
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };
+    let mut span_builder = ExtendedSpanBuilder::new();
     let error = match prepare_test_source_file(
         "@core/math sin\n",
         &file_path,
@@ -3526,15 +4183,17 @@ fn dependency_clause_is_rejected_in_config_source() {
         &mut string_table,
         0,
         0,
+        &mut span_builder,
     ) {
         Ok(_) => panic!("config dependency clause should be rejected"),
         Err(error) => error,
     };
-    let FileFrontendPrepareFailure::Diagnosed(error) = error else {
+    let FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError { diagnostic, .. }) = error
+    else {
         panic!("config dependency rejection must use a source diagnostic");
     };
     assert!(matches!(
-        error.diagnostic.payload,
+        &diagnostic.payload,
         DiagnosticPayload::InvalidDependencyClause {
             reason: InvalidDependencyClauseReason::DependencyClauseNotAllowed,
             ..
@@ -3546,7 +4205,7 @@ fn dependency_clause_is_rejected_in_config_source() {
 fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@one a\n@two\nexport:\n    @one a\n;\n",
         &file_path,
         &file_path,
@@ -3593,7 +4252,7 @@ fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
 fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@one a\n@one/a\n",
         &file_path,
         &file_path,
@@ -3633,8 +4292,8 @@ fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape
         "one/a"
     );
     assert_ne!(
-        direct_selection.dependency.location, bare.dependency.location,
-        "each authored occurrence keeps its own source location"
+        direct_selection.dependency.span, bare.dependency.span,
+        "each authored occurrence keeps its own source span"
     );
 }
 
@@ -3643,7 +4302,7 @@ fn imported_module_root_prepare_output_has_imported_root_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@mod.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "Button = | label String |\n",
         &file_path,
         &entry_file_path,
@@ -3659,7 +4318,7 @@ fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "greeting #= \"hello\"\n",
         &file_path,
         &entry_file_path,
@@ -3677,11 +4336,13 @@ fn api_only_active_roots_export_declarations_without_synthesizing_start() {
     ] {
         let mut string_table = StringTable::new();
         let file_path = PathBuf::from("src/styles/+package.moth");
+        let mut span_builder = ExtendedSpanBuilder::new();
         let output = prepare_active_root_with_role(
             "export:\n    theme #= \"dark\"\n;\n",
             &file_path,
             root_role,
             &mut string_table,
+            &mut span_builder,
         )
         .expect("API-only roots should accept public declarations");
 
@@ -3712,14 +4373,19 @@ fn api_only_active_roots_reject_every_root_activity_form() {
         for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
             let mut string_table = StringTable::new();
             let file_path = PathBuf::from("src/styles/+package.moth");
-            let error = match prepare_active_root_with_role(
+            let mut span_builder = ExtendedSpanBuilder::new();
+            let diagnostic = match prepare_active_root_with_role(
                 source,
                 &file_path,
                 root_role,
                 &mut string_table,
+                &mut span_builder,
             ) {
                 Ok(_) => panic!("API-only root activity should be rejected"),
-                Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
+                Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    diagnostic,
+                    ..
+                })) => diagnostic,
                 Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                     panic!(
                         "API-only root source rejection became infrastructure failure: {error:?}"
@@ -3728,7 +4394,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
             };
 
             assert_eq!(
-                error.diagnostic.kind,
+                diagnostic.kind,
                 DiagnosticKind::Rule(RuleDiagnosticKind::InvalidTopLevelRuntimeStatement)
             );
         }
@@ -3740,7 +4406,7 @@ fn support_package_root_file_is_assigned_imported_module_root_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/styles/+package.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "theme #= \"dark\"\n",
         &file_path,
         &entry_file_path,
@@ -3755,7 +4421,7 @@ fn ordinary_source_file_is_assigned_normal_role() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "value #= 1\n",
         &file_path,
         &entry_file_path,
@@ -3809,10 +4475,8 @@ fn export_alone_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -3852,10 +4516,8 @@ fn legacy_inline_export_declaration_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -3863,7 +4525,7 @@ fn legacy_inline_export_declaration_is_rejected() {
 #[test]
 fn export_dependency_path_parsed_as_public_surface_dependency() {
     let mut string_table = StringTable::new();
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "export:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
         &PathBuf::from("src/@page.moth"),
@@ -3945,10 +4607,8 @@ fn legacy_export_path_syntax_is_rejected() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -3965,10 +4625,8 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
     assert!(errors.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.payload,
-            DiagnosticPayload::ExpectedToken {
-                expected: TokenKind::Colon,
-                ..
-            }
+            DiagnosticPayload::ExpectedToken { expected, .. }
+                if expected == DiagnosticToken::from(TokenKind::Colon)
         )
     }));
 }
@@ -4163,7 +4821,7 @@ fn export_before_runtime_template_is_rejected() {
 #[test]
 fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut string_table = StringTable::new();
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@button Button\nexport:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
         &PathBuf::from("src/@page.moth"),
@@ -4207,10 +4865,12 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
     return 1
 ;
 ";
-    let output = prepare_single_file(source, &file_path, &file_path, &mut string_table);
+    let (output, mut span_builder) =
+        prepare_single_file(source, &file_path, &file_path, &mut string_table);
 
     let headers = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &ExternalPackageRegistry::new(),
         &ExternalImportResolutionTable::default(),
         None,
@@ -4351,22 +5011,22 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
     // any expression token begins, so the shared member-default owner reports
     // `MissingDefaultValue` (MOTH-RULE-0028) pointing at that boundary, not a generic
     // unexpected-token or end-of-file failure.
-    let cases: &[(&str, i32, i32)] = &[
+    let cases: &[(&str, Option<(&str, usize)>)] = &[
         // function parameter ending at the closing pipe
-        ("label |prefix String =| -> String:\n;\n", 0, 23),
+        ("label |prefix String =| -> String:\n;\n", Some(("|", 1))),
         // struct field ending at a comma
-        ("Options = |\n    width Int =,\n|\n", 1, 16),
+        ("Options = |\n    width Int =,\n|\n", Some((",", 0))),
         // struct field ending at the closing pipe
-        ("Options = |\n    width Int =|\n", 1, 16),
+        ("Options = |\n    width Int =|\n", Some(("|", 1))),
         // newline immediately after the authored `=`
-        ("label |prefix String =\n| -> String:\n;\n", 0, 22),
+        ("label |prefix String =\n| -> String:\n;\n", Some(("\n", 0))),
         // block end (`;`) immediately after the authored `=`
-        ("label |prefix String =;\n", 0, 23),
+        ("label |prefix String =;\n", Some((";", 0))),
         // end of file immediately after the authored `=`
-        ("label |prefix String =", 0, 22),
+        ("label |prefix String =", None),
     ];
 
-    for (source, expected_line, expected_column) in cases {
+    for (source, boundary) in cases {
         let result =
             parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
         let errors =
@@ -4388,13 +5048,17 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
             "MOTH-RULE-0028",
             "MissingDefaultValue must keep the stable signature-member code"
         );
-        assert_eq!(
-            diagnostic.primary_location.start_pos.line_number, *expected_line,
-            "MissingDefaultValue should point at the boundary line for: {source}"
+        let expected_span = boundary.map_or_else(
+            || {
+                // The final empty match is the exact zero-width span at EOF.
+                source_span_for(source, "", source.len())
+            },
+            |(needle, occurrence)| source_span_for(source, needle, occurrence),
         );
         assert_eq!(
-            diagnostic.primary_location.start_pos.char_column, *expected_column,
-            "MissingDefaultValue should point at the boundary column for: {source}"
+            diagnostic.primary_span,
+            Some(expected_span),
+            "MissingDefaultValue should point at the authored boundary for: {source}",
         );
     }
 }
@@ -4559,7 +5223,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
     let file_path = PathBuf::from("src/@page.moth");
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
-    let output = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file(
         "prelude_fn |x Int| -> Int:\n    return x\n;\n",
         &file_path,
         &file_path,
@@ -4572,17 +5236,18 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
             .any(|header| matches!(header.kind, HeaderKind::Function { .. })),
         "provider-independent preparation should retain the prelude-named declaration shell"
     );
-    let expected_location = output
+    let expected_span = output
         .headers
         .iter()
         .find(|header| matches!(header.kind, HeaderKind::Function { .. }))
         .expect("expected retained prelude-named function shell")
-        .name_location
-        .to_owned();
+        .name_span
+        .expect("retained declaration should keep its authored name span");
 
     let registry = registry_with_prelude_function_symbol("prelude_fn");
     let result = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &registry,
         &ExternalImportResolutionTable::default(),
         None,
@@ -4603,7 +5268,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
         })
         .expect("binding should preserve the reserved builtin-name diagnostic");
     assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0027");
-    assert_eq!(diagnostic.primary_location, expected_location);
+    assert_eq!(diagnostic.primary_span, Some(expected_span));
 }
 
 #[test]
@@ -4612,7 +5277,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
     let file_path = PathBuf::from("src/@page.moth");
     // A generic parameter reusing a prelude type name parses during provider-independent
     // preparation; the collision is provider-dependent and is validated during binding.
-    let output = prepare_single_file(
+    let (output, mut span_builder) = prepare_single_file(
         "Box type PreludeType = |\n    value PreludeType,\n|\n",
         &file_path,
         &file_path,
@@ -4629,6 +5294,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
     let registry = registry_with_prelude_type_symbol("PreludeType");
     let result = prepare_and_bind_headers_result(
         vec![output],
+        std::slice::from_mut(&mut span_builder),
         &registry,
         &ExternalImportResolutionTable::default(),
         None,
@@ -4656,7 +5322,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
 fn direct_selection_does_not_reserve_provider_basename_for_generic_parameter() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@core/Math add\nidentity type Math |value Math| -> Math:\n    return value\n;\n",
         &file_path,
         &file_path,
@@ -4708,29 +5374,40 @@ fn assert_generic_dependency_name_collision(source: &str) {
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
         entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };
-    let error =
-        match prepare_test_source_file(source, &file_path, &context, &mut string_table, 0, 0) {
-            Ok(_) => panic!("dependency names must reserve matching generic parameter names"),
-            Err(FileFrontendPrepareFailure::Diagnosed(error)) => error,
-            Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                panic!("generic-name collision became infrastructure failure: {error:?}")
-            }
-        };
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let diagnostic = match prepare_test_source_file(
+        source,
+        &file_path,
+        &context,
+        &mut string_table,
+        0,
+        0,
+        &mut span_builder,
+    ) {
+        Ok(_) => panic!("dependency names must reserve matching generic parameter names"),
+        Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+            diagnostic, ..
+        })) => diagnostic,
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("generic-name collision became infrastructure failure: {error:?}")
+        }
+    };
 
     assert!(
         matches!(
-            &error.diagnostic.payload,
+            &diagnostic.payload,
             DiagnosticPayload::InvalidDeclaration {
                 reason: InvalidDeclarationReason::GenericParameterNameCollision { .. },
                 ..
             }
         ),
         "unexpected dependency-name diagnostic: {:?}",
-        error.diagnostic.payload
+        diagnostic.payload
     );
 }
 
@@ -4739,7 +5416,7 @@ fn one_dependency_shell_and_selection_list_per_authored_clause() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@core/math sin, cos as cosine\n@core/io\n",
         &file_path,
         &entry_file_path,
@@ -4794,11 +5471,8 @@ fn one_dependency_shell_and_selection_list_per_authored_clause() {
 
 #[test]
 fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/math sin\nsin #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/math sin\nsin #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected name must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -4811,28 +5485,22 @@ fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the selected name to be the first location");
-    };
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 12);
-    assert_eq!(first_location.end_pos.char_column, 14);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 3);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the selected name's previous span");
+    assert_eq!(previous_span, source_span_for(source, "sin", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "sin", 1))
+    );
 }
-
 #[test]
 fn selected_alias_duplicate_declaration_uses_the_alias_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/math sin as local\nlocal #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/math sin as local\nlocal #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selected alias must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -4845,28 +5513,23 @@ fn selected_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the selected alias to be the first location");
-    };
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 19);
-    assert_eq!(first_location.end_pos.char_column, 23);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 5);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the selected alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "local", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "local", 1))
+    );
 }
 
 #[test]
 fn declaration_followed_by_selection_preserves_declaration_and_selection_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "line #= 1\n@core/io line\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "line #= 1\n@core/io line\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a selection must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -4884,28 +5547,23 @@ fn declaration_followed_by_selection_preserves_declaration_and_selection_spans()
             )
         });
 
-    let DiagnosticPayload::ImportNameCollision {
-        previous_location: Some(previous_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the declaration to be the previous location");
-    };
-    assert_eq!(previous_location.start_pos.line_number, 0);
-    assert_eq!(previous_location.start_pos.char_column, 1);
-    assert_eq!(previous_location.end_pos.char_column, 4);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 10);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 13);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the declaration's previous span");
+    assert_eq!(previous_span, source_span_for(source, "line", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "line", 1))
+    );
 }
 
 #[test]
 fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io line as value\n@core/io debug as value\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io line as value\n@core/io debug as value\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "duplicate selected aliases must conflict");
     let diagnostic = errors
         .diagnostics
@@ -4923,19 +5581,17 @@ fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
             )
         });
 
-    let DiagnosticPayload::ImportNameCollision {
-        previous_location: Some(previous_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the first selected alias to be the previous location");
-    };
-    assert_eq!(previous_location.start_pos.line_number, 0);
-    assert_eq!(previous_location.start_pos.char_column, 18);
-    assert_eq!(previous_location.end_pos.char_column, 22);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 19);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 23);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the first selected alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "value", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "value", 1))
+    );
 }
 
 #[test]
@@ -4967,28 +5623,24 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
 
 fn malformed_direct_selection_clause(range: DependencySelectionRange) -> RetainedDependencyClause {
     let provider = RetainedDependencyPath {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
         path: InternedPath::new(),
         path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
         target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        location: SourceLocation::default(),
-        dependency_shell_id: DependencyShellId::new(FileId(0), 0),
+        dependency_shell_id: DependencyShellId::new(SourceId::COMPILATION_ROOT, 0),
     };
     RetainedDependencyClause {
         dependency: provider,
 
         binding: DependencyBindingSyntax::DirectSelections { range },
-        location: SourceLocation::default(),
         export_mode: HeaderExportMode::Private,
     }
 }
 
 #[test]
 fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io as io\nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io as io\nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(result, "a namespace alias must conflict with a declaration");
     let diagnostic = errors
         .diagnostics
@@ -5001,28 +5653,23 @@ fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the namespace alias to be the first location");
-    };
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 13);
-    assert_eq!(first_location.end_pos.char_column, 14);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 2);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the namespace alias's previous span");
+    assert_eq!(previous_span, source_span_for(source, "io", 1));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "io", 2))
+    );
 }
 
 #[test]
 fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io\nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io\nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "an inferred namespace name must conflict with a declaration",
@@ -5038,28 +5685,23 @@ fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the provider path to be the first location");
-    };
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 1);
-    assert_eq!(first_location.end_pos.char_column, 8);
-    assert_eq!(diagnostic.primary_location.start_pos.line_number, 1);
-    assert_eq!(diagnostic.primary_location.start_pos.char_column, 1);
-    assert_eq!(diagnostic.primary_location.end_pos.char_column, 2);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the provider path's previous span");
+    assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(source_span_for(source, "io", 1))
+    );
 }
 
 #[test]
 fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
-    let result = parse_single_file_headers_with_entry(
-        "@core/io   \nio #= 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
+    let source = "@core/io   \nio #= 1\n";
+    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
     let errors = expect_header_error(
         result,
         "trailing whitespace must not enter the inferred namespace path span",
@@ -5075,16 +5717,13 @@ fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
         })
         .expect("expected duplicate declaration diagnostic");
 
-    let DiagnosticPayload::DuplicateDeclaration {
-        first_location: Some(first_location),
-        ..
-    } = &diagnostic.payload
-    else {
-        panic!("expected the inferred namespace path to be the first location");
-    };
-    assert_eq!(first_location.start_pos.line_number, 0);
-    assert_eq!(first_location.start_pos.char_column, 1);
-    assert_eq!(first_location.end_pos.char_column, 8);
+    let previous_span = diagnostic
+        .labels
+        .iter()
+        .find(|label| label.message.as_ref() == Some(&DiagnosticLabelMessage::PreviousDeclaration))
+        .and_then(|label| label.span)
+        .expect("expected the inferred namespace path's previous span");
+    assert_eq!(previous_span, source_span_for(source, "@core/io", 0));
 }
 
 #[test]
@@ -5092,7 +5731,7 @@ fn retained_clause_uses_one_shell_for_the_provider_binding_index() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
     let entry_file_path = PathBuf::from("src/@page.moth");
-    let output = prepare_single_file(
+    let (output, _span_builder) = prepare_single_file(
         "@drawing.js draw, clear\n",
         &file_path,
         &entry_file_path,
@@ -5107,4 +5746,1034 @@ fn retained_clause_uses_one_shell_for_the_provider_binding_index() {
             .iter()
             .all(|clause| clause.dependency.dependency_shell_id == shell)
     );
+}
+
+/// Preparation retains exact dependency and file-path ranges across identity normalization.
+#[test]
+fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
+    let long_name = "é".repeat(700);
+    let path_text = format!("@vendor/\"{long_name}.js\"");
+    let source = format!(
+        "-- 🦋\n{path_text} render as render_other, Button as UiButton\n@core/math as maths\nlogo #= @images/logo.svg\n"
+    );
+    let canonical = PathBuf::from("dependency-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("source should register");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("registered source")
+        .id;
+    let options = HeaderParseOptions::default();
+    let directives = StyleDirectiveRegistry::built_ins();
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &directives,
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &options,
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("dependency preparation should succeed");
+    let original_span = prepared.file_dependency_clauses[0].dependency.span;
+    assert_eq!(
+        spans.len(),
+        1,
+        "retained dependency records reuse the lexical overflow row"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    prepared
+        .remap_string_ids(&remap)
+        .expect("prepared strings should remap");
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("dependency-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+    assert_eq!(
+        prepared.file_dependency_clauses[0].dependency.span.local(),
+        original_span.local()
+    );
+    assert_eq!(
+        prepared.file_dependency_clauses[0]
+            .dependency
+            .dependency_shell_id
+            .source,
+        final_id
+    );
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain source snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    let rebound_dependency_span = prepared.file_dependency_clauses[0].dependency.span;
+    assert_eq!(rebound_dependency_span.source(), final_id);
+    assert_eq!(resolve(rebound_dependency_span), path_text);
+    let selections = &prepared.dependency_selections;
+    assert_eq!(resolve(selections[0].source_span), "render");
+    assert_eq!(
+        resolve(
+            selections[0]
+                .local_alias
+                .as_ref()
+                .expect("entry alias")
+                .span
+        ),
+        "render_other"
+    );
+    assert_eq!(resolve(selections[1].source_span), "Button");
+    assert_eq!(
+        resolve(
+            selections[1]
+                .local_alias
+                .as_ref()
+                .expect("entry alias")
+                .span
+        ),
+        "UiButton"
+    );
+    let DependencyBindingSyntax::Namespace { alias: Some(alias) } =
+        &prepared.file_dependency_clauses[1].binding
+    else {
+        panic!("expected namespace alias");
+    };
+    assert_eq!(resolve(alias.span), "maths");
+    let reference = prepared
+        .structural_file_references
+        .iter()
+        .next()
+        .expect("structural file reference");
+    assert_eq!(reference.source_file, final_id);
+    assert_eq!(resolve(reference.span), "@images/logo.svg");
+}
+
+#[test]
+fn declaration_member_return_and_variant_spans_retain_original_ranges() {
+    let member_name = format!("value_{}", "x".repeat(1100));
+    let return_name = format!("Output{}", "X".repeat(1100));
+    let variant_name = format!("Ready{}", "X".repeat(1100));
+    let source = format!(
+        "-- é🦋\nprocess |{member_name} Int| -> {return_name}:\n;\nState ::\n{variant_name} | field Int |,\n;\nRecord = | member Int |\n"
+    );
+    let canonical = PathBuf::from("member-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("shells should prepare");
+    assert_eq!(
+        spans.len(),
+        3,
+        "member, return and variant retain their original overflow rows"
+    );
+
+    let (original_member_span, original_return_span) = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Function { signature, .. } => Some((
+                signature.parameters[0]
+                    .span
+                    .expect("authored parameter should retain its span"),
+                signature.returns[0]
+                    .value
+                    .span
+                    .expect("authored return should retain its span"),
+            )),
+            _ => None,
+        })
+        .expect("function shell");
+    let original_variant_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Choice { variants, .. } => Some(
+                variants[0]
+                    .span
+                    .expect("authored choice variant should retain its span"),
+            ),
+            _ => None,
+        })
+        .expect("choice shell");
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("shell strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("member-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+    assert_eq!(prepared.file_id, final_id);
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    let signature = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Function { signature, .. } => Some(signature),
+            _ => None,
+        })
+        .expect("function shell");
+    let rebound_member_span = signature.parameters[0]
+        .span
+        .expect("authored parameter should retain its span");
+    let rebound_return_span = signature.returns[0]
+        .value
+        .span
+        .expect("authored return should retain its span");
+    assert_eq!(rebound_member_span.local(), original_member_span.local());
+    assert_eq!(rebound_member_span.source(), final_id);
+    assert_eq!(rebound_return_span.local(), original_return_span.local());
+    assert_eq!(rebound_return_span.source(), final_id);
+    assert_eq!(
+        resolve(
+            signature.parameters[0]
+                .span
+                .expect("authored parameter should retain its span")
+        ),
+        member_name
+    );
+    assert_eq!(
+        signature.parameters[0]
+            .id
+            .name()
+            .map(|name| merged.resolve(name)),
+        Some(member_name.as_str())
+    );
+    assert_eq!(
+        resolve(
+            signature.returns[0]
+                .value
+                .span
+                .expect("authored return should retain its span")
+        ),
+        return_name
+    );
+    let variants = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Choice { variants, .. } => Some(variants),
+            _ => None,
+        })
+        .expect("choice shell");
+    let rebound_variant_span = variants[0]
+        .span
+        .expect("authored choice variant should retain its span");
+    assert_eq!(rebound_variant_span.local(), original_variant_span.local());
+    assert_eq!(rebound_variant_span.source(), final_id);
+    assert_eq!(
+        resolve(
+            variants[0]
+                .span
+                .expect("authored choice variant should retain its span")
+        ),
+        variant_name
+    );
+    assert_eq!(merged.resolve(variants[0].id), variant_name);
+    let ChoiceVariantPayloadSyntax::Record { fields } = &variants[0].payload else {
+        panic!("record payload");
+    };
+    assert_eq!(
+        resolve(
+            fields[0]
+                .span
+                .expect("authored variant field should retain its span")
+        ),
+        "field"
+    );
+    let fields = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Struct { fields, .. } => Some(fields),
+            _ => None,
+        })
+        .expect("struct shell");
+    assert_eq!(
+        resolve(
+            fields[0]
+                .span
+                .expect("authored struct field should retain its span")
+        ),
+        "member"
+    );
+}
+
+#[test]
+fn trait_shell_spans_retain_original_ranges_after_remapping_and_rebinding() {
+    let trait_name = format!("DISPLAYABLE_{}", "X".repeat(1100));
+    let requirement_name = format!("render_{}", "x".repeat(1100));
+    let target_name = format!("Target{}", "X".repeat(1100));
+    let incompatible_name = format!("INCOMPATIBLE_{}", "Y".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{trait_name} must:\n\
+    {requirement_name} |This| -> String\n\
+;\n\
+{target_name} must {trait_name}, SERIALIZABLE\n\
+{trait_name} must not {incompatible_name}, OTHER_TRAIT\n\
+Generic of A must {trait_name}\n"
+    );
+    let canonical = PathBuf::from("trait-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("trait shells should prepare");
+
+    let snapshot = |prepared: &FileFrontendPrepareOutput, table: &StringTable| {
+        let mut anchors = Vec::new();
+        let mut generated_header_names = Vec::new();
+        let mut header_counts = [0usize; 4];
+        for header in &prepared.headers {
+            match &header.kind {
+                HeaderKind::Trait { declaration } => {
+                    header_counts[0] += 1;
+                    anchors.push((declaration.span, table.resolve(declaration.name).to_owned()));
+                    let requirement = declaration.requirements.first().expect("trait requirement");
+                    anchors.push((requirement.span, table.resolve(requirement.name).to_owned()));
+                }
+                HeaderKind::TraitConformance { conformance } => {
+                    match conformance.target.kind {
+                        ConformanceTargetKind::Named => {
+                            header_counts[1] += 1;
+                        }
+                        ConformanceTargetKind::SpecializedGenericInstance => {
+                            header_counts[3] += 1;
+                        }
+                    }
+                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    anchors.push((
+                        conformance.target.span,
+                        table.resolve(conformance.target.name).to_owned(),
+                    ));
+                    for trait_ref in &conformance.traits {
+                        anchors.push((trait_ref.span, table.resolve(trait_ref.name).to_owned()));
+                    }
+                }
+                HeaderKind::TraitIncompatibility { incompatibility } => {
+                    header_counts[2] += 1;
+                    generated_header_names.push(header.tokens.src_path.to_portable_string(table));
+                    anchors.push((
+                        incompatibility.subject.span,
+                        table.resolve(incompatibility.subject.name).to_owned(),
+                    ));
+                    for trait_ref in &incompatibility.incompatible_traits {
+                        anchors.push((trait_ref.span, table.resolve(trait_ref.name).to_owned()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        (anchors, generated_header_names, header_counts)
+    };
+
+    let (original_anchors, original_header_names, original_header_counts) =
+        snapshot(&prepared, &strings);
+    assert_eq!(original_header_counts, [1, 1, 1, 1]);
+    assert_eq!(
+        original_anchors.len(),
+        10,
+        "all trait shell anchors are captured"
+    );
+    assert_eq!(
+        spans.len(),
+        7,
+        "only the seven long authored identifier tokens should need extended rows"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("trait shell strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("trait-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+
+    let (rebound_anchors, rebound_header_names, rebound_header_counts) =
+        snapshot(&prepared, &merged);
+    assert_eq!(rebound_header_counts, original_header_counts);
+    assert_eq!(rebound_header_names, original_header_names);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for ((original_span, expected_text), (rebound_span, rebound_text)) in
+        original_anchors.iter().zip(rebound_anchors.iter())
+    {
+        assert_eq!(
+            rebound_span.local(),
+            original_span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(
+            rebound_span.source(),
+            final_id,
+            "rebound span should carry the final source identity"
+        );
+        assert_eq!(
+            rebound_text, expected_text,
+            "string remap changed anchor name"
+        );
+        let resolved_range = rebound_span.byte_range(&database);
+        assert_eq!(
+            resolve(*rebound_span),
+            expected_text,
+            "span no longer resolves to the exact authored UTF-8 bytes"
+        );
+        assert!(
+            resolved_range.end() >= resolved_range.start(),
+            "authored span must resolve to a valid source range"
+        );
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedTypeAnchorSnapshot {
+    span: SourceSpan,
+    expected_text: String,
+}
+
+fn push_parsed_type_anchor(
+    span: Option<SourceSpan>,
+    expected_text: String,
+    snapshots: &mut Vec<ParsedTypeAnchorSnapshot>,
+) {
+    snapshots.push(ParsedTypeAnchorSnapshot {
+        span: span.expect("authored parsed type anchor should retain its span"),
+        expected_text,
+    });
+}
+
+fn collect_parsed_type_anchor_snapshots(
+    parsed_type: &ParsedTypeRef,
+    string_table: &StringTable,
+    snapshots: &mut Vec<ParsedTypeAnchorSnapshot>,
+) {
+    match parsed_type {
+        ParsedTypeRef::Inferred => {}
+        ParsedTypeRef::Named { name, span } => {
+            push_parsed_type_anchor(*span, string_table.resolve(*name).to_owned(), snapshots)
+        }
+        ParsedTypeRef::Qualified { path, span } => {
+            push_parsed_type_anchor(*span, string_table.resolve(path[0]).to_owned(), snapshots)
+        }
+        ParsedTypeRef::Applied {
+            base,
+            arguments,
+            span,
+        } => {
+            push_parsed_type_anchor(*span, "of".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(base, string_table, snapshots);
+            for argument in arguments {
+                collect_parsed_type_anchor_snapshots(argument, string_table, snapshots);
+            }
+        }
+        ParsedTypeRef::BuiltinBool { span }
+        | ParsedTypeRef::BuiltinInt { span }
+        | ParsedTypeRef::BuiltinFloat { span }
+        | ParsedTypeRef::BuiltinString { span }
+        | ParsedTypeRef::BuiltinChar { span } => {
+            let expected_text = match parsed_type {
+                ParsedTypeRef::BuiltinBool { .. } => "Bool",
+                ParsedTypeRef::BuiltinInt { .. } => "Int",
+                ParsedTypeRef::BuiltinFloat { .. } => "Float",
+                ParsedTypeRef::BuiltinString { .. } => "String",
+                ParsedTypeRef::BuiltinChar { .. } => "Char",
+                _ => unreachable!("matched builtin type"),
+            };
+            push_parsed_type_anchor(*span, expected_text.to_owned(), snapshots);
+        }
+        ParsedTypeRef::Collection {
+            element,
+            span,
+            fixed_capacity,
+        } => {
+            push_parsed_type_anchor(*span, "{".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(element, string_table, snapshots);
+            if let Some(capacity) = fixed_capacity {
+                match capacity {
+                    ParsedCollectionCapacity::Literal { value, span } => {
+                        push_parsed_type_anchor(*span, value.to_string(), snapshots)
+                    }
+                    ParsedCollectionCapacity::BareConstant { name, span } => {
+                        push_parsed_type_anchor(
+                            *span,
+                            string_table.resolve(*name).to_owned(),
+                            snapshots,
+                        )
+                    }
+                }
+            }
+        }
+        ParsedTypeRef::Map { key, value, span } => {
+            push_parsed_type_anchor(*span, "{".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(key, string_table, snapshots);
+            collect_parsed_type_anchor_snapshots(value, string_table, snapshots);
+        }
+        ParsedTypeRef::Optional { inner, span } => {
+            push_parsed_type_anchor(*span, "?".to_owned(), snapshots);
+            collect_parsed_type_anchor_snapshots(inner, string_table, snapshots);
+        }
+        ParsedTypeRef::This { .. } => {}
+    }
+}
+
+fn snapshot_prepared_type_anchors(
+    prepared: &FileFrontendPrepareOutput,
+    string_table: &StringTable,
+) -> (usize, usize, Vec<ParsedTypeAnchorSnapshot>) {
+    let mut type_alias_count = 0;
+    let mut inferred_count = 0;
+    let mut anchors = Vec::new();
+    for header in &prepared.headers {
+        match &header.kind {
+            HeaderKind::TypeAlias { target } => {
+                type_alias_count += 1;
+                collect_parsed_type_anchor_snapshots(target, string_table, &mut anchors);
+            }
+            HeaderKind::Constant { declaration } => {
+                inferred_count += usize::from(matches!(
+                    declaration.type_annotation,
+                    ParsedTypeRef::Inferred
+                ));
+                collect_parsed_type_anchor_snapshots(
+                    &declaration.type_annotation,
+                    string_table,
+                    &mut anchors,
+                );
+            }
+            _ => {}
+        }
+    }
+    (type_alias_count, inferred_count, anchors)
+}
+
+#[test]
+fn parsed_type_and_capacity_spans_retain_exact_ranges_after_remapping_and_rebinding() {
+    let long_named = format!("Named{}", "N".repeat(1100));
+    let long_qualified = format!("Qualified{}", "Q".repeat(1100));
+    let long_generic = format!("Generic{}", "G".repeat(1100));
+    let long_capacity = format!("capacity_{}", "c".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{long_capacity} #Int = 7\n\
+NamedAlias as {long_named}\n\
+QualifiedAlias as {long_qualified}.Child\n\
+AppliedAlias as {long_generic} of Child, String\n\
+CollectionAlias as {{Child}}\n\
+FixedLiteralAlias as {{7 Child}}\n\
+FixedNameAlias as {{{long_capacity} Child}}\n\
+MapAlias as {{Key = Value}}\n\
+NestedAlias as {{Key = {{Child}}}}\n\
+OptionalAlias as Child?\n\
+BoolAlias as Bool\n\
+IntAlias as Int\n\
+FloatAlias as Float\n\
+StringAlias as String\n\
+CharAlias as Char\n\
+INFERRED #= 1\n"
+    );
+    let canonical = PathBuf::from("parsed-type-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let tokenizer_extended_span_count = spans.len();
+    assert_eq!(
+        tokenizer_extended_span_count, 5,
+        "only the long named, qualified, generic and capacity identifier tokens should overflow"
+    );
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("parsed type headers should prepare");
+    assert!(
+        prepared.warnings.is_empty(),
+        "warning-free preparation must not add diagnostic span rows"
+    );
+    assert_eq!(
+        spans.len(),
+        tokenizer_extended_span_count,
+        "parsed type anchors must reuse tokenizer rows without adding extended spans"
+    );
+
+    let (type_alias_count, inferred_count, original_anchors) =
+        snapshot_prepared_type_anchors(&prepared, &strings);
+    assert_eq!(
+        type_alias_count, 14,
+        "the source should produce one header per type shape"
+    );
+    assert_eq!(
+        inferred_count, 1,
+        "inferred declarations remain location-free"
+    );
+    assert_eq!(
+        original_anchors.len(),
+        29,
+        "the snapshot should cover every authored constructor and child type anchor"
+    );
+    let expected_texts = vec![
+        "Int".to_owned(),
+        long_named.clone(),
+        long_qualified.clone(),
+        "of".to_owned(),
+        long_generic.clone(),
+        "Child".to_owned(),
+        "String".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "7".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        long_capacity.clone(),
+        "{".to_owned(),
+        "Key".to_owned(),
+        "Value".to_owned(),
+        "{".to_owned(),
+        "Key".to_owned(),
+        "{".to_owned(),
+        "Child".to_owned(),
+        "?".to_owned(),
+        "Child".to_owned(),
+        "Bool".to_owned(),
+        "Int".to_owned(),
+        "Float".to_owned(),
+        "String".to_owned(),
+        "Char".to_owned(),
+    ];
+    assert_eq!(
+        original_anchors
+            .iter()
+            .map(|anchor| anchor.expected_text.clone())
+            .collect::<Vec<_>>(),
+        expected_texts,
+        "each parsed type variant must retain its contract-defined anchor"
+    );
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("parsed type strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("parsed-type-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+
+    let (_, rebound_inferred_count, rebound_anchors) =
+        snapshot_prepared_type_anchors(&prepared, &merged);
+    assert_eq!(rebound_inferred_count, inferred_count);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for (original, rebound) in original_anchors.iter().zip(rebound_anchors.iter()) {
+        assert_eq!(
+            rebound.span.local(),
+            original.span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(
+            rebound.span.source(),
+            final_id,
+            "rebound span should carry the final source identity"
+        );
+        assert_eq!(rebound.expected_text, original.expected_text);
+        let resolved_range = rebound.span.byte_range(&database);
+        assert_eq!(
+            source.get(resolved_range.start() as usize..resolved_range.end() as usize),
+            Some(original.expected_text.as_str()),
+            "span must resolve to the exact authored UTF-8 bytes"
+        );
+    }
+}
+#[test]
+fn generic_parameter_and_bound_spans_retain_exact_ranges_after_remapping_and_rebinding() {
+    let parameter_name = format!("Element{}", "E".repeat(1100));
+    let display_trait_name = format!("DISPLAY_TEXT_{}", "D".repeat(1100));
+    let named_trait_name = format!("NAMED_{}", "N".repeat(1100));
+    let source = format!(
+        "-- é🦋\n\
+{display_trait_name} must:\n\
+;\n\
+{named_trait_name} must:\n\
+;\n\
+render_value type {parameter_name} is {display_trait_name} and {named_trait_name} |value {parameter_name}| -> String:\n\
+    return \"ok\"\n\
+;\n\
+Envelope type {parameter_name} is {display_trait_name} and {named_trait_name} = |\n\
+    value {parameter_name},\n\
+|\n\
+State type {parameter_name} is {display_trait_name} and {named_trait_name} ::\n\
+    Ready | value {parameter_name} |,\n\
+;\n"
+    );
+    let canonical = PathBuf::from("generic-anchor-spans.moth");
+    let mut strings = StringTable::new();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope =
+        InternedPath::try_from_filesystem_path(&canonical, &mut strings).expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let mut tokens = tokenize(
+        &source,
+        &scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let tokenizer_extended_span_count = spans.len();
+    assert_eq!(
+        tokenizer_extended_span_count, 14,
+        "trait declarations, generic declarations, bounds and type uses should own the long rows"
+    );
+
+    let mut prepared = parse_file_headers_with_table(
+        &mut tokens,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("generic headers should prepare");
+    assert!(
+        prepared.warnings.is_empty(),
+        "valid generic names should not add warning spans"
+    );
+    assert_eq!(
+        spans.len(),
+        tokenizer_extended_span_count,
+        "generic anchors must reuse the tokenizer's original extended rows"
+    );
+
+    let snapshot_anchors = |prepared: &FileFrontendPrepareOutput, table: &StringTable| {
+        let mut owner_counts = [0usize; 3];
+        let mut anchors = Vec::new();
+        for header in &prepared.headers {
+            let (owner_index, generic_parameters) = match &header.kind {
+                HeaderKind::Function {
+                    generic_parameters, ..
+                } => (0, generic_parameters),
+                HeaderKind::Struct {
+                    generic_parameters, ..
+                } => (1, generic_parameters),
+                HeaderKind::Choice {
+                    generic_parameters, ..
+                } => (2, generic_parameters),
+                _ => continue,
+            };
+            if generic_parameters.parameters.is_empty() {
+                continue;
+            }
+            owner_counts[owner_index] += 1;
+            for parameter in &generic_parameters.parameters {
+                anchors.push((
+                    parameter
+                        .span
+                        .expect("authored generic parameter should retain its span"),
+                    table.resolve(parameter.name).to_owned(),
+                ));
+                for trait_bound in &parameter.trait_bounds {
+                    anchors.push((
+                        trait_bound
+                            .span
+                            .expect("authored generic trait bound should retain its span"),
+                        table.resolve(trait_bound.trait_name).to_owned(),
+                    ));
+                }
+            }
+        }
+        (owner_counts, anchors)
+    };
+
+    let (original_owner_counts, original_anchors) = snapshot_anchors(&prepared, &strings);
+    assert_eq!(
+        original_owner_counts,
+        [1, 1, 1],
+        "the regression must cover function, struct and choice generic owners"
+    );
+    assert_eq!(
+        original_anchors.len(),
+        9,
+        "each generic owner must retain one parameter and two bound anchors"
+    );
+    assert_eq!(
+        original_anchors
+            .iter()
+            .map(|anchor| anchor.1.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+            parameter_name.clone(),
+            display_trait_name.clone(),
+            named_trait_name.clone(),
+        ]
+    );
+    let original_resolver = spans.resolver();
+    for (span, expected_text) in &original_anchors {
+        let resolved_range = span.local().resolve_with(original_resolver);
+        assert_eq!(
+            source.get(resolved_range.start() as usize..resolved_range.end() as usize),
+            Some(expected_text.as_str()),
+            "the original span must cover the exact authored UTF-8 bytes"
+        );
+    }
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    prepared
+        .remap_string_ids(&merged.merge_from(&strings))
+        .expect("generic strings should remap");
+
+    drop(sources);
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = InternedPath::from_single_str("generic-anchor-spans.moth", &mut merged);
+    prepared
+        .rebind_source_identity(final_id, final_path, canonical)
+        .expect("retained source should rebind");
+
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.clone())
+        .expect("retain snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        source
+            .get(range.start() as usize..range.end() as usize)
+            .expect("retained source range")
+    };
+
+    let (rebound_owner_counts, rebound_anchors) = snapshot_anchors(&prepared, &merged);
+    assert_eq!(rebound_owner_counts, original_owner_counts);
+    assert_eq!(rebound_anchors.len(), original_anchors.len());
+    for ((original_span, original_text), (rebound_span, rebound_text)) in
+        original_anchors.iter().zip(rebound_anchors.iter())
+    {
+        assert_eq!(
+            rebound_span.local(),
+            original_span.local(),
+            "span encoding changed"
+        );
+        assert_eq!(rebound_span.source(), final_id);
+        assert_eq!(
+            rebound_text, original_text,
+            "string remap changed anchor name"
+        );
+        let resolved_range = rebound_span.byte_range(&database);
+        assert_eq!(resolve(*rebound_span), original_text);
+        assert!(
+            resolved_range.end() >= resolved_range.start(),
+            "authored span must resolve to a valid source range"
+        );
+    }
 }

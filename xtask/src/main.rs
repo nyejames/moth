@@ -24,6 +24,7 @@
 //! - `feature-lane-check`   - Check feature-lane coverage and write the coverage report
 //! - `source-audit`         - Apply the broad-source architecture bans and write their report
 //! - `honesty-audit`        - Classify the test-honesty findings and write the canonical inventory
+//! - `span-census`          - Measure LocalSpan bit-split candidates over the corpus
 
 mod architecture_boundary;
 mod bench;
@@ -56,6 +57,7 @@ mod report_file;
 mod rust_scanner;
 mod source_audit;
 mod source_tree;
+mod span_census;
 mod stress;
 #[cfg(test)]
 mod test_fs;
@@ -67,10 +69,11 @@ use bench_report::run_benchmark_report;
 use bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection};
 use bench_validate::validate_all_benchmarks;
 use feature_matrix::{run_feature_lane_check, run_feature_matrix};
-use frontend_bench::run_frontend_benchmarks;
+use frontend_bench::{run_data_layout_benchmarks, run_frontend_benchmarks};
 use honesty_audit::run_honesty_audit;
 use mode::{BenchmarkMode, ModeParseResult, TOP_LEVEL_USAGE};
 use source_audit::run_source_audit;
+use span_census::run_span_census_command;
 use std::env;
 use std::process;
 use stress::run_stress_matrix;
@@ -125,6 +128,16 @@ fn main() {
                 full_run_policy(BenchmarkRecording::Record).and_then(run_frontend_benchmarks),
             );
         }
+        BenchmarkMode::BenchDataLayoutCheck => {
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::ReadOnly).and_then(run_data_layout_benchmarks),
+            );
+        }
+        BenchmarkMode::BenchDataLayout => {
+            exit_with_result(
+                full_run_policy(BenchmarkRecording::Record).and_then(run_data_layout_benchmarks),
+            );
+        }
         BenchmarkMode::BenchProfile(options) => {
             exit_with_result(profile::run_profile_benchmarks(options));
         }
@@ -148,6 +161,9 @@ fn main() {
         }
         BenchmarkMode::SourceAudit => {
             exit_with_result(run_source_audit());
+        }
+        BenchmarkMode::SpanCensus => {
+            exit_with_result(run_span_census_command());
         }
         BenchmarkMode::HonestyAudit { update_evidence } => {
             exit_with_result(run_honesty_audit(update_evidence));

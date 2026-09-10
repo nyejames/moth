@@ -15,7 +15,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -227,7 +226,7 @@ fn triage_report_write_failure_returns_error() {
             let diagnostic = CompilerDiagnostic::with_severity(
                 DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
                 DiagnosticSeverity::Error,
-                SourceLocation::default(),
+                None,
                 DiagnosticPayload::None,
             );
             let messages = CompilerMessages::from_diagnostics(vec![diagnostic], table);

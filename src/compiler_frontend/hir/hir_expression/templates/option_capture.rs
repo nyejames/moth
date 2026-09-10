@@ -19,8 +19,8 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::return_hir_transformation_error;
 
 impl<'a> HirBuilder<'a> {
@@ -28,22 +28,24 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         scrutinee: &Expression,
         pattern: &MatchPattern,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
         append_present: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), CompilerError>,
         append_absent: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), CompilerError>,
     ) -> Result<(), CompilerError> {
         let MatchPattern::OptionPresentCapture {
             binding_path,
             inner_type_id,
-            binding_location,
+            span: pattern_span,
+            binding_span,
             ..
         } = pattern
         else {
             return_hir_transformation_error!(
                 "Runtime template option-present if reached HIR without an option-present capture pattern.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         };
+        let capture_span = (*binding_span).or(*pattern_span);
 
         let lowered_scrutinee = self.lower_expression_value_to_current_block(scrutinee)?;
         let option_type = lowered_scrutinee.ty;
@@ -54,24 +56,23 @@ impl<'a> HirBuilder<'a> {
         {
             return_hir_transformation_error!(
                 "Runtime template option-present if reached HIR with a non-option scrutinee.",
-                self.hir_error_location(location)
+                self.hir_error_location(span_ref)
             );
         }
 
         // Materialize the scrutinee once before the match. Branch payload extraction
-        // reads this local so branch body lowering cannot re-run side effects.
-        let option_local = self.allocate_temp_local(option_type, Some(location.clone()))?;
-        self.emit_assign_local_statement(option_local, lowered_scrutinee, location)?;
+        let option_local = self.allocate_temp_local(option_type, None)?;
+        self.emit_assign_local_statement(option_local, lowered_scrutinee, span_ref)?;
 
-        let match_block = self.current_block_id_or_error(location)?;
-        let parent_region = self.current_region_or_error(location)?;
+        let match_block = self.current_block_id_or_error(span_ref)?;
+        let parent_region = self.current_region_or_error(span_ref)?;
         let present_region = self.create_child_region(parent_region);
         let absent_region = self.create_child_region(parent_region);
         let present_block =
-            self.create_block(present_region, location, "template-if-option-present")?;
-        let absent_block = self.create_block(absent_region, location, "template-if-option-none")?;
+            self.create_block(present_region, span_ref, "template-if-option-present")?;
+        let absent_block = self.create_block(absent_region, span_ref, "template-if-option-none")?;
         let scrutinee_for_match =
-            self.make_local_load_expression(option_local, option_type, location, parent_region);
+            self.make_local_load_expression(option_local, option_type, span_ref, parent_region);
 
         self.emit_terminator(
             match_block,
@@ -90,40 +91,43 @@ impl<'a> HirBuilder<'a> {
                     },
                 ],
             },
-            location,
+            span_ref,
         )?;
 
         let mut terminated_anchor: Option<BlockId> = None;
-
-        self.set_current_block(present_block, location)?;
+        // The match has terminated the parent block; capture binding and present-body output
+        // belong to the present arm rather than being appended after that terminator.
+        self.set_current_block(present_block, span_ref)?;
         let capture_local = self.register_template_option_capture_local(
             binding_path,
             *inner_type_id,
-            binding_location,
+            &capture_span,
+            *binding_span,
         )?;
         self.emit_template_option_capture_assignment(
             capture_local,
             option_local,
             option_type,
             *inner_type_id,
-            binding_location,
+            &capture_span,
+            *binding_span,
         )?;
         self.with_temporary_local_bindings([(binding_path.clone(), capture_local)], |builder| {
             append_present(builder)
         })?;
 
-        let present_tail_block = self.current_block_id_or_error(location)?;
+        let present_tail_block = self.current_block_id_or_error(span_ref)?;
         let present_terminated =
-            self.block_has_explicit_terminator(present_tail_block, location)?;
+            self.block_has_explicit_terminator(present_tail_block, span_ref)?;
         if present_terminated {
             terminated_anchor = Some(present_tail_block);
         }
 
-        self.set_current_block(absent_block, location)?;
+        self.set_current_block(absent_block, span_ref)?;
         append_absent(self)?;
 
-        let absent_tail_block = self.current_block_id_or_error(location)?;
-        let absent_terminated = self.block_has_explicit_terminator(absent_tail_block, location)?;
+        let absent_tail_block = self.current_block_id_or_error(span_ref)?;
+        let absent_terminated = self.block_has_explicit_terminator(absent_tail_block, span_ref)?;
         if absent_terminated && terminated_anchor.is_none() {
             terminated_anchor = Some(absent_tail_block);
         }
@@ -134,15 +138,15 @@ impl<'a> HirBuilder<'a> {
             } else {
                 present_block
             };
-            return self.set_current_block(anchor_block, location);
+            return self.set_current_block(anchor_block, span_ref);
         }
 
-        let merge_block = self.create_block(parent_region, location, "template-if-option-merge")?;
+        let merge_block = self.create_block(parent_region, span_ref, "template-if-option-merge")?;
         if !present_terminated {
             self.emit_jump_to(
                 present_tail_block,
                 merge_block,
-                location,
+                span_ref,
                 "template-if-option.present.merge",
             )?;
         }
@@ -150,33 +154,34 @@ impl<'a> HirBuilder<'a> {
             self.emit_jump_to(
                 absent_tail_block,
                 merge_block,
-                location,
+                span_ref,
                 "template-if-option.none.merge",
             )?;
         }
 
-        self.set_current_block(merge_block, location)
+        self.set_current_block(merge_block, span_ref)
     }
 
     fn register_template_option_capture_local(
         &mut self,
         binding_path: &InternedPath,
         inner_type_id: TypeId,
-        binding_location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
+        binding_span: Option<SourceSpan>,
     ) -> Result<LocalId, CompilerError> {
-        let ty = self.lower_type_id(inner_type_id, binding_location)?;
-        let region = self.current_region_or_error(binding_location)?;
-        let block_id = self.current_block_id_or_error(binding_location)?;
+        let ty = self.lower_type_id(inner_type_id, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let block_id = self.current_block_id_or_error(span_ref)?;
         let local_id = self.allocate_local_id();
         let local = HirLocal {
             id: local_id,
             ty,
             mutable: false,
             region,
-            source_info: Some(binding_location.clone()),
+            span: binding_span,
         };
 
-        self.register_local_in_block(block_id, local, binding_location)?;
+        self.register_local_in_block(block_id, local, span_ref)?;
         self.side_table
             .bind_local_name(local_id, binding_path.clone());
 
@@ -189,13 +194,16 @@ impl<'a> HirBuilder<'a> {
         option_local: LocalId,
         option_type: TypeId,
         inner_type_id: TypeId,
-        location: &SourceLocation,
+        span_ref: &Option<SourceSpan>,
+        binding_span: Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
-        let field_ty = self.lower_type_id(inner_type_id, location)?;
-        let region = self.current_region_or_error(location)?;
-        let source = self.make_local_load_expression(option_local, option_type, location, region);
+        let field_ty = self.lower_type_id(inner_type_id, span_ref)?;
+        let region = self.current_region_or_error(span_ref)?;
+        let source = self.make_local_load_expression(option_local, option_type, span_ref, region);
+        // Authored option capture materialization carries the binding span. Constructing the
+        // value with that span keeps its side-table mapping aligned with the node itself.
         let payload_get = self.make_expression(
-            location,
+            &binding_span,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Option,
                 source: Box::new(source),
@@ -207,12 +215,13 @@ impl<'a> HirBuilder<'a> {
             region,
         );
 
-        self.emit_statement_kind(
+        self.emit_statement_kind_with_span(
             HirStatementKind::Assign {
                 target: HirPlace::Local(capture_local),
                 value: payload_get,
             },
-            location,
+            span_ref,
+            binding_span,
         )
     }
 }

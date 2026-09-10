@@ -20,7 +20,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 #[test]
@@ -35,10 +34,11 @@ fn declaration_semantics_preserves_missing_template_authority() {
                     phase: TemplateTirPhase::Composed,
                     context: TemplateViewContext::default(),
                 },
-                location: SourceLocation::default(),
+                span: None,
             },
             ValueMode::ImmutableOwned,
         ),
+        binding_span: None,
         config_qualifier: None,
     };
     let table = TopLevelDeclarationTable::new(vec![declaration]);

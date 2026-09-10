@@ -2,8 +2,8 @@
 //!
 //! WHAT: projects the build-system-owned folded `project` fields into the ordinary
 //! [`PublicSemanticInterface`] declaration vocabulary and retains one deterministic metadata row
-//! per field. The metadata keeps diagnostic location, build fingerprint and synthetic-interface
-//! provenance beside the stable member identity.
+//! per field. The metadata keeps the exact diagnostic span, build fingerprint and
+//! synthetic-interface provenance beside the stable member identity.
 //! WHY: `@project` is a synthetic compile-time provider, not an ordinary source module. Keeping its
 //! constants on the existing public-interface and folded-value vocabularies lets provider binding
 //! consume one borrowed interface without introducing AST, HIR, runtime or recursive project-value
@@ -19,12 +19,13 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::public_interface::{
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicDiagnosticLocation, PublicSemanticInterface,
+    PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginConstantId, OriginDeclarationId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -47,7 +48,7 @@ pub(crate) struct ProjectGlobalsFieldInput {
     pub(crate) name: String,
     pub(crate) type_identity: CanonicalTypeIdentity,
     pub(crate) value: PublicFoldedValue,
-    pub(crate) location: PublicDiagnosticLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) fingerprint: BuildConfigFingerprint,
     pub(crate) provenance: SyntheticInterfaceProvenance,
 }
@@ -58,7 +59,7 @@ impl ProjectGlobalsFieldInput {
         name: impl Into<String>,
         type_identity: CanonicalTypeIdentity,
         value: PublicFoldedValue,
-        location: PublicDiagnosticLocation,
+        span: Option<SourceSpan>,
         fingerprint: BuildConfigFingerprint,
         provenance: SyntheticInterfaceProvenance,
     ) -> Self {
@@ -66,7 +67,7 @@ impl ProjectGlobalsFieldInput {
             name: name.into(),
             type_identity,
             value,
-            location,
+            span,
             fingerprint,
             provenance,
         }
@@ -76,13 +77,13 @@ impl ProjectGlobalsFieldInput {
 /// Member-granular metadata retained beside one project-global field.
 ///
 /// Metadata is ordered by [`SyntheticInterfaceMemberIdentity::member`] in the owning interface.
-/// The identity, diagnostic location, fingerprint and provenance remain independent facts: source
-/// coordinates do not affect stable declaration identity, and provenance does not alter folded
+/// The identity, exact diagnostic span, fingerprint and provenance remain independent facts:
+/// source spans do not affect stable declaration identity, and provenance does not alter folded
 /// value semantics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectGlobalsMemberMetadata {
     pub(crate) identity: SyntheticInterfaceMemberIdentity,
-    pub(crate) location: PublicDiagnosticLocation,
+    pub(crate) span: Option<SourceSpan>,
     pub(crate) fingerprint: BuildConfigFingerprint,
     pub(crate) provenance: SyntheticInterfaceProvenance,
 }
@@ -94,10 +95,10 @@ impl ProjectGlobalsMemberMetadata {
         &self.identity
     }
 
-    /// The portable source location retained for diagnostics.
+    /// The exact source span retained for diagnostics, when source-authored.
     #[cfg(test)]
-    pub(crate) fn location(&self) -> &PublicDiagnosticLocation {
-        &self.location
+    pub(crate) fn span(&self) -> Option<SourceSpan> {
+        self.span
     }
 
     /// The semantic build-configuration fingerprint for this field.
@@ -154,7 +155,7 @@ impl ProjectGlobalsInterface {
                 name,
                 type_identity,
                 value,
-                location,
+                span,
                 fingerprint,
                 provenance,
             } = field;
@@ -181,7 +182,7 @@ impl ProjectGlobalsInterface {
                     PROJECT_GLOBALS_DEPENDENCY_NAME,
                     name,
                 ),
-                location,
+                span,
                 fingerprint,
                 provenance,
             });
@@ -258,15 +259,13 @@ mod tests {
         CanonicalBuiltinType, CanonicalTypeIdentity,
     };
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+    use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 
-    fn location(line: i32) -> PublicDiagnosticLocation {
-        PublicDiagnosticLocation {
-            scope_components: vec!["config.moth".to_owned()],
-            start_line: line,
-            start_column: 2,
-            end_line: line,
-            end_column: 9,
-        }
+    fn span(byte_offset: i32) -> Option<SourceSpan> {
+        let mut extended = ExtendedSpanBuilder::default();
+        let local = LocalSpan::exact(byte_offset as u32, 1, &mut extended)
+            .expect("test span should fit compact encoding");
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local))
     }
 
     fn field(name: &str, line: i32, fingerprint: u64) -> ProjectGlobalsFieldInput {
@@ -279,7 +278,7 @@ mod tests {
             name,
             CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
             PublicFoldedValue::Int(line),
-            location(line),
+            span(line),
             BuildConfigFingerprint(fingerprint),
             SyntheticInterfaceProvenance::single(member),
         )
@@ -337,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_retains_location_fingerprint_and_provenance() {
+    fn metadata_retains_span_fingerprint_and_provenance() {
         let interface = ProjectGlobalsInterface::new(
             StablePackageIdentity::project_local("metadata"),
             vec![field("version", 17, 0xfeed)],
@@ -347,7 +346,7 @@ mod tests {
             .member("version")
             .expect("metadata should be indexed by field name");
 
-        assert_eq!(metadata.location().start_line, 17);
+        assert_eq!(metadata.span(), span(17));
         assert_eq!(metadata.fingerprint(), BuildConfigFingerprint(0xfeed));
         assert_eq!(
             metadata.identity(),

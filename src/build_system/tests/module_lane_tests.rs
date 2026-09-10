@@ -66,7 +66,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{CharPosition, SourceLocation};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -86,7 +85,7 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
         ),
         canonical_source_path,
         asset_kind: "js".to_owned(),
-        authored_import_location: SourceLocation::default(),
+        source_span: None,
     }
 }
 
@@ -106,6 +105,7 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
             ty: NONE,
             value_kind: ValueKind::Const,
             region: RegionId(0),
+            span: None,
         }),
     }];
     module.functions = vec![HirFunction {
@@ -128,18 +128,15 @@ fn minimal_hir_module(start_name_path: InternedPath) -> HirModule {
 }
 
 #[test]
-fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
-    // WHAT: a module remaps both executable HIR names and diagnostic locations retained by
-    //       per-function link facts, while resolved runtime asset paths remain unchanged.
+fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
+    // WHAT: a module remaps executable HIR names and link-fact payload names while
+    //       source-less provenance stays absent.
     // WHY: module-local link facts feed later target diagnostics after build-table merging, so
-    //      their source scopes must not retain worker-local string IDs.
+    //      their owned StringIds must not retain worker-local values.
 
     let mut local_string_table = StringTable::new();
     let start_name_path = InternedPath::from_single_str("start_entry", &mut local_string_table);
 
-    let source_scope = InternedPath::from_single_str("source.moth", &mut local_string_table);
-    let reactive_scope =
-        InternedPath::from_single_str("reactive_source.moth", &mut local_string_table);
     let option_value_name = local_string_table.intern("value");
     let mut hir_module = minimal_hir_module(start_name_path);
     hir_module.blocks[0].statements.push(HirStatement {
@@ -157,24 +154,16 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
                         ty: NONE,
                         value_kind: ValueKind::Const,
                         region: RegionId(0),
+                        span: None,
                     },
                 }],
             },
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
+            span: None,
         }),
-        location: SourceLocation::new(
-            source_scope.clone(),
-            CharPosition {
-                line_number: 3,
-                char_column: 2,
-            },
-            CharPosition {
-                line_number: 3,
-                char_column: 8,
-            },
-        ),
+        span: None,
     });
     hir_module.blocks[0].statements.push(HirStatement {
         id: HirNodeId(2),
@@ -184,18 +173,9 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
+            span: None,
         }),
-        location: SourceLocation::new(
-            source_scope,
-            CharPosition {
-                line_number: 4,
-                char_column: 2,
-            },
-            CharPosition {
-                line_number: 4,
-                char_column: 8,
-            },
-        ),
+        span: None,
     });
 
     // Seed the merged table so the local "start_entry" id shifts during merge, proving the remap
@@ -229,17 +209,7 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
             statement_id: HirNodeId(1),
             source: ReactiveSourceId(0),
             kind: ReactiveInvalidationKind::Assignment,
-            location: SourceLocation::new(
-                reactive_scope,
-                CharPosition {
-                    line_number: 8,
-                    char_column: 4,
-                },
-                CharPosition {
-                    line_number: 8,
-                    char_column: 10,
-                },
-            ),
+            span: None,
         }],
     );
 
@@ -275,9 +245,8 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
 
     let statement = &module.executable.hir.blocks[0].statements[0];
     assert_eq!(
-        statement.location.scope.name_str(&merged_string_table),
-        Some("source.moth"),
-        "executable statement locations should resolve through the merged string table"
+        statement.span, None,
+        "synthetic executable statements retain no authored source span",
     );
     let HirStatementKind::Expr(HirExpression {
         kind: HirExpressionKind::VariantConstruct { fields, .. },
@@ -292,28 +261,14 @@ fn remap_string_ids_routes_hir_and_link_fact_locations_through_their_lanes() {
         "variant payload names should resolve through the merged string table"
     );
 
-    let reactive_location = &module
-        .executable
-        .borrow_analysis
-        .analysis
-        .reactive_invalidations[&HirNodeId(1)][0]
-        .location;
-    assert_eq!(
-        reactive_location.scope.name_str(&merged_string_table),
-        Some("reactive_source.moth"),
-        "borrow-fact locations should resolve through the merged string table"
-    );
-
     let reachability = collect_reachability_from_function_link_facts(
         &module.link_facts.functions,
         &[FunctionId(0)],
     )
     .expect("remapped function facts should remain linkable");
-    let map_location = &reachability.reachable_map_uses[0].location;
     assert_eq!(
-        map_location.scope.name_str(&merged_string_table),
-        Some("source.moth"),
-        "link-fact location should resolve through the merged string table"
+        reachability.reachable_map_uses[0].span, None,
+        "synthetic link facts retain no authored source span",
     );
 
     // Runtime asset identity remains filesystem-owned rather than string-table-owned.
@@ -338,7 +293,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             args: vec![],
             result: None,
         },
-        location: SourceLocation::default(),
+        span: None,
     });
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
@@ -904,24 +859,16 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
     assert_eq!(blocked_order, vec![0, 1]);
 }
 
-fn test_module_diagnostics(module_path: &str, string_table: &mut StringTable) -> ModuleDiagnostics {
-    let path = InternedPath::from_single_str(module_path, string_table);
+fn test_module_diagnostics(
+    _module_path: &str,
+    string_table: &mut StringTable,
+) -> ModuleDiagnostics {
     let name = string_table.intern("missing_name");
     let diagnostic = CompilerDiagnostic::new(
         DiagnosticKind::Rule(
             crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
         ),
-        SourceLocation::new(
-            path,
-            CharPosition {
-                line_number: 1,
-                char_column: 1,
-            },
-            CharPosition {
-                line_number: 1,
-                char_column: 2,
-            },
-        ),
+        None,
         DiagnosticPayload::UnknownName {
             name,
             namespace: NameNamespace::Value,
@@ -935,7 +882,9 @@ fn test_module_diagnostics(module_path: &str, string_table: &mut StringTable) ->
 fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let mut string_table = StringTable::new();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let messages = frontend.into_render_messages(&mut string_table);
+    let messages = frontend
+        .into_render_messages_with_frozen_identity(&mut string_table, None, None)
+        .expect("synthetic lane warnings should install frozen render identity");
     let rendered_codes = messages
         .warnings()
         .map(|warning| warning.kind.code().to_owned())
@@ -1374,7 +1323,7 @@ fn lane_module_with_generated_and_cross_module_calls(
                 args: vec![],
                 result: None,
             },
-            location: SourceLocation::default(),
+            span: None,
         });
     }
     for (index, origin) in cross_module_calls.iter().enumerate() {
@@ -1385,7 +1334,7 @@ fn lane_module_with_generated_and_cross_module_calls(
                 args: vec![],
                 result: None,
             },
-            location: SourceLocation::default(),
+            span: None,
         });
     }
     let function_link_facts = collect_module_function_link_facts(&hir_module)
@@ -1642,27 +1591,16 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
 }
 
 fn test_warning_diagnostic(
-    module_path: &str,
+    _module_path: &str,
     string_table: &mut StringTable,
 ) -> CompilerDiagnostic {
-    let path = InternedPath::from_single_str(module_path, string_table);
     let name = string_table.intern("unused_warning_name");
     CompilerDiagnostic::with_severity(
         DiagnosticKind::Rule(
             crate::compiler_frontend::compiler_messages::RuleDiagnosticKind::UnknownName,
         ),
         DiagnosticSeverity::Warning,
-        SourceLocation::new(
-            path,
-            CharPosition {
-                line_number: 1,
-                char_column: 1,
-            },
-            CharPosition {
-                line_number: 1,
-                char_column: 2,
-            },
-        ),
+        None,
         DiagnosticPayload::UnknownName {
             name,
             namespace: NameNamespace::Value,

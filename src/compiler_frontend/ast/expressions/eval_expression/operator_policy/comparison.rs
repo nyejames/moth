@@ -8,13 +8,14 @@ use super::diagnostics::invalid_comparison_types;
 use super::shared::is_mixed_int_float;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::{CompilerError, SourceLocation};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, IncompatibleChoiceComparisonReason,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 pub(super) fn is_comparison_operator(op: &Operator) -> bool {
@@ -33,7 +34,7 @@ pub(super) fn resolve_comparison_operator_type(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
     let builtins = type_environment.builtins();
@@ -44,7 +45,7 @@ pub(super) fn resolve_comparison_operator_type(
     if matches!(op, Operator::Equality | Operator::NotEqual)
         && expression_pair_has_option_context(lhs, rhs, type_environment)
     {
-        return resolve_option_equality_type(lhs, rhs, op, location, type_environment);
+        return resolve_option_equality_type(lhs, rhs, op, span, type_environment);
     }
 
     // ------------------------
@@ -64,7 +65,7 @@ pub(super) fn resolve_comparison_operator_type(
                 | Operator::GreaterThanOrEqual
                 | Operator::LessThan
                 | Operator::LessThanOrEqual => Ok(builtins.bool),
-                _ => invalid_comparison_types(lhs, rhs, op, location),
+                _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
 
@@ -72,7 +73,7 @@ pub(super) fn resolve_comparison_operator_type(
         if lhs == builtins.bool {
             return match op {
                 Operator::Equality | Operator::NotEqual => Ok(builtins.bool),
-                _ => invalid_comparison_types(lhs, rhs, op, location),
+                _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
 
@@ -80,7 +81,7 @@ pub(super) fn resolve_comparison_operator_type(
         if lhs == builtins.string {
             return match op {
                 Operator::Equality | Operator::NotEqual => Ok(builtins.bool),
-                _ => invalid_comparison_types(lhs, rhs, op, location),
+                _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
 
@@ -93,7 +94,7 @@ pub(super) fn resolve_comparison_operator_type(
                 | Operator::LessThanOrEqual
                 | Operator::GreaterThan
                 | Operator::GreaterThanOrEqual => Ok(builtins.bool),
-                _ => invalid_comparison_types(lhs, rhs, op, location),
+                _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
 
@@ -101,15 +102,15 @@ pub(super) fn resolve_comparison_operator_type(
         if type_environment.variants_for(lhs).is_some() {
             return match op {
                 Operator::Equality | Operator::NotEqual => {
-                    validate_choice_equality_support(lhs, rhs, location, type_environment)?;
+                    validate_choice_equality_support(lhs, rhs, span, type_environment)?;
                     Ok(builtins.bool)
                 }
-                _ => invalid_comparison_types(lhs, rhs, op, location),
+                _ => invalid_comparison_types(lhs, rhs, op, span),
             };
         }
 
         // Same type but not a comparable category.
-        return invalid_comparison_types(lhs, rhs, op, location);
+        return invalid_comparison_types(lhs, rhs, op, span);
     }
 
     // ------------------------
@@ -130,7 +131,7 @@ pub(super) fn resolve_comparison_operator_type(
             IncompatibleChoiceComparisonReason::DifferentChoiceTypes,
             lhs,
             rhs,
-            location.clone(),
+            span,
         )
         .into());
     }
@@ -142,12 +143,12 @@ pub(super) fn resolve_comparison_operator_type(
             IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
             lhs,
             rhs,
-            location.clone(),
+            span,
         )
         .into());
     }
 
-    invalid_comparison_types(lhs, rhs, op, location)
+    invalid_comparison_types(lhs, rhs, op, span)
 }
 
 /// Validates that every payload field in a choice type supports runtime equality.
@@ -157,7 +158,7 @@ pub(super) fn resolve_comparison_operator_type(
 fn validate_choice_equality_support(
     lhs_type_id: TypeId,
     rhs_type_id: TypeId,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<(), ExpressionTypingError> {
     let Some(variants) = type_environment.variants_for(lhs_type_id) else {
@@ -182,7 +183,7 @@ fn validate_choice_equality_support(
                         },
                         lhs_type_id,
                         rhs_type_id,
-                        location.clone(),
+                        span,
                     )
                     .into());
                 }
@@ -233,7 +234,7 @@ fn resolve_option_equality_type(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> Result<TypeId, ExpressionTypingError> {
     let lhs_kind = classify_option_comparison_operand(lhs, type_environment);
@@ -268,5 +269,5 @@ fn resolve_option_equality_type(
         return Ok(type_environment.builtins().bool);
     }
 
-    invalid_comparison_types(lhs, rhs, op, location)
+    invalid_comparison_types(lhs, rhs, op, span)
 }

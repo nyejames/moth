@@ -310,7 +310,9 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
             )
         })?;
         match &node.kind {
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 let bodies: Vec<_> = branches.iter().map(|b| b.body).collect();
                 (Some(bodies), *fallback, None)
             }

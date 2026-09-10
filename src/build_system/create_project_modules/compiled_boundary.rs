@@ -12,16 +12,23 @@
 //! MUST NOT: concatenate package artefacts into one vector with a count, place build-local
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, RenderFrozenContext,
+};
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::source::SourceDatabaseRetentionMetrics;
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::Arc;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
@@ -29,6 +36,16 @@ use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
+fn diagnostic_range_requires_source_identity(
+    diagnostics: &[CompilerDiagnostic],
+    range: &std::ops::Range<usize>,
+) -> bool {
+    diagnostics[range.clone()].iter().any(|diagnostic| {
+        diagnostic.primary_span.is_some()
+            || diagnostic.labels.iter().any(|label| label.span.is_some())
+    })
+}
+
 #[derive(Debug)]
 pub(crate) struct DiagnosedModule {
     pub(crate) module_id: ModuleId,
@@ -289,6 +306,23 @@ impl CompiledGraphBoundary {
             .map(|artifact| &artifact.module)
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
     }
+
+    pub(crate) fn install_frozen_identity(
+        &self,
+        identity: Option<Arc<FrozenIdentityContext>>,
+    ) -> Result<(), CompilerError> {
+        for module in self.successful_module_views() {
+            if let Some(context) = module.metadata.materialisation_context.as_ref() {
+                let identity = identity.as_ref().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "successful module retained materialisation state without a frozen source identity",
+                    )
+                })?;
+                context.install_frozen_identity(Arc::clone(identity))?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One compiled source-package boundary with its stable package identity.
@@ -446,6 +480,8 @@ pub(crate) struct CompletedSourcePackageRegistry {
     consumer_packages: Vec<Vec<PackageBoundaryId>>,
     declarations_by_identity:
         FxHashMap<GeneratedDeclarationIdentity, PackageMaterialisationLocation>,
+    /// Retained source databases aligned with `packages`, used for package warning rendering.
+    source_databases: Vec<Option<Arc<SourceDatabase>>>,
     /// Every published package materialisation row in deterministic publication order.
     materialisation_rows: Vec<(GeneratedDeclarationIdentity, PackageMaterialisationLocation)>,
 }
@@ -465,6 +501,7 @@ impl CompletedSourcePackageRegistry {
             by_prefix: FxHashMap::default(),
             provider_packages: Vec::new(),
             consumer_packages: Vec::new(),
+            source_databases: Vec::new(),
             declarations_by_identity: FxHashMap::default(),
             materialisation_rows: Vec::new(),
         }
@@ -570,6 +607,7 @@ impl CompletedSourcePackageRegistry {
         } = publication;
 
         self.packages.push(package);
+        self.source_databases.push(None);
         // The provider vector was allocated while preflighting. Move it into the retained lane
         // so commit performs no capacity-bearing allocation after the first mutation.
         self.provider_packages.push(resolved_providers);
@@ -587,8 +625,51 @@ impl CompletedSourcePackageRegistry {
         }
     }
 
+    /// Associate one published package with the source database that produced its diagnostics.
+    ///
+    /// Package results already live in this registry when this handoff occurs; keeping the Arc in
+    /// the same owner lets render aggregation attach package warning ranges without reconstructing
+    /// ownership from logical paths.
+    pub(crate) fn set_source_database(
+        &mut self,
+        package_id: PackageBoundaryId,
+        source_database: Arc<SourceDatabase>,
+    ) -> Result<(), CompilerError> {
+        let slot = self
+            .source_databases
+            .get_mut(package_id.index())
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "completed source package registry has no source database slot for boundary id {}",
+                    package_id.index()
+                ))
+            })?;
+        if slot.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "source package @{} source database was attached more than once",
+                self.package(package_id)?.package_prefix()
+            )));
+        }
+        *slot = Some(source_database);
+        Ok(())
+    }
+
+    /// Borrow the retained source database for one package boundary.
+    ///
+    /// Package IDs are dense publication indexes, so this lookup stays aligned with the package
+    /// row and never reconstructs ownership from a diagnostic's logical path.
+    pub(crate) fn source_database(
+        &self,
+        package_id: PackageBoundaryId,
+    ) -> Option<&Arc<SourceDatabase>> {
+        self.source_databases
+            .get(package_id.index())
+            .and_then(Option::as_ref)
+    }
+
     pub(crate) fn reserve_commit(&mut self, publication: &SourcePackagePublication) {
         self.packages.reserve(1);
+        self.source_databases.reserve(1);
         self.by_prefix.reserve(1);
         self.provider_packages.reserve(1);
         self.consumer_packages.reserve(1);
@@ -726,8 +807,10 @@ impl CompletedSourcePackageRegistry {
     }
 
     /// Consume the registry, returning the completed packages in publication order.
-    pub(crate) fn into_packages(self) -> Vec<CompiledSourcePackage> {
-        self.packages
+    pub(crate) fn into_packages_with_source_databases(
+        self,
+    ) -> (Vec<CompiledSourcePackage>, Vec<Option<Arc<SourceDatabase>>>) {
+        (self.packages, self.source_databases)
     }
 }
 
@@ -818,6 +901,64 @@ pub(crate) fn compilation_module_views<'a>(
     Ok(views)
 }
 
+/// Move-only domain-tagged premerge batch lane for transient check-only diagnostics.
+///
+/// WHAT: retains a [`PremergeDiagnosticBatch`] with its local [`StringTable`] alongside the
+///       package domain that produced it (`None` for project transients).
+/// WHY: transient units have no graph slot, so their diagnostics must cross into the final
+///      render tail as move-only owners with domain tags; the final tail merges each local
+///      table exactly once and installs the matching frozen identity.
+#[derive(Debug)]
+pub(crate) struct TransientPremergeBatch {
+    pub(crate) package_id: Option<PackageBoundaryId>,
+    pub(crate) batch: PremergeDiagnosticBatch,
+}
+
+impl TransientPremergeBatch {
+    pub(crate) fn project(batch: PremergeDiagnosticBatch) -> Self {
+        Self {
+            package_id: None,
+            batch,
+        }
+    }
+
+    pub(crate) fn package(package_id: PackageBoundaryId, batch: PremergeDiagnosticBatch) -> Self {
+        Self {
+            package_id: Some(package_id),
+            batch,
+        }
+    }
+}
+/// Storage retained by the final diagnostic render boundary.
+///
+/// The source fields count only frozen source owners reachable from the returned diagnostic
+/// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
+/// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
+/// A clean result returns zeroes because the render boundary intentionally skips freezing when
+/// there is nothing to render.
+#[cfg(feature = "data_layout_memory_probe")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FrozenRenderRetentionMetrics {
+    pub(crate) source_snapshot_bytes: usize,
+    pub(crate) extended_span_rows: usize,
+    pub(crate) source_identity_slots: usize,
+    pub(crate) diagnostic_records: usize,
+    pub(crate) diagnostic_label_slots: usize,
+    pub(crate) retained_identity_contexts: usize,
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl FrozenRenderRetentionMetrics {
+    fn add_source(&mut self, metrics: SourceDatabaseRetentionMetrics) {
+        self.source_snapshot_bytes += metrics.source_snapshot_bytes;
+        self.extended_span_rows += metrics.extended_span_rows;
+        self.source_identity_slots += metrics.source_identity_slots;
+    }
+}
+
+#[cfg(not(feature = "data_layout_memory_probe"))]
+type FrozenRenderRetentionMetrics = ();
+
 /// Typed frontend outcome carrying every project and source-package graph boundary.
 ///
 /// WHAT: the `Ok` payload of [`compile_project_frontend`](super::compile_project_frontend).
@@ -831,7 +972,16 @@ pub(crate) struct ProjectFrontendCompilation {
     /// Build-only physical resource inputs and missing-target watches discovered before AST.
     pub(crate) resource_inputs: ResourceInputRegistry,
     /// Diagnostics and warnings from transient check-only units, which have no canonical graph slot.
-    pub(crate) transient_messages: Vec<CompilerMessages>,
+    ///
+    /// WHAT: move-only premerge batches tagged by domain; local tables merge exactly once
+    ///       at the final render tail.
+    pub(crate) transient_batches: Vec<TransientPremergeBatch>,
+    /// Project source identity retained by the no-input frontend seam for its caller to pass into
+    /// the frozen render tail.
+    ///
+    /// Command-owned callers provide this owner directly; retaining it here only keeps the
+    /// config-free seam move-only until its caller invokes the canonical frozen renderer.
+    pub(crate) project_source_database: Option<Arc<SourceDatabase>>,
 }
 
 impl ProjectFrontendCompilation {
@@ -847,7 +997,7 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
-        transient_messages: Vec<CompilerMessages>,
+        transient_batches: Vec<TransientPremergeBatch>,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
         source_packages.validate_dependency_edges()?;
@@ -880,7 +1030,8 @@ impl ProjectFrontendCompilation {
             project,
             source_packages,
             resource_inputs,
-            transient_messages,
+            transient_batches,
+            project_source_database: None,
         })
     }
 
@@ -892,9 +1043,9 @@ impl ProjectFrontendCompilation {
         !self.project.diagnosed.is_empty()
             || !self.project.blocked.is_empty()
             || self
-                .transient_messages
+                .transient_batches
                 .iter()
-                .any(|messages| messages.error_count() > 0)
+                .any(|transient| transient.batch.has_errors())
             || self.source_packages.iter().any(|package| {
                 !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
             })
@@ -902,6 +1053,7 @@ impl ProjectFrontendCompilation {
 
     /// Iterate every successful module view (base artefacts and generated sidecars) across all
     /// boundaries in deterministic order.
+    #[cfg(test)]
     pub(crate) fn successful_module_views(&self) -> impl Iterator<Item = &Module> + '_ {
         self.project.successful_module_views().chain(
             self.source_packages
@@ -910,32 +1062,312 @@ impl ProjectFrontendCompilation {
         )
     }
 
-    /// Build the render-boundary message set for this outcome.
+    /// Build the frozen-identity render-boundary message set for this outcome.
     ///
-    /// Warnings from every successful boundary are retained first, then diagnosed module
-    /// messages in deterministic `ModuleId` order. Blocked modules produce no cascade
-    /// diagnostics and are not rendered.
-    pub(crate) fn into_render_messages(self, string_table: &mut StringTable) -> CompilerMessages {
-        let warnings = self
+    /// WHAT: merges every retained local table exactly once into the caller aggregate,
+    ///       freezes that aggregate with the project snapshot as the root identity, shares
+    ///       the frozen strings with each package snapshot, and installs one frozen range
+    ///       per nonempty diagnostic span. Order is project warnings, package warnings,
+    ///       project diagnosed, package diagnosed, then transient batches.
+    /// WHY: production build/check/benchmark render against exact snapshots with no table
+    ///      clones and no filesystem rereads; `diagnostic_render_context` resolves every
+    ///      covered row through its frozen strings.
+    pub(crate) fn into_render_messages_with_frozen_identity(
+        self,
+        string_table: &mut StringTable,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_project_messages: Option<CompilerMessages>,
+    ) -> Result<CompilerMessages, CompilerError> {
+        self.into_render_messages_with_optional_retention(
+            string_table,
+            project_source,
+            trailing_project_messages,
+        )
+        .map(|(messages, _)| messages)
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn into_render_messages_with_frozen_identity_and_metrics(
+        self,
+        string_table: &mut StringTable,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_project_messages: Option<CompilerMessages>,
+    ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+        self.into_render_messages_with_optional_retention(
+            string_table,
+            project_source,
+            trailing_project_messages,
+        )
+    }
+
+    fn into_render_messages_with_optional_retention(
+        self,
+        string_table: &mut StringTable,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_project_messages: Option<CompilerMessages>,
+    ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+        // The second tuple member is a unit in normal builds. Retention scans and source
+        // accounting exist only in the data-layout probe feature, while production rendering
+        // still shares this one ownership-preserving implementation.
+
+        let Self {
+            mut project,
+            source_packages,
+            transient_batches,
+            project_source_database,
+            ..
+        } = self;
+        let project_warnings = project
             .successful_module_views()
             .flat_map(|module| module.metadata.warnings.iter().cloned())
             .collect::<Vec<_>>();
-        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table.clone());
-
-        for diagnosed in self.project.diagnosed {
-            messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
+        let (mut source_packages, package_source_arcs) =
+            source_packages.into_packages_with_source_databases();
+        let project_diagnosed = std::mem::take(&mut project.diagnosed);
+        let package_diagnosed = source_packages
+            .iter_mut()
+            .map(|package| std::mem::take(&mut package.boundary.diagnosed))
+            .collect::<Vec<_>>();
+        let package_warnings = source_packages
+            .iter()
+            .map(|package| {
+                package
+                    .boundary
+                    .successful_module_views()
+                    .flat_map(|module| module.metadata.warnings.iter().cloned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        // Consume the caller aggregate without cloning; success warnings already live in
+        // this domain while each local batch merges exactly once below before freezing.
+        let mut messages = CompilerMessages::empty(std::mem::take(string_table));
+        // Pending frozen rows as (range, package_index). `None` package means project/root.
+        let mut frozen_spans: Vec<(std::ops::Range<usize>, Option<usize>)> = Vec::new();
+        let start = messages.diagnostic_slice().len();
+        messages.extend_diagnostics(project_warnings);
+        if messages.diagnostic_slice().len() != start {
+            frozen_spans.push((start..messages.diagnostic_slice().len(), None));
         }
-        let source_packages = self.source_packages.into_packages();
-        for package in source_packages {
-            for diagnosed in package.boundary.diagnosed {
+        for (package_index, warnings) in package_warnings.into_iter().enumerate() {
+            if warnings.is_empty() {
+                continue;
+            }
+            let start = messages.diagnostic_slice().len();
+            // Warnings already live in the aggregate domain, so no local merge is needed;
+            // the frozen row below still binds them to their package snapshot.
+            messages.extend_diagnostics(warnings);
+            frozen_spans.push((
+                start..messages.diagnostic_slice().len(),
+                Some(package_index),
+            ));
+        }
+        if !project_diagnosed.is_empty() {
+            let start = messages.diagnostic_slice().len();
+            for diagnosed in project_diagnosed {
                 messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
             }
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+            }
+        }
+        for (package_index, diagnosed_modules) in package_diagnosed.into_iter().enumerate() {
+            if diagnosed_modules.is_empty() {
+                continue;
+            }
+            let start = messages.diagnostic_slice().len();
+            for diagnosed in diagnosed_modules {
+                messages.append_messages_preserving_context(diagnosed.diagnostics.into_messages());
+            }
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((
+                    start..messages.diagnostic_slice().len(),
+                    Some(package_index),
+                ));
+            }
+        }
+        for transient in transient_batches {
+            let domain = transient.package_id.map(|id| id.index());
+            let start = messages.diagnostic_slice().len();
+            messages.append_messages_preserving_context(transient.batch.into_messages());
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), domain));
+            }
+        }
+        if let Some(trailing_project_messages) = trailing_project_messages {
+            let start = messages.diagnostic_slice().len();
+            messages.append_messages_preserving_context(trailing_project_messages);
+            if messages.diagnostic_slice().len() != start {
+                frozen_spans.push((start..messages.diagnostic_slice().len(), None));
+            }
+        }
+        // A clean result has no source-backed render work. Return before freezing so the common
+        // success path retains no source snapshots, path trie or extended-span tables solely for
+        // an empty message vessel.
+        if messages.diagnostic_slice().is_empty() && !messages.has_infrastructure_error() {
+            let _ = std::mem::take(&mut messages.string_table);
+            return Ok((messages, FrozenRenderRetentionMetrics::default()));
         }
 
-        for transient in self.transient_messages {
-            messages.append_messages_preserving_context(transient);
-        }
+        #[cfg(feature = "data_layout_memory_probe")]
+        let mut retention = FrozenRenderRetentionMetrics {
+            diagnostic_records: messages.diagnostic_slice().len(),
+            diagnostic_label_slots: messages
+                .diagnostic_slice()
+                .iter()
+                .map(|diagnostic| diagnostic.labels.len())
+                .sum(),
+            ..FrozenRenderRetentionMetrics::default()
+        };
+        #[cfg(not(feature = "data_layout_memory_probe"))]
+        let retention = ();
 
-        messages
+        let project_source = project_source.or(project_source_database);
+        // Consume owners without cloning. An unexpectedly shared Arc is a caller bug.
+        let project_database = match project_source {
+            Some(source) => Arc::try_unwrap(source).map_err(|_| {
+                CompilerError::compiler_error(
+                    "project source database was unexpectedly shared at the frozen render tail",
+                )
+            })?,
+            None => SourceDatabase::empty(),
+        };
+        #[cfg(feature = "data_layout_memory_probe")]
+        let project_source_metrics = project_database.retention_metrics();
+
+        let mut package_databases: Vec<Option<SourceDatabase>> =
+            Vec::with_capacity(package_source_arcs.len());
+        #[cfg(feature = "data_layout_memory_probe")]
+        let mut package_source_metrics: Vec<Option<SourceDatabaseRetentionMetrics>> =
+            Vec::with_capacity(package_source_arcs.len());
+        for source in package_source_arcs {
+            match source {
+                Some(source) => {
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    let source_metrics = source.retention_metrics();
+                    let database = Arc::try_unwrap(source).map_err(|_| {
+                        CompilerError::compiler_error(
+                            "package source database was unexpectedly shared at the frozen render tail",
+                        )
+                    })?;
+                    package_databases.push(Some(database));
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    package_source_metrics.push(Some(source_metrics));
+                }
+                None => {
+                    package_databases.push(None);
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    package_source_metrics.push(None);
+                }
+            }
+        }
+        // Freeze only after every local table has been appended/remapped above.
+        let frozen_root = Arc::new(FrozenIdentityContext::from_parts(
+            *std::mem::take(&mut messages.string_table),
+            project_database,
+        ));
+        let mut package_identities: Vec<Option<Arc<FrozenIdentityContext>>> =
+            Vec::with_capacity(package_databases.len());
+        for database in package_databases {
+            match database {
+                Some(database) => {
+                    package_identities.push(Some(Arc::new(
+                        FrozenIdentityContext::from_shared_strings(
+                            frozen_root.shared_strings(),
+                            database,
+                        ),
+                    )));
+                }
+                None => package_identities.push(None),
+            }
+        }
+        project.install_frozen_identity(Some(Arc::clone(&frozen_root)))?;
+        if let Some(domain) = project.structure.stable_package_identity() {
+            messages.install_frozen_identity_handles_for_domain(domain, &frozen_root)?;
+        }
+        for (package, identity) in source_packages.iter().zip(package_identities.iter()) {
+            package
+                .boundary
+                .install_frozen_identity(identity.as_ref().map(Arc::clone))?;
+            if let Some(identity) = identity {
+                messages.install_frozen_identity_handles_for_domain(
+                    &package.package_identity,
+                    identity,
+                )?;
+            }
+        }
+        messages.ensure_frozen_identity_handles_installed()?;
+        let mut frozen_contexts = Vec::with_capacity(frozen_spans.len());
+        for (range, domain) in frozen_spans {
+            if range.is_empty() {
+                continue;
+            }
+            let identity = match domain {
+                Some(package_index) => {
+                    let package_identity = package_identities
+                        .get(package_index)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(format!(
+                                "diagnostic range references missing source package identity index {package_index}",
+                            ))
+                        })?;
+                    let Some(identity) = package_identity else {
+                        if diagnostic_range_requires_source_identity(
+                            messages.diagnostic_slice(),
+                            &range,
+                        ) {
+                            return Err(CompilerError::compiler_error(format!(
+                                "source-package diagnostic range {range:?} has no frozen source identity",
+                            )));
+                        }
+                        continue;
+                    };
+                    Arc::clone(identity)
+                }
+                None => Arc::clone(&frozen_root),
+            };
+            frozen_contexts.push(RenderFrozenContext {
+                diagnostic_range: range,
+                identity,
+            });
+        }
+        messages.install_frozen_identity_contexts(frozen_contexts, 0);
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            // A range row is not a context count: repeated rows may share one context, and a
+            // donor-only handle can retain a context without contributing an ordinary range.
+            let mut retained_contexts = FxHashSet::<*const FrozenIdentityContext>::default();
+            for frozen_context in &messages.render_frozen_contexts {
+                retained_contexts.insert(Arc::as_ptr(&frozen_context.identity));
+            }
+            for diagnostic in messages.diagnostic_slice() {
+                if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                    && let Some(identity) = handle.get()
+                {
+                    retained_contexts.insert(identity as *const FrozenIdentityContext);
+                }
+                for label in &diagnostic.labels {
+                    if let Some(handle) = label.frozen_identity_handle.as_ref()
+                        && let Some(identity) = handle.get()
+                    {
+                        retained_contexts.insert(identity as *const FrozenIdentityContext);
+                    }
+                }
+            }
+            retention.retained_identity_contexts = retained_contexts.len();
+
+            if retained_contexts.contains(&Arc::as_ptr(&frozen_root)) {
+                retention.add_source(project_source_metrics);
+            }
+            for (identity, source_metrics) in
+                package_identities.iter().zip(package_source_metrics.iter())
+            {
+                if let (Some(identity), Some(source_metrics)) = (identity, source_metrics)
+                    && retained_contexts.contains(&Arc::as_ptr(identity))
+                {
+                    retention.add_source(*source_metrics);
+                }
+            }
+        }
+        Ok((messages, retention))
     }
 }

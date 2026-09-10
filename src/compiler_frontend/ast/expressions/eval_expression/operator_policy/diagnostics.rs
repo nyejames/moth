@@ -7,9 +7,9 @@
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticOperator};
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 
 /// Maps an AST `Operator` to the diagnostic-owned exact operator at the emission boundary.
 ///
@@ -46,13 +46,13 @@ pub(super) fn invalid_comparison_types(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<TypeId, ExpressionTypingError> {
     Err(CompilerDiagnostic::unsupported_operator_types(
         diagnostic_operator_from_ast(op),
         lhs,
         Some(rhs),
-        location.clone(),
+        span,
     )
     .into())
 }
@@ -61,13 +61,13 @@ pub(super) fn invalid_operator_types(
     lhs: TypeId,
     rhs: TypeId,
     op: &Operator,
-    location: &SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Result<TypeId, ExpressionTypingError> {
     Err(CompilerDiagnostic::unsupported_operator_types(
         diagnostic_operator_from_ast(op),
         lhs,
         Some(rhs),
-        location.clone(),
+        span,
     )
     .into())
 }

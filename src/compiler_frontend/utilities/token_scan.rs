@@ -10,9 +10,20 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, Token, TokenKind};
+use crate::compiler_frontend::tokenizer::tokens::{FileTokens, Token, TokenKind};
+
+/// Failure lanes for declaration-initializer scanning.
+///
+/// User-authored unterminated constructs remain structured diagnostics. An impossible scanner
+/// state stays a compiler error so the declaration-shell boundary can preserve it as
+/// infrastructure instead of fabricating a user-facing diagnostic.
+#[derive(Debug)]
+pub(crate) enum TokenScanFailure {
+    Diagnostic(CompilerDiagnostic),
+    Infrastructure(CompilerError),
+}
 
 /// A lightweight value-reference hint extracted from a token slice.
 ///
@@ -24,13 +35,15 @@ use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation, To
 pub struct InitializerReference {
     pub name: StringId,
     pub dot_member: Option<StringId>,
-    pub location: SourceLocation,
+    /// Exact authored source span of the referenced name, when the token belongs to a source
+    /// with a retained identity.
+    pub span: Option<SourceSpan>,
     pub followed_by_call: bool,
     pub followed_by_choice_namespace: bool,
 }
 
 impl InitializerReference {
-    /// Remap the reference name and source location into a merged string table.
+    /// Remap the reference names into a merged string table.
     ///
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
@@ -38,11 +51,6 @@ impl InitializerReference {
         if let Some(dot_member) = &mut self.dot_member {
             *dot_member = remap.get(*dot_member);
         }
-        self.location.remap_string_ids(remap);
-    }
-
-    pub fn rebind_source_identity(&mut self, logical_path: &InternedPath) {
-        self.location.rebind_source_identity(logical_path);
     }
 }
 
@@ -52,7 +60,10 @@ impl InitializerReference {
 /// dot/namespace accessor, an assignment target, or preceded by a dot/double-colon.
 /// WHY: dependency sorting and capacity-expression reference discovery both need
 /// shallow reference facts without duplicating the scan logic.
-pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerReference> {
+pub(crate) fn collect_symbol_references(
+    tokens: &[Token],
+    source_id: SourceId,
+) -> Vec<InitializerReference> {
     let mut references = Vec::new();
     let mut in_config_qualifier = false;
 
@@ -116,7 +127,7 @@ pub(crate) fn collect_symbol_references(tokens: &[Token]) -> Vec<InitializerRefe
         references.push(InitializerReference {
             name: *name,
             dot_member,
-            location: token.location.clone(),
+            span: Some(SourceSpan::new(source_id, token.span)),
             followed_by_call: matches!(next, Some(TokenKind::OpenParenthesis)),
             followed_by_choice_namespace: matches!(next, Some(TokenKind::DoubleColon)),
         });
@@ -323,12 +334,11 @@ impl TemplateBalance {
     }
 }
 
-/// Boxed diagnostic result for declaration-initializer token scanning.
+/// Two-lane result for declaration-initializer token scanning.
 ///
-/// WHAT: carries the scanner's single structured EOF diagnostic in the same shape as its owner.
-/// WHY: declaration-shell parsing already uses a boxed diagnostic family, so the scan result flows
-///      into that boundary directly without an unbox/rebox adapter.
-pub(crate) type TokenScanResult<T> = Result<T, Box<CompilerDiagnostic>>;
+/// Structured unexpected-EOF diagnostics stay in the diagnostic lane while impossible scanner
+/// states remain typed infrastructure failures for the declaration-shell boundary.
+pub(crate) type TokenScanResult<T> = Result<T, TokenScanFailure>;
 
 pub(crate) fn collect_declaration_initializer_tokens(
     token_stream: &mut FileTokens,
@@ -415,19 +425,20 @@ pub(crate) fn collect_declaration_initializer_tokens(
                     // No construct is open but the scanner believes it is nested. This is an
                     // internal scanner invariant, not a user-facing syntax error. Report it
                     // through the infrastructure error lane instead of fabricating a delimiter.
-                    return Err(Box::new(CompilerDiagnostic::from(
+                    return Err(TokenScanFailure::Infrastructure(
                         CompilerError::compiler_error(
                             "declaration-initializer scanner reported a nested state with no open construct",
                         ),
-                    )));
+                    ));
                 }
             };
-            return Err(Box::new(CompilerDiagnostic::unexpected_end_of_file(
-                expected_delimiter,
-                token_stream.current_location(),
-            )));
+            return Err(TokenScanFailure::Diagnostic(
+                CompilerDiagnostic::unexpected_end_of_file(
+                    expected_delimiter,
+                    Some(token_stream.current_span()),
+                ),
+            ));
         }
-
         // Declaration initializers can end with receiver-owned statement blocks such as
         // `catch:` and value-producing `if ...:`. Their bodies belong to the initializer even
         // though they are statement-shaped, so newline termination is suspended until the
@@ -621,14 +632,14 @@ pub(crate) fn find_expression_end_index(
 pub(crate) fn consume_balanced_template_region<E>(
     token_stream: &mut FileTokens,
     mut on_token: impl FnMut(Token, &TokenKind),
-    on_eof_error: impl Fn(SourceLocation) -> E,
+    on_eof_error: impl Fn(SourceSpan) -> E,
 ) -> Result<(), E> {
     let mut balance = TemplateBalance::with_opening_template();
 
     while balance.has_unclosed_templates() {
         let token_kind = token_stream.current_token_kind().clone();
         if matches!(token_kind, TokenKind::Eof) {
-            return Err(on_eof_error(token_stream.current_location()));
+            return Err(on_eof_error(token_stream.current_span()));
         }
 
         balance.step(&token_kind);

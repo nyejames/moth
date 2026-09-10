@@ -4,7 +4,6 @@
 //! dependency-specific boundary error and validation rules that are independent of resolver state.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::source_location::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -14,16 +13,11 @@ use std::path::Path;
 
 /// Failure while resolving a dependency path.
 ///
-/// WHAT: keeps user-facing dependency diagnostics separate from filesystem/internal failures.
-/// WHY: Stage 0 source discovery needs to preserve typed dependency diagnostics without routing them
-/// through the older internal-error transport.
-///
-/// The `Diagnostic` variant boxes `CompilerDiagnostic` because it is large enough to trigger
-/// `clippy::result_large_err` when stored inline in the `Result` enum. Boxing keeps the error
-/// variant small; callers unbox at existing plain-diagnostic accumulation boundaries.
+/// User-facing dependency failures remain plain `CompilerDiagnostic` values;
+/// filesystem and internal failures remain typed `CompilerError` values.
 #[derive(Clone, Debug)]
 pub(crate) enum DependencyPathResolutionError {
-    Diagnostic(Box<CompilerDiagnostic>),
+    Diagnostic(CompilerDiagnostic),
     Infrastructure(CompilerError),
 }
 
@@ -35,15 +29,11 @@ impl From<CompilerError> for DependencyPathResolutionError {
 
 /// WHAT: rejects dependency paths that escape their resolved base directory.
 /// WHY: dependencies must stay within the project root (relative/entry) or package root.
-///
-/// NOTE: `string_table` is only used to intern the declaring_source file path for diagnostics.
 pub(crate) fn validate_dependency_boundary(
     canonical_file: &Path,
     base_kind: &CompileTimePathBase,
     filesystem_base: &Path,
     dependency_path: &InternedPath,
-    declaring_file: &Path,
-    string_table: &mut StringTable,
 ) -> Result<(), DependencyPathResolutionError> {
     let canonical_base =
         fs::canonicalize(filesystem_base).unwrap_or_else(|_| filesystem_base.to_path_buf());
@@ -53,8 +43,6 @@ pub(crate) fn validate_dependency_boundary(
         base_kind,
         &canonical_base,
         dependency_path,
-        declaring_file,
-        string_table,
     )
 }
 
@@ -63,8 +51,6 @@ fn validate_dependency_boundary_against_base(
     base_kind: &CompileTimePathBase,
     canonical_base: &Path,
     dependency_path: &InternedPath,
-    declaring_file: &Path,
-    string_table: &mut StringTable,
 ) -> Result<(), DependencyPathResolutionError> {
     if !target_path.starts_with(canonical_base) {
         let reason = match base_kind {
@@ -73,15 +59,10 @@ fn validate_dependency_boundary_against_base(
             }
             _ => InvalidImportPathReason::EscapesProjectRoot,
         };
-
-        let location = SourceLocation::from_path(declaring_file, string_table);
         let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, location);
-        return Err(DependencyPathResolutionError::Diagnostic(Box::new(
-            diagnostic,
-        )));
+            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, None);
+        return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
-
     Ok(())
 }
 
@@ -95,7 +76,6 @@ pub(crate) fn validate_dependency_case_sensitivity(
     filesystem_base: &Path,
     canonical_file: &Path,
     is_parent_fallback: bool,
-    declaring_file: &Path,
     string_table: &mut StringTable,
 ) -> Result<(), DependencyPathResolutionError> {
     let canonical_base =
@@ -143,16 +123,13 @@ pub(crate) fn validate_dependency_case_sensitivity(
     if let Some((provided, expected)) =
         first_case_mismatch(user_file_components, &canonical_components)
     {
-        let location = SourceLocation::from_path(declaring_file, string_table);
         let reason = InvalidImportPathReason::CaseMismatch {
             provided: string_table.intern(&provided),
             expected: string_table.intern(&expected),
         };
         let diagnostic =
-            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, location);
-        return Err(DependencyPathResolutionError::Diagnostic(Box::new(
-            diagnostic,
-        )));
+            CompilerDiagnostic::invalid_import_path(dependency_path.clone(), reason, None);
+        return Err(DependencyPathResolutionError::Diagnostic(diagnostic));
     }
 
     Ok(())

@@ -114,7 +114,7 @@ fn rendered_error_msg(error: &DependencyPathResolutionError, string_table: &Stri
     match error {
         DependencyPathResolutionError::Diagnostic(diagnostic) => {
             format_terse_diagnostic_with_context(
-                diagnostic.as_ref(),
+                diagnostic,
                 DiagnosticRenderContext::new(string_table),
             )
         }
@@ -140,7 +140,7 @@ fn typed_dependency_diagnostic(
         panic!("expected typed dependency diagnostic, got infrastructure error");
     };
 
-    diagnostic.as_ref()
+    diagnostic
 }
 
 #[test]
@@ -428,9 +428,8 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
 
     let canonical_file = fs::canonicalize(package_root.join("helpers.moth"))
         .expect("should canonicalize source-backed package file");
-    let mut string_table = StringTable::new();
     let logical_path = resolver
-        .logical_path_for_canonical_file(&canonical_file, &mut string_table)
+        .logical_path_for_canonical_file(&canonical_file)
         .expect("canonical source-backed package file should resolve");
 
     assert_eq!(logical_path, PathBuf::from("html").join("helpers.moth"));
@@ -1106,13 +1105,9 @@ fn source_package_logical_paths_use_the_deepest_matching_root() {
         ("outer", "/packages/outer"),
         ("inner", "/packages/outer/inner"),
     ]);
-    let mut string_table = StringTable::new();
 
     let logical_path = resolver
-        .logical_path_for_canonical_file(
-            std::path::Path::new("/packages/outer/inner/file.moth"),
-            &mut string_table,
-        )
+        .logical_path_for_canonical_file(std::path::Path::new("/packages/outer/inner/file.moth"))
         .expect("nested source-backed package file should have a logical path");
 
     assert_eq!(logical_path, PathBuf::from("inner/file.moth"));

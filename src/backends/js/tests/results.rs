@@ -88,7 +88,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
             args: vec![],
             result: Some(LocalId(0)),
         },
-        1,
     );
     let b_entry = HirBlock {
         id: BlockId(1),
@@ -130,7 +129,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
             args: vec![],
             result: Some(LocalId(1)),
         },
-        1,
     );
     let a_entry = HirBlock {
         id: BlockId(4),
@@ -483,7 +481,6 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
             )],
             result: Some(LocalId(2)),
         },
-        2,
     );
     let caller_block = HirBlock {
         id: BlockId(1),

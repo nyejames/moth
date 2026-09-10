@@ -46,10 +46,6 @@ pub(crate) fn for_each_named_type_in_parsed_ref<'a>(
             for_each_named_type_in_parsed_ref(key, visitor);
             for_each_named_type_in_parsed_ref(value, visitor);
         }
-        ParsedTypeRef::Result { ok, err, .. } => {
-            for_each_named_type_in_parsed_ref(ok, visitor);
-            for_each_named_type_in_parsed_ref(err, visitor);
-        }
         _ => {}
     }
 }
@@ -78,12 +74,11 @@ pub(crate) fn collect_capacity_references_in_parsed_ref(
             fixed_capacity,
             ..
         } => {
-            if let Some(ParsedCollectionCapacity::BareConstant { name, location }) = fixed_capacity
-            {
+            if let Some(ParsedCollectionCapacity::BareConstant { name, span }) = fixed_capacity {
                 references.push(InitializerReference {
                     name: *name,
                     dot_member: None,
-                    location: location.clone(),
+                    span: *span,
                     followed_by_call: false,
                     followed_by_choice_namespace: false,
                 });
@@ -96,10 +91,6 @@ pub(crate) fn collect_capacity_references_in_parsed_ref(
         }
         ParsedTypeRef::Optional { inner, .. } => {
             collect_capacity_references_in_parsed_ref(inner, references);
-        }
-        ParsedTypeRef::Result { ok, err, .. } => {
-            collect_capacity_references_in_parsed_ref(ok, references);
-            collect_capacity_references_in_parsed_ref(err, references);
         }
         _ => {}
     }

@@ -226,7 +226,9 @@ fn walk_tir_view_expression_payload_node(
             }
         }
 
-        TemplateIrNodeKind::BranchChain { branches, fallback } => {
+        TemplateIrNodeKind::BranchChain {
+            branches, fallback, ..
+        } => {
             let branches = branches.clone();
             let fallback = *fallback;
             for branch in &branches {

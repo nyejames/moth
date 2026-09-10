@@ -25,6 +25,7 @@ use crate::compiler_frontend::datatypes::definitions::{
     FunctionTypeDefinition, StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, GenericParameterId, GenericParameterListId, NominalTypeId,
     TypeConstructor, TypeId,
@@ -39,7 +40,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
 
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
@@ -218,19 +218,11 @@ fn register_single_param_list(
     env: &mut TypeEnvironment,
     string_table: &mut StringTable,
 ) -> GenericParameterListId {
-    use crate::compiler_frontend::datatypes::generic_parameters::{
-        GenericParameter, GenericParameterList, TypeParameterId,
-    };
-    let list = GenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name: string_table.intern("T"),
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        }],
-    };
-    env.register_generic_parameter_list(&list, &FxHashMap::default())
-        .list_id
+    env.register_generic_parameter_list(
+        [(TypeParameterId(0), string_table.intern("T"))].into_iter(),
+        &FxHashMap::default(),
+    )
+    .list_id
 }
 
 /// Builds a test registry with one registered external type at `@test/canvas.Canvas`.
@@ -1189,21 +1181,12 @@ fn exported_generic_parameter_identity_is_equal_across_distinct_generic_paramete
     // parameter gets GenericParameterId(1).
     let _ = env_a.register_synthetic_generic_parameter(string_table.intern("dummy"));
 
-    use crate::compiler_frontend::datatypes::generic_parameters::{
-        GenericParameter, GenericParameterList, TypeParameterId,
-    };
+    let parameter = (TypeParameterId(0), string_table.intern("T"));
 
-    let list = GenericParameterList {
-        parameters: vec![GenericParameter {
-            id: TypeParameterId(0),
-            name: string_table.intern("T"),
-            location: SourceLocation::default(),
-            trait_bounds: Vec::new(),
-        }],
-    };
-
-    let registered_a = env_a.register_generic_parameter_list(&list, &FxHashMap::default());
-    let registered_b = env_b.register_generic_parameter_list(&list, &FxHashMap::default());
+    let registered_a =
+        env_a.register_generic_parameter_list([parameter].into_iter(), &FxHashMap::default());
+    let registered_b =
+        env_b.register_generic_parameter_list([parameter].into_iter(), &FxHashMap::default());
 
     let param_id_a = registered_a.canonical_by_local[&TypeParameterId(0)];
     let param_id_b = registered_b.canonical_by_local[&TypeParameterId(0)];
@@ -1634,7 +1617,7 @@ fn canonical_trait_identity_carries_no_local_ids_or_paths() {
         assert!(
             !debug.contains("TraitId(")
                 && !debug.contains("StringId(")
-                && !debug.contains("FileId("),
+                && !debug.contains("SourceId("),
             "canonical trait identity must not embed local IDs: {debug}"
         );
         assert!(

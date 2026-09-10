@@ -15,7 +15,7 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::operators::HirUnaryOp;
 use crate::compiler_frontend::hir::statements::HirStatement;
-use crate::compiler_frontend::tokenizer::tokens::SourceLocation;
+use crate::compiler_frontend::source::SourceSpan;
 
 use super::super::LoweredExpression;
 use super::RuntimeRpnTree;
@@ -27,12 +27,12 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_runtime_rpn_expression(
         &mut self,
         rpn: &ExpressionRpn,
-        location: &SourceLocation,
+        source_span: &Option<SourceSpan>,
         expr_type_id: FrontendTypeId,
     ) -> Result<LoweredExpression, CompilerError> {
-        let tree = self.build_runtime_rpn_tree(rpn, location)?;
-        let mut lowered = self.lower_runtime_tree_node(&tree, location)?;
-        let expected_ty = self.lower_type_id(expr_type_id, location)?;
+        let tree = self.build_runtime_rpn_tree(rpn, source_span)?;
+        let mut lowered = self.lower_runtime_tree_node(&tree, source_span)?;
+        let expected_ty = self.lower_type_id(expr_type_id, source_span)?;
         lowered.value.ty = expected_ty;
         Ok(lowered)
     }
@@ -45,11 +45,11 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_tree_value_to_current_block(
         &mut self,
         node: &RuntimeRpnTree,
-        location: &SourceLocation,
+        source_span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
-        let lowered = self.lower_runtime_tree_node(node, location)?;
+        let lowered = self.lower_runtime_tree_node(node, source_span)?;
         for prelude in lowered.prelude {
-            self.emit_statement_to_current_block(prelude, location)?;
+            self.emit_statement_to_current_block(prelude, source_span)?;
         }
         Ok(lowered.value)
     }
@@ -57,7 +57,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_tree_node(
         &mut self,
         node: &RuntimeRpnTree,
-        _location: &SourceLocation,
+        _source_span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, CompilerError> {
         match node {
             RuntimeRpnTree::Leaf(expression) => {
@@ -72,16 +72,12 @@ impl<'a> HirBuilder<'a> {
                 }
             }
 
-            RuntimeRpnTree::Unary {
-                op,
-                operand,
-                location,
-            } => {
+            RuntimeRpnTree::Unary { op, operand, span } => {
                 let mut prelude = Vec::new();
                 let lowered_operand =
-                    self.lower_runtime_tree_child_for_parent(&mut prelude, operand, location)?;
-                let region = self.current_region_or_error(location)?;
-                let hir_op = self.lower_unary_op(op, location)?;
+                    self.lower_runtime_tree_child_for_parent(&mut prelude, operand, span)?;
+                let region = self.current_region_or_error(span)?;
+                let hir_op = self.lower_unary_op(op, span)?;
                 let result_ty = match hir_op {
                     HirUnaryOp::Not => builtin_type_ids::BOOL,
                     HirUnaryOp::Neg => lowered_operand.ty,
@@ -93,7 +89,7 @@ impl<'a> HirBuilder<'a> {
                         self.classify_checked_numeric_negation(&lowered_operand)
                 {
                     for prelude_statement in prelude.drain(..) {
-                        self.emit_statement_to_current_block(prelude_statement, location)?;
+                        self.emit_statement_to_current_block(prelude_statement, span)?;
                     }
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
@@ -101,7 +97,7 @@ impl<'a> HirBuilder<'a> {
                             operand: lowered_operand,
                         },
                         numeric_result_ty,
-                        location,
+                        span,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],
@@ -109,52 +105,48 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                Ok(LoweredExpression {
-                    prelude,
-                    value: self.make_expression(
-                        location,
-                        HirExpressionKind::UnaryOp {
-                            op: hir_op,
-                            operand: Box::new(lowered_operand),
-                        },
-                        result_ty,
-                        ValueKind::RValue,
-                        region,
-                    ),
-                })
+                let value = self.make_expression(
+                    span,
+                    HirExpressionKind::UnaryOp {
+                        op: hir_op,
+                        operand: Box::new(lowered_operand),
+                    },
+                    result_ty,
+                    ValueKind::RValue,
+                    region,
+                );
+                Ok(LoweredExpression { prelude, value })
             }
             RuntimeRpnTree::Binary {
                 left,
                 op,
                 right,
-                location,
+                span,
             } => {
                 if matches!(op, Operator::And | Operator::Or) {
-                    return self.lower_short_circuit_binary_expression(left, op, right, location);
+                    return self.lower_short_circuit_binary_expression(left, op, right, span);
                 }
 
                 let mut prelude = Vec::new();
                 let lowered_left =
-                    self.lower_runtime_tree_child_for_parent(&mut prelude, left, location)?;
+                    self.lower_runtime_tree_child_for_parent(&mut prelude, left, span)?;
                 let lowered_right =
-                    self.lower_runtime_tree_child_for_parent(&mut prelude, right, location)?;
-                let region = self.current_region_or_error(location)?;
+                    self.lower_runtime_tree_child_for_parent(&mut prelude, right, span)?;
+                let region = self.current_region_or_error(span)?;
 
                 if matches!(op, Operator::Range) {
                     let range_ty = builtin_type_ids::RANGE;
-                    return Ok(LoweredExpression {
-                        prelude,
-                        value: self.make_expression(
-                            location,
-                            HirExpressionKind::Range {
-                                start: Box::new(lowered_left),
-                                end: Box::new(lowered_right),
-                            },
-                            range_ty,
-                            ValueKind::RValue,
-                            region,
-                        ),
-                    });
+                    let value = self.make_expression(
+                        span,
+                        HirExpressionKind::Range {
+                            start: Box::new(lowered_left),
+                            end: Box::new(lowered_right),
+                        },
+                        range_ty,
+                        ValueKind::RValue,
+                        region,
+                    );
+                    return Ok(LoweredExpression { prelude, value });
                 }
 
                 // Numeric arithmetic is lowered as a checked NumericOp statement. Comparisons
@@ -164,19 +156,18 @@ impl<'a> HirBuilder<'a> {
                     self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
                 {
                     for prelude_statement in prelude.drain(..) {
-                        self.emit_statement_to_current_block(prelude_statement, location)?;
+                        self.emit_statement_to_current_block(prelude_statement, span)?;
                     }
                     let (left, right) = self.lower_checked_numeric_binary_operands(
                         numeric_op,
                         lowered_left,
                         lowered_right,
-                        location,
                     )?;
                     let value = self.emit_checked_numeric_value(
                         numeric_op,
                         HirNumericOperands::Binary { left, right },
                         numeric_result_ty,
-                        location,
+                        span,
                     )?;
                     return Ok(LoweredExpression {
                         prelude: vec![],
@@ -184,24 +175,22 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                let hir_op = self.lower_bin_op(op, location)?;
+                let hir_op = self.lower_bin_op(op, span)?;
                 let result_ty =
                     self.infer_binop_result_type(lowered_left.ty, lowered_right.ty, hir_op);
 
-                Ok(LoweredExpression {
-                    prelude,
-                    value: self.make_expression(
-                        location,
-                        HirExpressionKind::BinOp {
-                            op: hir_op,
-                            left: Box::new(lowered_left),
-                            right: Box::new(lowered_right),
-                        },
-                        result_ty,
-                        ValueKind::RValue,
-                        region,
-                    ),
-                })
+                let value = self.make_expression(
+                    span,
+                    HirExpressionKind::BinOp {
+                        op: hir_op,
+                        left: Box::new(lowered_left),
+                        right: Box::new(lowered_right),
+                    },
+                    result_ty,
+                    ValueKind::RValue,
+                    region,
+                );
+                Ok(LoweredExpression { prelude, value })
             }
         }
     }
@@ -210,17 +199,17 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         pending_prelude: &mut Vec<HirStatement>,
         child: &RuntimeRpnTree,
-        location: &SourceLocation,
+        source_span: &Option<SourceSpan>,
     ) -> Result<HirExpression, CompilerError> {
         if self.runtime_tree_needs_current_block_lowering(child) {
             for prelude in pending_prelude.drain(..) {
-                self.emit_statement_to_current_block(prelude, location)?;
+                self.emit_statement_to_current_block(prelude, source_span)?;
             }
 
-            return self.lower_runtime_tree_value_to_current_block(child, location);
+            return self.lower_runtime_tree_value_to_current_block(child, source_span);
         }
 
-        let lowered = self.lower_runtime_tree_node(child, location)?;
+        let lowered = self.lower_runtime_tree_node(child, source_span)?;
         pending_prelude.extend(lowered.prelude);
         Ok(lowered.value)
     }

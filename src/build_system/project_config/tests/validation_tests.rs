@@ -25,7 +25,6 @@ use crate::builder_surface::config_schema::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::SourceLocation;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidConfigReason, InvalidOutputFolderReason,
 };
@@ -37,8 +36,8 @@ use crate::compiler_frontend::folded_value::{
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationRequest, FoldedConfigDeclaration, compile_config_source,
 };
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
@@ -81,14 +80,6 @@ fn with_required_project(
     declarations
 }
 
-fn test_location() -> SourceLocation {
-    let mut string_table = StringTable::new();
-    let scope =
-        InternedPath::try_from_filesystem_path(Path::new("project/config.moth"), &mut string_table)
-            .expect("the test path is UTF-8");
-    SourceLocation::new(scope, Default::default(), Default::default())
-}
-
 /// Validate one folded value against one schema field through the production recursion.
 fn validate_field(
     schema: &ConfigSchema,
@@ -101,10 +92,9 @@ fn validate_field(
         schema,
         field_indexes: &field_indexes,
     };
-    let location = test_location();
     let mut errors = Vec::new();
     let mut diagnostics = super::ValueDiagnosticContext {
-        location: &location,
+        span: None,
         string_table,
         errors: &mut errors,
     };
@@ -650,9 +640,9 @@ fn validate_and_apply_with_surface(
             .map(|(name, value)| FoldedConfigDeclaration {
                 name: string_table.intern(name),
                 value,
-                location: test_location(),
-                name_location: test_location(),
-                direct_field_locations: Vec::new(),
+                span: None,
+                name_span: None,
+                direct_field_spans: Vec::new(),
             })
             .collect(),
         resolution_records: Vec::new(),
@@ -701,7 +691,7 @@ fn applies_grouped_project_record_to_config_fields() {
     assert_eq!(config.license, Some("MIT".to_owned()));
     assert_eq!(config.template_const_loop_iteration_limit, 500);
 
-    // Every compiler-owned field records its setting location.
+    // Synthetic declarations carry no authored spans, so validation must not fabricate them.
     for field_name in [
         "name",
         "entry_root",
@@ -711,8 +701,8 @@ fn applies_grouped_project_record_to_config_fields() {
         "template_const_loop_iteration_limit",
     ] {
         assert!(
-            config.setting_locations.contains_key(field_name),
-            "field '{field_name}' should record its setting location"
+            config.setting_span(field_name).is_none(),
+            "field '{field_name}' should not fabricate a setting span"
         );
     }
 }
@@ -736,13 +726,13 @@ fn omitted_optional_project_metadata_stays_absent() {
     assert_eq!(config.version, None);
     assert_eq!(config.author, None);
     assert_eq!(config.license, None);
-    assert!(!config.setting_locations.contains_key("version"));
-    assert!(!config.setting_locations.contains_key("author"));
-    assert!(!config.setting_locations.contains_key("license"));
+    assert!(config.setting_span("version").is_none());
+    assert!(config.setting_span("author").is_none());
+    assert!(config.setting_span("license").is_none());
     assert!(
-        !config
-            .setting_locations
-            .contains_key("template_const_loop_iteration_limit")
+        config
+            .setting_span("template_const_loop_iteration_limit")
+            .is_none()
     );
 }
 
@@ -934,9 +924,9 @@ fn rejects_grouped_project_entry_root_symlink_outside_the_project() {
                 ("name", text("docs")),
                 ("entry_root", text("sources")),
             ]),
-            location: test_location(),
-            name_location: test_location(),
-            direct_field_locations: Vec::new(),
+            span: None,
+            name_span: None,
+            direct_field_spans: Vec::new(),
         }],
         resolution_records: Vec::new(),
     };
@@ -974,9 +964,9 @@ fn rejects_grouped_project_entry_root_that_is_a_regular_file() {
                 ("name", text("docs")),
                 ("entry_root", text("README.md")),
             ]),
-            location: test_location(),
-            name_location: test_location(),
-            direct_field_locations: Vec::new(),
+            span: None,
+            name_span: None,
+            direct_field_spans: Vec::new(),
         }],
         resolution_records: Vec::new(),
     };
@@ -1049,7 +1039,7 @@ fn applies_grouped_html_section_to_typed_storage() {
     assert_eq!(site_config.page_url_style, PageUrlStyle::NoTrailingSlash);
     assert!(!site_config.redirect_index_html);
 
-    // Every authored field records the section's location for downstream value diagnostics.
+    // Synthetic declarations carry no authored spans, so validation must not fabricate them.
     for field_name in [
         "origin",
         "page_url_style",
@@ -1058,8 +1048,8 @@ fn applies_grouped_html_section_to_typed_storage() {
         "html_inject_core_css",
     ] {
         assert!(
-            config.setting_locations.contains_key(field_name),
-            "field '{field_name}' should record its setting location"
+            config.setting_span(field_name).is_none(),
+            "field '{field_name}' should not fabricate a setting span"
         );
     }
 }
@@ -1151,6 +1141,7 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\n\nhtml #= |\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -1163,6 +1154,7 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
         },
         &mut string_table,
     )
+    .result
     .expect("an authored html section should compile to folded declarations");
 
     let mut config = Config::new(PathBuf::from("project"));
@@ -1416,6 +1408,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    custom_note = \"open\",\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -1430,6 +1423,7 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         },
         &mut string_table,
     )
+    .result
     .expect("grouped project metadata should compile");
 
     let project = compiled
@@ -1442,8 +1436,8 @@ fn retains_compiled_project_metadata_type_and_field_location() {
     };
     assert_eq!(
         fields.len(),
-        project.direct_field_locations.len(),
-        "direct field locations must align with folded record fields"
+        project.direct_field_spans.len(),
+        "direct field spans must align with folded record fields"
     );
     let note_index = fields
         .iter()
@@ -1454,8 +1448,8 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)
     );
     assert_ne!(
-        project.direct_field_locations[note_index], project.location,
-        "field initializer location must not collapse to the project record"
+        project.direct_field_spans[note_index], project.span,
+        "field initializer span must not collapse to the project record"
     );
 
     let mut config = Config::new(PathBuf::from("project"));
@@ -1475,8 +1469,8 @@ fn retains_compiled_project_metadata_type_and_field_location() {
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)
     );
     assert_eq!(
-        config.extra_project_fields[0].location,
-        project.direct_field_locations[note_index]
+        config.extra_project_fields[0].span,
+        project.direct_field_spans[note_index]
     );
     assert_eq!(config.extra_project_fields[0].value, text("open"));
 }
@@ -1500,6 +1494,7 @@ fn applies_direct_project_config_global_through_validation() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    version #Config of String,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -1512,6 +1507,7 @@ fn applies_direct_project_config_global_through_validation() {
         },
         &mut string_table,
     )
+    .result
     .expect("builder global should fold before validation");
     let mut config = Config::new(PathBuf::from("project"));
     apply_result(validate_and_apply_config_declarations(
@@ -1535,6 +1531,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             canonical_path: Path::new("/project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= |\n    name = \"docs\",\n    author #Config of String?,\n|\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
@@ -1547,6 +1544,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
         },
         &mut string_table,
     )
+    .result
     .expect("optional config absence should compile");
 
     let author_record = compiled

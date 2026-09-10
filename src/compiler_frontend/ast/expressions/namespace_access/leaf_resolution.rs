@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::expressions::external_namespace_members::{
     parse_external_namespace_constant_member, parse_external_namespace_function_member,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_dispatch::{
-    ExpressionOperandInput, push_expression_operand_at_location,
+    ExpressionOperandInput, push_expression_operand_with_span,
 };
 use crate::compiler_frontend::ast::expressions::source_function_calls::{
     SourceCallableMemberInput, parse_source_callable_member,
@@ -25,9 +25,10 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceValueMember;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::{FileTokens, SourceLocation};
+use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 
 /// Shared mutable state passed to leaf resolution helpers.
 ///
@@ -56,7 +57,7 @@ pub(super) fn resolve_namespace_value_member(
     context: &mut LeafDispatchContext<'_, '_>,
     value_member: &NamespaceValueMember,
     member_name: StringId,
-    member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
     expected_result_evidence_allowed: bool,
 ) -> Result<(), ExpressionParseError> {
     match value_member {
@@ -64,12 +65,12 @@ pub(super) fn resolve_namespace_value_member(
             context,
             symbol_path,
             member_name,
-            member_location,
+            member_span,
             expected_result_evidence_allowed,
         ),
 
         NamespaceValueMember::ExternalSymbol(symbol_id) => {
-            resolve_external_value_member(context, *symbol_id, member_name, member_location)
+            resolve_external_value_member(context, *symbol_id, member_name, member_span)
         }
     }
 }
@@ -87,7 +88,7 @@ fn resolve_source_value_member(
     context: &mut LeafDispatchContext<'_, '_>,
     symbol_path: &InternedPath,
     member_name: StringId,
-    member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
     expected_result_evidence_allowed: bool,
 ) -> Result<(), ExpressionParseError> {
     let LeafDispatchContext {
@@ -104,7 +105,7 @@ fn resolve_source_value_member(
         .top_level_declarations
         .get_by_path(symbol_path)
     else {
-        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into());
+        return Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into());
     };
 
     // Namespace fields are not first-class function values. A function member must
@@ -119,7 +120,7 @@ fn resolve_source_value_member(
             signature,
             generic_template,
             visible_name: member_name,
-            call_location: member_location.clone(),
+            call_span: member_span,
             context,
             expression,
             allow_boundary_catch: *allow_boundary_catch,
@@ -128,15 +129,11 @@ fn resolve_source_value_member(
             string_table,
         })
     } else {
-        let reference_expression = reference_expression_from_declaration(
-            declaration,
-            context,
-            type_interner,
-            member_location.clone(),
-        );
+        let reference_expression =
+            reference_expression_from_declaration(declaration, context, type_interner, member_span);
         token_stream.advance();
 
-        push_expression_operand_at_location(
+        push_expression_operand_with_span(
             token_stream,
             context,
             type_interner,
@@ -145,7 +142,7 @@ fn resolve_source_value_member(
             *allow_boundary_catch,
             ExpressionOperandInput {
                 operand: reference_expression,
-                wrapper_location: member_location,
+                wrapper_span: member_span,
             },
         )
     }
@@ -164,7 +161,7 @@ fn resolve_external_value_member(
     context: &mut LeafDispatchContext<'_, '_>,
     symbol_id: ExternalSymbolId,
     member_name: StringId,
-    member_location: SourceLocation,
+    member_span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     let LeafDispatchContext {
         token_stream,
@@ -180,7 +177,7 @@ fn resolve_external_value_member(
             parse_external_namespace_function_member(ExternalNamespaceFunctionMemberInput {
                 function_id,
                 member_name,
-                member_location,
+                member_span,
                 token_stream,
                 context,
                 type_interner,
@@ -194,7 +191,7 @@ fn resolve_external_value_member(
             parse_external_namespace_constant_member(ExternalNamespaceConstantMemberInput {
                 constant_id,
                 member_name,
-                member_location,
+                member_span,
                 token_stream,
                 context,
                 type_interner,
@@ -207,7 +204,7 @@ fn resolve_external_value_member(
         // The orchestration layer filters type symbols before calling the value leaf
         // resolver, so this branch is a proven internal invariant violation.
         ExternalSymbolId::Type(_) => {
-            Err(CompilerDiagnostic::unknown_value_name(member_name, member_location).into())
+            Err(CompilerDiagnostic::unknown_value_name(member_name, member_span).into())
         }
     }
 }

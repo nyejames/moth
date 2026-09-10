@@ -8,7 +8,7 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind, SourceLocation,
+    AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -33,6 +33,7 @@ use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -72,21 +73,20 @@ pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
 // ---------------------------------------------------------------------------
 // Parameter / declaration helpers
 // ---------------------------------------------------------------------------
-
 pub(crate) fn param_with_type_id(
     name: InternedPath,
     type_id: TypeId,
     mutable: bool,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Declaration {
-    param_declaration(name, type_id, mutable, location)
+    param_declaration(name, type_id, mutable, span)
 }
 
 pub(crate) fn param_declaration(
     name: InternedPath,
     type_id: TypeId,
     mutable: bool,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Declaration {
     let value_mode = if mutable {
         ValueMode::MutableOwned
@@ -98,11 +98,12 @@ pub(crate) fn param_declaration(
         id: name,
         value: Expression::new(
             ExpressionKind::NoValue,
-            location,
+            span,
             type_id,
             DataType::Inferred,
             value_mode,
         ),
+        binding_span: None,
         config_qualifier: None,
     }
 }
@@ -112,12 +113,11 @@ pub(crate) fn loop_binding_with_type_id(
     type_id: TypeId,
     string_table: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
 ) -> Declaration {
-    let location = crate::compiler_frontend::tokenizer::tokens::SourceLocation::default();
     param_with_type_id(
         InternedPath::from_single_str(name, string_table),
         type_id,
         false,
-        location,
+        None,
     )
 }
 
@@ -132,14 +132,14 @@ pub(crate) fn loop_binding_with_type_id(
 pub(crate) fn inferred_type_reference_expr(
     name: InternedPath,
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     Expression::reference_with_type_id(
         name,
         DataType::Inferred,
         type_id,
-        location,
+        span,
         value_mode,
         ConstRecordState::RuntimeValue,
     )
@@ -148,14 +148,14 @@ pub(crate) fn inferred_type_reference_expr(
 pub(crate) fn const_record_reference_expr(
     name: InternedPath,
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     Expression::reference_with_type_id(
         name,
         DataType::Inferred,
         type_id,
-        location,
+        span,
         value_mode,
         ConstRecordState::ConstRecord,
     )
@@ -163,12 +163,12 @@ pub(crate) fn const_record_reference_expr(
 
 pub(crate) fn no_value_expr(
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     Expression::new(
         ExpressionKind::NoValue,
-        location,
+        span,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -178,13 +178,13 @@ pub(crate) fn no_value_expr(
 pub(crate) fn runtime_expr(
     items: Vec<ExpressionRpnItem>,
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     let contains_regular_division = items.iter().any(rpn_item_has_regular_division);
     Expression::new(
         ExpressionKind::Runtime(ExpressionRpn { items }),
-        location,
+        span,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -198,15 +198,15 @@ pub(crate) fn runtime_operand_item(expression: Expression) -> ExpressionRpnItem 
 
 pub(crate) fn runtime_operator_item(
     operator: Operator,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
-    ExpressionRpnItem::Operator { operator, location }
+    ExpressionRpnItem::Operator { operator, span }
 }
 
 pub(crate) fn runtime_function_call_item(
     name: InternedPath,
     result_type_ids: Vec<TypeId>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
     let expression_type_id = single_fixture_result_type_id(&result_type_ids);
 
@@ -216,7 +216,7 @@ pub(crate) fn runtime_function_call_item(
             args: vec![],
             result_type_ids,
         },
-        location,
+        span,
         expression_type_id,
         DataType::Inferred,
         ValueMode::MutableOwned,
@@ -227,7 +227,7 @@ pub(crate) fn runtime_handled_function_call_item(
     name: InternedPath,
     result_type_ids: Vec<TypeId>,
     handling: FallibleHandling,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
     let expression_type_id = single_fixture_result_type_id(&result_type_ids);
     let expression_handling = fixture_fallible_expression_handling(&handling);
@@ -238,9 +238,9 @@ pub(crate) fn runtime_handled_function_call_item(
             args: vec![],
             result_type_ids,
             handling: expression_handling,
-            propagation_location: None,
+            propagation_span: None,
         },
-        location,
+        span,
         expression_type_id,
         DataType::Inferred,
         ValueMode::MutableOwned,
@@ -277,13 +277,13 @@ fn fixture_fallible_expression_handling(handling: &FallibleHandling) -> Fallible
 
 pub(crate) fn collection_expr(
     items: Vec<Expression>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     let contains_regular_division = items.iter().any(|item| item.contains_regular_division);
     Expression::new(
         ExpressionKind::Collection(items),
-        location,
+        span,
         builtin_type_ids::NONE,
         DataType::Inferred,
         value_mode,
@@ -296,14 +296,14 @@ pub(crate) fn multi_bind_target(
     type_id: TypeId,
     value_mode: ValueMode,
     kind: MultiBindTargetKind,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> MultiBindTarget {
     MultiBindTarget {
         id,
         type_id,
         value_mode,
         kind,
-        location,
+        span,
     }
 }
 
@@ -313,14 +313,14 @@ pub(crate) fn field_access_node(
     type_id: TypeId,
     const_record_state: ConstRecordState,
     value_mode: ValueMode,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> AstNode {
     let mut expression = Expression::new(
         ExpressionKind::FieldAccess {
             base: Box::new(base),
             field,
         },
-        location.clone(),
+        span,
         type_id,
         DataType::Inferred,
         value_mode,
@@ -329,7 +329,7 @@ pub(crate) fn field_access_node(
 
     AstNode {
         kind: NodeKind::ExpressionStatement(expression),
-        location,
+        span,
         scope: InternedPath::new(),
     }
 }
@@ -339,7 +339,7 @@ pub(crate) fn choice_construct_expr(
     tag: usize,
     fields: Vec<Declaration>,
     type_id: TypeId,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
 ) -> Expression {
     Expression::choice_construct(
@@ -349,7 +349,7 @@ pub(crate) fn choice_construct_expr(
             fields,
             diagnostic_type: DataType::Inferred,
             type_id,
-            location,
+            span,
             value_mode,
         },
     )
@@ -358,14 +358,9 @@ pub(crate) fn choice_construct_expr(
 pub(crate) fn option_none_expr(
     inner_type_id: TypeId,
     type_environment: &mut TypeEnvironment,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Expression {
-    Expression::option_none_with_type_id(
-        inner_type_id,
-        DataType::Inferred,
-        type_environment,
-        location,
-    )
+    Expression::option_none_with_type_id(inner_type_id, DataType::Inferred, type_environment, span)
 }
 
 pub(crate) fn result_carrier_type_id(
@@ -381,7 +376,7 @@ pub(crate) fn handled_result_expr(
     handling: FallibleHandling,
     result_type_id: TypeId,
     result_type_ids: Vec<TypeId>,
-    location: SourceLocation,
+    span: Option<SourceSpan>,
 ) -> Expression {
     let expression_handling = match &handling {
         FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
@@ -393,7 +388,7 @@ pub(crate) fn handled_result_expr(
         expression_handling,
         result_type_id,
         DataType::Inferred,
-        location.clone(),
+        span,
     );
 
     match handling {
@@ -563,7 +558,7 @@ pub(crate) fn choice_type_id(
                         .map(|field| FieldDefinition {
                             name: field.id.clone(),
                             type_id: field.value.type_id,
-                            location: field.value.location.clone(),
+                            span: field.value.span,
                         })
                         .collect::<Vec<_>>();
                     ChoiceVariantPayloadDefinition::Record {
@@ -571,7 +566,7 @@ pub(crate) fn choice_type_id(
                     }
                 }
             },
-            location: variant.location.clone(),
+            span: variant.span,
         })
         .collect::<Vec<_>>();
 
@@ -616,7 +611,7 @@ pub(crate) fn build_ast_with_choices(
                 .map(|field| FieldDefinition {
                     name: field.id.clone(),
                     type_id: field.value.type_id,
-                    location: field.value.location.clone(),
+                    span: field.value.span,
                 })
                 .collect::<Vec<_>>();
 
@@ -654,7 +649,7 @@ pub(crate) fn build_ast_with_choices(
                             .map(|field| FieldDefinition {
                                 name: field.id.clone(),
                                 type_id: field.value.type_id,
-                                location: field.value.location.clone(),
+                                span: field.value.span,
                             })
                             .collect::<Vec<_>>();
                         ChoiceVariantPayloadDefinition::Record {
@@ -662,7 +657,7 @@ pub(crate) fn build_ast_with_choices(
                         }
                     }
                 },
-                location: variant.location.clone(),
+                span: variant.span,
             })
             .collect::<Vec<_>>();
 

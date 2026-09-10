@@ -21,7 +21,7 @@ pub(crate) fn check_signature_common_mistake(
     token_stream: &FileTokens,
 ) -> Option<CompilerDiagnostic> {
     let current = token_stream.current_token_kind();
-    let location = token_stream.current_location();
+    let location = token_stream.current_span();
 
     match current {
         // `(` where `|` is expected for parameters/fields

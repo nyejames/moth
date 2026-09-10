@@ -128,7 +128,7 @@ impl<'a> HirBuilder<'a> {
                 .push(ModuleDocFragment {
                     kind,
                     rendered_text: self.string_table.resolve(fragment.value).to_owned(),
-                    location: fragment.location.to_owned(),
+                    span: fragment.span,
                 });
         }
 

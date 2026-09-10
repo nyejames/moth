@@ -13,13 +13,14 @@ pub(crate) use validation::validate_directory_output_settings;
 
 use crate::build_system::create_project_modules::extract_source_code;
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
-use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::single_source_compilation::{
-    ConfigCompilationRequest, compile_config_source,
+    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
+use crate::compiler_frontend::source::{SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
@@ -57,6 +58,7 @@ pub fn load_project_config(
     config: &mut Config,
     services: &ProjectConfigParseServices<'_>,
     string_table: &mut StringTable,
+    project_source_files: Option<&mut SourceDatabase>,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     let config_path = config.config_file_path();
 
@@ -68,10 +70,10 @@ pub fn load_project_config(
         config.extra_project_fields.clear();
         if config.entry_dir.is_dir() {
             return Err(CompilerMessages::from_diagnostic(
-                config.config_diagnostic(
-                    "config.moth",
+                CompilerDiagnostic::invalid_config_reason(
+                    Some(string_table.intern("config.moth")),
                     InvalidConfigReason::MissingConfigFile,
-                    string_table,
+                    None,
                 ),
                 string_table.clone(),
             ));
@@ -79,8 +81,22 @@ pub fn load_project_config(
 
         return validate_directory_output_settings_if_needed(config, string_table);
     }
+    let Some(project_source_files) = project_source_files else {
+        return Err(CompilerMessages::from_error(
+            CompilerError::compiler_error(
+                "config.moth exists but the project source database is absent",
+            ),
+            string_table.clone(),
+        ));
+    };
 
-    compile_project_config_file(config, &config_path, services, string_table)
+    compile_project_config_file(
+        config,
+        &config_path,
+        services,
+        project_source_files,
+        string_table,
+    )
 }
 
 // -------------------------
@@ -96,31 +112,71 @@ pub(crate) fn compile_project_config_file(
     config: &mut Config,
     config_path: &Path,
     services: &ProjectConfigParseServices<'_>,
+    project_source_files: &mut SourceDatabase,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
-    // A failed reload must not leave prior project-global/config provenance visible to the next
-    // frontend invocation.
     config.project_config_loaded = false;
     config.config_resolution_records.clear();
     config.extra_project_fields.clear();
-    // 1. Compile the config source to folded values.
+    config.setting_spans.clear();
+    config.html_section = crate::projects::settings::HtmlSectionConfig::default();
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         CompilerMessages::from_error(
             CompilerError::file_error(
                 config_path,
                 format!("Failed to canonicalize config path: {error}"),
-                string_table,
             ),
             string_table.clone(),
         )
     })?;
-    let source_code = extract_source_code(&canonical_config_path, string_table)
+
+    // Register config before tokenization so its retained syntax and diagnostics share the
+    // project identity context with every source discovered later. Config sits outside the entry
+    // root, so its own directory roots the logical path and yields a bare `config.moth`.
+    let config_file_id = project_source_files
+        .insert(
+            canonical_config_path.clone(),
+            SourceKind::Compiler(SourceFileKind::Moth),
+            &canonical_config_path,
+            None,
+            string_table,
+        )
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-    let compiled_config = compile_config_source(
+
+    let source_code = match extract_source_code(&canonical_config_path, string_table) {
+        Ok(source_code) => source_code,
+        Err(error) => {
+            project_source_files
+                .record_source_load_error(config_file_id, error.clone())
+                .map_err(|slot_error| {
+                    CompilerMessages::from_error(slot_error, string_table.clone())
+                })?;
+            return Err(CompilerMessages::from_error(error, string_table.clone()));
+        }
+    };
+    project_source_files
+        .retain_text(config_file_id, source_code)
+        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    let source_code = project_source_files
+        .retained_text(config_file_id)
+        .ok_or_else(|| {
+            CompilerMessages::from_error(
+                CompilerError::compiler_error(
+                    "registered config source lost its retained source text",
+                ),
+                string_table.clone(),
+            )
+        })?;
+    let ConfigCompilationOutcome {
+        result,
+        file_id: outcome_file_id,
+        span_builder,
+    } = compile_config_source(
         ConfigCompilationRequest {
             authored_path: config_path,
             canonical_path: &canonical_config_path,
-            source_code: &source_code,
+            file_id: config_file_id,
+            source_code,
             style_directives: services.style_directives,
             binding_packages: &services.frontend_surface.binding_packages,
             build_config_inputs: services.build_config_inputs,
@@ -132,13 +188,37 @@ pub(crate) fn compile_project_config_file(
                 .project_field_config_policies(),
         },
         string_table,
-    )?;
+    );
+    let validated_config = match result {
+        Ok(compiled_config) => {
+            validate_and_apply_compiled_config(config, &compiled_config, services, string_table)
+                .map(|settings| (compiled_config, settings))
+        }
+        Err(messages) => Err(messages),
+    };
 
+    // Both compiler and build-owned diagnostics are complete before the source becomes immutable.
+    project_source_files
+        .install_extended_spans(outcome_file_id, span_builder.freeze())
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+
+    let (compiled_config, validated_output_settings) = validated_config?;
+    // Retain provenance until the build boundary projects source providers and `@project`.
+    config.config_resolution_records = compiled_config.resolution_records;
+    config.project_config_loaded = true;
+    Ok(validated_output_settings)
+}
+
+fn validate_and_apply_compiled_config(
+    config: &mut Config,
+    compiled_config: &CompiledConfigSource,
+    services: &ProjectConfigParseServices<'_>,
+    string_table: &mut StringTable,
+) -> Result<Option<ValidatedDirectoryOutputSettings>, CompilerMessages> {
     let mut errors = Vec::new();
-    // 2. Validate and apply the folded declarations to the live Config object.
     match validation::validate_and_apply_config_declarations(
         config,
-        &compiled_config,
+        compiled_config,
         &services.frontend_surface.config_schemas,
         string_table,
     ) {
@@ -147,11 +227,11 @@ pub(crate) fn compile_project_config_file(
             errors.append(&mut validation_errors);
         }
         Err(ConfigApplyError::Compiler(error)) => {
-            return Err(CompilerMessages::from_error(error, string_table.clone()));
+            return Err(CompilerMessages::from_error_ref(error, string_table));
         }
     }
 
-    // 3. Validate directory output settings after all config values are applied.
+    // Output policy needs the completed config values, even when another field was diagnosed.
     let validated_output_settings = if config.entry_dir.is_dir() {
         match validate_directory_output_settings(config, string_table) {
             Ok(settings) => Some(settings),
@@ -164,13 +244,7 @@ pub(crate) fn compile_project_config_file(
         None
     };
 
-    // 4. Aggregate all errors into one CompilerMessages payload.
     if errors.is_empty() {
-        // Keep compiler-owned resolution provenance with the live bootstrap config until the
-        // build boundary projects source providers and `@project`. Successful build results clear
-        // this transient handoff after frontend compilation.
-        config.config_resolution_records = compiled_config.resolution_records;
-        config.project_config_loaded = true;
         Ok(validated_output_settings)
     } else {
         Err(CompilerMessages::from_diagnostics(

@@ -43,10 +43,11 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
     InvalidPageMetadataReason, InvalidTemplateDirectiveReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, UnsupportedOperatorCategory,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
+    UnsupportedOperatorCategory,
 };
+use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
-use crate::compiler_frontend::datatypes::display::display_type;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -54,8 +55,7 @@ use crate::compiler_frontend::source_packages::root_file::{
     dependency_component_is_config_file, dependency_component_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tokenizer::tokens::TokenKind;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 
 pub(crate) fn invalid_generic_application_message(
     reason: GenericApplicationErrorReason,
@@ -157,7 +157,7 @@ pub(crate) fn invalid_map_literal_message(reason: InvalidMapLiteralReason) -> St
 
 pub(crate) fn invalid_generic_parameter_message(
     reason: &InvalidGenericParameterReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     match reason {
         InvalidGenericParameterReason::EmptyParameterList
@@ -194,7 +194,7 @@ fn invalid_generic_parameter_static_message(
 pub(crate) fn invalid_template_directive_message(
     directive_name: Option<StringId>,
     reason: InvalidTemplateDirectiveReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = directive_name
         .map(|id| string_table.resolve(id))
@@ -239,7 +239,7 @@ pub(crate) fn namespace_misuse_message(
     name: StringId,
     expected: NameNamespace,
     found: NameNamespace,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(name);
 
@@ -405,7 +405,7 @@ pub(crate) fn unsupported_external_function_message(
     function_name: StringId,
     package_path: Option<StringId>,
     backend_name: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let function_name = string_table.resolve(function_name);
     let backend_name = string_table.resolve(backend_name);
@@ -427,7 +427,7 @@ pub(crate) fn invalid_choice_variant_message(
     choice_name: Option<StringId>,
     variant_name: Option<StringId>,
     available_variants: &[StringId],
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let choice_name = choice_name
         .map(|name| string_table.resolve(name).to_owned())
@@ -530,7 +530,7 @@ pub(crate) fn incompatible_choice_comparison_message(
 
 pub(crate) fn deferred_feature_message(
     reason: &DeferredFeatureReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     if let DeferredFeatureReason::NamedFeature { feature } = reason {
         return format!("Deferred feature: {}.", string_table.resolve(*feature));
@@ -592,7 +592,7 @@ pub(crate) fn invalid_range_operand_message(
 
 pub(crate) fn unsupported_builder_package_message(
     package_path: StringId,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let package_path_str = string_table.resolve(package_path);
     format!(
@@ -604,7 +604,7 @@ pub(crate) fn unsupported_builder_package_message(
 pub(crate) fn invalid_page_metadata_message(
     key: StringId,
     reason: InvalidPageMetadataReason,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let key_str = string_table.resolve(key);
     match reason {
@@ -651,7 +651,7 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 /// the path parser's `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
     for component in path.as_components() {
@@ -673,7 +673,7 @@ pub(crate) fn special_file_name_from_path(
 
 fn named_value_or_default(
     name: Option<StringId>,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
     fallback: &'static str,
 ) -> String {
     name.map(|name| format!("'{}'", string_table.resolve(name)))
@@ -689,7 +689,7 @@ fn named_value_or_default(
 ///      `@helper symbol` instead.
 pub(crate) fn support_root_import_suggestion(
     path: &InternedPath,
-    string_table: &StringTable,
+    string_table: &dyn StringTableResolver,
 ) -> String {
     let components = path.as_components();
     let mut suggestion_path: Vec<String> = Vec::new();

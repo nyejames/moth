@@ -283,7 +283,9 @@ fn accumulate_nodes(
                 summary.record_insert_contribution();
             }
 
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 summary.record_control_flow();
 
                 for branch in branches {

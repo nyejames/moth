@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::source::{LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{FileTokens, TokenKind};
 
@@ -28,7 +29,8 @@ type ReactiveSubscriptionResult<T> = Result<T, TemplateError>;
 
 /// Parses and validates a `$(source)` template subscription.
 ///
-/// The token stream enters on `TokenKind::Reactive` and exits on the token after the closing `)`.
+/// The token stream enters on `TokenKind::Reactive` and exits on the token after
+/// the closing `)`.
 pub(super) fn parse_reactive_subscription(
     token_stream: &mut FileTokens,
     context: &ScopeContext,
@@ -36,13 +38,21 @@ pub(super) fn parse_reactive_subscription(
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
 ) -> ReactiveSubscriptionResult<()> {
-    let subscription_location = token_stream.current_location();
+    let subscription_token_span = token_stream.current_token().span;
+    let subscription_span = Some(SourceSpan::new(
+        token_stream.file_id,
+        subscription_token_span,
+    ));
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::OpenParenthesis {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
-            subscription_location,
+        return Err(with_token_span(
+            token_stream,
+            subscription_token_span,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
+                subscription_span,
+            ),
         )
         .into());
     }
@@ -50,9 +60,12 @@ pub(super) fn parse_reactive_subscription(
     token_stream.advance();
     let source_name = match token_stream.current_token_kind() {
         TokenKind::CloseParenthesis => {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::ReactiveSubscriptionEmpty,
-                token_stream.current_location(),
+            return Err(with_current_token_span(
+                token_stream,
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::ReactiveSubscriptionEmpty,
+                    Some(token_stream.current_span()),
+                ),
             )
             .into());
         }
@@ -60,15 +73,19 @@ pub(super) fn parse_reactive_subscription(
         TokenKind::Symbol(source_name) => *source_name,
 
         _ => {
-            return Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
-                token_stream.current_location(),
+            return Err(with_current_token_span(
+                token_stream,
+                CompilerDiagnostic::invalid_template_structure(
+                    InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression,
+                    Some(token_stream.current_span()),
+                ),
             )
             .into());
         }
     };
 
-    let source_location = token_stream.current_location();
+    let source_token_span = token_stream.current_token().span;
+    let source_span = Some(SourceSpan::new(token_stream.file_id, source_token_span));
 
     token_stream.advance();
     if token_stream.current_token_kind() != &TokenKind::CloseParenthesis {
@@ -78,25 +95,33 @@ pub(super) fn parse_reactive_subscription(
             InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression
         };
 
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            reason,
-            token_stream.current_location(),
+        return Err(with_current_token_span(
+            token_stream,
+            CompilerDiagnostic::invalid_template_structure(
+                reason,
+                Some(token_stream.current_span()),
+            ),
         )
         .into());
     }
 
     let Some(reference) = context.get_reference(&source_name) else {
-        return Err(CompilerDiagnostic::unexpected_token(
-            TokenKind::Symbol(source_name),
-            source_location,
+        return Err(with_token_span(
+            token_stream,
+            source_token_span,
+            CompilerDiagnostic::unexpected_token(TokenKind::Symbol(source_name), source_span),
         )
         .into());
     };
 
     let Some(source) = reference.value.reactive_source.clone() else {
-        return Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource,
-            source_location,
+        return Err(with_token_span(
+            token_stream,
+            source_token_span,
+            CompilerDiagnostic::invalid_template_structure(
+                InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource,
+                source_span,
+            ),
         )
         .into());
     };
@@ -105,7 +130,7 @@ pub(super) fn parse_reactive_subscription(
         reference.id.to_owned(),
         reference.value.diagnostic_type.to_owned(),
         reference.value.type_id,
-        source_location,
+        source_span,
         reference.value.value_mode.to_owned(),
         reference.value.const_record_state,
     )
@@ -119,10 +144,32 @@ pub(super) fn parse_reactive_subscription(
             type_environment,
             construction_context,
         },
-        &subscription_location,
+        subscription_span,
         string_table,
     )?;
 
     token_stream.advance();
     Ok(())
+}
+
+/// Attach the authored span for a reactive-head syntax diagnostic.
+fn with_current_token_span(
+    token_stream: &FileTokens,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(token_stream.current_span());
+    }
+    diagnostic
+}
+
+fn with_token_span(
+    token_stream: &FileTokens,
+    span: LocalSpan,
+    mut diagnostic: CompilerDiagnostic,
+) -> CompilerDiagnostic {
+    if diagnostic.primary_span.is_none() {
+        diagnostic.primary_span = Some(SourceSpan::new(token_stream.file_id, span));
+    }
+    diagnostic
 }

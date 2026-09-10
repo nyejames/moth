@@ -276,26 +276,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => continue,
             };
             if !generic_parameters.is_empty() {
-                let parameters = GenericParameterList {
-                    parameters: generic_parameters
-                        .iter()
-                        .enumerate()
-                        .map(|(index, parameter)| GenericParameter {
-                            id: TypeParameterId(index as u32),
-                            name: string_table.intern(parameter.identity.authored_name()),
-                            location: Default::default(),
-                            trait_bounds: Vec::new(),
-                        })
-                        .collect(),
-                };
-                let metadata =
-                    crate::compiler_frontend::headers::module_symbols::GenericDeclarationMetadata {
-                        kind,
-                        parameters,
-                        declaration_location: Default::default(),
-                    };
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(local_path.clone(), metadata.clone());
+                    .insert(local_path.clone(), kind.clone());
 
                 let internal_path = self
                     .type_environment
@@ -307,7 +289,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )
                     })?;
                 Rc::make_mut(&mut self.generic_declarations_by_path)
-                    .insert(internal_path.clone(), metadata);
+                    .insert(internal_path.clone(), kind);
 
                 if let PublicDeclarationSemantics::Struct(_) = &record.semantics {
                     let fields = self
@@ -328,11 +310,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     id: local_path,
                     value: Expression::new(
                         ExpressionKind::NoValue,
-                        Default::default(),
+                        None,
                         type_id,
                         diagnostic_type,
                         ValueMode::ImmutableReference,
                     ),
+                    binding_span: None,
                     config_qualifier: None,
                 })
                 .ok_or_else(|| {
@@ -421,21 +404,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return Ok(Some(existing.list_id));
         }
 
-        let parsed = GenericParameterList {
-            parameters: parameters
-                .iter()
-                .enumerate()
-                .map(|(index, parameter)| GenericParameter {
-                    id: TypeParameterId(index as u32),
-                    name: string_table.intern(parameter.identity.authored_name()),
-                    location: Default::default(),
-                    trait_bounds: Vec::new(),
-                })
-                .collect(),
-        };
-        let registered = self
-            .type_environment
-            .register_generic_parameter_list(&parsed, &FxHashMap::default());
+        let registered = self.type_environment.register_generic_parameter_list(
+            parameters.iter().enumerate().map(|(index, parameter)| {
+                (
+                    TypeParameterId(index as u32),
+                    string_table.intern(parameter.identity.authored_name()),
+                )
+            }),
+            &FxHashMap::default(),
+        );
         for (index, parameter) in parameters.iter().enumerate() {
             let local_id = registered
                 .canonical_by_local
@@ -493,7 +470,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             fields.push(FieldDefinition {
                 name: field_path.clone(),
                 type_id: field_type_id,
-                location: Default::default(),
+                span: None,
             });
             let default_value = match &field.folded_default {
                 Some(value) => {
@@ -501,7 +478,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
                 None => Expression::new(
                     ExpressionKind::NoValue,
-                    Default::default(),
+                    None,
                     field_type_id,
                     diagnostic_type_spelling(field_type_id, &self.type_environment),
                     ValueMode::ImmutableReference,
@@ -510,6 +487,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             field_declarations.push(Declaration {
                 id: field_path,
                 value: default_value,
+                binding_span: None,
                 config_qualifier: None,
             });
         }
@@ -554,7 +532,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     fields.push(FieldDefinition {
                         name: nominal_path.join_str(&field.name, string_table),
                         type_id: field_type_id,
-                        location: Default::default(),
+                        span: None,
                     });
                 }
                 ChoiceVariantPayloadDefinition::Record {
@@ -565,7 +543,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 name: string_table.intern(&variant.name),
                 tag,
                 payload,
-                location: Default::default(),
+                span: None,
             });
         }
 

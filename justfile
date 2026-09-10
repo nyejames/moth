@@ -47,6 +47,12 @@ bench:
 bench-frontend:
     cargo run --package xtask --bin xtask -- bench-frontend
 
+bench-data-layout:
+    cargo run --package xtask --bin xtask -- bench-data-layout
+
+bench-data-layout-check:
+    cargo run --package xtask --bin xtask -- bench-data-layout-check
+
 bench-check:
     cargo run --package xtask --bin xtask -- bench-check
 
@@ -74,6 +80,10 @@ timers-erasure-check:
 # The one broad-source architecture audit: timer source rules plus the removed-name tripwires.
 source-audit:
     cargo run --quiet --package xtask --bin xtask -- source-audit
+
+# Measure LocalSpan start/length bit-split candidates over the representative corpus.
+span-census:
+    cargo run --quiet --package xtask --bin xtask -- span-census
 
 # Run every curated feature lane. Lanes are package-scoped: `cargo test --workspace` unifies
 # features across the resolve graph and always enables `timers` through xtask's dependency, so it

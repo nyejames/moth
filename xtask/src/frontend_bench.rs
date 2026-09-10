@@ -29,20 +29,45 @@ use crate::benchmark_workspace::{BenchmarkExecutionWorkspace, finalise_workspace
 /// writing any data. Explicit workspace finalisation precedes repository
 /// verification and persistence.
 pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
+    run_frontend_suite(policy, BenchmarkSuiteKind::FrontendPhases)
+}
+
+/// Run the diagnostic/data-layout frontend benchmark suite through the same
+/// in-process engine as the ordinary frontend suite.
+pub(crate) fn run_data_layout_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
+    run_frontend_suite(policy, BenchmarkSuiteKind::DataLayout)
+}
+
+fn run_frontend_suite(
+    policy: BenchmarkRunPolicy,
+    suite_kind: BenchmarkSuiteKind,
+) -> Result<(), String> {
     let prepared = PreparedBenchmarkRun::load(policy.recording())?;
 
-    let cases: Vec<BenchmarkCase> = prepared
-        .manifest
-        .frontend_cases()
-        .filter(|case| policy.selects_case(case.quick))
-        .cloned()
-        .collect();
+    let cases: Vec<BenchmarkCase> = match suite_kind {
+        BenchmarkSuiteKind::FrontendPhases => prepared
+            .manifest
+            .frontend_cases()
+            .filter(|case| policy.selects_case(case.quick))
+            .cloned()
+            .collect(),
+        BenchmarkSuiteKind::DataLayout => prepared
+            .manifest
+            .data_layout_cases()
+            .filter(|case| policy.selects_case(case.quick))
+            .cloned()
+            .collect(),
+        BenchmarkSuiteKind::EndToEndCli => {
+            return Err("CLI cases cannot run through the frontend benchmark suite".to_owned());
+        }
+    };
     let workspace = BenchmarkExecutionWorkspace::create(&prepared.manifest.repository_root)?;
     let context = BenchmarkExecutionContext::frontend(&prepared.manifest, &workspace);
 
     println!(
-        "Running {} frontend benchmark cases: 1 shared preflight + {} measured",
+        "Running {} {} benchmark cases: 1 shared preflight + {} measured",
         cases.len(),
+        suite_kind.display_label(),
         policy.measured_iterations()
     );
 
@@ -65,7 +90,7 @@ pub(crate) fn run_frontend_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), 
             }
             finish_suite_run(
                 case_results,
-                BenchmarkSuiteKind::FrontendPhases,
+                suite_kind,
                 thread_count,
                 policy,
                 &git_revision,

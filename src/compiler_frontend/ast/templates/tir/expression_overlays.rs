@@ -390,7 +390,9 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 Ok(())
             }
 
-            TemplateIrNodeKind::BranchChain { branches, fallback } => {
+            TemplateIrNodeKind::BranchChain {
+                branches, fallback, ..
+            } => {
                 for branch in branches {
                     let (expression, precedence) = self.effective_expression(
                         store,
