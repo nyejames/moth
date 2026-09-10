@@ -8,8 +8,8 @@
 >
 > **Status:**
 > Phase 1 complete. The source, token and diagnostic representation cutover, focused corrections,
-> independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`
-> and `134aebf63`. Phase 2 is paused for external user review; Phases 2–7 remain pending.
+> independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`,
+> `134aebf63` and `749f9c3f0`. The plan and benchmark evidence closeout is committed in `38e68d2a5`.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -74,16 +74,17 @@ CURRENT_SLICE:
 - Validation evidence: `just validate`, the data-layout benchmark, span census, cross-target checks and
   focused correction review passed; current measurements are recorded in the Phase 1 closeout below.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
-  cross-target test-import correction `134aebf63`.
+  cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
+  final plan/evidence closeout `38e68d2a5`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
 LAST_RECORDED_CHECKPOINT:
-Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49` and `134aebf63`; the plan and
-evidence closeout commit is recorded in the external review checkpoint below.
+Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63` and `749f9c3f0`;
+the final plan and evidence closeout is committed in `38e68d2a5`.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic and renderer cutover is committed and validated.
-- The worktree is clean at the code checkpoint while the final plan/evidence update is prepared.
+- The worktree is clean at final closeout commit `38e68d2a5`.
 - Phase 2 remains pending external user review.
 HISTORICAL_ACCEPTED_SLICES:
 The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
@@ -814,17 +815,17 @@ Before accepting the slice:
 
 Every phase ends with an explicit **Audit / style-guide review / validation** subsection containing:
 
-- [x] one-owner and no-duplicate-path audit
-- [x] obsolete adapter/helper/comment/test sweep
-- [x] architecture and stage-boundary audit
-- [x] style-guide and module-organization review
-- [x] focused invariant and integration validation
-- [x] `cargo fmt` when Rust changed
-- [x] required documentation build/check
-- [x] `just validate`; when the refreshed Phase 0 baseline fails, record the exact failure and run/report every independently runnable component without claiming the full gate
-- [x] benchmark evidence required by that phase
-- [x] roadmap/matrix/docs impact review
-- [x] accepted commit and active-context refresh
+- [ ] one-owner and no-duplicate-path audit
+- [ ] obsolete adapter/helper/comment/test sweep
+- [ ] architecture and stage-boundary audit
+- [ ] style-guide and module-organization review
+- [ ] focused invariant and integration validation
+- [ ] `cargo fmt` when Rust changed
+- [ ] required documentation build/check
+- [ ] `just validate`; when the refreshed Phase 0 baseline fails, record the exact failure and run/report every independently runnable component without claiming the full gate
+- [ ] benchmark evidence required by that phase
+- [ ] roadmap/matrix/docs impact review
+- [ ] accepted commit and active-context refresh
 
 A temporary adapter normally dies inside its owning phase. A bridge may cross a phase boundary only
 when this plan names its exact deletion slice, the active capsule lists every caller and new callers are
@@ -992,25 +993,22 @@ real unreached consumer rather than suppress an entire module.
 
 - [x] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
   — **tokens delivered in 1D2a; preparation diagnostics delivered in 1D3**
-- [ ] keep every authored token stream and header/source identity keyed by its registered
-  `SourceId`; frozen generic syntax remains explicitly identity-free until 1F preserves or remaps
-  its owning context. The compilation root must never stand in for that missing identity.
-- [ ] finalize line starts and immutable token preparation at file-preparation completion, but keep the source-local extended-span builder mutable until the final span-producing stage
+- [x] keep every authored token stream and header/source identity keyed by its registered `SourceId`; frozen generic syntax now preserves or canonically remaps its owning context, and the compilation root never substitutes for missing identity.
+- [x] finalize line starts and immutable token preparation at file-preparation completion, while keeping the source-local extended-span builder mutable until the final span-producing stage.
 - [x] **delivered as 1D1** — `SourceRecord` gained its extended-span table plus the authority's
   `&SourceRecord`/`&SourceDatabase` span signatures; 1D2a retired 1C3's module-wide
   `allow(dead_code)`/`allow(unused_imports)`, leaving item-level allowances on the consumer half,
   each naming its first caller's slice.
 - [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
   retained prepared facts without rereading, cloning or owning a second source snapshot
-- [ ] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto final
-  `SourceId` records without adding another structural scan
-- [ ] make file workers return `SourcePreparationDelta` values keyed by final `SourceId`; each delta owns its `DiagnosticBag`, token/header preparation and span builder, and moves into module/build ownership by existing chunk/file order without shared mutation or SourceId remapping
-- [ ] make any diagnostic produced before that merge retain only exact final SourceId plus local span data owned by the same delta
-- [ ] migrate path-item and alias locations to source-local spans
-- [ ] migrate headers, dependency clauses, declaration shells, source contracts, fragments and source-kind adapters
-- [ ] remove source-location string-ID remapping from file-preparation outputs
-- [ ] preserve stable diagnostic codes, source ranges and ordering
-- [ ] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API
+- [x] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto source records with final `SourceId` ownership and no additional structural scan.
+- [x] make file workers return move-only `SourcePreparationDelta` values keyed by their owning source identity; private discovery domains normalize exactly once at final publication, and no published delta retains provisional IDs.
+- [x] make diagnostics produced before merge retain the exact producer source identity and local span data, then normalize those identities before downstream publication.
+- [x] migrate path-item and alias locations to source-local spans.
+- [x] migrate headers, dependency clauses, declaration shells, source contracts, fragments and source-kind adapters.
+- [x] remove source-location string-ID remapping from file-preparation outputs.
+- [x] preserve stable diagnostic codes, source ranges and ordering.
+- [x] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API.
 
 #### 1D sub-slices and ownership history
 
@@ -1020,7 +1018,7 @@ real unreached consumer rather than suppress an entire module.
   installation under the exclusive owner after every current span producer.
 - **1D2 — tokenizer spans and identity:** delivered exact local spans and registered inputs for
   authored tokenization. The 1D4 ownership cutover makes tokenization borrow the source's original
-  builder; frozen generic materialisation still needs its owning context in 1F.
+  builder; 1F5 now preserves or canonically remaps frozen generic materialisation to its owning context.
 - **1D4 — builder lifetime and source preparation delta:** delivered across successful and diagnosed
   file/chunk aggregation, semantic calls and module/direct-service outcomes. Identity-rebind errors
   also retain every known original table before finalization. Later migrations must thread this owner
@@ -1056,15 +1054,12 @@ real unreached consumer rather than suppress an entire module.
     token anchor into shared declaration/binding-target shells, preserve synthetic source-start
     anchors under their real source identity and delete `Token::terminator_at`.
   - [x] **1D5b — path and dependency records:** source-local path rows, provider/selection/alias
-    anchors and structural file references. Reuse the minted path token's encoded span and preserve
-    source ownership, remapping and wrong-table checks. The mandatory provider owns the clause's
-    path-token anchor; remove the outer clause's duplicated location/span. Four field-level
-    dead-code allowances name their planned 1E consumers: dependency alias, selection, provider
-    and structural file-reference
-    spans. Remove each allowance in its owning 1E batch and confirm none survives 1H.
-  - [ ] **1D5c — remaining preparation records:** header names and joined const fragments,
-    source contracts and signature shells. Preserve each record's existing range meaning;
-    runtime fragments already use retained tokens and need no new record.
+    anchors and structural file references reuse the minted path token's encoded span and preserve
+    source ownership, remapping and wrong-table checks.
+    The mandatory provider owns the clause's path-token anchor; the outer clause's duplicated
+    location/span is removed. The four former field-level dead-code allowances were removed in
+    their owning downstream batches, and no such allowance survives 1H.
+- [x] **1D5c — remaining preparation records:** accepted in `e1f16cb49`; header names, joined const fragments, source contracts and signature shells preserve their existing range meaning, while runtime fragments continue to use retained tokens without a new record.
     - [x] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
       remove `ReturnSlotSyntax.location`, which duplicates its nested return value's location.
       Preserve anchors through remapping and trait `This` substitution.
@@ -1175,8 +1170,9 @@ the code checkpoint, correction review and evidence block below:
 
 ### Phase 1 closeout evidence (2026-09-10)
 
-The final Phase 1 code checkpoint is `134aebf63`, following the representation-correction checkpoint
-`e1f16cb49` and implementation checkpoint `a9f9744de`. The correction review found no blockers.
+The final Phase 1 code checkpoint is `749f9c3f0`, following the cross-target correction checkpoint
+`134aebf63`, representation-correction checkpoint `e1f16cb49` and implementation checkpoint
+`a9f9744de`. The correction review found no blockers.
 Commands below ran on the Apple M1 Pro
 (`aarch64-apple-darwin`) with Rust 1.97.1 / Clippy 0.1.97 unless a target is named.
 

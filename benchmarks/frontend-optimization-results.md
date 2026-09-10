@@ -3485,8 +3485,8 @@ checkpoint is the commit containing this subsection.
 ## Data Layout Migration - Phase 1 Closeout (2026-09-10)
 
 Phase 1 is complete. The implementation checkpoint is `a9f9744de`; representation corrections are
-in `e1f16cb49`, and the cross-target test-import correction is `134aebf63`. The final correction
-review found no blockers.
+in `e1f16cb49`, the cross-target test-import correction is `134aebf63`, and obsolete span-allowance
+cleanup is `749f9c3f0`. The final correction review found no blockers.
 
 Environment: Apple M1 Pro, `aarch64-apple-darwin`, Rust 1.97.1 / Clippy 0.1.97. Cross-target
 Clippy also ran with installed `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc` targets.
