@@ -9,8 +9,8 @@
 > **Status:**
 > Phase 1 complete. The source, token and diagnostic representation cutover, focused corrections,
 > independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`,
-> `134aebf63` and `749f9c3f0`. The plan and benchmark evidence closeout sequence is committed
-> through `1f6d4a81` (following `38e68d2a5`).
+> `134aebf63`, `749f9c3f0` and `eb6416312`. The plan and benchmark evidence closeout sequence is
+> committed through `1f6d4a81` (following `38e68d2a5`).
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -76,11 +76,13 @@ CURRENT_SLICE:
   focused correction review passed; current measurements are recorded in the Phase 1 closeout below.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  plan/evidence closeout sequence through `1f6d4a81` (following `38e68d2a5`).
+  stale diagnostic-boxing comment cleanup `eb6416312`; plan/evidence closeout sequence through
+  `1f6d4a81` (following `38e68d2a5`).
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
-Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63` and `749f9c3f0`;
-the plan and evidence closeout sequence is committed through `1f6d4a81` (following `38e68d2a5`).
+Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0` and
+`eb6416312`; the plan and evidence closeout sequence is committed through `1f6d4a81` (following
+`38e68d2a5`).
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic and renderer cutover is committed and validated.
@@ -1170,9 +1172,9 @@ the code checkpoint, correction review and evidence block below:
 
 ### Phase 1 closeout evidence (2026-09-10)
 
-The final Phase 1 code checkpoint is `749f9c3f0`, following the cross-target correction checkpoint
-`134aebf63`, representation-correction checkpoint `e1f16cb49` and implementation checkpoint
-`a9f9744de`. The correction review found no blockers.
+The final Phase 1 code checkpoint is `eb6416312`, following obsolete span-allowance cleanup
+`749f9c3f0`, cross-target correction checkpoint `134aebf63`, representation-correction checkpoint
+`e1f16cb49` and implementation checkpoint `a9f9744de`. The correction review found no blockers.
 Commands below ran on the Apple M1 Pro
 (`aarch64-apple-darwin`) with Rust 1.97.1 / Clippy 0.1.97 unless a target is named.
 
