@@ -17,9 +17,12 @@
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
 
-use crate::report_file::{ReportRunIdentity, write_report_atomically};
-use crate::source_tree::{WalkDecision, relative_display_path, walk_source_tree, workspace_root};
-use moth::first_party_js::{inventoried_javascript_sources, javascript_import_findings};
+use crate::report_file::{write_report_atomically, ReportRunIdentity};
+use crate::source_tree::{relative_display_path, walk_source_tree, workspace_root, WalkDecision};
+use moth::first_party_js::{
+    inventoried_javascript_sources, javascript_import_findings,
+    FirstPartyJavascriptImportFindingKind,
+};
 use serde::Serialize;
 use std::fmt;
 use std::fs;
@@ -29,7 +32,7 @@ use std::path::Path;
 pub const FIRST_PARTY_DEPS_REPORT_PATH: &str = "target/test-reports/first_party_deps.json";
 
 /// Schema version of the first-party dependency report.
-pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 2;
+pub const FIRST_PARTY_DEPS_SCHEMA_VERSION: u32 = 3;
 
 /// First-party implementation roots, in deterministic scan order.
 ///
@@ -69,8 +72,10 @@ pub enum FirstPartyDepsRule {
     PackageManagerManifest,
     /// A known vendored dependency directory was found by exact directory name.
     VendoredDependencyRoot,
-    /// A JavaScript import, require or re-export is not an exact registered runtime module.
+    /// A JavaScript module-loading form is not an exact registered runtime module.
     UnapprovedModuleImport,
+    /// A registered runtime module was imported with an unknown name or unsupported form.
+    InvalidRuntimeImport,
     /// A path could not be read or represented, so the audit could not inspect it.
     UnreadablePath,
 }
@@ -81,6 +86,7 @@ impl FirstPartyDepsRule {
             Self::PackageManagerManifest => "package-manager-manifest",
             Self::VendoredDependencyRoot => "vendored-dependency-root",
             Self::UnapprovedModuleImport => "unapproved-module-import",
+            Self::InvalidRuntimeImport => "invalid-runtime-import",
             Self::UnreadablePath => "unreadable-path",
         }
     }
@@ -325,14 +331,24 @@ fn is_javascript_file(path: &Path) -> bool {
     )
 }
 
-/// Apply the moth first-party import policy to one JavaScript source fragment.
 fn audit_javascript_source(file: &str, source: &str) -> Vec<FirstPartyDepsFinding> {
     javascript_import_findings(source)
         .into_iter()
-        .map(|message| FirstPartyDepsFinding {
+        .map(|finding| FirstPartyDepsFinding {
             file: file.to_owned(),
-            rule: FirstPartyDepsRule::UnapprovedModuleImport,
-            message,
+            rule: match finding.kind {
+                FirstPartyJavascriptImportFindingKind::DynamicImport
+                | FirstPartyJavascriptImportFindingKind::ArbitraryImport
+                | FirstPartyJavascriptImportFindingKind::CommonJsRequire
+                | FirstPartyJavascriptImportFindingKind::ReExportFrom => {
+                    FirstPartyDepsRule::UnapprovedModuleImport
+                }
+                FirstPartyJavascriptImportFindingKind::UnsupportedRuntimeImportForm
+                | FirstPartyJavascriptImportFindingKind::UnknownRuntimeImportName => {
+                    FirstPartyDepsRule::InvalidRuntimeImport
+                }
+            },
+            message: finding.message,
         })
         .collect()
 }

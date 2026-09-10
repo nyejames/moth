@@ -22,13 +22,13 @@ mod signature_parser;
 #[cfg(test)]
 mod tests;
 
-use comment_extractor::{AnnotationKind, ExtractedAnnotation, extract_annotations};
-use export_scanner::{JsExport, scan_exports};
+use comment_extractor::{extract_annotations, AnnotationKind, ExtractedAnnotation};
+use export_scanner::{scan_exports, JsExport};
 use parsed_js_module::{
     JsDiagnosticKind, JsParserDiagnostic, ParsedJsFunction, ParsedJsModule, ParsedOpaqueType,
     ParsedRuntimeImport,
 };
-use signature_parser::{SignatureParseInput, parse_signature};
+use signature_parser::{parse_signature, SignatureParseInput};
 
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 use std::collections::{BTreeMap, BTreeSet};
@@ -50,20 +50,26 @@ pub(crate) fn parse_js_module(source: &str, registry: &RuntimeModuleRegistry) ->
 ///
 /// WHAT: reuses the HTML JS module scanner and the v1 runtime-module registry.
 /// WHY: first-party validation must not own a second JavaScript lexer or a second allowlist.
-pub(crate) fn first_party_javascript_import_messages(source: &str) -> Vec<String> {
+///
+/// The scanner diagnostics remain structured here so the first-party audit can distinguish
+/// module-loading facts from invalid forms of an otherwise registered runtime import. Parser-only
+/// syntax diagnostics, such as local exports and CommonJS exports, are intentionally omitted.
+pub(crate) fn first_party_javascript_import_messages(source: &str) -> Vec<JsParserDiagnostic> {
     let registry = RuntimeModuleRegistry::v1();
     let scanned = scan_exports(source, &registry);
     scanned
         .diagnostics
         .into_iter()
-        .filter_map(|diagnostic| match diagnostic.kind {
-            JsDiagnosticKind::DynamicImport
-            | JsDiagnosticKind::ArbitraryImport
-            | JsDiagnosticKind::UnsupportedRuntimeImportForm
-            | JsDiagnosticKind::UnknownRuntimeImportName
-            | JsDiagnosticKind::CommonJsExport
-            | JsDiagnosticKind::ReExport => Some(diagnostic.message),
-            _ => None,
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.kind,
+                JsDiagnosticKind::DynamicImport
+                    | JsDiagnosticKind::ArbitraryImport
+                    | JsDiagnosticKind::CommonJsRequire
+                    | JsDiagnosticKind::ReExportFrom
+                    | JsDiagnosticKind::UnsupportedRuntimeImportForm
+                    | JsDiagnosticKind::UnknownRuntimeImportName
+            )
         })
         .collect()
 }

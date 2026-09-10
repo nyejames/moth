@@ -12,7 +12,8 @@
 //!
 //! Rejected forms:
 //! - `export default ...`
-//! - `export { name }` (re-exports)
+//! - `export { name }` (local export-list syntax)
+//! - `export { name } from "..."` / `export * from "..."` (re-exports)
 //! - `export class ...`
 //! - `module.exports = ...` (CommonJS)
 //! - `exports.name = ...` (CommonJS)
@@ -162,23 +163,44 @@ impl<'a> ExportScanner<'a> {
         }
 
         if self.consume_char('{') {
+            self.skip_export_list_to_close();
+            let has_from_clause = self.has_from_module_specifier_ahead();
             let span = self.make_span(export_start_byte);
-            self.emit_diagnostic(
-                "Re-export forms such as `export { name }` are not supported in Moth JS modules.",
-                JsDiagnosticKind::ReExport,
-                span,
-            );
+            let (message, kind) = if has_from_clause {
+                (
+                    "Re-export forms such as `export { name } from \"...\"` are not supported \
+                     in Moth JS modules.",
+                    JsDiagnosticKind::ReExportFrom,
+                )
+            } else {
+                (
+                    "Export-list forms such as `export { name }` are not supported in Moth JS \
+                     modules.",
+                    JsDiagnosticKind::ReExport,
+                )
+            };
+            self.emit_diagnostic(message, kind, span);
             self.skip_to_statement_end();
             return;
         }
 
         if self.consume_char('*') {
+            let has_from_clause = self.has_from_module_specifier_ahead();
             let span = self.make_span(export_start_byte);
-            self.emit_diagnostic(
-                "Re-export forms such as `export * from \"...\"` are not supported in Moth JS modules.",
-                JsDiagnosticKind::ReExport,
-                span,
-            );
+            let (message, kind) = if has_from_clause {
+                (
+                    "Re-export forms such as `export * from \"...\"` are not supported in Moth JS \
+                     modules.",
+                    JsDiagnosticKind::ReExportFrom,
+                )
+            } else {
+                (
+                    "Star exports without a `from` module specifier are not supported in Moth JS \
+                     modules.",
+                    JsDiagnosticKind::ReExport,
+                )
+            };
+            self.emit_diagnostic(message, kind, span);
             self.skip_to_statement_end();
             return;
         }
@@ -274,6 +296,56 @@ impl<'a> ExportScanner<'a> {
 
         // Unknown export form; skip it
         self.skip_to_statement_end();
+    }
+
+    /// Looks for a `from "..."` clause after an export list or star, including across newlines.
+    ///
+    /// Automatic semicolon insertion would otherwise end the export statement before a following
+    /// `from` specifier. The cursor and any interpolation diagnostics are restored so the later
+    /// statement skip remains the sole consumer of the remaining source.
+    fn has_from_module_specifier_ahead(&mut self) -> bool {
+        let original_pos = self.pos;
+        let original_diagnostic_count = self.diagnostics.len();
+        let original_runtime_import_count = self.runtime_imports.len();
+
+        self.skip_whitespace_and_comments();
+        let found = if self.peek_str("from") && self.is_word_boundary_around("from".len()) {
+            self.advance_chars("from".len());
+            self.skip_whitespace_and_comments();
+            matches!(self.current_char_opt(), Some('"') | Some('\''))
+        } else {
+            false
+        };
+
+        self.pos = original_pos;
+        self.diagnostics.truncate(original_diagnostic_count);
+        self.runtime_imports.truncate(original_runtime_import_count);
+        found
+    }
+
+    fn skip_export_list_to_close(&mut self) {
+        let mut nested_brace_depth = 0usize;
+
+        while !self.is_at_end() {
+            if self.skip_lexical_content_at_current() {
+                continue;
+            }
+
+            match self.current_char() {
+                '{' => {
+                    nested_brace_depth += 1;
+                    self.advance_char();
+                }
+                '}' => {
+                    self.advance_char();
+                    if nested_brace_depth == 0 {
+                        return;
+                    }
+                    nested_brace_depth -= 1;
+                }
+                _ => self.advance_char(),
+            }
+        }
     }
 
     // ------------------------
@@ -380,7 +452,7 @@ impl<'a> ExportScanner<'a> {
 
         self.emit_diagnostic(
             "CommonJS `require()` is not supported in Moth JS modules.",
-            JsDiagnosticKind::CommonJsExport,
+            JsDiagnosticKind::CommonJsRequire,
             JsSourceSpan::range(require_start_byte, self.pos),
         );
         self.skip_to_statement_end();

@@ -614,6 +614,38 @@ export { foo };
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExport]);
 }
 
+#[test]
+fn local_export_list_ignores_comment_text_that_looks_like_from_clause() {
+    let source = r#"
+export { foo /* from "not-a-module" */ };
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExport]);
+}
+
+#[test]
+fn re_export_from_is_classified_as_module_loading() {
+    let source = r#"
+export { foo } from "./helper.js";
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
+#[test]
+fn multiline_export_from_is_classified_as_module_loading() {
+    let source = "export { foo }\nfrom \"./helper.js\";\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
+#[test]
+fn multiline_star_export_from_is_classified_as_module_loading() {
+    let source = "export *\nfrom \"./helper.js\";\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
 // ------------------------
 //  CommonJS rejection
 // ------------------------
@@ -680,13 +712,22 @@ fn require_call_rejected() {
 const helper = require("./helper.js");
 "#;
     let parsed = parse(source);
-    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsExport]);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::CommonJsRequire]);
 }
 
 #[test]
 fn star_reexport_rejected() {
     let source = r#"
 export * from "./helper.js";
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExportFrom]);
+}
+
+#[test]
+fn star_export_without_from_remains_syntax_only() {
+    let source = r#"
+export *;
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ReExport]);

@@ -349,6 +349,8 @@ The only allowed JavaScript module specifier is an exact compiler-owned runtime 
 by `RuntimeModuleRegistry`. Dynamic `import()`, `require()`, relative, absolute, URL and data
 imports are rejected. Exact package-manager manifest and lockfile basenames, and `node_modules`,
 `vendor` and `third_party` directory names, are rejected under the scoped roots.
+Invalid named imports or unsupported import forms from a registered runtime module are reported
+as a distinct runtime-import rule, not as an unapproved third-party module specifier.
 
 This audit does not walk generated `runtime_glue`, user-owned or future dependency packages,
 documentation, test fixtures, benchmarks or repository-root manifests. Missing roots and unreadable

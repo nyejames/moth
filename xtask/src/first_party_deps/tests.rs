@@ -4,13 +4,13 @@
 //! benchmarks are deliberately created beside them in one test to prove they are outside scope.
 
 use super::{
-    FIRST_PARTY_DEPS_SCHEMA_VERSION, FirstPartyDepsRule, audit_first_party_deps,
-    audit_javascript_source, started_report,
+    audit_first_party_deps, audit_javascript_source, started_report, FirstPartyDepsRule,
+    FIRST_PARTY_DEPS_SCHEMA_VERSION,
 };
 use crate::report_file::ReportRunIdentity;
 use std::fs;
 use std::path::Path;
-use tempfile::{TempDir, tempdir};
+use tempfile::{tempdir, TempDir};
 
 fn fixture_workspace() -> TempDir {
     let workspace = tempdir().expect("temp dir");
@@ -175,11 +175,9 @@ const npm = import('some-npm');
             .any(|finding| finding.message.contains("import()")),
         "dynamic import must be rejected: {findings:?}"
     );
-    assert!(
-        findings
-            .iter()
-            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport)
-    );
+    assert!(findings
+        .iter()
+        .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport));
 }
 
 #[test]
@@ -257,6 +255,27 @@ export * from "lodash-star";
         3,
         "all static import forms should be reported: {findings:?}"
     );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport),
+        "side-effect imports and re-export-from forms are module-loading findings: {findings:?}"
+    );
+}
+
+#[test]
+fn newline_split_export_from_is_an_unapproved_module_import() {
+    let source = "export { value }\nfrom 'lodash-reexport';\nexport *\nfrom \"lodash-star\";\n";
+    let findings = audit_javascript_source("fixture.mjs", source);
+
+    assert_eq!(
+        findings.len(),
+        2,
+        "newline-split export-from forms are still module loading: {findings:?}"
+    );
+    assert!(findings
+        .iter()
+        .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport));
 }
 
 #[test]
@@ -272,16 +291,12 @@ import { "feature-name" as feature } from "lodash-named";
         2,
         "clause names must not hide the module: {findings:?}"
     );
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding.message.contains("lodash-from"))
-    );
-    assert!(
-        findings
-            .iter()
-            .any(|finding| finding.message.contains("lodash-named"))
-    );
+    assert!(findings
+        .iter()
+        .any(|finding| finding.message.contains("lodash-from")));
+    assert!(findings
+        .iter()
+        .any(|finding| finding.message.contains("lodash-named")));
 }
 
 #[test]
@@ -324,6 +339,37 @@ fn allowed_runtime_specifier_passes() {
     assert!(
         audit_javascript_source("fixture.js", source).is_empty(),
         "the registered runtime module remains the only allowed import"
+    );
+}
+
+#[test]
+fn syntax_only_exports_are_not_dependencies_and_invalid_runtime_imports_are_typed() {
+    let source = r#"
+const localName = value;
+export { localName };
+module.exports = value;
+exports.foo = value;
+import { unknown } from "@moth/runtime";
+import * as runtime from "@moth/runtime";
+"#;
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        2,
+        "only the two invalid registered-runtime imports should remain: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule == FirstPartyDepsRule::InvalidRuntimeImport),
+        "invalid runtime imports need their own rule: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule != FirstPartyDepsRule::UnapprovedModuleImport),
+        "local and CommonJS export syntax must not be third-party dependency findings: {findings:?}"
     );
 }
 
@@ -436,7 +482,7 @@ fn missing_first_party_root_fails_closed() {
 fn started_report_is_incomplete_until_the_walk_finishes() {
     let report = started_report(ReportRunIdentity::started("first-party-deps", None));
 
-    assert_eq!(report.schema_version, FIRST_PARTY_DEPS_SCHEMA_VERSION);
+    assert_eq!(FIRST_PARTY_DEPS_SCHEMA_VERSION, 3);
     assert!(!report.run.completed);
     assert_eq!(report.visited_file_count, 0);
     assert_eq!(report.javascript_source_count, 0);

@@ -21,7 +21,9 @@ use crate::builder_surface::core_packages::{
     register_core_time_package,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::projects::html_project::external_js::parser::first_party_javascript_import_messages;
+use crate::projects::html_project::external_js::parser::{
+    first_party_javascript_import_messages, parsed_js_module::JsDiagnosticKind,
+};
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 
 /// One compiler-owned JavaScript fragment inspected by first-party dependency validation.
@@ -29,6 +31,28 @@ use crate::projects::html_project::external_js::runtime_module_registry::Runtime
 pub struct InventoriedJsSource {
     pub label: String,
     pub source: String,
+}
+
+/// The scanner-level category of a first-party JavaScript import finding.
+///
+/// The variants retain the module-syntax distinction needed by the dependency audit. In
+/// particular, invalid names or forms from a registered runtime module are not third-party
+/// module specifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstPartyJavascriptImportFindingKind {
+    DynamicImport,
+    ArbitraryImport,
+    CommonJsRequire,
+    ReExportFrom,
+    UnsupportedRuntimeImportForm,
+    UnknownRuntimeImportName,
+}
+
+/// A structured first-party JavaScript import finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirstPartyJavascriptImportFinding {
+    pub kind: FirstPartyJavascriptImportFindingKind,
+    pub message: String,
 }
 
 /// Helper bodies, inline lowering templates and registered runtime-module sources.
@@ -65,14 +89,47 @@ pub fn inventoried_javascript_sources() -> Vec<InventoriedJsSource> {
     sources
 }
 
-/// Messages for import, require and re-export forms that first-party JavaScript must not use.
-pub fn javascript_import_findings(source: &str) -> Vec<String> {
+/// Structured findings for import, require and re-export forms that first-party JavaScript must
+/// not use.
+pub fn javascript_import_findings(source: &str) -> Vec<FirstPartyJavascriptImportFinding> {
     first_party_javascript_import_messages(source)
+        .into_iter()
+        .filter_map(|diagnostic| {
+            let kind = match diagnostic.kind {
+                JsDiagnosticKind::DynamicImport => {
+                    FirstPartyJavascriptImportFindingKind::DynamicImport
+                }
+                JsDiagnosticKind::ArbitraryImport => {
+                    FirstPartyJavascriptImportFindingKind::ArbitraryImport
+                }
+                JsDiagnosticKind::CommonJsRequire => {
+                    FirstPartyJavascriptImportFindingKind::CommonJsRequire
+                }
+                JsDiagnosticKind::ReExportFrom => {
+                    FirstPartyJavascriptImportFindingKind::ReExportFrom
+                }
+                JsDiagnosticKind::UnsupportedRuntimeImportForm => {
+                    FirstPartyJavascriptImportFindingKind::UnsupportedRuntimeImportForm
+                }
+                JsDiagnosticKind::UnknownRuntimeImportName => {
+                    FirstPartyJavascriptImportFindingKind::UnknownRuntimeImportName
+                }
+                _ => return None,
+            };
+            Some(FirstPartyJavascriptImportFinding {
+                kind,
+                message: diagnostic.message,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{inventoried_javascript_sources, javascript_import_findings};
+    use super::{
+        inventoried_javascript_sources, javascript_import_findings,
+        FirstPartyJavascriptImportFindingKind,
+    };
 
     #[test]
     fn inventory_includes_runtime_helpers_and_inline_templates() {
@@ -121,5 +178,51 @@ mod tests {
         );
         assert!(!javascript_import_findings("const module = import(name);\n").is_empty());
         assert!(!javascript_import_findings("const value = require(name);\n").is_empty());
+    }
+    #[test]
+    fn import_findings_preserve_dependency_and_runtime_distinctions() {
+        let source = r#"
+const localName = 1;
+export { localName };
+module.exports = value;
+exports.foo = value;
+const required = require("left-pad");
+const loaded = import("left-pad");
+export { localName } from "left-pad";
+import { unknown } from "@moth/runtime";
+"#;
+
+        let findings = javascript_import_findings(source);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|finding| matches!(
+                    finding.kind,
+                    FirstPartyJavascriptImportFindingKind::DynamicImport
+                        | FirstPartyJavascriptImportFindingKind::CommonJsRequire
+                        | FirstPartyJavascriptImportFindingKind::ReExportFrom
+                ))
+                .count(),
+            3,
+            "module-loading forms should remain dependency findings: {findings:?}"
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|finding| {
+                    finding.kind == FirstPartyJavascriptImportFindingKind::UnknownRuntimeImportName
+                })
+                .count(),
+            1,
+            "invalid registered-runtime names should remain structured: {findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|finding| !finding.message.contains("module.exports")
+                    && !finding.message.contains("exports.name")
+                    && !finding.message.contains("Export-list forms")),
+            "syntax-only exports must not enter first-party findings: {findings:?}"
+        );
     }
 }

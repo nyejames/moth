@@ -49,8 +49,14 @@ pub enum JsDiagnosticKind {
     DuplicateMothName,
     DuplicateJsExportName,
     DefaultExport,
+    /// A local export-list declaration, which is syntax-only rather than module loading.
     ReExport,
+    /// An export-list or star re-export that loads another module.
+    ReExportFrom,
+    /// A CommonJS export assignment, not a module-loading operation.
     CommonJsExport,
+    /// A CommonJS `require()` call, which loads another module.
+    CommonJsRequire,
     ClassExport,
     ArbitraryImport,
     DynamicImport,
