@@ -23,8 +23,8 @@ use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceCo
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity,
-    InvalidConfigReason,
+    CompilerDiagnostic, DiagnosticCategory, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -151,7 +151,7 @@ fn build_project_preserves_builder_warnings_in_build_result() {
 }
 
 #[test]
-fn build_result_warning_handoff_expands_generated_donor_source_context() {
+fn build_result_warning_handoff_resolves_generated_donor_source_context() {
     let project_temp = tempfile::tempdir().expect("should create project temp dir");
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let project_root = project_temp.path().join("src");
@@ -264,6 +264,130 @@ fn build_result_warning_handoff_expands_generated_donor_source_context() {
         !position.line.contains("project_snapshot"),
         "donor warning must not render the project snapshot: {}",
         position.line
+    );
+}
+
+#[test]
+fn build_result_warning_handoff_keeps_related_package_label_out_of_default_context() {
+    let project_temp = tempfile::tempdir().expect("should create project temp dir");
+    let package_temp = tempfile::tempdir().expect("should create package temp dir");
+    let project_root = project_temp.path().join("src");
+    let package_root = package_temp.path().join("src");
+    fs::create_dir_all(&project_root).expect("should create project source root");
+    fs::create_dir_all(&package_root).expect("should create package source root");
+
+    let project_path = project_root.join("@mod.moth");
+    let package_path = package_root.join("@mod.moth");
+    let project_text = "project_snapshot = 1\n";
+    let package_text = "package_snapshot = 1\n";
+    fs::write(&project_path, project_text).expect("should write project source");
+    fs::write(&package_path, package_text).expect("should write package source");
+
+    let mut string_table = StringTable::new();
+    let mut project_database = SourceDatabase::build(
+        std::iter::once(project_path.as_path()),
+        &project_root,
+        None,
+        &mut string_table,
+    )
+    .expect("project source identity should build");
+    let project_source_id = project_database
+        .get_by_canonical_path(&project_path)
+        .expect("project source should be registered")
+        .id;
+    project_database
+        .retain_text(project_source_id, project_text.to_owned())
+        .expect("project snapshot should be retained");
+
+    let mut package_database = SourceDatabase::build(
+        std::iter::once(package_path.as_path()),
+        &package_root,
+        None,
+        &mut string_table,
+    )
+    .expect("package source identity should build");
+    let package_source_id = package_database
+        .get_by_canonical_path(&package_path)
+        .expect("package source should be registered")
+        .id;
+    package_database
+        .retain_text(package_source_id, package_text.to_owned())
+        .expect("package snapshot should be retained");
+    assert_eq!(
+        project_source_id, package_source_id,
+        "independent source databases should have colliding SourceId values"
+    );
+
+    let package_identity = StablePackageIdentity::source_package(PackageOrigin::Builder, "pkg");
+    let package_database = Arc::new(package_database);
+    let project_database = Arc::new(project_database);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let local_span =
+        LocalSpan::exact(0, 1, &mut span_builder).expect("diagnostic span should fit inline");
+    let package_handle = FrozenIdentityHandle::for_domain(package_identity.clone());
+    let diagnostic = CompilerDiagnostic::unreachable_match_arm(Some(SourceSpan::new(
+        project_source_id,
+        local_span,
+    )))
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(SourceSpan::new(package_source_id, local_span)),
+        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
+        package_handle,
+    )]);
+
+    let mut result = BuildResult {
+        project: Project {
+            output_files: Vec::new(),
+            entry_page_rel: None,
+            cleanup_policy: generic_cleanup_policy(),
+            warnings: Vec::new(),
+            deferred_resources: Vec::new(),
+            resource_inputs: ResourceInputRegistry::new(),
+        },
+        config: Config::new(project_temp.path().to_path_buf()),
+        warnings: vec![diagnostic],
+        string_table,
+        warning_source_contexts: vec![RenderSourceContext {
+            diagnostic_range: 0..0,
+            source_database: Arc::clone(&package_database),
+            domain: Some(package_identity),
+        }],
+        source_database: Some(Arc::clone(&project_database)),
+        output_owner: OutputOwner {
+            builder: BuilderKind::Test,
+            profile: BuildProfile::Dev,
+        },
+        directory_output_plan: None,
+    };
+    drop(package_database);
+    drop(project_database);
+
+    let messages = result
+        .take_warning_messages()
+        .expect("warning report handoff should succeed")
+        .expect("spanful warning should produce a report");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("warning report should retain its diagnostic");
+    let context = messages.diagnostic_render_context(0);
+    let primary = context
+        .primary_position(diagnostic)
+        .expect("ownerless primary should use the project default context");
+    assert_eq!(primary.host_path, Some(project_path.as_path()));
+    assert!(
+        primary.line.contains("project_snapshot"),
+        "ownerless primary should render the project snapshot: {}",
+        primary.line
+    );
+    let label = context
+        .label_position(&diagnostic.labels[0])
+        .expect("package-owned secondary label should resolve through its explicit owner");
+    assert_eq!(label.host_path, Some(package_path.as_path()));
+    assert!(
+        label.line.contains("package_snapshot"),
+        "package-owned secondary label should render the package snapshot: {}",
+        label.line
     );
 }
 

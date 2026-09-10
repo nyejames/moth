@@ -47,7 +47,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginDeclarationId,
-    OriginFunctionId, StableModuleOriginIdentity,
+    OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
@@ -109,7 +109,6 @@ fn finalize_backend_failure_messages(
     let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
     messages.install_source_contexts(warning_source_contexts, 0);
     messages.append_messages_preserving_context(backend_messages);
-    messages.extend_source_contexts_for_owned_handles();
     if let Some(source_database) = project_source_database {
         messages.set_source_database(source_database);
     }
@@ -598,6 +597,7 @@ impl ProjectCompilation {
             entries.push(ProjectEntry {
                 resource_union: &entry.resource_union,
                 module,
+                source_domain: self.source_domain_for_module_ref(entry.module_ref),
                 reachability: &entry.reachability,
                 external_imports: &entry.external_imports,
                 linked_modules: entry
@@ -605,6 +605,7 @@ impl ProjectCompilation {
                     .iter()
                     .map(|linked| ProjectLinkedModule {
                         module: self.module_at(linked.module_ref),
+                        source_domain: self.source_domain_for_module_ref(linked.module_ref),
                         reachability: &linked.reachability,
 
                         generated_function_names: self
@@ -619,6 +620,28 @@ impl ProjectCompilation {
         }
 
         entries
+    }
+
+    /// Resolve the stable source domain for one linked module boundary.
+    ///
+    /// Project modules intentionally return `None`: their backend diagnostics use the
+    /// domain-less project source fallback. Source-package modules return their exact package
+    /// identity so a related package site can only resolve through that package's source row.
+    fn source_domain_for_module_ref(
+        &self,
+        module_ref: CompiledModuleRef,
+    ) -> Option<&StablePackageIdentity> {
+        match module_ref {
+            CompiledModuleRef::Project(_) | CompiledModuleRef::GeneratedProject(_) => None,
+            CompiledModuleRef::SourcePackage { package_id, .. }
+            | CompiledModuleRef::GeneratedSourcePackage { package_id, .. } => Some(
+                &self
+                    .source_packages
+                    .package(package_id)
+                    .expect("validated linked module must reference a retained source package")
+                    .package_identity,
+            ),
+        }
     }
 
     /// Move the build-only resource registry into the output-emission owner.
@@ -1399,6 +1422,8 @@ impl PackageAssembly {
 #[derive(Clone)]
 pub(crate) struct ProjectLinkedModule<'a> {
     pub(crate) module: &'a Module,
+    /// Stable source-package domain for this linked boundary, or `None` for project modules.
+    pub(crate) source_domain: Option<&'a StablePackageIdentity>,
     pub(crate) reachability: &'a HirReachability,
     /// Generated symbol lookup for the linked module's own boundary.
     pub(crate) generated_function_names: Arc<
@@ -1413,6 +1438,8 @@ pub(crate) struct ProjectLinkedModule<'a> {
 #[derive(Clone)]
 pub(crate) struct ProjectEntry<'a> {
     pub(crate) module: &'a Module,
+    /// Stable source-package domain for this entry boundary, or `None` for project modules.
+    pub(crate) source_domain: Option<&'a StablePackageIdentity>,
     /// Exact stable-origin union consumed by the HTML resource planner.
     pub(crate) resource_union: &'a ResourceOriginUnion,
     pub(crate) reachability: &'a HirReachability,
@@ -1592,9 +1619,8 @@ pub struct BuildResult {
     /// Per-warning source snapshot associations, indexed against `warnings`.
     ///
     /// Package ranges are collected before backend warnings are appended, so the final append
-    /// leaves their indexes unchanged. Ordinary project-owned warnings use the project database
-    /// fallback; donor-owned generated warnings are expanded into their package range at the
-    /// terminal report handoff.
+    /// leaves their indexes unchanged. Empty package rows remain available for explicitly owned
+    /// generated spans without widening a diagnostic's default source range.
     pub(crate) warning_source_contexts: Vec<RenderSourceContext>,
     /// The retained source snapshots used by this build's diagnostics and warning renderers.
     ///
@@ -1607,10 +1633,9 @@ pub struct BuildResult {
 
 impl BuildResult {
     /// Move successful-build warnings into a mutable report owner without freezing it yet.
-    ///
     /// WHAT: transfers warnings, their aggregate string table and all source contexts as one
-    ///       move-only `CompilerMessages` value, expanding package rows for donor-owned generated
-    ///       warnings that were published through the project sidecar lane.
+    ///       move-only `CompilerMessages` value, retaining empty package rows for explicitly
+    ///       owned generated spans.
     /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
     ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
     pub(crate) fn take_warning_messages_before_freeze(
@@ -1632,8 +1657,6 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
-        messages.extend_source_contexts_for_owned_handles();
-
         Ok(Some(messages))
     }
 
@@ -1657,11 +1680,12 @@ impl BuildResult {
         &mut self,
         late_messages: CompilerMessages,
     ) -> Result<CompilerMessages, CompilerError> {
-        let messages = if self.warnings.is_empty() {
+        let mut messages = if self.warnings.is_empty() {
             let string_table = std::mem::take(&mut self.string_table);
+            let source_contexts = std::mem::take(&mut self.warning_source_contexts);
             let source_database = self.source_database.take();
-            self.warning_source_contexts.clear();
             let mut messages = CompilerMessages::from_diagnostics(Vec::new(), string_table);
+            messages.install_source_contexts(source_contexts, 0);
             messages.append_messages_preserving_context(late_messages);
             if let Some(source_database) = source_database {
                 messages.set_source_database(source_database);
@@ -1674,9 +1698,9 @@ impl BuildResult {
                 )
             })?;
             messages.append_messages_preserving_context(late_messages);
-            messages.extend_project_source_context_to_diagnostics();
             messages
         };
+        messages.extend_project_source_context_to_diagnostics();
         messages.freeze_source_contexts()
     }
 }
@@ -1760,8 +1784,7 @@ pub fn build_project(
             return Err(messages);
         }
     };
-    let (mut warnings, mut warning_source_contexts) =
-        collect_success_warnings(&project_compilation);
+    let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
@@ -1828,9 +1851,6 @@ pub fn build_project(
     // retained in the successful build result.
     config.config_resolution_records.clear();
     let source_database = project_source_files;
-    if warnings.is_empty() {
-        warning_source_contexts.clear();
-    }
     Ok(BuildResult {
         project,
         config,

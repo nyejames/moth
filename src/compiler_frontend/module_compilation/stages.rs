@@ -19,16 +19,8 @@ fn attach_owner_to_diagnostic(
     mut diagnostic: CompilerDiagnostic,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
 ) -> CompilerDiagnostic {
-    let Some(handle) = frozen_identity_handle else {
-        return diagnostic;
-    };
-    if diagnostic.primary_span.is_some() {
-        diagnostic.set_primary_frozen_identity_handle_if_missing(handle.clone());
-    }
-    for label in &mut diagnostic.labels {
-        if label.span.is_some() {
-            label.set_frozen_identity_handle_if_missing(handle.clone());
-        }
+    if let Some(handle) = frozen_identity_handle {
+        diagnostic.attach_frozen_identity_handle_if_missing(handle.clone());
     }
     diagnostic
 }

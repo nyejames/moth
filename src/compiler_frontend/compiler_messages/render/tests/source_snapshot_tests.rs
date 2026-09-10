@@ -1,15 +1,19 @@
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
-use crate::compiler_frontend::compiler_messages::render::primary_underline_length;
 use crate::compiler_frontend::compiler_messages::render::terminal::{
     format_label_messages_with_context, format_label_messages_with_context_from_root,
     format_terminal_source_frame_for_test,
 };
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
-use crate::compiler_frontend::compiler_messages::{DiagnosticLabel, DiagnosticLabelMessage};
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, ResolvedDiagnosticLabel, primary_caret_padding,
+    primary_underline_length, resolve_label_render_facts_from_root,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
+};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
     SourceId, SourceSpan,
@@ -630,6 +634,56 @@ fn renderers_count_a_combining_mark_as_zero_cells_for_carets() {
 }
 
 #[test]
+fn renderers_measure_a_zwj_emoji_sequence_as_two_display_cells_for_carets() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "👩‍💻x\n",
+        &mut string_table,
+    );
+
+    let name = string_table.intern("x");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 11, 1)));
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+    let position = context
+        .primary_position(&diagnostic)
+        .expect("the primary span should resolve against the retained source");
+
+    assert_eq!(position.start.column, 3);
+    assert_eq!(primary_caret_padding(&position, "👩‍💻x"), 2);
+    assert_eq!(primary_underline_length(&position, "👩‍💻x"), 1);
+}
+
+#[test]
+fn renderers_measure_a_variation_selector_sequence_as_two_display_cells_for_carets() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "❤️x\n",
+        &mut string_table,
+    );
+
+    let name = string_table.intern("x");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 6, 1)));
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+    let position = context
+        .primary_position(&diagnostic)
+        .expect("the primary span should resolve against the retained source");
+
+    assert_eq!(position.start.column, 2);
+    assert_eq!(primary_caret_padding(&position, "❤️x"), 2);
+    assert_eq!(primary_underline_length(&position, "❤️x"), 1);
+}
+
+#[test]
 fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
     let primary_directory = tempfile::tempdir().expect("primary directory should exist");
     let donor_directory = tempfile::tempdir().expect("donor directory should exist");
@@ -673,6 +727,19 @@ fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
     )]);
     let context = DiagnosticRenderContext::new(primary_identity.strings())
         .with_frozen_identity(&primary_identity);
+    let label_facts =
+        resolve_label_render_facts_from_root(&diagnostic, context, primary_directory.path());
+    assert_eq!(
+        label_facts,
+        vec![ResolvedDiagnosticLabel {
+            style: DiagnosticLabelStyle::Secondary,
+            path: Some("src/donor.moth".to_owned()),
+            line: Some(1),
+            column: Some(1),
+            message: "generic body operation failed here".to_owned(),
+        }],
+        "shared label resolution should expose facts without terminal presentation text",
+    );
 
     let terminal_labels = format_label_messages_with_context_from_root(
         &diagnostic,
@@ -731,6 +798,43 @@ fn html_escapes_dynamic_relative_source_paths() {
     assert!(
         !html.contains("src/bad<&.moth:1:1"),
         "raw relative source path markup must never be emitted: {html}",
+    );
+}
+
+#[test]
+fn html_escapes_related_label_messages_without_terminal_presentation_text() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "value\n",
+        &mut string_table,
+    );
+    let name = string_table.intern("value");
+    let label_text = string_table.intern("<label> &");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)))
+            .with_labels(vec![DiagnosticLabel::secondary(
+                None,
+                Some(DiagnosticLabelMessage::RenderedText(label_text)),
+            )]);
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    let html = render_diagnostics_html_with_context(
+        std::slice::from_ref(&diagnostic),
+        temporary_directory.path(),
+        context,
+    );
+
+    assert!(
+        html.contains(r#"class="diagnostic-label">info: - &lt;label&gt; &amp;</p>"#),
+        "label message text must be escaped independently in HTML: {html}",
+    );
+    assert!(
+        !html.contains(r#"class="diagnostic-label">info: - <label> &</p>"#),
+        "raw label message markup must never be emitted: {html}",
     );
 }
 /// A compilation-root span names no physical source, so renderers omit a source frame even when

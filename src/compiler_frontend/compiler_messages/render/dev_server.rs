@@ -4,13 +4,14 @@
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_with_context_from_root;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, display_column_number, display_gutter_width, display_line_number,
-    expand_tabs_for_display, primary_caret_padding, primary_underline_length,
-    relative_display_path_from_root, render_payload,
+    DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
+    display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
+    relative_display_path_from_root, render_payload, resolve_label_render_facts_from_root,
 };
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticSeverity,
+};
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 #[cfg(test)]
 use std::path::Path;
@@ -198,10 +199,38 @@ fn render_diagnostic_card(
 
     body.push_str(&source_frame);
 
-    for label in format_label_messages_with_context_from_root(diagnostic, context, project_root) {
+    let primary_display_path = context
+        .primary_position(diagnostic)
+        .map(|position| relative_display_path_from_root(position.path.as_path(), project_root));
+    for ResolvedDiagnosticLabel {
+        style,
+        path,
+        line,
+        column,
+        message,
+    } in resolve_label_render_facts_from_root(diagnostic, context, project_root)
+    {
+        let style_name = match style {
+            DiagnosticLabelStyle::Secondary => "info",
+        };
+        let escaped_message = escape_html(&message);
+        let rendered_label = match (path.as_deref(), line, column) {
+            (None, None, None) => format!("{style_name}: - {escaped_message}"),
+            (Some(label_path), Some(label_line), Some(label_column)) => {
+                let include_path = primary_display_path
+                    .as_deref()
+                    .is_none_or(|primary_path| primary_path != label_path);
+                let location = if include_path && !label_path.is_empty() {
+                    format!("{}:{label_line}:{label_column}", escape_html(label_path))
+                } else {
+                    format!("{label_line}:{label_column}")
+                };
+                format!("{style_name}: {location} - {escaped_message}")
+            }
+            _ => continue,
+        };
         body.push_str(&format!(
-            r#"<p class="diagnostic-label">{}</p>"#,
-            escape_html(&label)
+            r#"<p class="diagnostic-label">{rendered_label}</p>"#
         ));
     }
     format!(

@@ -90,6 +90,19 @@ impl CompilerDiagnostic {
             self.primary_frozen_identity_handle = Some(frozen_identity_handle);
         }
     }
+
+    /// Fill missing owners for every source-bearing part of this diagnostic.
+    pub(crate) fn attach_frozen_identity_handle_if_missing(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        self.set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+        for label in &mut self.labels {
+            if label.span.is_some() {
+                label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+            }
+        }
+    }
     pub(crate) fn with_primary_frozen_identity_handle(
         mut self,
         frozen_identity_handle: FrozenIdentityHandle,

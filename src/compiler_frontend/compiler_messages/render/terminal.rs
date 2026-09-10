@@ -4,14 +4,13 @@
 //! WHY: this is the primary human-facing render path for compiler errors and warnings.
 
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticPrimaryPosition, DiagnosticRenderContext, diagnostic_type_name,
+    DiagnosticPrimaryPosition, DiagnosticRenderContext, ResolvedDiagnosticLabel,
     display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
-    render_payload,
+    render_payload, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
-    DiagnosticSeverity,
+    CompilerDiagnostic, DiagnosticLabelStyle, DiagnosticPayload, DiagnosticSeverity,
 };
 use saying::say;
 use std::path::Path;
@@ -146,10 +145,19 @@ pub(crate) fn format_label_messages_with_context(
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
     let root = std::env::current_dir().unwrap_or_default();
-    format_label_messages_with_context_from_root(diagnostic, context, &root)
+    format_label_messages_with_context_from_root_impl(diagnostic, context, &root)
 }
 
+#[cfg(test)]
 pub(crate) fn format_label_messages_with_context_from_root(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+    root: &Path,
+) -> Vec<String> {
+    format_label_messages_with_context_from_root_impl(diagnostic, context, root)
+}
+
+fn format_label_messages_with_context_from_root_impl(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
     root: &Path,
@@ -157,38 +165,37 @@ pub(crate) fn format_label_messages_with_context_from_root(
     let primary_display_path = context
         .primary_position(diagnostic)
         .map(|position| relative_display_path_from_root(position.path.as_path(), root));
-    let mut rendered_labels = Vec::new();
+    let labels = resolve_label_render_facts_from_root(diagnostic, context, root);
+    let mut rendered_labels = Vec::with_capacity(labels.len());
 
-    for label in &diagnostic.labels {
-        let Some(message) = &label.message else {
-            continue;
-        };
-        let style_name = match label.style {
+    for ResolvedDiagnosticLabel {
+        style,
+        path,
+        line,
+        column,
+        message,
+    } in labels
+    {
+        let style_name = match style {
             DiagnosticLabelStyle::Secondary => "info",
         };
-        let Some(position) = context.label_position(label) else {
-            if label.span.is_none() {
-                let message_text = diagnostic_label_message_text(message, context);
-                rendered_labels.push(format!("{style_name}: - {message_text}"));
+        let rendered_label = match (path.as_deref(), line, column) {
+            (None, None, None) => format!("{style_name}: - {message}"),
+            (Some(label_path), Some(label_line), Some(label_col)) => {
+                let include_path = primary_display_path
+                    .as_deref()
+                    .is_none_or(|primary_path| primary_path != label_path);
+                let location = if include_path && !label_path.is_empty() {
+                    format!("{label_path}:{label_line}:{label_col}")
+                } else {
+                    format!("{label_line}:{label_col}")
+                };
+                format!("{style_name}: {location} - {message}")
             }
-            continue;
-        };
-        let label_path = relative_display_path_from_root(position.path.as_path(), root);
-        let include_path = primary_display_path
-            .as_deref()
-            .is_none_or(|primary_path| primary_path != label_path);
-        let label_line =
-            display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
-        let label_col =
-            display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
-        let message_text = diagnostic_label_message_text(message, context);
-        let location = if include_path && !label_path.is_empty() {
-            format!("{label_path}:{label_line}:{label_col}")
-        } else {
-            format!("{label_line}:{label_col}")
+            _ => continue,
         };
 
-        rendered_labels.push(format!("{style_name}: {location} - {message_text}"));
+        rendered_labels.push(rendered_label);
     }
 
     rendered_labels
@@ -207,52 +214,6 @@ pub(crate) fn format_payload_guidance(
     lines.extend(rendered_payload.guidance);
 
     lines
-}
-
-pub(crate) fn diagnostic_label_message_text(
-    message: &DiagnosticLabelMessage,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let string_table = context.string_table;
-
-    match message {
-        DiagnosticLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
-        DiagnosticLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
-        DiagnosticLabelMessage::ExpectedTypeDeclaredHere => {
-            "expected type declared here".to_owned()
-        }
-        DiagnosticLabelMessage::ValueMovedHere => "value moved here".to_owned(),
-        DiagnosticLabelMessage::RenderedText(text) => string_table.resolve(*text).to_owned(),
-        DiagnosticLabelMessage::GenericInstantiationCallSite => {
-            "while instantiating this generic call".to_owned()
-        }
-        DiagnosticLabelMessage::GenericInstantiationBodySite => {
-            "generic body operation failed here".to_owned()
-        }
-        DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
-            "generic function declared here".to_owned()
-        }
-        DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
-            let substitution_text = substitutions
-                .iter()
-                .map(|substitution| {
-                    let parameter_name = string_table.resolve(substitution.parameter_name);
-                    let concrete_type =
-                        diagnostic_type_name(substitution.concrete_type_id, context);
-                    format!("{parameter_name} = {concrete_type}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            format!("generic substitution: {substitution_text}")
-        }
-        DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
-            "previous generic inference evidence here".to_owned()
-        }
-        DiagnosticLabelMessage::ImmutableBindingDeclaration => {
-            "immutable binding declared here".to_owned()
-        }
-    }
 }
 
 fn severity_display_name(severity: DiagnosticSeverity) -> &'static str {

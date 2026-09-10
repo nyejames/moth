@@ -85,7 +85,7 @@ use crate::compiler_frontend::source::{
     FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceSpan, SpanCapacityError,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -324,15 +324,7 @@ impl CompilerMessages {
         frozen_identity_handle: FrozenIdentityHandle,
     ) {
         for diagnostic in &mut self.diagnostics {
-            if diagnostic.primary_span.is_some() {
-                diagnostic
-                    .set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-            }
-            for label in &mut diagnostic.labels {
-                if label.span.is_some() {
-                    label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-                }
-            }
+            diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
         }
     }
 
@@ -520,73 +512,6 @@ impl CompilerMessages {
                 source_context
             }));
     }
-
-    /// Extend package source rows to cover late diagnostics carrying that package domain.
-    ///
-    /// Matching diagnostics are split into contiguous ranges instead of widening one package row
-    /// across diagnostics owned by another domain. This keeps first-match render precedence
-    /// correct when late project and package diagnostics are interleaved.
-    pub(crate) fn extend_source_contexts_for_owned_handles(&mut self) {
-        let source_contexts = std::mem::take(&mut self.render_source_contexts);
-        let mut expanded_contexts = Vec::with_capacity(source_contexts.len());
-        for context in source_contexts {
-            let Some(domain) = context.domain.as_ref() else {
-                expanded_contexts.push(context);
-                continue;
-            };
-            let mut covered_indices = context.diagnostic_range.clone().collect::<Vec<_>>();
-            covered_indices.extend(self.diagnostics.iter().enumerate().filter_map(
-                |(index, diagnostic)| {
-                    let primary_matches = diagnostic
-                        .primary_frozen_identity_handle
-                        .as_ref()
-                        .is_some_and(|handle| handle.domain() == Some(domain));
-                    let label_matches = diagnostic.labels.iter().any(|label| {
-                        label
-                            .frozen_identity_handle
-                            .as_ref()
-                            .is_some_and(|handle| handle.domain() == Some(domain))
-                    });
-                    (primary_matches || label_matches).then_some(index)
-                },
-            ));
-            covered_indices.sort_unstable();
-            covered_indices.dedup();
-            if covered_indices.is_empty() {
-                expanded_contexts.push(context);
-                continue;
-            }
-
-            let mut ranges = Vec::new();
-            let mut start = covered_indices[0];
-            let mut end = start + 1;
-            for index in covered_indices.into_iter().skip(1) {
-                if index == end {
-                    end += 1;
-                } else {
-                    ranges.push(start..end);
-                    start = index;
-                    end = index + 1;
-                }
-            }
-            ranges.push(start..end);
-
-            let RenderSourceContext {
-                source_database,
-                domain,
-                ..
-            } = context;
-            for diagnostic_range in ranges {
-                expanded_contexts.push(RenderSourceContext {
-                    diagnostic_range,
-                    source_database: Arc::clone(&source_database),
-                    domain: domain.clone(),
-                });
-            }
-        }
-        self.render_source_contexts = expanded_contexts;
-    }
-
     /// Install precomputed frozen identity contexts for diagnostics appended at `diagnostic_offset`.
     ///
     /// WHAT: offsets each incoming frozen range by the diagnostic offset, mirroring
@@ -610,14 +535,38 @@ impl CompilerMessages {
     /// diagnostic storage.
     ///
     /// The first source row consumes the aggregate string table; subsequent rows share that
-    /// frozen string allocation while moving only their own source database. This is the final
-    /// report handoff used by successful build/dev warning paths.
+    /// frozen string allocation while moving only their own source database. Empty package rows
+    /// are retained only when an explicitly owned diagnostic span needs their domain. They supply
+    /// the corresponding frozen handle but never become default render ranges.
     pub(crate) fn freeze_source_contexts(mut self) -> Result<Self, CompilerError> {
+        let mut required_handle_domains = HashSet::new();
+        for diagnostic in &self.diagnostics {
+            if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                && let Some(domain) = handle.domain()
+            {
+                required_handle_domains.insert(domain.clone());
+            }
+            for label in &diagnostic.labels {
+                if let Some(handle) = label.frozen_identity_handle.as_ref()
+                    && let Some(domain) = handle.domain()
+                {
+                    required_handle_domains.insert(domain.clone());
+                }
+            }
+        }
+
         let source_contexts = std::mem::take(&mut self.render_source_contexts)
             .into_iter()
-            .filter(|context| !context.diagnostic_range.is_empty())
+            .filter(|context| {
+                !context.diagnostic_range.is_empty()
+                    || context
+                        .domain
+                        .as_ref()
+                        .is_some_and(|domain| required_handle_domains.contains(domain))
+            })
             .collect::<Vec<_>>();
         if source_contexts.is_empty() {
+            self.ensure_frozen_identity_handles_installed()?;
             return Ok(self);
         }
 
@@ -675,28 +624,47 @@ impl CompilerMessages {
         }
 
         for (diagnostic_range, domain, identity) in &frozen_contexts {
-            for diagnostic in self
-                .diagnostics
-                .iter()
-                .skip(diagnostic_range.start)
-                .take(diagnostic_range.end.saturating_sub(diagnostic_range.start))
-            {
-                if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                    && handle.get().is_none()
-                    && domain
-                        .as_ref()
-                        .is_none_or(|domain| handle.domain() == Some(domain))
-                {
-                    handle.install(Arc::clone(identity))?;
-                }
-                for label in &diagnostic.labels {
-                    if let Some(handle) = label.frozen_identity_handle.as_ref()
+            if domain.is_some() {
+                // Package domains identify one source owner even when the owned span is a
+                // related label on a diagnostic whose default range belongs to the project.
+                for diagnostic in &self.diagnostics {
+                    if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
                         && handle.get().is_none()
-                        && domain
-                            .as_ref()
-                            .is_none_or(|domain| handle.domain() == Some(domain))
+                        && handle.domain() == domain.as_ref()
                     {
                         handle.install(Arc::clone(identity))?;
+                    }
+                    for label in &diagnostic.labels {
+                        if let Some(handle) = label.frozen_identity_handle.as_ref()
+                            && handle.get().is_none()
+                            && handle.domain() == domain.as_ref()
+                        {
+                            handle.install(Arc::clone(identity))?;
+                        }
+                    }
+                }
+            } else {
+                // Domain-less handles remain tied to their genuine default source range. In
+                // particular, a project row cannot satisfy a foreign package handle.
+                for diagnostic in self
+                    .diagnostics
+                    .iter()
+                    .skip(diagnostic_range.start)
+                    .take(diagnostic_range.end.saturating_sub(diagnostic_range.start))
+                {
+                    if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                        && handle.get().is_none()
+                        && handle.domain() == domain.as_ref()
+                    {
+                        handle.install(Arc::clone(identity))?;
+                    }
+                    for label in &diagnostic.labels {
+                        if let Some(handle) = label.frozen_identity_handle.as_ref()
+                            && handle.get().is_none()
+                            && handle.domain() == domain.as_ref()
+                        {
+                            handle.install(Arc::clone(identity))?;
+                        }
                     }
                 }
             }
@@ -704,9 +672,11 @@ impl CompilerMessages {
 
         self.render_frozen_contexts = frozen_contexts
             .into_iter()
-            .map(|(diagnostic_range, _, identity)| RenderFrozenContext {
-                diagnostic_range,
-                identity,
+            .filter_map(|(diagnostic_range, _, identity)| {
+                (!diagnostic_range.is_empty()).then_some(RenderFrozenContext {
+                    diagnostic_range,
+                    identity,
+                })
             })
             .collect();
         self.ensure_frozen_identity_handles_installed()?;

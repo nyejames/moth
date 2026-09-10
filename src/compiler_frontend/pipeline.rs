@@ -528,10 +528,7 @@ impl<'a> CompilerFrontend<'a> {
             &self.string_table,
         ) {
             Ok(report) => Ok(report),
-            Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
-                if let Some(handle) = frozen_identity_handle {
-                    diagnostic.set_primary_frozen_identity_handle_if_missing(handle.clone());
-                }
+            Err(BorrowCheckError::Diagnostic(diagnostic)) => {
                 let mut batch = PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
                     diagnostic,
                     std::mem::take(&mut self.string_table),

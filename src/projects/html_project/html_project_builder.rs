@@ -24,7 +24,7 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
-use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -62,19 +62,25 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn generated_source_identity_handle(hir: &HirModule) -> Option<FrozenIdentityHandle> {
+fn generated_source_identity_handle(
+    hir: &HirModule,
+    source_domain: Option<&StablePackageIdentity>,
+) -> Option<FrozenIdentityHandle> {
     hir.function_ids_by_generated
         .keys()
         .next()
-        .map(|identity: &GeneratedFunctionIdentity| {
-            FrozenIdentityHandle::for_domain(
-                identity.declaration().module_origin().package().clone(),
-            )
+        .map(|_| match source_domain {
+            Some(domain) => FrozenIdentityHandle::for_domain(domain.clone()),
+            None => FrozenIdentityHandle::new(),
         })
 }
 
-fn attach_module_source_identity(messages: &mut CompilerMessages, hir: &HirModule) {
-    if let Some(handle) = generated_source_identity_handle(hir) {
+fn attach_module_source_identity(
+    messages: &mut CompilerMessages,
+    hir: &HirModule,
+    source_domain: Option<&StablePackageIdentity>,
+) {
+    if let Some(handle) = generated_source_identity_handle(hir, source_domain) {
         messages.set_frozen_identity_handle_if_missing(handle);
     }
 }
@@ -188,7 +194,11 @@ impl BackendBuilder for HtmlProjectBuilder {
                 ) => {
                     let mut messages =
                         CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
-                    attach_module_source_identity(&mut messages, &module.executable.hir);
+                    attach_module_source_identity(
+                        &mut messages,
+                        &module.executable.hir,
+                        entry.source_domain,
+                    );
                     return Err(messages);
                 }
                 Err(
@@ -481,6 +491,7 @@ impl HtmlProjectBuilder {
         let HtmlModuleCompileContext {
             entry:
                 ProjectEntry {
+                    source_domain,
                     module,
                     reachability,
                     external_imports,
@@ -516,7 +527,7 @@ impl HtmlProjectBuilder {
         )
         .map_err(|diagnostic| {
             let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
-            attach_module_source_identity(&mut messages, &module.executable.hir);
+            attach_module_source_identity(&mut messages, &module.executable.hir, source_domain);
             messages
         })?;
 
@@ -535,7 +546,7 @@ impl HtmlProjectBuilder {
                     .with_type_context_for_all_diagnostics(
                         module.executable.type_environment.clone(),
                     );
-                attach_module_source_identity(&mut messages, &module.executable.hir);
+                attach_module_source_identity(&mut messages, &module.executable.hir, source_domain);
                 messages
             }
             BackendFeatureValidationError::Infrastructure(error) => {
@@ -551,7 +562,11 @@ impl HtmlProjectBuilder {
             )
             .map_err(|diagnostic| {
                 let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
-                attach_module_source_identity(&mut messages, &linked.module.executable.hir);
+                attach_module_source_identity(
+                    &mut messages,
+                    &linked.module.executable.hir,
+                    linked.source_domain,
+                );
                 messages
             })?;
             validate_hir_backend_feature_support(
@@ -570,7 +585,11 @@ impl HtmlProjectBuilder {
                             .with_type_context_for_all_diagnostics(
                                 linked.module.executable.type_environment.clone(),
                             );
-                    attach_module_source_identity(&mut messages, &linked.module.executable.hir);
+                    attach_module_source_identity(
+                        &mut messages,
+                        &linked.module.executable.hir,
+                        linked.source_domain,
+                    );
                     messages
                 }
                 BackendFeatureValidationError::Infrastructure(error) => {

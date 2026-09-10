@@ -98,13 +98,14 @@ pub(crate) fn with_generic_primary_span(
     diagnostic
 }
 
-/// Rebuild a concrete-body diagnostic so the generic call site is primary.
+/// Rebuild a concrete-body diagnostic around optional generic instantiation provenance.
 ///
-/// WHAT: stores the original diagnostic primary location as the generic body location,
-/// makes the call location the diagnostic primary location, and rebuilds labels so the
-/// body, declaration, and substitution sites remain secondary.
-/// WHY: the call selected the concrete type arguments, so the call site should be primary
-/// and the generic body span should be secondary.
+/// WHAT: when a call location exists, stores the original diagnostic primary location as the
+///       generic body location, makes the call location primary, and keeps declaration and
+///       substitution sites as secondary labels. Without a call location, preserves the original
+///       body primary instead of downgrading the only available source position.
+/// WHY: the call selected the concrete type arguments when authored call provenance is available,
+///       while generated or synthetic requests still need the concrete body's source location.
 pub(crate) fn with_generic_instantiation_context(
     mut diagnostic: CompilerDiagnostic,
     context: GenericInstantiationDiagnosticContext,
@@ -118,22 +119,23 @@ pub(crate) fn with_generic_instantiation_context(
     } = context;
 
     if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
-        for label in &mut diagnostic.labels {
-            label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-        }
+        diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
     }
 
     let body_span = diagnostic.primary_span;
     let body_frozen_identity_handle = diagnostic.primary_frozen_identity_handle.take();
-    if call_span.is_some() {
+    let has_call_span = call_span.is_some();
+    if let Some(call_span) = call_span {
+        diagnostic.primary_span = Some(call_span);
         diagnostic.primary_frozen_identity_handle = call_site_frozen_identity_handle;
     } else {
+        diagnostic.primary_span = body_span;
         diagnostic.primary_frozen_identity_handle = body_frozen_identity_handle.clone();
     }
-    diagnostic.primary_span = call_span;
     let mut new_labels = Vec::with_capacity(diagnostic.labels.len() + 3);
 
-    if let Some(span) = body_span
+    if has_call_span
+        && let Some(span) = body_span
         && !diagnostic.labels.iter().any(|label| {
             label.span == Some(span)
                 && label_owner_domain_matches(
@@ -197,7 +199,6 @@ pub(crate) fn with_generic_instantiation_context(
         };
         new_labels.push(label);
     }
-
     new_labels.extend(diagnostic.labels);
     diagnostic.labels = new_labels;
     diagnostic
@@ -207,6 +208,14 @@ fn label_owner_domain_matches(
     label_owner: Option<&FrozenIdentityHandle>,
     expected_owner: Option<&FrozenIdentityHandle>,
 ) -> bool {
-    label_owner.map(FrozenIdentityHandle::domain)
-        == expected_owner.map(FrozenIdentityHandle::domain)
+    match (label_owner, expected_owner) {
+        (None, None) => true,
+        (None, Some(_)) | (Some(_), None) => false,
+        (Some(label_owner), Some(expected_owner)) => {
+            match (label_owner.domain(), expected_owner.domain()) {
+                (Some(label_domain), Some(expected_domain)) => label_domain == expected_domain,
+                _ => label_owner == expected_owner,
+            }
+        }
+    }
 }

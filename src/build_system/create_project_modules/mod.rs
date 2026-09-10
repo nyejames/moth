@@ -66,12 +66,18 @@ pub(crate) mod resource_inputs;
 mod source_discovery;
 pub(crate) mod source_discovery_error;
 pub(crate) mod source_loading;
+
+#[cfg(test)]
+#[path = "../tests/source_loading_test_support.rs"]
+mod source_loading_test_support;
 pub(crate) mod source_package_discovery;
 pub(crate) mod source_preparation;
 mod source_tree_index;
 
 #[cfg(test)]
-pub(super) use module_inventory::{ModuleCompilationSchedule, discover_all_modules_in_project};
+pub(super) use module_inventory::{
+    ModuleCompilationSchedule, discover_all_modules_in_project_with_check_only,
+};
 
 pub(crate) use project_roots::resolve_project_entry_root;
 pub(crate) use source_loading::extract_source_code;
@@ -262,7 +268,7 @@ mod create_project_modules_tests;
 mod stage0_filesystem_identity_tests;
 
 #[cfg(test)]
-#[path = "../tests/compile_project_frontend_tests.rs"]
+#[path = "../tests/compile_project_frontend_tests/mod.rs"]
 mod compile_project_frontend_tests;
 
 #[cfg(test)]

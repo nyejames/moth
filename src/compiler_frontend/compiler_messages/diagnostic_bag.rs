@@ -277,15 +277,7 @@ impl PremergeDiagnosticBatch {
         frozen_identity_handle: FrozenIdentityHandle,
     ) {
         for diagnostic in &mut self.bag.diagnostics {
-            if diagnostic.primary_span.is_some() {
-                diagnostic
-                    .set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-            }
-            for label in &mut diagnostic.labels {
-                if label.span.is_some() {
-                    label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
-                }
-            }
+            diagnostic.attach_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
         }
     }
 

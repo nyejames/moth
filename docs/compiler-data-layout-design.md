@@ -216,7 +216,8 @@ pub struct FrozenIdentityContext {
     paths: FrozenPathTable,
 }
 
-/// One report covers exactly one identity domain.
+/// One report has one normal identity domain. Rare foreign sites use explicit
+/// typed cold ownership data rather than changing that domain.
 pub struct DiagnosticReport {
     context: Arc<FrozenIdentityContext>,
     diagnostics: DiagnosticStore,
@@ -1143,6 +1144,32 @@ label data reference.
 
 More than `2^24 - 1` label-data entries in one compilation is a typed diagnostic-capacity failure for
 user input, not integer wrapping.
+
+### Mixed-domain ownership
+
+The frozen identity context carried by a report is the normal identity domain for
+both `DiagnosticRecord::primary` and `SecondaryDiagnosticLabel::span`. A compact
+span without cold ownership data is interpreted only in that domain. Numeric
+source IDs or paths never infer a different owner.
+
+A rare primary or secondary site that genuinely belongs to another identity
+domain uses typed cold ownership data associated with that site. The cold data
+resolves the site through a compact, report-owned reference to the other
+`FrozenIdentityContext`; it must not widen the common record. An explicit
+`FrozenIdentityHandle` may provide this ownership during migration, but it is
+not the final packed representation. Phase 4 chooses the exact side-store
+encoding.
+
+The common `DiagnosticRecord` remains exactly 32 bytes and
+`SecondaryDiagnosticLabel` remains exactly 12 bytes. Neither common type carries
+an `Arc`, path object or pointer, or context pointer to implement this ownership.
+Foreign related-site ownership is separate from the report's default render
+ownership and must never change which normal context resolves the diagnostic's
+primary span.
+
+This subsection is the current authority for mixed-domain ownership. Any earlier
+R7 wording that describes portable coordinates or an optional explicit span is
+historical migration context only and does not override this contract.
 
 ### Diagnostic places
 

@@ -4,22 +4,11 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerErrorMetadataKey};
 use crate::compiler_frontend::source::SourceDatabase;
-#[cfg(test)]
-use crate::compiler_frontend::source::SourceRegistrationIndex;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[cfg(test)]
-static SOURCE_READ_TRACK_PREFIX_FOR_TEST: std::sync::Mutex<Option<PathBuf>> =
-    std::sync::Mutex::new(None);
-
-#[cfg(test)]
-static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: std::sync::LazyLock<
-    std::sync::Mutex<HashMap<PathBuf, usize>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 // -------------------------
 //  Source Extraction
@@ -33,12 +22,8 @@ static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: std::sync::LazyLock<
 ///      serial boundary.
 pub(crate) fn read_source_code(file_path: &Path) -> Result<String, std::io::Error> {
     #[cfg(test)]
-    if should_count_source_read_for_test(file_path) {
-        *SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
-            .lock()
-            .expect("source read path-count test hook lock poisoned")
-            .entry(file_path.to_path_buf())
-            .or_insert(0) += 1;
+    if super::source_loading_test_support::should_count_source_read_for_test(file_path) {
+        super::source_loading_test_support::record_source_read_for_test(file_path);
     }
 
     fs::read_to_string(file_path)
@@ -124,39 +109,6 @@ impl SelectedSourceTextMap {
     }
 }
 
-#[cfg(test)]
-fn should_count_source_read_for_test(file_path: &Path) -> bool {
-    let prefix = SOURCE_READ_TRACK_PREFIX_FOR_TEST
-        .lock()
-        .expect("source read test hook lock poisoned");
-
-    prefix
-        .as_ref()
-        .is_none_or(|tracked_prefix| file_path.starts_with(tracked_prefix))
-}
-
-#[cfg(test)]
-pub(crate) fn reset_source_read_count_for_test(tracked_prefix: &Path) {
-    let mut prefix = SOURCE_READ_TRACK_PREFIX_FOR_TEST
-        .lock()
-        .expect("source read test hook lock poisoned");
-    *prefix = Some(tracked_prefix.to_path_buf());
-    SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
-        .lock()
-        .expect("source read path-count test hook lock poisoned")
-        .clear();
-}
-
-#[cfg(test)]
-pub(crate) fn source_read_count_for_path_for_test(path: &Path) -> usize {
-    SOURCE_READ_COUNTS_BY_PATH_FOR_TEST
-        .lock()
-        .expect("source read path-count test hook lock poisoned")
-        .get(path)
-        .copied()
-        .unwrap_or(0)
-}
-
 /// Reads the contents of a source file from disk.
 ///
 /// WHAT: performs UTF-8 file read with structured `CompilerError` diagnostics for common
@@ -172,41 +124,6 @@ pub fn extract_source_code(
 
         Err(error) => Err(source_read_error(file_path, error)),
     }
-}
-
-#[cfg(test)]
-/// Load every source already assigned a slot by the registration boundary.
-///
-/// Successful reads move their `String` directly into the corresponding source record. Read and
-/// UTF-8 failures are retained as per-source errors so callers can surface them in the same lane
-/// as the old on-demand read without aborting unrelated source preparation.
-pub(crate) fn load_registered_source_texts(
-    source_files: &mut SourceDatabase,
-    registration_index: &SourceRegistrationIndex<'_>,
-    _string_table: &mut StringTable,
-) -> Result<(), CompilerError> {
-    for canonical_path in registration_index.canonical_paths() {
-        let source_id = source_files
-            .get_by_canonical_path(canonical_path)
-            .map(|record| record.id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "registered source path {} has no source database slot",
-                    canonical_path.display()
-                ))
-            })?;
-
-        match read_source_code(canonical_path) {
-            Ok(source) => source_files.retain_text(source_id, source)?,
-            Err(error) => {
-                source_files.record_source_load_error(
-                    source_id,
-                    source_read_error(canonical_path, error),
-                )?;
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Converts raw source-read failures into the existing structured compiler error shape.
@@ -261,7 +178,7 @@ mod tests {
 
         let tracked_root = fs::canonicalize(temp_root.path())
             .expect("source-loading test root should canonicalize");
-        reset_source_read_count_for_test(&tracked_root);
+        super::super::source_loading_test_support::reset_source_read_count_for_test(&tracked_root);
         let mut selected = SelectedSourceTextMap::default();
         assert_eq!(
             selected
@@ -276,8 +193,18 @@ mod tests {
             "selected"
         );
 
-        assert_eq!(source_read_count_for_path_for_test(&selected_path), 1);
-        assert_eq!(source_read_count_for_path_for_test(&provider_path), 0);
+        assert_eq!(
+            super::super::source_loading_test_support::source_read_count_for_path_for_test(
+                &selected_path
+            ),
+            1
+        );
+        assert_eq!(
+            super::super::source_loading_test_support::source_read_count_for_path_for_test(
+                &provider_path
+            ),
+            0
+        );
         assert_eq!(selected.entries.len(), 1);
         assert!(selected.entries.contains_key(&selected_path));
     }

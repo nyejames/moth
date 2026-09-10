@@ -106,6 +106,52 @@ fn with_generic_instantiation_context_changes_primary_span_to_call_site() {
 }
 
 #[test]
+fn with_generic_instantiation_context_without_call_span_retains_body_primary() {
+    let body_span = make_span(1, 10, 1);
+    let declaration_span = make_span(2, 20, 1);
+    let body_owner = FrozenIdentityHandle::new();
+    let mut diagnostic = CompilerDiagnostic::type_mismatch(
+        builtin_type_ids::INT,
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        Some(body_span),
+    );
+    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+
+    let transformed = with_generic_instantiation_context(
+        diagnostic,
+        GenericInstantiationDiagnosticContext {
+            call_span: None,
+            declaration_span: Some(declaration_span),
+            frozen_identity_handle: None,
+            call_site_frozen_identity_handle: None,
+            substitutions: Vec::new(),
+        },
+    );
+
+    assert_eq!(transformed.primary_span, Some(body_span));
+    assert_eq!(
+        transformed.primary_frozen_identity_handle.as_ref(),
+        Some(&body_owner)
+    );
+    assert_eq!(
+        transformed
+            .labels
+            .iter()
+            .filter(|label| {
+                label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+            })
+            .count(),
+        0,
+        "without a call site, the body must remain primary rather than become a label"
+    );
+    assert!(transformed.labels.iter().any(|label| {
+        label.span == Some(declaration_span)
+            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+    }));
+}
+
+#[test]
 fn with_generic_instantiation_context_retains_exact_extended_call_span() {
     let body_span = make_span(1, 10, 1);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -190,6 +236,97 @@ fn with_generic_instantiation_context_avoids_duplicate_body_secondary_label() {
             .filter(|label| label.span == Some(body_span))
             .count(),
         1
+    );
+}
+
+#[test]
+fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
+    let body_span = make_span(1, 10, 1);
+    let call_span = make_span(2, 20, 1);
+    let body_owner = FrozenIdentityHandle::new();
+    let existing_owner = FrozenIdentityHandle::new();
+    let mut diagnostic = CompilerDiagnostic::type_mismatch(
+        builtin_type_ids::INT,
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        Some(body_span),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(body_span),
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        existing_owner.clone(),
+    )]);
+    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+
+    let transformed = with_generic_instantiation_context(
+        diagnostic,
+        GenericInstantiationDiagnosticContext {
+            call_span: Some(call_span),
+            declaration_span: None,
+            frozen_identity_handle: None,
+            call_site_frozen_identity_handle: None,
+            substitutions: Vec::new(),
+        },
+    );
+
+    assert_eq!(
+        transformed
+            .labels
+            .iter()
+            .filter(|label| label.span == Some(body_span))
+            .count(),
+        2,
+        "distinct domain-less owners must not deduplicate colliding spans"
+    );
+    assert!(transformed.labels.iter().any(|label| {
+        label.span == Some(body_span)
+            && label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+            && label.frozen_identity_handle.as_ref() == Some(&body_owner)
+    }));
+    assert!(transformed.labels.iter().any(|label| {
+        label.span == Some(body_span)
+            && label.message == Some(DiagnosticLabelMessage::PreviousDeclaration)
+            && label.frozen_identity_handle.as_ref() == Some(&existing_owner)
+    }));
+}
+
+#[test]
+fn generic_reanchoring_deduplicates_same_domainless_label_owner() {
+    let body_span = make_span(1, 10, 1);
+    let call_span = make_span(2, 20, 1);
+    let body_owner = FrozenIdentityHandle::new();
+    let mut diagnostic = CompilerDiagnostic::type_mismatch(
+        builtin_type_ids::INT,
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        Some(body_span),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(body_span),
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        body_owner.clone(),
+    )]);
+    diagnostic.primary_frozen_identity_handle = Some(body_owner.clone());
+
+    let transformed = with_generic_instantiation_context(
+        diagnostic,
+        GenericInstantiationDiagnosticContext {
+            call_span: Some(call_span),
+            declaration_span: None,
+            frozen_identity_handle: None,
+            call_site_frozen_identity_handle: None,
+            substitutions: Vec::new(),
+        },
+    );
+
+    assert_eq!(
+        transformed
+            .labels
+            .iter()
+            .filter(|label| label.span == Some(body_span))
+            .count(),
+        1,
+        "clones of the same domain-less owner should deduplicate"
     );
 }
 

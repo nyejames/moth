@@ -6,12 +6,28 @@
 //! kinds become user-facing prose.
 
 use super::*;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticLabel};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
+};
 use crate::compiler_frontend::source::FrozenIdentityContext;
 use crate::compiler_frontend::source::line_index::{LineIndex, LinePosition};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
 use std::path::{Path, PathBuf};
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
+
+/// A secondary diagnostic label resolved into renderer-independent display facts.
+///
+/// A label with a source span carries a root-relative path and one-based display coordinates.
+/// A spanless message carries no location. Labels with an unresolved source span are omitted by
+/// [`resolve_label_render_facts_from_root`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResolvedDiagnosticLabel {
+    pub(crate) style: DiagnosticLabelStyle,
+    pub(crate) path: Option<String>,
+    pub(crate) line: Option<i32>,
+    pub(crate) column: Option<i32>,
+    pub(crate) message: String,
+}
 
 /// Exact primary source position resolved from an attached source identity context.
 ///
@@ -206,6 +222,100 @@ impl<'a> DiagnosticRenderContext<'a> {
         })
     }
 }
+/// Resolve secondary labels into facts consumed independently by terminal and HTML renderers.
+///
+/// The path is made relative to `root`, while line and column remain one-based display
+/// coordinates. A spanless message is retained with no location; a label whose source span cannot
+/// be resolved is omitted.
+pub(crate) fn resolve_label_render_facts_from_root(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+    root: &Path,
+) -> Vec<ResolvedDiagnosticLabel> {
+    let mut labels = Vec::new();
+
+    for label in &diagnostic.labels {
+        let Some(message) = label.message.as_ref() else {
+            continue;
+        };
+        let message = diagnostic_label_message_text(message, context);
+        let Some(position) = context.label_position(label) else {
+            if label.span.is_none() {
+                labels.push(ResolvedDiagnosticLabel {
+                    style: label.style,
+                    path: None,
+                    line: None,
+                    column: None,
+                    message,
+                });
+            }
+            continue;
+        };
+
+        labels.push(ResolvedDiagnosticLabel {
+            style: label.style,
+            path: Some(relative_display_path_from_root(
+                position.path.as_path(),
+                root,
+            )),
+            line: Some(display_line_number(
+                i32::try_from(position.start.line).unwrap_or(i32::MAX),
+            )),
+            column: Some(display_column_number(
+                i32::try_from(position.start.column).unwrap_or(i32::MAX),
+            )),
+            message,
+        });
+    }
+
+    labels
+}
+
+fn diagnostic_label_message_text(
+    message: &DiagnosticLabelMessage,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    let string_table = context.string_table;
+
+    match message {
+        DiagnosticLabelMessage::PreviousDeclaration => "previous declaration here".to_owned(),
+        DiagnosticLabelMessage::ConflictingAccess => "earlier conflicting access here".to_owned(),
+        DiagnosticLabelMessage::ExpectedTypeDeclaredHere => {
+            "expected type declared here".to_owned()
+        }
+        DiagnosticLabelMessage::ValueMovedHere => "value moved here".to_owned(),
+        DiagnosticLabelMessage::RenderedText(text) => string_table.resolve(*text).to_owned(),
+        DiagnosticLabelMessage::GenericInstantiationCallSite => {
+            "while instantiating this generic call".to_owned()
+        }
+        DiagnosticLabelMessage::GenericInstantiationBodySite => {
+            "generic body operation failed here".to_owned()
+        }
+        DiagnosticLabelMessage::GenericInstantiationDeclarationSite => {
+            "generic function declared here".to_owned()
+        }
+        DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions } => {
+            let substitution_text = substitutions
+                .iter()
+                .map(|substitution| {
+                    let parameter_name = string_table.resolve(substitution.parameter_name);
+                    let concrete_type =
+                        diagnostic_type_name(substitution.concrete_type_id, context);
+                    format!("{parameter_name} = {concrete_type}")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            format!("generic substitution: {substitution_text}")
+        }
+        DiagnosticLabelMessage::GenericInferencePreviousEvidence => {
+            "previous generic inference evidence here".to_owned()
+        }
+        DiagnosticLabelMessage::ImmutableBindingDeclaration => {
+            "immutable binding declared here".to_owned()
+        }
+    }
+}
 
 /// Return a validated retained line, allowing only the exact EOF position of an empty snapshot to
 /// use an empty excerpt. Ordinary out-of-range positions must remain unresolved.
@@ -230,15 +340,19 @@ pub(crate) const RENDER_TAB_STOP_CELLS: usize = 8;
 pub(crate) fn expand_tabs_for_display(line: &str) -> String {
     let mut expanded = String::with_capacity(line.len());
     let mut cells = 0usize;
-    for scalar in line.chars() {
-        let next_cells = advance_display_cells(cells, scalar);
-        if scalar == '\t' {
+    let mut chunks = line.split('\t').peekable();
+
+    while let Some(chunk) = chunks.next() {
+        expanded.push_str(chunk);
+        cells += UnicodeWidthStr::width(chunk);
+
+        if chunks.peek().is_some() {
+            let next_cells = advance_tab_stop(cells);
             expanded.push_str(&" ".repeat(next_cells.saturating_sub(cells)));
-        } else {
-            expanded.push(scalar);
+            cells = next_cells;
         }
-        cells = next_cells;
     }
+
     expanded
 }
 
@@ -249,40 +363,54 @@ pub(crate) fn display_gutter_width(display_line: i32) -> usize {
 
 /// Convert one retained source line plus scalar-column span bounds into caret geometry.
 ///
-/// WHAT: walks the line's scalars from its start, counting display cells: a tab advances to the
-/// next [`RENDER_TAB_STOP_CELLS`] multiple and every other scalar contributes its Unicode width
-/// (combining marks 0, wide CJK 2, unassigned or control scalars 0). Returns the padding cells
-/// before `start_column` and the underline cells covering `start_column..end_column`.
+/// WHAT: walks non-tab runs as strings so contextual Unicode display sequences use their
+/// repository-defined width; a tab advances to the next [`RENDER_TAB_STOP_CELLS`] multiple.
+/// Returns the padding cells before `start_column` and the underline cells covering
+/// `start_column..end_column`.
 /// WHY: scalar columns misplace carets behind tabs and wide characters, while tooling columns
 /// (UTF-16) and scalar source offsets stay separate concerns owned by `LineIndex`. Only this
 /// render boundary knows display cells.
 pub(crate) fn caret_cells(line: &str, start_column: u32, end_column: u32) -> (usize, usize) {
-    let start = start_column as usize;
-    let end = end_column.max(start_column) as usize;
-    let mut cells = 0usize;
-    let mut padding = None;
-    let mut underline_end = None;
-    for (index, scalar) in line.chars().enumerate() {
-        if index == start {
-            padding = Some(cells);
-        }
-        if index == end {
-            underline_end = Some(cells);
-            break;
-        }
-        cells = advance_display_cells(cells, scalar);
-    }
-    let padding = padding.unwrap_or(cells);
-    let underline_end = underline_end.unwrap_or(cells);
+    let padding = display_cells_at_scalar_column(line, start_column);
+    let underline_end = display_cells_at_scalar_column(line, end_column.max(start_column));
     (padding, underline_end.saturating_sub(padding).max(1))
 }
 
-fn advance_display_cells(cells: usize, scalar: char) -> usize {
-    if scalar == '\t' {
-        cells + RENDER_TAB_STOP_CELLS - cells % RENDER_TAB_STOP_CELLS
-    } else {
-        cells + UnicodeWidthChar::width(scalar).unwrap_or(0)
+fn display_cells_at_scalar_column(line: &str, scalar_column: u32) -> usize {
+    let target = scalar_column as usize;
+    let mut scalar_index = 0usize;
+    let mut cells = 0usize;
+    let mut chunks = line.split('\t').peekable();
+
+    while let Some(chunk) = chunks.next() {
+        let chunk_scalar_count = chunk.chars().count();
+        let chunk_end = scalar_index + chunk_scalar_count;
+        if target <= chunk_end {
+            let prefix_scalar_count = target.saturating_sub(scalar_index);
+            let prefix_end = chunk
+                .char_indices()
+                .nth(prefix_scalar_count)
+                .map_or(chunk.len(), |(byte_index, _)| byte_index);
+            return cells + UnicodeWidthStr::width(&chunk[..prefix_end]);
+        }
+
+        cells += UnicodeWidthStr::width(chunk);
+        scalar_index = chunk_end;
+
+        if chunks.peek().is_some() {
+            cells = advance_tab_stop(cells);
+            scalar_index += 1;
+            if target <= scalar_index {
+                return cells;
+            }
+        }
     }
+
+    cells
+}
+
+fn advance_tab_stop(cells: usize) -> usize {
+    cells + RENDER_TAB_STOP_CELLS - cells % RENDER_TAB_STOP_CELLS
 }
 
 /// Count the display cells before a primary span's start column on its retained line.
