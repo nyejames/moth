@@ -40,6 +40,7 @@ Coverage is not quality. An audited area may still have open findings.
 | `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` `stale` |
 | `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
 | `frontend.tokenizer` | `src/compiler_frontend/tokenizer/**` - lexer, tokens, numeric scanning, text modes, line scanning, newline handling, and the tokenizer test files | Correctness 2026-08 AUD-0005 `stale` |
+| `frontend.symbols` | `src/compiler_frontend/symbols/**` - string interning with fork/merge/freeze, complete-path interning (`PathId`, `PathInternerBuilder`, `PathTable`), `InternedPath`, identifier and reserved-name policy, compiler-owned symbol preseeding, dependency identities, and the symbols test files | Correctness 2026-09 AUD-0006 |
 
 ## Never audited
 
@@ -48,7 +49,7 @@ Areas with no row above and no coverage of any kind. This list is deliberately c
 AUD-0004 measured 771 of 791 production `.rs` files as having no owner under the registry taxonomy that preceded this log. That figure is a historical ownership measurement, not a recount of the areas below under the current model.
 
 - `src/compiler_frontend/ast/**` - AST semantics, constant folding, templates and TIR
-- `src/compiler_frontend/headers/**`, `symbols/**`, `module_compilation/**`
+- `src/compiler_frontend/headers/**`, `module_compilation/**`
 - `src/compiler_frontend/compiler_messages/**` - diagnostic construction and rendering
 - `src/backends/**` - JS and Wasm lowering, backend feature validation
 - `src/build_system/**` outside `create_project_modules/`

@@ -20,6 +20,18 @@ Filed, not yet triaged.
   - `Correctness` | `frontend.tokenizer`
 - [AUD-0005-F03 (linked, Diagnostics lane): Unicode numeric characters are diagnosed as `_` separator errors](./audits/AUD-0005-tokenizer-correctness.md#aud-0005-f03-linked-diagnostics-lane-unicode-numeric-characters-are-diagnosed-as-_-separator-errors)
   - `Diagnostics` | `frontend.tokenizer`
+- [AUD-0006-F01: A user-authored root-level `start` function reaches the compiler-invariant lane and is reported as a compiler bug](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f01-a-user-authored-root-level-start-function-reaches-the-compiler-invariant-lane-and-is-reported-as-a-compiler-bug)
+  - `Correctness` | `frontend.symbols`
+- [AUD-0006-F02 (linked, Diagnostics lane): ASCII-only naming predicates warn on legal Unicode identifiers](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f02-linked-diagnostics-lane-ascii-only-naming-predicates-warn-on-legal-unicode-identifiers-telling-the-user-to-use-the-convention-they-already-used)
+  - `Diagnostics` | `frontend.symbols`
+- [AUD-0006-F03 (linked, Redundancy lane): `StringIdRemap::has_non_identity_after` has no production caller](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f03-linked-redundancy-lane-stringidremaphas_non_identity_after-has-no-production-caller-and-its-only-consumers-are-the-tests-that-pin-it)
+  - `Redundancy` | `frontend.symbols`
+- [AUD-0006-F04 (linked, Redundancy lane): `path_interner/frozen.rs` defines a private duplicate of the crate's `StringTableResolver` trait](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f04-linked-redundancy-lane-path_internerfrozeners-defines-a-private-duplicate-of-the-crates-stringtableresolver-trait)
+  - `Redundancy` | `frontend.symbols`
+- [AUD-0006-F05 (linked, Redundancy lane): the typed `CompilerSymbolIds` accessors have no production consumer](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f05-linked-redundancy-lane-the-typed-compilersymbolids-accessors-have-no-production-consumer)
+  - `Redundancy` | `frontend.symbols`
+- [AUD-0006-F06 (linked, Tests lane): no Rust harness test drives the frontend with a preseeded string table, and the only authored-`start` fixture cannot reach F01](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f06-linked-tests-lane-no-rust-harness-test-drives-the-frontend-with-a-preseeded-string-table-and-the-only-authored-start-fixture-cannot-reach-f01)
+  - `Tests` | `frontend.symbols`
 
 ## Accepted
 
