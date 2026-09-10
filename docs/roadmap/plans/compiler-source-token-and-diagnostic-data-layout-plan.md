@@ -9,7 +9,8 @@
 > **Status:**
 > Phase 1 complete. The source, token and diagnostic representation cutover, focused corrections,
 > independent review, validation and benchmark evidence are accepted in `a9f9744de`, `e1f16cb49`,
-> `134aebf63` and `749f9c3f0`. The plan and benchmark evidence closeout is committed in `38e68d2a5`.
+> `134aebf63` and `749f9c3f0`. The plan and benchmark evidence closeout sequence is committed
+> through `1f6d4a81` (following `38e68d2a5`).
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -75,16 +76,15 @@ CURRENT_SLICE:
   focused correction review passed; current measurements are recorded in the Phase 1 closeout below.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  final plan/evidence closeout `38e68d2a5`.
+  plan/evidence closeout sequence through `1f6d4a81` (following `38e68d2a5`).
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
-LAST_RECORDED_CHECKPOINT:
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63` and `749f9c3f0`;
-the final plan and evidence closeout is committed in `38e68d2a5`.
+the plan and evidence closeout sequence is committed through `1f6d4a81` (following `38e68d2a5`).
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic and renderer cutover is committed and validated.
-- The worktree is clean at final closeout commit `38e68d2a5`.
+- The worktree is clean at the current closeout sequence through `1f6d4a81`.
 - Phase 2 remains pending external user review.
 HISTORICAL_ACCEPTED_SLICES:
 The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
