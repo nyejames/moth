@@ -17,7 +17,9 @@ use crate::build_system::output::{
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
-use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
+#[cfg(unix)]
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticCategory, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
 };

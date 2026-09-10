@@ -57,9 +57,10 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
+#[cfg(unix)]
+use crate::compiler_frontend::source::SourceKind;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceKind,
-    SourceSpan,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
