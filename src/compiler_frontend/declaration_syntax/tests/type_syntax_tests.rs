@@ -76,7 +76,7 @@ fn assert_diagnostic_payload(
 /// Unwrap a type-syntax parse failure into its authored-source diagnostic.
 ///
 /// WHAT: matches the typed `HeaderParseFailure` lane so tests pin the user diagnostic
-///       instead of dereferencing an obsolete boxed value.
+///       instead of conflating infrastructure failure with a source diagnostic.
 /// WHY: infrastructure failures must abort the test explicitly rather than being mistaken
 ///      for a source diagnostic.
 fn unwrap_type_parse_diagnostic(failure: HeaderParseFailure) -> CompilerDiagnostic {

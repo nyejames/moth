@@ -58,7 +58,7 @@ use std::collections::HashSet;
 /// WHAT: gives declaration dispatch and its local helpers one error boundary that keeps
 ///       authored-source diagnostics separate from internal compiler-state failures.
 /// WHY: delegated declaration parsers carry both lanes, so dispatch can propagate them directly
-///      without unboxing and reboxing between each step.
+///      across each delegation step without converting either lane.
 type HeaderDispatchResult<T> = Result<T, HeaderParseFailure>;
 
 // WHAT: classifies one top-level declaration by its leading token and builds the concrete header

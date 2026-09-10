@@ -28,9 +28,9 @@ use crate::compiler_frontend::tokenizer::tokens::FileTokens;
 /// Two-lane result for struct shell parsing.
 ///
 /// WHAT: mirrors `RecordBodyParseResult` so the thin `parse_struct_shell` wrapper
-///       propagates both lanes from `parse_record_body` without unboxing.
+///       propagates both lanes from `parse_record_body` directly.
 /// WHY: struct shell parsing is a delegation layer; the two-lane boundary belongs to
-///      record-body parsing, and each plain-`CompilerDiagnostic` caller unboxes once.
+///      record-body parsing, and plain-`CompilerDiagnostic` callers extract their inline lane once.
 type StructShellResult = Result<Vec<SignatureMemberSyntax>, HeaderParseFailure>;
 
 /// Parse a struct field-list shell from `| field Type [= default], ... |` syntax.

@@ -37,8 +37,8 @@ pub use crate::compiler_frontend::utilities::token_scan::InitializerReference;
 ///       error boundary while preserving the original structured diagnostic, with
 ///       infrastructure failures aborting through the typed lane.
 /// WHY: these connected helpers otherwise carry the large diagnostic value
-///      through every successful parse. Plain-diagnostic callers unbox once at
-///      their existing boundary.
+///      through every successful parse. Plain-diagnostic callers extract the
+///      inline diagnostic lane at their existing boundary.
 type DeclarationShellResult<T> = Result<T, HeaderParseFailure>;
 #[derive(Clone, Debug)]
 pub struct DeclarationSyntax {

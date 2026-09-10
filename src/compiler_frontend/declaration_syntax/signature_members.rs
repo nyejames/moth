@@ -37,7 +37,8 @@ use rustc_hash::FxHashMap;
 ///       preserving structured diagnostics for header and AST callers, with infrastructure
 ///       failures aborting through the typed lane.
 /// WHY: these connected parsers otherwise carry the large diagnostic value
-///      through every successful header parse. Plain callers unbox once.
+///      through every successful header parse. Plain callers extract the
+///      inline diagnostic lane once.
 type SignatureMemberParseResult<T> = Result<T, HeaderParseFailure>;
 
 /// Distinguishes the two syntactic contexts that share `| ... |` member parsing.

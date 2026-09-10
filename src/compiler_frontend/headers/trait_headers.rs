@@ -28,7 +28,7 @@ use crate::compiler_frontend::headers::types::{HeaderBuildContext, HeaderParseFa
 ///      incompatibility and trait-name validation helper one small error boundary that keeps
 ///      authored-source diagnostics separate from internal compiler-state failures.
 /// WHY: the signature-member boundary already carries both lanes, so trait-header
-///      parsing propagates them directly without unboxing and reboxing at each step. The
+///      parsing propagates them directly across its delegation steps. The
 ///      header-dispatch boundary also uses two lanes, so callers stay in sync.
 type TraitHeaderResult<T> = Result<T, HeaderParseFailure>;
 
