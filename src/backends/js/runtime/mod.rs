@@ -4,6 +4,14 @@
 //! semantics. All helper groups are declared as JS `function` declarations, which means
 //! JS hoisting guarantees correct behaviour regardless of emission order.
 //!
+//! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
+//! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
+//! dependency validation. The remaining prelude groups — binding, alias, computed-place, clone,
+//! error, result, map, string, cast, numeric, choice, and reactivity — are compiler-runtime
+//! infrastructure rather than first-party package implementations. They intentionally stay out of
+//! the first-party package inventory; new package-facing JS must not be added here without an
+//! inventory source.
+
 //! The top-level [`JsEmitter::emit_runtime_prelude`] only owns:
 //! - helper emission order
 //! - high-level comments about why these groups exist
@@ -18,6 +26,7 @@ mod casts;
 mod choices;
 mod cloning;
 mod collections;
+
 mod errors;
 mod maps;
 mod numeric;
@@ -25,6 +34,8 @@ mod places;
 mod reactivity;
 mod results;
 mod strings;
+
+pub(crate) use collections::collection_javascript_helpers;
 
 use crate::backends::js::JsEmitter;
 

@@ -15,6 +15,7 @@
 //! - Package-manager manifests, vendored directories, or workspace traversal.
 //! - Generated runtime glue, documentation, tests or user-owned JavaScript.
 
+use crate::backends::js::collection_javascript_helpers;
 use crate::backends::js::package_bindings::core::core_javascript_helpers;
 use crate::builder_surface::core_packages::{
     register_core_math_package, register_core_random_package, register_core_text_package,
@@ -55,7 +56,8 @@ pub struct FirstPartyJavascriptImportFinding {
     pub message: String,
 }
 
-/// Helper bodies, inline lowering templates and registered runtime-module sources.
+/// Core package helper bodies, `@core/collections` runtime helpers, inline lowering templates and
+/// registered runtime-module sources.
 pub fn inventoried_javascript_sources() -> Vec<InventoriedJsSource> {
     let mut sources = Vec::new();
 
@@ -63,6 +65,12 @@ pub fn inventoried_javascript_sources() -> Vec<InventoriedJsSource> {
         sources.push(InventoriedJsSource {
             label: format!("core-js-helper:{}", helper.name),
             source: helper.source.to_owned(),
+        });
+    }
+    for helper in collection_javascript_helpers() {
+        sources.push(InventoriedJsSource {
+            label: format!("core-collections-js-helper:{}", helper.name),
+            source: helper.source,
         });
     }
 
@@ -140,6 +148,23 @@ mod tests {
                 .any(|source| source.label == "runtime-module:@moth/runtime"
                     && source.source.contains("export function mothOk")),
             "runtime module source must come from RuntimeModuleRegistry: {sources:?}"
+        );
+        assert!(
+            sources.iter().any(|source| {
+                source.label == "core-collections-js-helper:__moth_fixed_collection"
+                    && source
+                        .source
+                        .contains("function __moth_fixed_collection(items, fixedCapacity)")
+            }),
+            "fixed collection helper must be inventoried from its emitted source: {sources:?}"
+        );
+        assert!(
+            sources.iter().any(|source| {
+                source.label == "core-collections-js-helper:__moth_collection_get"
+                    && source.source.contains("__moth_error_result")
+                    && source.source.contains("Collection index out of bounds")
+            }),
+            "collection get helper and interpolated error source must be inventoried: {sources:?}"
         );
         assert!(
             sources

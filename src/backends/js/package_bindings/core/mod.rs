@@ -21,8 +21,9 @@ pub(crate) struct CoreJsHelper {
 
 /// Optional `@core/*` helper bodies emitted from `package_bindings`, including unreferenced ones.
 ///
-/// Generic runtime-prelude helpers such as `@core/collections` stay with `src/backends/js/runtime`
-/// and are outside this first-party package inventory.
+/// `@core/collections` JavaScript lives with the runtime collection helpers and is inventoried
+/// through [`crate::backends::js::runtime::collection_javascript_helpers`]. Remaining runtime
+/// prelude groups are compiler infrastructure, not this optional-helper inventory.
 pub(crate) fn core_javascript_helpers() -> Vec<CoreJsHelper> {
     let mut helpers = Vec::new();
     helpers.extend_from_slice(text::CORE_TEXT_JS_HELPERS);
