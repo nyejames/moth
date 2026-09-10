@@ -100,197 +100,9 @@ CURRENT_WORKSPACE_STATE:
   correction evidence below.
 - Phase 2 is the next slice on the rebased continuation branch. Establish its actual workspace state and validation baseline when work starts.
 HISTORICAL_ACCEPTED_SLICES:
-The entries below preserve prior checkpoint records as historical, as-of their recorded commits. They
-are not current workspace validation or checkpoint claims.
-
-- Accepted 1D5c1: `SignatureMemberSyntax`, `FunctionReturnSyntax` and `ChoiceVariantSyntax`
-  copy existing token-local spans by direct indexing. `ReturnSlotSyntax.location` and its now
-  redundant remap/rebind forwarding implementation are removed. Trait `This` substitution copies
-  the nested return span. Focused fixtures cover long anchors, remapping and authored substitution.
-- Accepted 1D5c5 is committed in `6afa29848`. Header names retain exact local anchors; const
-  fragments retain explicit final-source `SourceSpan` ownership and join their first-interior
-  through post-close bounds through the original live builder; source contracts retain the
-  qualifier `#` anchor. Focused coverage includes long multibyte/extended ranges, infrastructure-
-  lane selection failure, related labels and joined dependency-clause ends. The scripted
-  independent audit could not run because its providers failed before inspection; no files changed
-  during those attempts.
-- Accepted 1D6 is committed in `cefb61634`. The test-only `source::test_support::TestSourceContext`
-  owns an explicit source identity, interned path, string table and live extended-span builder;
-  focused header span regressions now share it, and its own test covers a long live-table span.
-- Accepted 1E1a is committed in `3f40b6b48`. Stage 0's directory file-reference resolver consumes
-  the retained `PreparedFileReference` local span for every user diagnostic, preserving the legacy
-  location and label order while removing the field-level dead-code bridge. The focused missing
-  resource regression proves the diagnostic span resolves to the authored path bytes in the
-  retained source snapshot. Dependency-clause, module-symbol and sorted-header consumers remain
-  the next 1E1 batches.
-- Accepted the first sorted-header consumer in `73ee265df`. Stage 3 dependency edges retain each
-  header's exact `name_span` with its owning `SourceId`; missing-import and circular-dependency
-  diagnostics publish that `SourceSpan` while preserving their legacy primary locations and
-  ordering. The focused module-dependency suite (30 tests) passes, and infrastructure errors keep
-  their existing location lane.
-- Accepted dependency-selection spans in `1690f8bd0`. Provider-surface diagnostics now publish
-  the selection token's exact `SourceSpan` with its dependency-owned source ID while preserving
-  the legacy primary location. The focused namespace-binding regression passes.
-- Accepted renderer span consumption in `616d9a864`. Terminal, terse and dev-server renderers
-  resolve retained primary spans against the attached source database, derive scalar columns from
-  `LineIndex`, and keep legacy-location fallback for diagnostics without a retained span. Unicode
-  and half-open multibyte caret regressions pass.
-- Accepted module-symbol span consumption in `5e722fc07`. Declaration records retain exact
-  `SourceSpan` anchors, and same-file visible-name collisions attach the current and previous
-  declaration spans while preserving the legacy location and diagnostic ordering.
-- Accepted trait diagnostic anchors in `953cb928f`. Trait requirement duplicates retain exact
-  primary and related spans, conformance targets retain their target span, and both evidence and
-  AST-only trait-reference resolution retain the authored reference span. Legacy locations and
-  labels remain available as the interval bridge.
-- Accepted dependency-alias span consumption in `715c17ca9`. Namespace alias collisions attach
-  the authored alias span through the dependency shell's source ID while preserving the legacy
-  collision location. The obsolete alias field-level allowance is removed.
-- Accepted template body span consumption in `fd4829a4d`. The parser's defensive unexpected-token
-  lane publishes the retained current-token span and source ID while preserving the legacy
-  location and primary label; a multibyte regression exercises the retained token boundary.
-- Accepted source config span consumption in `a33729819`. Prepared source-contract facts carry
-  their declaration span through the build-config boundary, and missing required inputs publish
-  that exact primary span while provider-only facts retain their location-only contract.
-- Accepted the open 1B4 loading evidence in `3b4ae4b26`. A source-loading regression verifies that
-  `retain_text` moves the original allocation into the loaded source record while preserving its
-  exact contents; production lifecycle code is unchanged.
-- Accepted named call-target span consumption in `3d9ef3e65`. Duplicate named-argument
-  diagnostics publish the exact parameter-name token span while preserving the existing call-shape
-  location and diagnostic payload.
-- Accepted template loop-control span consumption in `5d527326d`. Direct break/continue markers
-  retain their token span and source ID through sentinel classification, so orphan diagnostics
-  point at the authored marker while retaining their legacy location and labels.
-- Accepted the first 1F1 freeze foundation in `1a7546d19`. A merged root `StringTable` can be
-  consumed into lookup-only `FrozenStringTable` storage without copying its boxed strings or
-  changing `StringId` values; forked tables are rejected until their deltas merge into the root.
-- Accepted the bounded 1F2 warning handoff in `641017866`. Module preparation moves its warning
-  vector into diagnosed failure messages instead of cloning it, while successful preparation
-  retains the same vector for the prepared module.
-- Accepted the bounded 1G1 import-collision payload simplification in `1bfefa23d`. The previous
-  declaration remains a related `PreviousDeclaration` label, including its exact span when one is
-  available, while the duplicate payload location is removed. String remapping, source rebinding,
-  renderer matches and header assertions now use the canonical labels; namespace bindings (38),
-  diagnostic model (78), header remap (29), header parsing (179) and collision regressions pass.
-- Accepted the bounded 1E2 shadowed-declaration consumer in `3b36306cd`. The duplicate declaration
-  token's existing `LocalSpan` and `FileTokens.file_id` become the diagnostic primary span while
-  the legacy location, payload and both labels remain unchanged. The multibyte declaration
-  regression and the full declaration test module (23 tests) pass.
-- Accepted the bounded 1E3 template-head consumer in `ebe54fea5`. Directive argument syntax
-  diagnostics use one current-token helper to retain exact spans from `FileTokens.file_id`, while
-  legacy locations, labels, payloads and ordering remain unchanged. The multibyte slot-target
-  regression and directive-style suite (52 tests) pass.
-- Accepted the bounded 1G1 duplicate-declaration payload simplification in `742dc7665`. The
-  previous declaration remains solely in the ordered secondary label; payload remapping, identity
-  rebinding and renderer matches no longer duplicate its legacy location. Diagnostic-model (78),
-  signature-duplicate (5) and header parsing (179) tests preserve the previous-declaration label
-  and existing exact-span checks.
-- Accepted the bounded 1E2 mutation consumer in `71c020f15`. Immutable assignment diagnostics
-  retain the current assignment operator's exact token span through the registered `SourceId`,
-  while the existing invalid-assignment payload, legacy location and labels remain unchanged. The
-  multibyte operator regression and mutation suite (9 tests) pass.
-- Accepted the bounded 1G1 trait-duplicate payload simplification in `a46c20be7`. The previous
-  requirement remains solely in the ordered `PreviousDeclaration` label, including the exact
-  primary/related requirement spans already attached by trait validation. Payload remapping,
-  identity rebinding and rendering no longer duplicate its legacy location; the focused trait
-  environment and diagnostic-model suites pass.
-- Accepted the bounded 1E5 synthetic file-reference consumer in `127af8d3c`. Invalid component,
-  boundary, missing-target, physical-resolution and unsupported-kind diagnostics all retain the
-  `PreparedFileReference` source ID and local span, while infrastructure failures remain
-  `CompilerError` and legacy locations/lanes are unchanged. The synthetic file-reference suite
-  (8 tests) and its exact-span regression pass.
-- Accepted the bounded 1G1 duplicate template-input and use-after-move payload simplifications
-  in `62d0465ee`. The first/previous source facts remain in ordered related labels, while payload
-  remapping, rebinding and rendering retain only semantic path/place data. Diagnostic-model (79)
-  and template duplicate regressions pass, with a fresh audit finding no ownership or ordering
-  defect.
-- Accepted the bounded 1F2 module warning handoff in `92ab5bb1d`. Header binding and sorting now
-  move accumulated warnings into diagnosed failures with `std::mem::take`, preserving warning
-  order while successful compilation keeps the same vector for later metadata. Module-compilation
-  (23) and header (378) suites pass, with no change to message or source ownership boundaries.
-- Accepted the bounded 1G1 generic-inference payload simplification in `401f8bb91`. Conflicting
-  inference keeps current and previous evidence solely in the ordered primary/secondary labels;
-  payload remapping, rebinding and rendering retain only semantic inference facts. Generic,
-  nominal-conflict and diagnostic-model regressions pass, with a fresh audit finding no issue.
-- Accepted the bounded 1E3 reactive template-head span consumer in `990d334f1`. Direct reactive
-  subscription diagnostics retain the marker, source-symbol or offending-token span through the
-  existing `FileTokens.file_id` owner while preserving legacy locations, labels and infrastructure
-  behavior. The multibyte unknown-source regression and reactive/template-head suites pass.
-- Accepted the bounded 1E3 control-flow suffix span consumer in `2139c8554`. Missing, unsupported,
-  non-final and unexpected `if`/`loop` suffix diagnostics retain marker, offending-token or scanned
-  terminator spans while preserving the interval bridge. The focused suffix suite (27) and a
-  multibyte separator regression pass.
-- Accepted the bounded 1E2 statement-position span consumer in `0628233ec`. Unexpected statement
-  tokens and scope closes retain their current token spans and source IDs through body dispatch,
-  with legacy locations and error lanes unchanged. The focused statement diagnostics suite (20)
-  passes.
-- Accepted the bounded 1G1 borrow payload simplification in `0dd4b753b`. Existing/conflicting
-  borrow locations are retained once as ordered secondary labels; payload remapping, rendering and
-  cross-source span ownership remain intact. Diagnostic-model (80) and borrow (141) suites pass.
-- Accepted the bounded 1E3 else-marker span consumer in `4f1c54717`. Direct malformed, orphan,
-  duplicate, inline, loop-body and literal-body `[else]` diagnostics carry the marker span and
-  source ID while preserving downstream parser ownership. Malformed-template (15), head (103)
-  and multibyte orphan-marker regressions pass.
-- Accepted the bounded 1E5 provider-capable dependency span consumer in `089042447`. Direct
-  reserved-path, unsupported-package/extension and provider-boundary diagnostics retain the
-  authored dependency path span through the retained shell source ID; provider-owned message and
-  infrastructure lanes remain unchanged. The focused discovery suite (307) and multibyte provider
-  regression pass.
-- Accepted the bounded 1E2 generic-parameter parser span consumer in `81a79f7c1`. Malformed lists,
-  bounds, invalid trait names and scope-validation failures at header preparation retain exact
-  token spans without changing boxing, labels, ordering or infrastructure behavior. Generic (184)
-  and multibyte extended-bound regressions pass. AST-time generic scope validation remains a later
-  semantic consumer slice.
-- Accepted the bounded 1E2 AST generic-scope span consumer in `4842e80f6`. AST environment scope
-  construction carries each header's `FileTokens.file_id`, and forbidden-name collisions retain
-  the offending generic parameter's exact span while preserving legacy locations, labels, payloads,
-  ordering and infrastructure behavior. Type-resolution (22), datatype-generic (24), and the
-  multibyte collision regression pass.
-- Accepted the bounded 1E3 downstream template-else span consumer in `532526829`. Valid else and
-  else-if boundaries carry the direct marker's local span and source ID through fallback and
-  malformed/inline checks, so missing-condition, malformed-header, inline and fallback diagnostics
-  retain exact marker spans while preserving legacy locations, labels, payloads and ordering.
-  Malformed-template (19) and template-head (104) suites plus the multibyte regressions pass.
-- Accepted the bounded 1E3 template-head diagnostic span consumer in `c5378c489`. Compatibility,
-  expression-parser, path-value and direct boundary diagnostics retain exact current or scanned
-  token spans through the existing `FileTokens.file_id` owner, while nested diagnostics keep their
-  own locations, identity-free streams remain span-less, and infrastructure failures stay in their
-  lane. The head suite (105) includes multibyte/extended compatibility, unknown-name and
-  extensionless-path regressions; `cargo check -p moth`, formatting and diff checks are clean.
-- Accepted the bounded 1E5 module-namespace span consumer in `62808f4eb`. Indexed namespace and
-  provider-target diagnostics retain the dependency shell's source ID and exact local span while
-  preserving legacy locations, labels, ordering and infrastructure lanes. Diagnosed Stage 0 test
-  helpers retain the finalized source database so the span can be resolved. The focused
-  create-project-modules suite (149) covers multibyte missing, ambiguous, unsupported-source and
-  unsupported-provider diagnostics; `cargo check -p moth`, formatting and diff checks are clean.
-- Accepted the bounded 1E2 generic call-site span consumer in `51ae0343e`. Authored free-function
-  and receiver-member tokens retain exact source-owned spans through generic inference, evidence
-  labels, canonical/generated request records and materialisation. Legacy locations, payloads,
-  label order, source IDs and deferred frozen-body ownership remain unchanged. Generic-function
-  (38), generic-diagnostic (11), function-call (15), generated-transaction (7), same-file request
-  (1), receiver and real materialisation regressions pass; independent audits are clean.
-- Accepted the bounded 1G1 assignment payload cleanup in `c86cf90d3`. `InvalidAssignmentTarget`
-  keeps declaration context solely in the ordered `ImmutableBindingDeclaration` secondary label;
-  payload remapping, rebinding and rendering no longer duplicate that legacy location. Diagnostic
-  model (80), assignment mutation (9), collection assignment (57), fallible handling (38) and
-  header/config regression coverage pass; the independent audit is clean.
-- Accepted the bounded 1B4/1D4b source-loading lifecycle repair in `f308f91e5`. Serial and parallel
-  missing-source reads collect all outcomes deterministically, retain successful siblings before
-  failure publication, and record every read failure in its registered source slot. Finalized
-  diagnostics retain their source database; no ProviderOwned loading policy changed. The focused
-  create-project-modules suite (151) and source ownership checks pass; the independent audit is clean.
-- Accepted AST anchor consumption in `70a7ce035`. Signature-member diagnostics retain the exact
-  member anchor as a primary or secondary span, choice payload diagnostics retain the variant
-  anchor as a related span, and struct remapping preserves captured primary spans. The two new
-  anchor regressions and all 21 type-resolution tests pass.
-- Accepted 1D5c2 adds four field-level allowances for the remaining 1E AST consumers:
-  trait declaration, requirement, reference and conformance-target spans. 1D5c4 removes the trait
-  declaration allowance because synthetic `This` now consumes that span. Remove the remaining
-  three in 1E and confirm none survives 1H.
-- Two 1D5c1 field-level dead-code allowances name 1E AST consumers: `SignatureMemberSyntax.span`
-  and `ChoiceVariantSyntax.span`. Remove them in the owning 1E batch and confirm none survives 1H.
-- The user identified `librust_out.rmeta` as an earlier-session Rust metadata artefact;
-  it was inspected and removed at their request before this continuation.
-- One unrelated `packages-work` worktree and one pre-existing stash remain untouched.
+Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
+Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and
+ownership notes that later slices still need. Do not resume Phase 1 work from this capsule.
 
 RELEVANT_DOCS_THIS_SLICE:
 - `AGENTS.md`
@@ -377,168 +189,16 @@ BLOCKERS / RISKS:
 - Repeated canonical/check-only preparation now shares the original builder. Removing the repeated
   syntax preparation itself remains 3E work; later span-producing stages must use the retained owner.
 
-VALIDATION_STATE (historical, as of each recorded candidate entry):
-  tests (7) and file-reference tests (25) passed. `cargo check -p moth` passed in the delegated
-  worker. The independent scripted audit was attempted but unavailable because the configured
-  auditor provider's HTTPS fallback reported `invalid peer certificate: UnknownIssuer`; no audit
-  edits occurred. Parent Slice review found no required correction.
-- 1E1 sorted-header candidate: `cargo fmt --all`, `git diff --check`, and the focused
-  `cargo test -p moth --lib module_dependencies -- --nocapture` suite (30 tests) passed. The
-  diagnostic regression checks exact `SourceSpan` ownership and preserved `SourceLocation`; no
-  audit worker was available after the coordinator provider block, so parent Slice review is the
-  acceptance review for this bounded change.
-- 1E1 dependency-selection candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`
-  and the focused `missing_provider_record_fails_deterministically` test passed.
-- 1F4 renderer candidate: `cargo fmt --all`, `git diff --check` and the focused renderer suite
-  (13 tests) passed. The exact-span path uses retained snapshots and scalar `LineIndex` columns;
-  legacy locations remain a fallback for older diagnostics.
-- 1E2 AST candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and all 21
-  `compiler_frontend::ast::type_resolution_tests` passed, including the two new anchor tests.
-- 1E1 module-symbol candidate: `cargo fmt --all`, `git diff --check` and the focused namespace
-  binding suite (37 tests) passed, including the exact same-file declaration collision anchor.
-- 1E2 trait candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and the
-  focused trait environment suite (12 tests) passed, including duplicate requirement, target and
-  unknown-reference span regressions.
-- 1E1 dependency-alias candidate: `cargo fmt --all`, `git diff --check` and the focused namespace
-  binding suite (38 tests) passed, including exact alias collision ownership.
-- 1E3 template candidate: `cargo fmt --all`, `git diff --check` and the focused malformed-template
-  suite (13 tests) passed, including the multibyte defensive unexpected-token span regression.
-- 1E5 config candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`, the focused
-  config-boundary suite (4 tests) and the full library test baseline (4,976 tests) passed.
-- 1B4 lifecycle candidate: `cargo fmt --all`, `git diff --check`, the focused no-copy source-loading
-  test (1 test) and the full library suite (4,979 tests) passed.
-- 1B4/1D4b lifecycle correction candidate: `cargo fmt --all`, `git diff --check`, `cargo check
-  -p moth` and the focused `cargo test -p moth --lib create_project_modules_tests --quiet` suite
-  (151) passed. Serial and parallel mixed success/failure regressions retain sibling snapshots,
-  finalize failed slots and preserve deterministic infrastructure diagnostics; a fresh audit is
-  clean.
-- 1E2 call-target candidate: `cargo fmt --all`, `git diff --check` and the focused cast-boundary
-  suite (28 tests) passed, including exact duplicate named-argument ownership.
-- 1E3 sentinel candidate: `cargo fmt --all`, `git diff --check` and the focused malformed-template
-  suite (14 tests) passed, including exact multibyte orphan-break ownership.
-- 1F1 string foundation candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`
-  and the focused string interning suite (8 tests) passed, including pointer-preserving freeze.
-- 1F2 warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and
-  the focused module-preparation suite (21 tests) passed.
-- 1G1 import-collision payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, namespace bindings (38), diagnostic model (78), header remap (29), header
-  parsing (179), template collision and focused remap regressions passed.
-- 1E2 shadowed-declaration candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, the focused regression (1), declaration test module (23) and the full
-  library suite (4,985) passed. The independent Slice review found no required correction.
-- 1E3 template-head candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  the focused multibyte regression (1), directive-style suite (52), diagnostic model (78) and
-  full library suite (4,986) passed. The independent Slice review found no required correction.
-- 1E5 module-namespace candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  and the focused `cargo test -p moth --lib create_project_modules_tests --quiet` suite (149)
-  passed. Namespace and provider-target diagnostics resolve their retained source snapshots in
-  multibyte regressions; a fresh read-only audit found no required correction.
-- 1E2 generic call-site candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  generic-function (38), generic-diagnostic (11), function-call (15), generated-transaction (7),
-  same-file request (1), receiver-member and real materialisation regressions passed. Two focused
-  verification audits are clean after strengthening the tests to assert diagnostic identity and
-  the exact final call occurrence.
-- 2026-09-09 review reconciliation: the attached Phase 1 source and diagnostic data-layout audit
-  was compared with the implementation through `1501330d7`. R1a (authored snapshot capacity
-  recording) is accepted in `f308f91e5`; R1b–R9 remain open correction gates, and R10a–R10d are
-  recorded as later-phase prerequisites. No implementation changes were made while this review
-  was reconciled; the branch is paused at the documented checkpoint.
-- R1b compact-capacity candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  source (77), path-interner (10) and diagnostic-model (80) suites passed. Two independent
-  audits found only corrections that were applied and revalidated; full `just validate`
-  remains reserved for Phase 1 closeout.
-- R2 source-qualified resolution candidate: `cargo fmt --all`, `git diff --check`,
-  `cargo check -p moth`, source (78), header preparation (180), diagnostic-model (80),
-  template-node (301) and full library (5,012) suites passed. The independent audit is clean.
-- R3 span-identity ownership candidate: `cargo fmt --all`, `git diff --check`,
-  `cargo check -p moth`, diagnostic-model (82), source (78), preparation (62),
-  create-project-modules (310) and full library (5,014) suites passed. The independent audit
-  found only test-strength corrections that were applied and revalidated.
-- R4 compilation-root candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  source (80), render (14) and full library (5,017) suites passed. The independent audit could
-  not run (provider usage-limit then policy errors, no review occurred); parent Slice review
-  is the acceptance review for this bounded change.
-- R5 cold-path candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth` and
-  the full library suite (5,016) passed. `SourceSlot` measures 40 bytes (was 48) and
-  `SourceRecord` stays 48. The independent audit could not run (provider rate limits, no
-  review occurred); parent Slice review is the acceptance review for this bounded change.
-- 1G1 assignment payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, diagnostic-model (80), assignment mutation (9), collection assignment
-  (57), fallible-handling assignment (38) and header/config regression (1) passed. The independent
-  audit found no required correction; full `just validate` remains reserved for Phase 1 closeout.
-- 1G1 duplicate-declaration payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, diagnostic model (78), signature duplicate (5), header parsing (179)
-  and the full library suite (4,987) passed. The independent Slice review found no required
-  correction.
-- 1E2 mutation candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`, the
-  focused mutation suite (9), assignment suite (30) and the full library suite (4,987) passed.
-  The independent Slice review found no required correction.
-- 1G1 trait-duplicate payload candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, trait environment (12), diagnostic model (78) and exact trait-span
-  coverage passed. The independent Slice review found no required correction.
-- 1E5 synthetic file-reference candidate: `cargo fmt --all`, `git diff --check`,
-  `cargo check -p moth`, synthetic file-reference suite (8), exact-span regression (1) and full
-  library suite (4,987) passed. The independent Slice review found no required correction.
-- 1G1 duplicate template/use-after-move candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, diagnostic model (79) and duplicate template regression (1) passed. A
-  fresh audit confirmed related source locations remain ordered labels and no independent source
-  facts remain in either payload.
-- 1F2 module warning handoff candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  module-compilation (23) and header (378) suites passed. Failure paths move warnings exactly once;
-  success paths retain the vector for module metadata.
-- 1G1 generic-inference candidate: `cargo fmt --all`, `git diff --check`, `cargo check -p moth`,
-  generic functions (37), nominal conflict (1), generic rendering (1) and diagnostic model (79)
-  tests passed. A fresh audit confirmed label ownership and no stale payload location handling.
-- 1E3 reactive template-head candidate: `cargo fmt --all -- --check`, `git diff --check`,
-  `cargo check -p moth`, reactive tests (75), template-head tests (102) and the multibyte regression
-  (1) passed. A fresh audit found the direct parser branches sound; compatibility and downstream
-  const/type diagnostics remain a separate follow-up.
-- 1D5c4 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
-  5,076 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
-  source audit, 82 benchmark preflights, scaling and timer erasure. Focused generic Rust (183),
-  trait `This` (1), type syntax (52), header remap (29), parsed remap (10), generic integrations
-  (186) and trait integrations (110) passed. The nine-anchor regression resolves original extended
-  rows after UTF-8 text, string remapping and nonidentity source rebinding. Synthetic `This`
-  retains the parsed trait declaration's name anchor and legacy location. Independent review is
-  clean with no required findings or material test gaps. An initial Clippy type-complexity failure
-  in the test closure was corrected before the passing full gate.
-- 1D5c3 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
-  5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
-  source audit, 82 benchmark preflights, scaling and timer erasure. Focused type syntax (52),
-  parsed remap (10), shell remap (3), type resolution (19), header remap (29), substitution (1),
-  synthetic adapters (2) and the 29-anchor exactness regression (1) passed.
-  Independent review is clean. Its non-blocking coverage limitation is that the substitution
-  test covers direct `This`, not constructed sibling types traversing recursive reconstruction.
-  Composed `This` is rejected by the canonical language contract; the recursive copies were
-  inspected and preserve their spans. No additional synthetic fixture is required for this slice.
-- 1D5c2 candidate: `cargo fmt --all && just validate` passed native featured all-target Clippy,
-  5,075 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
-  source audit, benchmark preflights, scaling and timer erasure. Focused trait (9), remap (29),
-  public trait root (8), requirement (1) and header-parser (175) tests passed. The final regression
-  also checks decoded byte offsets against the original locations after nonidentity source rebinding.
-  Independent review is clean with no required findings or material test gaps.
-- 1D5c1 final candidate: `cargo fmt --all && just validate` passed native featured all-target
-  Clippy, 5,074 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integrations, docs checking,
-  source audit, 82 benchmark preflights, scaling and timer erasure. Focused substitution (1),
-  traits (9), shared signature (5) and long-anchor preparation (1) tests passed.
-  Independent review's rebind coverage correction is implemented and focused verification is
-  clean. The stale capsule is refreshed here. No required finding remains.
-- 1D5b final candidate: `cargo fmt --all && just validate` passed after the anchor consolidation.
-  Native featured all-target Clippy, 5,072 compiler tests, 17 CLI tests, 825 xtask tests,
-  1,951 integrations, docs check, source audit, 82 benchmark preflights, scaling and timer erasure
-  passed. Focused paths (60), headers (328), frozen generics (25) and config-filter (192) passed.
-  Independent review's duplicate-anchor finding is resolved; fresh focused verification is clean.
-- Accepted `0f92205c6`: `cargo fmt --all && just validate` passed. Native featured all-target
-  Clippy, 5,070 compiler tests, 17 CLI tests, 825 xtask tests, 1,951 integration cases,
-  docs check, source audit, 82 benchmark preflights, three scaling budgets and timer erasure passed.
-- Focused 263 declaration tests, 41 Moth-template tests, seven Markdown tests and the updated
-  real-source/extended-anchor regression passed. Featured all-target compilation passed.
-- Independent 1D5a review is clean with no required finding.
-- The earlier 1D3 carrier/failure-lane and aggregation reviews and focused correction verification
-  were clean. No new structured-audit coverage is claimed.
-- Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before
-  it starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
-  all-target Clippy gate before accepting a slice.
+VALIDATION_STATE:
+Phase 1 final closeout is `3c9c776a8` (2026-09-10). `just validate` passed native featured
+all-target Clippy, 5,105 workspace tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951,
+source audit 1,336 files, docs check, 82 benchmark preflights, three scaling series and timer
+erasure. Retained-layout and allocator evidence is in
+`benchmarks/frontend-optimization-results.md`. Earlier per-slice validation is Git history, not a
+current workspace claim.
+Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
+starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
+all-target Clippy gate before accepting a slice.
 
 DOCS_IMPACT:
 - progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
@@ -851,27 +511,19 @@ anticipated cross-phase cases.
 
 ## Phase 0 — Activation, current-state audit and evidence baseline (historical)
 
-Phase 0 is an activation baseline recorded as of the plan's baseline evidence. It is not a report
-of the current workspace. Evidence: `benchmarks/frontend-optimization-results.md`; searchable
-inventories: `target/data-layout-audit/`. Detailed execution history remains in Git.
+Phase 0 is an activation baseline, not a current workspace report. Evidence:
+`benchmarks/frontend-optimization-results.md`; searchable inventories: `target/data-layout-audit/`.
+Detailed execution history remains in Git.
 
-- [x] **0A — activation:** hardening prerequisite `03168082d`, branch/worktree inventory,
-  authority and owner refresh.
-- [x] **0B — roadmap ownership:** activated this plan, paused diagnostics work, updated authority
-  routing and built documentation. No support change required a matrix edit.
-- [x] **0C — migration inventory:** source/location, path, token, diagnostic, context-copy and
-  failure/recovery owners mapped to phases.
-- [x] **0D — baseline:** layouts, corpus source sizes and representative success/warning/failure
-  workloads recorded. Added `data_layout` benchmark support using existing machinery.
-  Instrumentation has no normal-build cost; the throwaway layout probe was removed.
-- [x] **0E — validation/evidence:** Rust 1.97.1 native/Linux/Windows Clippy, `just validate`,
-  frontend/CLI checks and five-run predecessor evidence passed at activation.
-- [x] **Phase close:** ownership/style review and exit criteria accepted without semantic changes
-  at activation.
+Delivered: hardening prerequisite `03168082d`; this plan activated as the sole representation
+migration with diagnostics work parked; source/location, path, token, diagnostic, context-copy and
+failure owners mapped to phases; layouts, corpus sizes and representative workloads recorded;
+`data_layout` benchmark support added with no normal-build cost; activation validation passed on
+Rust 1.97.1 native/Linux/Windows Clippy plus `just validate`.
 
-Limits: memory evidence covers bounded capacities and aggregate live/peak allocation proxies,
-not a complete heap partition, nested heaps or path-only remap counts. No profiles were needed.
-Exact span histograms required byte offsets and were delivered in 1C2, not Phase 0.
+Limits that still apply: memory evidence covers bounded capacities and aggregate live/peak
+allocation proxies, not a complete heap partition, nested heaps or path-only remap counts. Exact
+span histograms required byte offsets and were delivered in 1C, not Phase 0.
 
 ---
 
@@ -879,45 +531,34 @@ Exact span histograms required byte offsets and were delivered in 1C2, not Phase
 
 ### Summary, reasoning and context
 
-Source locations are the most pervasive representation problem. This phase moves source ownership to
-Stage 0, introduces exact packed byte spans and migrates every compiler stage and renderer. It also
-removes duplicated location data and obsolete diagnostic indirection so the final validation gate can
-run before later layout work proceeds.
+Source locations are the most pervasive representation problem. This phase moved source ownership to
+Stage 0, introduced exact packed byte spans and migrated every compiler stage and renderer. It also
+removed duplicated location data and obsolete diagnostic indirection so later layout work proceeds
+from one source-span boundary.
 
-### Slice 1A — Add the final path foundation required by source records
+Phase 1 is complete on main. Implementation tasks and per-slice checklists are closed. Git holds the
+delivery log. The notes below are standing contracts, remaining later-phase work and ownership
+facts that Phase 2 onward still needs.
 
-- [x] introduce `PathId(NonZeroU32)` and a dense parent/component path table
-- [x] intern source logical paths into the database-owned build base before string/path forks
-- [x] use `PathId` in compiler source registration slots immediately; reuse the existing
-  interner in `SourceDatabase` and remove the Stage 0 path table and fields retained only
-  for its test-only entry-root-relative lookup
-- [x] keep filesystem `PathBuf`/`Box<Path>` separate from compiler logical identity
-- [x] add layout, root, parent, append, equality and rendering tests
-- [x] defer the full compiler `InternedPath` migration to Phase 2
+### Standing contracts
 
-`SourceLogicalIdentity` keeps its owned portable spelling as the `SourceId` sort key.
-Canonical source order is established before path interning. Numeric `PathId` allocation order
-must never be used to sort source candidates.
+#### Path foundation (1A)
 
-Source paths preserve exact `Path::components()` semantics and strict UTF-8 validation, matching
-their predecessor. Portable semantic spellings preserve their component separators instead.
-The frozen table owns nodes and depths only; the child map lives and dies with the builder.
+`PathId(NonZeroU32)` and a dense parent/component path table intern source logical paths into the
+database-owned build base before string/path forks. Compiler source registration slots use `PathId`
+immediately. Filesystem `PathBuf`/`Box<Path>` stay separate from compiler logical identity.
 
-### Slice group 1B — Replace per-module source tables with build-lifetime registration
+`SourceLogicalIdentity` keeps its owned portable spelling as the `SourceId` sort key. Canonical
+source order is established before path interning. Numeric `PathId` allocation order must never
+sort source candidates.
 
-- [x] **1B1 — registration index and ID domain:** one compiler-facing registration index from
-  existing Stage 0 inventories, `SourceId(NonZeroU32)` and compilation-root ID 1.
-- [x] **1B2 — registration barriers:** config and project share one domain; packages retain their
-  own. Canonical inventories register before preparation, independent of completion order.
-- [x] **1B3 — traversal and synthetic sources:** directory/packages pre-register inventory IDs.
-  Synthetic single-file and recursive direct-template traversal normalize private provisional
-  identities once before publication. Authored provenance and deterministic late deltas remain.
-- [x] **1B4 — source slots and loading:** move each loaded text allocation into its preassigned slot with no second full copy; enforce the monotonic registered → loaded → finalized lifecycle; represent registered-but-unloaded candidates with a compact slot/index rather than allocating empty full records; keep loaded records dense behind a `SourceId` slot map; deduplicate canonical physical sources and reject conflicting logical identity, kind or a second different snapshot. Reconciled without code change: `SourceSlot` carries no text, loaded records are dense (`database.rs` slots/loaded/failure arrays), the lifecycle is monotonic (R1a/R6), authored `FileTokens` always carry `Some(file_id)` with `None` confined to materialised generics (1F5), line starts finalize at retain, and canonical dedup/conflict rejection is pinned by 1B7 tests. The remaining frozen identity/render boundary is 1F work.
-- [x] **1B5 — module inputs and worker ownership:** ordered candidate IDs, canonical file/chunk merge checks, per-source deltas, original live builder retention and final table installation are delivered. Move-only diagnostic bags and the complete frozen identity context remain 1F work.
-- [x] **1B6 — remove per-module service copies:** absorb `SourceFileTable`, `FileId`, `FrontendSourceFileIdentity` and `attach_source_files`; make `CompilerFrontend` and header-parse options borrow immutable source registration, style directives, path resolver and external registries. The facade and module context now borrow their immutable services. Token and prepared-output canonical-path copies remain assigned to 3D/3E1.
-- [x] **1B7 — failures and tests:** preserve typed source-size, UTF-8 path and source-registration failures in their correct lanes; add config-to-project, direct-service, serial/parallel ID, slot, deduplication and source-order determinism tests
+Source paths preserve exact `Path::components()` semantics and strict UTF-8 validation. Portable
+semantic spellings preserve their component separators. The frozen table owns nodes and depths
+only; the child map lives and dies with the builder.
 
-#### Delivered registration contracts and remaining ownership
+The full compiler `InternedPath` migration remains Phase 2.
+
+#### Registration and loading (1B)
 
 The source database owns one registration slot per candidate, dense loaded snapshots and a cold
 load-failure array. `SourceId(1)` is the compilation root. Config is registered before tokenization
@@ -927,6 +568,7 @@ and direct-template lanes use canonical logical-path order because they have no 
 and their provisional identities stay in a private, disposable discovery-local domain, rebound
 exactly once before success or diagnosed publication. A flat display-path sort must not replace
 either lane's canonical ordering policy.
+
 Loaded text moves into its slot once; a second retain is an invariant failure. Re-registration of
 one canonical source rejects conflicting logical identity or supplied kind. Different physical
 sources may share a display path (bootstrap `config.moth` vs `src/config.moth`); display-path
@@ -936,241 +578,106 @@ identity but acquire no compiler snapshots merely by registration. Module inputs
 candidate `SourceId` sets whose external-import scope is the module's owned candidates, not every
 source in the boundary database. File/chunk merges place prepared results in preassigned slots and
 reject duplicate, missing and out-of-range outputs.
-`SourceDatabaseBuilder` now separates live span ownership from immutable lookup services.
-Private AST handles share the same allocation only during producer calls; finalization regains
-exclusive access and returns that same `Arc` after installing the tables. Package lookup publication
-waits for check-only producers. This is the source half of the lifecycle; 1F still owns the complete
-lookup-only identity/render boundary and its string/path context.
-The source path foundation is delivered: `SourceDatabase` owns the existing path interner as its
-one source identity base; Stage 0's test-only path table is gone with its stable logical ordering
-and authored classification unchanged. The source `PathId`/legacy-path bridge ends at 2D and
-reconstructs transient components from table nodes, never rendered text. Current bridge callers:
-source discovery/rebinding, frontend identity and AST entry setup, content dependency targets, AST
-file-value scope, direct-template entry setup, HTML template bundle rebinding/owner diagnostics,
-the source-size error path; test callers: source invariants, frontend pipeline, module
-dependencies, template heads, source snapshot rendering, Stage 0 preparation fixtures. No new
-consumer may adopt this migration bridge.
+
+`SourceDatabaseBuilder` separates live span ownership from immutable lookup services. Private AST
+handles share the same allocation only during producer calls; finalization regains exclusive access
+and returns that same `Arc` after installing the tables. Package lookup publication waits for
+check-only producers.
+
+`SourceDatabase` owns the existing path interner as its one source identity base. The source
+`PathId`/legacy-path bridge ends at 2D and reconstructs transient components from table nodes,
+never rendered text. Current bridge callers: source discovery/rebinding, frontend identity and AST
+entry setup, content dependency targets, AST file-value scope, direct-template entry setup, HTML
+template bundle rebinding/owner diagnostics, the source-size error path; test callers: source
+invariants, frontend pipeline, module dependencies, template heads, source snapshot rendering,
+Stage 0 preparation fixtures. No new consumer may adopt this migration bridge.
+
 `ModuleSymbols` no longer copies canonical OS paths. `FileTokens.canonical_os_path` and
 `FileFrontendPrepareOutput.canonical_os_path` remain for 3D and 3E1; their agreement checks stay
-until the duplicated fields are removed. Renderers already use retained snapshots rather than
-reopening files; until 1F migrates them to source identity, per-diagnostic-range source contexts
-preserve package ownership and ambiguous display-path matches omit a frame rather than select the
-wrong file. The direct-template API retains its finalized per-document source context with
-warnings and diagnosed outcomes.
-1B4 is reconciled (see the slice entry); the final frozen identity/render boundary remains 1F work.
-1B6 is delivered (facade and module semantic context borrow immutable services). Individual
-mutation-test results and delivery history remain in Git.
+until the duplicated fields are removed. Renderers use retained snapshots rather than reopening
+files. Per-diagnostic-range source contexts preserve package ownership, and ambiguous display-path
+matches omit a frame rather than select the wrong file. The direct-template API retains its
+finalized per-document source context with warnings and diagnosed outcomes. The facade and module
+semantic context borrow immutable services.
 
-### Slice group 1C — Implement `LocalSpan`, line indexes and exact resolution
+#### Spans and line indexes (1C)
 
-Delivered contracts (evidence: layout authority and benchmark report):
+`LocalSpan` and `Option<LocalSpan>` are four bytes; `SourceSpan` and `Option<SourceSpan>` are eight.
+Selected codec: the measured 22/10 split (`LENGTH_BITS = 10`) with exact append-only overflow rows.
+The Phase 0 source-size census proved every candidate start-overflow-free, so length overflow alone
+decided the split. The bounded terminator experiment was deferred undone, not evaluated or
+rejected; its measured maximum prize is under 2 KB and re-entry criteria are in the architecture
+document and evidence report.
 
-- [x] **1C1 — byte cursor and line index:** one line-index builder and byte-offset cursor
-  threaded through each source kind's existing traversal; no second pre-scan where a traversal
-  already existed.
-- [x] **1C2 — span census and encoding selection:** exact span start/length histograms with
-  boundary buckets over the 8–12 length-bit splits on the weighted corpus; benchmark-only
-  candidate codecs; constants frozen in the architecture document and evidence report. Selected
-  codec: the measured 22/10 split (`LENGTH_BITS = 10`) with exact append-only overflow rows. The
-  Phase 0 source-size census proved every candidate start-overflow-free, so length overflow alone
-  decided the split. **Amended at delivery:** the bounded terminator experiment was deferred
-  undone, not evaluated or rejected — its measured maximum prize is under 2 KB; re-entry criteria
-  are recorded.
-- [x] **1C3 — exact span codec:** `LocalSpan(NonZeroU32)`, one append-only `ExtendedSpanBuilder`
-  per source, one private source-local factory/codec for exact construction, join, insertion
-  point and resolution; one read-only resolver serves live builders and frozen records;
-  cross-source joins rejected; named source-order, overlap and containment operations.
-  **Frozen-record half deferred to 1D** and delivered there as 1D1.
-- [x] **1C4 — conversion semantics:** CRLF, empty-file, final-newline, long-line and zero-width
-  EOF behaviour; lazy line, Unicode-scalar and UTF-16 column conversion. **Widened at delivery:**
-  chose the tokenizer's line-break set (LF, CRLF, bare CR) and made `TokenStream::next` the
-  single owner of the authored line counter.
-- [x] **1C5 — invariants:** hard layout assertions plus boundary, malformed-capacity, Unicode
-  and conversion property tests. **Narrowed at delivery:** join/ordering coverage already existed
-  in 1C3's named-operation tests.
-- [x] **1C6 — registration slot and loaded record:** compact registration slot per candidate plus
-  a loaded record owning text, line starts and extended spans unconditionally; unreadable-source
-  failure stays at the slot layer; `Unreadable` variant removed from the record. Moved here from
-  1B4: the split pays once the three loaded boxes exist.
+One line-index builder and byte-offset cursor is threaded through each source kind's existing
+traversal. The line index builds once per snapshot; empty snapshots have no lines; EOF after a
+final terminator resolves to the preceding visible line end. Unicode scalar columns serve rendering
+and UTF-16 columns serve tooling; both are derived lazily from exact byte offsets. Empty spans
+overlap nothing; containment is the operation for insertion points.
 
-Standing facts: `LocalSpan`/option are four bytes; `SourceSpan`/option are eight. The line index
-builds once per snapshot; empty snapshots have no lines; EOF after a final terminator resolves to
-the preceding visible line end. Unicode scalar columns serve rendering and UTF-16 columns serve
-tooling; both are derived lazily from exact byte offsets. Empty spans overlap nothing; containment
-is the operation for insertion points. Renderers consume retained snapshots and `LineIndex`; no
-legacy location or character-position fields are retained. Any remaining allowance must name a
-real unreached consumer rather than suppress an entire module.
+The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` is the single owner of
+the authored line counter. Unreadable-source failure stays at the slot layer; loaded records own
+text, line starts and extended spans unconditionally.
 
+Cross-source joins are rejected. Named source-order, overlap and containment operations replace
+ambiguous location `PartialOrd`. Any remaining allowance must name a real unreached consumer rather
+than suppress an entire module.
 
-### Slice 1D — Migrate tokenization and source preparation
+#### Preparation and builder ownership (1D)
 
-- [x] make tokenization emit `LocalSpan` and source-scoped diagnostics emit `SourceSpan`
-  — **tokens delivered in 1D2a; preparation diagnostics delivered in 1D3**
-- [x] keep every authored token stream and header/source identity keyed by its registered `SourceId`; frozen generic syntax now preserves or canonically remaps its owning context, and the compilation root never substitutes for missing identity.
-- [x] finalize line starts and immutable token preparation at file-preparation completion, while keeping the source-local extended-span builder mutable until the final span-producing stage.
-- [x] **delivered as 1D1** — `SourceRecord` gained its extended-span table plus the authority's
-  `&SourceRecord`/`&SourceDatabase` span signatures; 1D2a retired 1C3's module-wide
-  `allow(dead_code)`/`allow(unused_imports)`, leaving item-level allowances on the consumer half,
-  each naming its first caller's slice.
-- [x] preserve the dependency-clause plan's deletion of the duplicate scanner: Stage 0 consumes
-  retained prepared facts without rereading, cloning or owning a second source snapshot
-- [x] move the current `source_preparation.rs` and `PreparedSourceInput` handoff onto source records with final `SourceId` ownership and no additional structural scan.
-- [x] make file workers return move-only `SourcePreparationDelta` values keyed by their owning source identity; private discovery domains normalize exactly once at final publication, and no published delta retains provisional IDs.
-- [x] make diagnostics produced before merge retain the exact producer source identity and local span data, then normalize those identities before downstream publication.
-- [x] migrate path-item and alias locations to source-local spans.
-- [x] migrate headers, dependency clauses, declaration shells, source contracts, fragments and source-kind adapters.
-- [x] remove source-location string-ID remapping from file-preparation outputs.
-- [x] preserve stable diagnostic codes, source ranges and ordering.
-- [x] add one owning-module test-only `TestSourceContext` that creates a source record/span builder for focused Rust tests; migrate repeated ad hoc path/location constructors to it without exposing a production convenience API.
+Tokenization emits `LocalSpan`; source-scoped diagnostics emit `SourceSpan`. Authored token streams
+and header/source identity are keyed by registered `SourceId`. Frozen generic syntax preserves or
+canonically remaps its owning context; the compilation root never substitutes for missing identity.
 
-#### 1D sub-slices and ownership history
+The original source builder remains owned through the last producer. Preparation, aggregation and
+diagnosis publish only final source identities before downstream consumers run. Joined and insertion
+spans use that owner. No repeated preparation or independent builder may create a parallel source
+table. Later migrations must thread this owner into any new joined/insertion-span producer.
 
-1D is split at source ownership boundaries:
+File workers return move-only `SourcePreparationDelta` values keyed by owning source identity.
+Private discovery domains normalize exactly once at final publication; no published delta retains
+provisional IDs. Diagnostics produced before merge retain the producer source identity and local
+span, then normalize those identities before downstream publication.
 
-- **1D1 — frozen record spans:** delivered codec and one-shot install API; 1D4b supplies production
-  installation under the exclusive owner after every current span producer.
-- **1D2 — tokenizer spans and identity:** delivered exact local spans and registered inputs for
-  authored tokenization. The 1D4 ownership cutover makes tokenization borrow the source's original
-  builder; 1F5 now preserves or canonically remaps frozen generic materialisation to its owning context.
-- **1D4 — builder lifetime and source preparation delta:** delivered across successful and diagnosed
-  file/chunk aggregation, semantic calls and module/direct-service outcomes. Identity-rebind errors
-  also retain every known original table before finalization. Later migrations must thread this owner
-  into any new joined/insertion-span producer, rather than start an independent builder.
-  - [x] **1D4a — diagnosed producer ownership:** delivered; returns the existing span builder and
-    real source identity on tokenizer and file-header failures, retaining warnings and diagnostic
-    facts. Closed producer-local drops only, not later aggregation.
-  - [x] **1D4b — aggregation and outcome ownership:** original builders stay outside diagnostic
-    bags and survive preparation, aggregation and semantic outcomes. The exclusive source owner
-    installs each table once and retains final render context on terminal errors.
-  - [x] **1D4b prerequisite — direct-template entry reuse:** delivered; preserves the entry's
-    original preparation and builder through final identity rebinding and bundle consumption; the
-    compiler service prepares only standalone raw-source inputs, not bundle entries. Brings
-    forward the direct-entry portion of 3E without claiming its source-owned token storage
-    migration.
-  - [x] **1D4b direct-template finalization:** delivered; preserves builders and snapshots through
-    bundle diagnosis or compiler folding, then retains finalized per-document contexts with
-    warnings.
-  - [x] **1D4b config finalization:** delivered; retains the original builder through compiler and
-    build-owned config validation, then installs it once before source database sharing.
-  - [x] **1D4b synthetic discovery finalization:** retain prior and failed snapshots/builders
-    through the borrowed traversal, normalize the known set on abort and publish final context.
-- **1D3 — preparation diagnostics carry source spans:** tokenization and preparation diagnostics
-  retain exact final `SourceId` plus local span data owned by the same producer.
-  - [x] **1D3a — lexical and per-file primary spans:** encode exact producer-owned byte bounds
-    before the original builder leaves preparation; normalize the carrier at discovery publication.
-  - [x] **1D3b — aggregation and related ranges:** capture source-contract/symbol aggregation
-    diagnostics and related preparation labels with explicit source ownership. Per-file primary
-    capture alone does not complete 1D3.
-- **1D5 — preparation records onto spans:** headers, dependency clauses and aliases, declaration
-  shells, source contracts, const fragments and source-kind adapters carry spans.
-  - [x] **1D5a — declaration anchors and initializer terminators:** copy the existing exact
-    token anchor into shared declaration/binding-target shells, preserve synthetic source-start
-    anchors under their real source identity and delete `Token::terminator_at`.
-  - [x] **1D5b — path and dependency records:** source-local path rows, provider/selection/alias
-    anchors and structural file references reuse the minted path token's encoded span and preserve
-    source ownership, remapping and wrong-table checks.
-    The mandatory provider owns the clause's path-token anchor; the outer clause's duplicated
-    location/span is removed. The four former field-level dead-code allowances were removed in
-    their owning downstream batches, and no such allowance survives 1H.
-- [x] **1D5c — remaining preparation records:** accepted in `e1f16cb49`; header names, joined const fragments, source contracts and signature shells preserve their existing range meaning, while runtime fragments continue to use retained tokens without a new record.
-    - [x] **1D5c1 — signatures and choices:** copy member, return-type and variant token anchors;
-      remove `ReturnSlotSyntax.location`, which duplicates its nested return value's location.
-      Preserve anchors through remapping and trait `This` substitution.
-    - [x] **1D5c2 — trait shells:** declaration, requirement, reference and conformance anchors;
-      consolidate duplicate name locations without changing synthesized semantic names.
-    - [x] **1D5c3 — parsed types and capacities:** preserve each type constructor's current token
-      anchor and all synthetic/materialized constructors. Resolved types remain 1E2.
-    - [x] **1D5c4 — generic parameters and bounds:** preserve authored anchors and explicit
-      synthetic metadata without manufacturing source identities. Semantic registration consumes
-      ordered parameter IDs and names. Canonical type parameters replace duplicated parsed metadata.
-    - [x] **1D5c5 — header names, const fragments and source contracts:** thread the original
-      builder only where a joined range needs encoding. Keep const-fragment source ownership
-      explicit after module aggregation and preserve the infrastructure failure lane. Source contracts
-      retain the qualifier `#` anchor already copied into `DeclarationSyntax.span`, not the header
-      name anchor. Const-template joins preserve the existing first-interior-token through post-close-token
-      bounds by joining those original token spans through the original live builder.
-- [x] **1D6 — test source context:** one owning-module test-only `TestSourceContext`, replacing the
-  repeated ad hoc path/location constructors in Rust tests.
+The mandatory provider owns a dependency clause's path-token anchor. Source contracts retain the
+qualifier `#` anchor copied into `DeclarationSyntax.span`, not the header name anchor.
+Const-template joins preserve first-interior-token through post-close-token bounds by joining those
+original token spans through the original live builder. Runtime fragments continue to use retained
+tokens without a new record. Synthetic constructors preserve authored anchors and explicit
+synthetic metadata without manufacturing source identities.
 
-**Historical interval bridge.** Earlier checkpoints temporarily carried both exact spans and a
-line/column location representation while downstream consumers migrated. That bridge is complete in
-the current workspace: authored tokens and diagnostics use source-qualified `SourceSpan` values, and
-the old location representation is not a second production field.
+The historical interval bridge that carried both exact spans and a line/column location is gone:
+authored tokens and diagnostics use source-qualified `SourceSpan` values.
 
-**Current ownership rule.** The original source builder remains owned through the last producer;
-preparation, aggregation and diagnosis publish only final source identities before downstream
-consumers run. Joined and insertion spans use that owner, and no repeated preparation or independent
-builder may create a parallel source table.
+Focused Rust tests use one owning-module test-only `TestSourceContext`. Do not expose a production
+convenience API for that helper.
 
-The old producer inventory below is retained as historical activation evidence only. It described
-the pre-cutover constructors and adapters; it is not a current TODO list or a claim about current
-source code.
+#### Downstream spans, freeze, diagnostics and deletion (1E–1H)
 
+All compiler source positions are exact compact byte spans, or explicit absence for generated data.
+HIR, borrow facts, target-contract validation, Stage 0, config and build diagnostics use the same
+boundary. Header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit
+spanless contract; no path/line reconstruction is permitted.
 
-### Slice group 1E — Migrate all downstream source spans
+Consuming freeze moves current string/source/minimal-path allocations into lookup-only
+`FrozenIdentityContext`. File stages return move-only diagnostic/source deltas. The final
+build/package render boundary owns diagnostics, type context and frozen identity; there is no
+module-level premature freeze or clone. Materialised tokens, generated artefacts and diagnostics
+preserve or canonically remap their owning `SourceId`, including extended spans after donor
+builders drop. Synthetic/compilation-root display and provenance are explicit. Non-UTF-8
+filesystem display stays in infrastructure/path handling, not fabricated source paths.
 
-Each checked batch below is an independent accepted agent slice. Split a batch by its listed submodule
-before coding when it cannot reach focused green validation in one context. Do not accept a commit with
-a public boundary supporting duplicate source representations.
+`CompilerDiagnostic` owns one canonical primary span; secondary labels retain related sites without
+copying primary facts. Infrastructure failures remain in the typed `CompilerError` lane. A
+throwaway layout probe measured `CompilerDiagnostic` at 96 bytes and `CompilerMessages` at 112 bytes
+on `aarch64-apple-darwin`; the hard diagnostic bound is 128 bytes. `DiagnosticToken` remains the
+fixed-width 8-byte projection with explicit `TokenTag(u16)`. Plain `CompilerDiagnostic` values cross
+the diagnosed lane with no common diagnostic boxing, no `result_large_err` allowance and no
+lint-specific local workaround.
 
-- [x] **1E1 — headers and ordering:** accepted in `fc867c9fb`. Header/dependency/declaration-shell record span coverage audited with zero gaps; ordering hints are path-spelling-based with no location ordering; the module-symbol span map exists and header diagnostics are span-captured by the file-output batch pass. Delivered `InitializerReference.span` end to end. This is a historical checkpoint record; current span ownership is described by the source-span rule above.
-- [x] **1E2 — core AST:** accepted in `e1f16cb49`; declarations, types, expressions, statements, calls, assignments, generic inference/evidence and generated-function requests retain exact `SourceSpan` values or explicit absence for generated data.
-- [x] **1E3 — templates:** accepted in `e1f16cb49`; template/TIR nodes, views, overlays, slots, control flow, formatting and runtime handoff metadata retain their source ownership.
-- [x] **1E4 — backend-facing frontend:** accepted in `e1f16cb49`; HIR nodes, locals, places, statements, terminators, validators, borrow facts and target-contract validation retain exact spans or explicit generated absence.
-- [x] **1E5 — orchestration and support:** accepted in `e1f16cb49`; project config, Stage 0, build-system diagnostics, source adapters, compiler test helpers and direct location constructors use the source-span boundary.
-- [x] in the owning batch, replace ambiguous location `PartialOrd` use with named source-order, overlap and containment operations.
-
-### Slice group 1F — Establish the frozen identity/render boundary
-
-- [x] **1F1 — frozen lookup foundation:** accepted in `a9f9744de`; consuming string/source/minimal-path freeze operations move current allocations into the final lookup-only `FrozenIdentityContext`.
-- [x] **1F2 — pre-merge boundary cleanup:** accepted in `a9f9744de`; file stages return move-only diagnostic/source deltas and the final message set is created only after canonical build/package merge.
-- [x] **1F3 — transitional message ownership:** accepted in `a9f9744de`; only the final build/package render boundary owns diagnostics, type context and the frozen identity context, with no module-level premature freeze or clone.
-- [x] **1F4 — renderer migration:** accepted in `a9f9744de`; retained snapshots and exact `SourceSpan` byte offsets drive terminal, HTML, terse and dev-server rendering, including Unicode, CRLF, tabs, wide scalars and combining sequences.
-- [x] **1F5 — frozen generic source ownership:** accepted in `a9f9744de` and corrected in `e1f16cb49`; materialised tokens, generated artefacts and diagnostics preserve or canonically remap their owning `SourceId`, including extended spans after donor builders drop.
-- [x] preserve terminal, terse and dev-server code/span identity
-- [x] define synthetic/compilation-root display and provenance explicitly
-- [x] keep non-UTF-8 filesystem display in infrastructure/path handling, not fabricated source paths
-- [x] add rendering tests for changed-on-disk files, Unicode, CRLF, long lines, config/bootstrap sources and synthetic sources
-- [x] verify header parse-time duplicate sites carry their first authored `SourceSpan` or an explicit spanless contract before renderer publication; no path/line reconstruction is permitted.
-
-### Slice group 1G — Compact plain diagnostics
-
-Phase 1G is complete. The plain diagnostic boundary, typed infrastructure lane, compact token
-projection and lint-removal gate were verified by the correction audit and final validation.
-
-- [x] **1G1 — remove duplicated source facts:** `CompilerDiagnostic` owns one canonical primary span; secondary labels retain related sites without copying primary facts.
-- [x] **1G2 — keep infrastructure typed:** infrastructure failures remain in the typed `CompilerError` lane rather than a user-diagnostic payload.
-- [x] **1G3 — retain the compact boundary:** a throwaway layout probe measured `CompilerDiagnostic` at 96 bytes and `CompilerMessages` at 112 bytes on `aarch64-apple-darwin`; the hard diagnostic bound is 128 bytes.
-- [x] **1G4 — retain compact token projection:** `DiagnosticToken` remains the final fixed-width 8-byte projection with explicit `TokenTag(u16)`.
-- [x] **1G5 — final boundary gate:** plain `CompilerDiagnostic` values cross the diagnosed lane, with no common diagnostic boxing, no `result_large_err` allowance and no lint-specific local workaround.
-- [x] verify the activation-era lint allowances are absent rather than relocating them.
-
-### Slice 1H — Remove the old location and source identity model
-
-Phase 1H is complete. The old location/source-identity model is absent from production sources and
-the authorities now describe the exact source-span boundary.
-
-- [x] verify `SourceLocation`, `CharPosition`, their constructors, path replacement and remap methods are absent
-- [x] verify `SourceFileTable`, `FileId` and fallback path-based identity comparison are absent
-- [x] verify line/column mutation and location filesystem fallback helpers are absent
-- [x] search the repository for old type names and construction patterns
-- [x] update compiler/build authorities and source-span style rules.
-
-### Phase 1 — Audit / style-guide review / validation
-
-Complete. The common phase-close checks and the following Phase 1-specific audits are recorded by
-the code checkpoint, correction review and evidence block below:
-
-- [x] audit exactness: no consumer guesses or reconstructs a span end
-- [x] audit ownership: source text exists once, each extended-span builder has one owner and every builder freezes exactly once after its last producer
-- [x] audit determinism: serial/parallel SourceIds, spans, diagnostics and outputs match
-- [x] audit no raw source span crosses a project/package identity boundary without context ownership or canonical remap
-- [x] audit user-input limits diagnose rather than panic or truncate
-- [x] audit no path/line-column durable location remains
-- [x] audit related diagnostic locations were not lost while duplication was removed
-- [x] review codec isolation, module size, comments and stage ownership
-- [x] run source/span/tokenizer/header/renderer property tests and affected integration cases
-- [x] record source-corpus snapshot, selected span-table and timing deltas in the closeout evidence below
+`SourceLocation`, `CharPosition`, `SourceFileTable`, `FileId`, fallback path-based identity
+comparison, line/column mutation and location filesystem fallback helpers are absent from
+production sources.
 
 ### Phase 1 exit criteria
 
@@ -1179,110 +686,36 @@ the code checkpoint, correction review and evidence block below:
 - [x] retained snapshots render diagnostics
 - [x] old location/file identity types are absent from production sources
 - [x] the compact plain diagnostic boundary has no common diagnostic boxing or lint-specific workaround
-- [x] full local CI is green before Phase 2 begins; cross-target Clippy results are recorded in the closeout evidence.
+- [x] full local CI is green before Phase 2 begins
 
-### Phase 1 closeout evidence (2026-09-10)
+### Closeout evidence
 
-This is the original closeout record, retained for provenance. Its statement that no retained-memory
-delta was measured is superseded by the external-review correction checkpoint below; the correction
-checkpoint is the current Phase 1 acceptance record.
+Final Phase 1 review-correction closeout is `3c9c776a8` (2026-09-10), after implementation
+`a9f9744de`, representation corrections `e1f16cb49` and later correction checkpoints through
+`fc9f449e9`. `just validate` passed on Apple M1 Pro / Rust 1.97.1 as recorded in the capsule.
+Span-census corpus: 4,626 files walked, 4,585 tokenized, 286,779 spans; selected `LocalSpan`
+extended table 1,992 bytes at the 22/10 split. Timing and retained-memory partitions, including
+the five-run probe, live in `benchmarks/frontend-optimization-results.md`. Per-command closeout
+tables are Git history.
 
-The final Phase 1 code checkpoint is `eb6416312`, following obsolete span-allowance cleanup
-`749f9c3f0`, cross-target correction checkpoint `134aebf63`, representation-correction checkpoint
-`e1f16cb49` and implementation checkpoint `a9f9744de`. The correction review found no blockers.
-Commands below ran on the Apple M1 Pro
-(`aarch64-apple-darwin`) with Rust 1.97.1 / Clippy 0.1.97 unless a target is named.
+### Standing correction contracts
 
-| Evidence | Result |
-| --- | --- |
-| `cargo fmt --all`; `git diff --check` | pass |
-| `just ci-clippy-native` | pass, workspace all-targets, featured, `-D warnings` |
-| `cargo clippy --target x86_64-unknown-linux-gnu` | pass, all-targets, featured, `-D warnings` |
-| `cargo clippy --target x86_64-pc-windows-msvc` | pass, all-targets, featured, `-D warnings` |
-| `cargo test --workspace --quiet -- --format terse` | 5,078 moth + 17 CLI + 825 xtask = 5,920 passed |
-| `cargo run --quiet -- tests --terse` | 1,951 / 1,951 integration cases correct |
-| `cargo run --quiet -- build docs --release` | 74 output files built successfully |
-| `cargo run --quiet -- check docs --terse` | no errors or warnings |
-| `just feature-lane-check` | 0 findings |
-| `just source-audit` | 1,324 files audited, 0 findings |
-| `just span-census` | 4,626 files walked; 4,585 tokenized; 286,779 spans; 2,353,104 source bytes |
-| selected `LocalSpan` extended table | 1,992 bytes at the 22/10 split; +268 source bytes versus the historical 2,352,836-byte census, with the same span count |
-| `just bench-data-layout-check` | 2/2 cases; 10 measured iterations; **-5 ms average**, 1 faster, 0 slower |
-| `just bench-ci` | 82/82 preflight; CLI 7/8 and frontend 9/10 quick cases measured; no failures; CLI **-1 ms average** (no measurable change); frontend **-4 ms average**; changed docs workloads excluded |
-| `just bench-scaling` | all 3 series within budget; fitted exponents 0.95, 0.76 and 1.63 |
-| `just timers-erasure-check` | no-timer binary clean, 8,581,088 bytes |
+These remain in force for later phases. They do not reopen Phase 1 or start Phase 2.
 
-The source-byte and extended-table figures are span-census corpus evidence, not a claim that source
-text was copied during rendering. The bounded benchmark runner reports timings and counters rather
-than aggregate retained heap bytes; no unmeasured memory delta is claimed here. Cross-target
-Clippy passed for the installed Linux and Windows targets; no other platform lane was available.
-
-### External review correction checkpoint
-
-The external review reopened the Phase 1 gate for a bounded correction pass. This checkpoint records
-the applied decisions, the regressions that defend them and the current retained-memory evidence.
-The full validation gate below is green; the final audit is the independent acceptance checkpoint.
-Phase 2 remains paused for external user review.
-
-| Review finding | Correction now owned by Phase 1 |
-| --- | --- |
-| Cross-package generic spans could resolve through the requester identity, and the production donor handle was unavailable. | `FrozenIdentityHandle::get` is production-readable and carries an optional stable-package domain; generic materialised body/declaration/substitution labels carry their donor handle; donor-owned generic primary spans carry the requesting materialisation context's handle; render contexts resolve those facts through their explicit handles; project/package ranges install separate frozen identities at the final boundary; an unresolved handle is an infrastructure error rather than a project-root fallback. The imported-generic regression uses colliding `SourceId` values and a donor span beyond the inline limit, while the nested imported-generic regression proves the final package installation is reachable for a donor-owned primary span. |
-| Authored extended-span exhaustion could lose its file identity or enter the infrastructure lane. | `SourceSpanCapacity` is a typed `MOTH-SYNTAX-0036` source diagnostic with exact rejected bounds and an already representable file source-start primary span. `EndUnrepresentable` remains the compiler-invariant lane. The real tokenizer exhaustion path is covered. |
-| Frozen diagnostics and type contexts were remapped as if they belonged to the mutable aggregate table. | Merge/remap now partitions frozen and premerge ranges: frozen diagnostics and type environments retain their owner IDs, premerge facts remap once, and mixed type-context ranges split at owner boundaries. Repeated nonidentity appends cover diagnostic names and type names. |
-| Empty-file EOF positions and spanless message labels disappeared at render time. | Mutable and frozen renderers retain the valid empty-file `0:0` path/coordinate with an empty excerpt; invalid source IDs/ranges remain unresolved; spanless message-only labels render as message records. |
-| A test-only full aggregation implementation and legacy stage handoffs obscured the final boundary. | The duplicate `into_render_messages` test implementation and `merge_stage_messages` path are removed. Stage handoffs use `PremergeDiagnosticBatch`; the one remaining `CompilerMessages` classifier is explicitly documented as the deferred AST/HIR API boundary rather than a second aggregation owner. |
-| Frozen construction-only state and APIs remained reachable, and clean results froze empty render contexts. | Frozen source storage drops reverse canonical lookup and load-failure state; dead frozen forwarders and allowances are removed; the clean-result return occurs after every producer has contributed and before freeze; the frozen-handle test lives with source database tests. |
-| Earlier evidence had no retained-memory partition and only single-run timings. | The feature-gated memory probe now reports exact snapshot bytes, extended rows, source identity slots, diagnostic records, label slots and frozen-context records beside aggregate live/peak allocator deltas. Five independent invocations per matched `docs`, `warning-heavy.moth` and `diagnosed/` workloads, medians and ranges, plus predecessor peak/after-report comparisons, are recorded in `benchmarks/frontend-optimization-results.md`. |
-
-Focused correction verification on the Apple M1 Pro used the actual changed surfaces:
-
-| Command | Result |
-| --- | --- |
-| `cargo test --lib imported_generic_materialisation_preserves_donor_identity_with_colliding_sources_and_extended_label` | pass; project-primary and package-donor labels resolve under colliding source IDs, including an extended donor row |
-| `cargo test -p moth imported_nested_generic_materialisation_preserves_call_site_identity_with_colliding_sources` | pass; a nested donor-owned primary span resolves through the package identity rather than the colliding project snapshot |
-| `cargo test -p moth generated_materialisation_preserves_exact_request_span_in_recursive_diagnostic` | pass; recursive generated-request primaries retain their exact request span through the requester-owned frozen context |
-| `cargo test --lib last_usable_extended_index_encodes_and_one_past_it_is_capacity_error` | pass; real tokenizer exhaustion remains typed `MOTH-SYNTAX-0036` with exact bounds |
-| `cargo test --lib append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners` | pass; repeated nonidentity append preserves frozen names/type contexts and remaps premerge facts |
-| `cargo test --lib empty_retained_file_eof_position_preserves_path_coordinates_and_excerpt` | pass; mutable and frozen empty-file EOF resolution retain path and `0:0` |
-| `cargo test --lib spanless_message_label_renders_without_a_source_position` | pass; message-only labels remain visible |
-| `cargo test -p moth --features timers,benchmark_counters,data_layout_memory_probe merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identity` | pass; the fixture introduces chunk-local paths after the shared base so the frozen-output remap skip observes a real nonidentity append |
-| `cargo check --quiet --locked --bin data_layout_memory_probe --features data_layout_memory_probe` | pass |
-
-The complete validation gate then passed:
-
-| Command | Result |
-| --- | --- |
-| `just validate` | native featured all-target Clippy passed; 5,086 moth + 17 CLI + 825 xtask tests passed; integration 1,951/1,951; source audit 1,325 files; docs check clean; 82 benchmark preflights, all 3 scaling series and timer erasure passed |
-| `cargo run --quiet -- tests --terse` | 1,951/1,951 integration cases correct |
-| `cargo fmt --all -- --check`; `git diff --check` | pass |
-
-The correction checkpoint is the commit containing this section. No Phase 2 slice starts from this
-plan until that commit has passed the independent final audit.
-
-### Follow-up correction contract (current workspace)
-
-The next external review identified eight incomplete production contracts. This follow-up closes
-them without changing the fixed common layouts or starting Phase 2:
-
-| Finding | Phase 1 contract now enforced |
-| --- | --- |
-| Generated ownership stopped at AST | Generated materialisation retains the declaring frozen-identity handle through successful warnings, HIR lowering, borrow checking and backend target validation. Re-anchoring preserves existing primary/label owners, compares duplicate sites with their identity domains, and never falls back from an unresolved donor-domain handle to the requester database. |
-| Provenance-independent Wasm validation | Generic runtime validation returns an occurrence with an independent optional span. Reachable spanful and spanless occurrences take the same unsupported-feature path; only reachability controls acceptance. |
-| String lookup safety | Mutable and frozen string resolvers use checked lookup. An in-range ID still requires the correct identity domain; a foreign out-of-range ID is a compiler-invariant failure, never undefined behaviour. |
-| Build/dev report ownership | Early frontend diagnosis, generated post-HIR failure, late backend/output failure, warning success and clean success each have an explicit terminal owner. Warnings, package/generated source contexts and authored late-output source contexts move into the final frozen report before late failures; clean consumers release the mutable table and source owner only after output succeeds. |
-| Selected source loading | Registration assigns deterministic slots without reading files. Canonical discovery and explicit check-only preparation load selected semantic sources once; provider-only and unselected sources remain pending. |
-| Rendered output correctness | Terminal source/caret rows share gutter and tab policies; related sites retain their paths/messages; HTML retains secondary labels and escapes dynamic path text. |
-| Retention evidence | Feature-gated accounting distinguishes peak, live-report and after-owner-drop measurements. Retained-context counts are distinct and include donor-only handles; diagnostic-free package databases do not inflate the final report count. |
-| Failure handoffs | Production borrow failures move a premerge batch with its table once. Package finalization uses the existing append/finish helper; the remaining AST/HIR compatibility classifier is a production migration boundary, explicitly deferred until its callers move to direct premerge classification. |
-
-#### Cold ownership contract for the final common layouts
+#### Cold ownership
 
 The common `DiagnosticRecord` remains 32 bytes and the common `SecondaryDiagnosticLabel` remains
 12 bytes. Their compact spans are meaningful only in the identity domain of the enclosing report
 context. Rare mixed-domain sites carry an optional typed `FrozenIdentityHandle` in cold diagnostic
 or label ownership storage; the handle names the immutable string/source context that resolves the
 span. No common record grows an `Arc`, path table, or rendered coordinate, and no renderer guesses
-an owner from a colliding requester database.
+an owner from a colliding requester database. Exact Phase 4 side-store encoding remains deferred.
+
+`ProjectEntry` and linked-module views retain the owning boundary domain. Project backend
+diagnostics use the domain-less project default only for project modules; package diagnostics use
+their exact package domain. Empty package rows are retained only for explicitly domained handles
+and never become default render ranges. Distinct domain-less handles compare by allocation identity
+rather than `None == None`.
 
 #### Production lifecycle gates
 
@@ -1298,147 +731,52 @@ The first four retain the final diagnostic owner and all source-domain associati
 drops compiler identity storage once no compact-ID consumer remains. A focused test that exercises
 only frozen frontend diagnostics does not close the build/dev gates.
 
+Generated materialisation retains the declaring frozen-identity handle through successful warnings,
+HIR lowering, borrow checking and backend target validation. Re-anchoring preserves existing
+primary/label owners, compares duplicate sites with their identity domains, and never falls back
+from an unresolved donor-domain handle to the requester database. The body remains primary when
+`call_span` is absent; a body secondary is created only when a real call span exists.
+
+Mutable and frozen string resolvers use checked lookup. An in-range ID still requires the correct
+identity domain; a foreign out-of-range ID is a compiler-invariant failure, never undefined
+behaviour.
+
+Registration assigns deterministic slots without reading files. Canonical discovery and explicit
+check-only preparation load selected semantic sources once; provider-only and unselected sources
+remain pending.
+
+Authored table or compact-domain exhaustion is a deterministic typed source-capacity diagnostic;
+capture exhaustion is terminal and carries the offending exact range. Compiler-produced impossible
+overflow remains a compiler failure. Global `SourceSpan` live-builder operations accept only a
+source-qualified resolver view and validate `span.source()` against the resolver source. Database
+resolution of the reserved compilation-root `SourceSpan` accepts only the exact empty range
+`[0, 0)`.
+
+Scalar source offsets, UTF-16 tooling columns and terminal/HTML display cells are three separate
+units. Terminal and HTML format independently; non-tab chunks use string display width while scalar
+columns, UTF-16 columns and tab stops remain distinct.
+
 #### Deferred representation work
 
 Parent-linked path tables, compact span encoding, token-store consolidation and declarative
-token/diagnostic schemas remain deferred to their planned migration slices. This correction pass
-adds no second interner, scheduler, observer API or ubiquitous per-node owner.
-
-#### Follow-up validation evidence (2026-09-10)
-
-The final follow-up correction checkpoints are `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`,
-`a9f5eaae` and `fc9f449e9`.
-Focused suites cover generated ownership, terminal BuildResult and integration-runner warning
-handoffs, provenance-independent Wasm validation, checked string lookup, selected-source loading,
-terminal/HTML rendering, report aggregation, retention accounting and late site-config interned
-values. The clean `just validate` gate then passed native featured all-target Clippy, 5,099 moth tests,
-17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit (1,325 files), docs, benchmark
-sanity (82 preflights), all three scaling budgets and timer erasure. `cargo fmt --all -- --check` and
-`git diff --check` also pass; the clean gate left no generated changes in the worktree.
-
-### Final review-correction closeout (2026-09-10)
-
-This final bounded pass closes the six external-review corrections without changing the fixed
-common layouts or starting Phase 2:
-
-| Finding | Final correction |
-| --- | --- |
-| Related-site ownership could hijack the default source context. | `ProjectEntry` and linked-module views retain the owning boundary domain. Project backend diagnostics use the domain-less project default only for project modules; package diagnostics use their exact package domain. Empty package rows are retained only for explicitly domained handles and never become default render ranges. |
-| Generic re-anchoring could replace a body primary when no call span existed. | The body remains primary when `call_span` is absent; a body secondary is created only when a real call span exists. Distinct domain-less handles compare by allocation identity rather than `None == None`. |
-| Mixed-domain cold ownership was underspecified. | The canonical layout design now makes the normal report domain authoritative for common primary/secondary spans and requires rare foreign sites to use typed cold ownership resolving through a compact report-owned frozen-context reference. No common record carries an `Arc`, path or context pointer; exact Phase 4 side-store encoding remains deferred. |
-| Generated materialisation used local diagnostic detours and duplicated owner attachment. | Local invariant failures use direct `PremergeFailure::Infrastructure` or `PremergeDiagnosticBatch`; `CompilerDiagnostic` owns source-bearing handle attachment, while stage, emitter and message owners delegate to it. |
-| Dev-server formatting depended on terminal text and display widths conflated Unicode coordinate spaces. | Dev-server consumes structured resolved label facts and escapes/serializes independently. Terminal and HTML format independently; non-tab chunks use string display width while scalar columns, UTF-16 columns and tab stops remain distinct. ZWJ and variation-selector regressions cover caret geometry. |
-| Obsolete test loaders and oversized owners obscured source ownership. | The cfg(test) registered-source loader is deleted; source discovery and compile-project frontend tests are split into focused real sibling modules with no `include!` shortcuts. |
-
-Focused final-correction verification passed:
-
-| Command | Result |
-| --- | --- |
-| `cargo run --quiet -- tests --case cast_generic_builtin_evidence_success` | 2/2 case/backend executions correct, including the expected HTML-Wasm `MOTH-RULE-0064` |
-| `cargo test --quiet --lib with_generic_instantiation_context_without_call_span_retains_body_primary` | pass |
-| `cargo test --quiet --lib generated_materialisation_preserves_exact_request_span_in_recursive_diagnostic` | pass |
-| `cargo test --quiet --lib renderers_measure_a_` | 2 tests pass for ZWJ and variation-selector caret widths |
-| `cargo test --quiet --lib registered_source_database_retains_exact_text_for_multiple_compiled_sources` | pass |
-| `cargo fmt --all -- --check`; `git diff --check` | pass |
-
-The complete `just validate` gate then passed: native featured all-target Clippy; feature-lane
-coverage with zero findings; source audit of 1,336 files; 5,105 workspace tests, 17 CLI tests and
-825 xtask tests; 1,951/1,951 integration cases; docs check with no errors or warnings; all 82
-benchmark preflights; all three scaling budgets; and timer erasure. Quick benchmark sanity reported
-no measurable change for the CLI set and a 2 ms average frontend improvement; the scaling fits
-were within the configured budgets. Phase 2 remains paused for external user review.
-
-### Review-derived corrections supporting Phase 1 closeout
-
-The following checkpoint notes preserve historical review and commit records. The applied corrections
-and final Phase 1 validation are recorded in the closeout evidence above; they do not reopen the
-accepted migration choices or create parallel owners.
-
-The attached source and diagnostic data-layout audit was reconciled against checkpoints through
-`1501330d7` on 2026-09-09; its implementation findings are represented by the completed Phase 1
-gates and the correction checkpoint above.
-
-- [x] **R1a — authored snapshot capacity lane:** `f308f91e5` records an oversized authored
-  snapshot in its source slot before publishing the existing source/file failure, while
-  compiler-produced oversize snapshots remain compiler invariants.
-- [x] **R1b — compact capacity semantics:** accepted in `dc9f36532`. `SourceId`, `PathId` and
-  source-local extended span allocation are fallible at their real owners. Authored table or
-  compact-domain exhaustion becomes a deterministic typed source-capacity diagnostic;
-  capture exhaustion is terminal and carries the offending exact range instead of silently
-  losing the span. Compiler-produced impossible overflow remains a compiler failure. Bounded
-  ID/span boundary tests require no multi-billion-byte allocation.
-- [x] **R2 — source-qualified live span resolution:** accepted in `c4eeaf1c9`. Global `SourceSpan`
-  live-builder operations accept only a source-qualified resolver view and validate
-  `span.source()` against the resolver source, rejecting a wrong-source extended row as a
-  compiler invariant; bare resolvers remain for source-local `LocalSpan` work.
-- [x] **R3 — explicit source ownership during capture/rebinding:** accepted in `fa5a2e75d`.
-  Legacy logical-path equality is removed from preparation label ownership decisions.
-  Source-local capture inherits the producer `SourceId`; rebinding inspects each existing
-  label span's `SourceId`, with a regression for distinct source IDs sharing one logical
-  display path.
-- [x] **R4 — compilation-root span contract:** accepted in `472ad7400`. Database-backed
-  resolution of the reserved compilation-root `SourceSpan` accepts only the exact empty range
-  `[0, 0)`; non-empty root ranges are compiler invariants, while renderers keep omitting a
-  physical source frame.
-- [x] **R5 — cold canonical path storage:** accepted in `b862ce300`. `SourceSlot::canonical_os_path`
-  is the cold `Option<Box<Path>>` representation; the row measures 40 bytes (was 48).
-  Incidental exact `SourceSlot`/`SourceRecord` size assertions are removed from correctness
-  tests; hard layout assertions and observed measurements stay in benchmark evidence.
-- [x] **R6 — consuming source freeze:** accepted in `ab090fcb5`. Construction state enters owned
-  through `SourceDatabaseBuilder::new` and leaves owned through `finish`; terminal publish `Arc`s
-  are minted after the consume. The interior builder `Arc` stays the transient share handle for
-  boundary compilation and Stage 0 facts, dropped before the freeze. `canonical_to_id` and the
-  path interner are retained: frozen consumers still resolve canonical paths, so the drop waits
-  for 1F1's `FrozenIdentityContext` decision. A `should_panic` test pins freeze rejection of an
-  outstanding transient share; `cargo fmt`, `git diff --check`, `cargo check -p moth` and the full
-  library suite (5,017) pass. At that historical checkpoint, R7 was recorded as the next gate.
-- [x] **R7 — cross-context related diagnostic sites:** accepted in `f98b7c42f`. Related sites stay
-  portable coordinate records with an optional explicit `SourceSpan` naming their own table; span
-  identity governs rebinding and renderers use portable secondary coordinates, so a foreign-table
-  span is never interpreted in another table. Production never creates cross-table secondaries;
-  same-domain labels stay compact. The historical checkpoint's test and validation record remain
-  as-of that entry and are not current workspace evidence.
-  At that historical checkpoint, R8 was recorded as the next gate.
-- [x] **R8 — renderer display-cell coordinates:** accepted in `a7283c9c6`. Scalar source offsets
-  (`LineIndex::position`), UTF-16 tooling columns (`utf16_column`) and terminal/HTML display cells
-  are three separate units: caret padding and underline length now derive from the retained line
-  via display-cell geometry (tab advances to the next multiple of 8; other scalars use Unicode
-  width, combining 0, wide CJK 2), shared by the terminal and dev-server renderers. Regressions
-  cover a preceding tab, a wide CJK scalar and a combining mark. Independent audit was
-  unavailable (subagent provider quota exhausted); the change passed `cargo fmt`,
-  `git diff --check`, `cargo check -p moth` and the full library suite (5,021). At that historical
-  checkpoint, R9 was recorded as the next gate.
-- [x] **R9 — migration-debt cleanup:** accepted in `1e209c3b5`. Impl-wide dead-code allowances
-  are narrowed to per-method `#[allow(dead_code)]` on deferred-consumer span, table and line-index
-  APIs (first callers land in slices 1D3/1D4/1E/1F; each allowance names its unreached callers),
-  and `source/tests.rs` (2,331 lines, git history preserved in `database_tests.rs`) is split into
-  focused `database_tests`, `span_tests`, `line_index_tests` and `render_bridge_tests` modules
-  wired with `#[path]` from `source/mod.rs`, sharing one `test_support::database_with_retained_text`
-  helper. Test parity holds (63 = 63) and the change passed `cargo fmt`, `git diff --check`,
-  `cargo check -p moth --tests` with zero warnings and the full library suite (5,021).
-  Independent audit was unavailable (subagent provider quota exhausted). The R10 prerequisites are
-  the next gates before the remaining 1D/1E/1F/1G/1H completion slices at that historical checkpoint.
-- [ ] **R10a — diagnostic identity ownership (Phase 4 prerequisite):** make stable reason keys part
-  of the final diagnostic schema rather than an interim compiler-owned payload convention.
-- [ ] **R10b — draft/durable type separation (Phase 4 prerequisite):** define distinct draft and
-  durable diagnostic fact types before compact-record and type-display work begins.
-- [ ] **R10c — infrastructure/bug context (Phase 5 prerequisite):** settle self-contained context
-  ownership for infrastructure failures and compiler-bug reports before deleting the mixed error
-  model.
-- [ ] **R10d — structural type-display dedup (Phase 4 prerequisite):** keep `TypeId` to
-  `TypeDisplayId` memoization mandatory, but require benchmark evidence before adding
-  cross-identity structural hash-consing.
+token/diagnostic schemas remain deferred to their planned migration slices. This Phase 1 work adds
+no second interner, scheduler, observer API or ubiquitous per-node owner.
 
 The private discovery-finalization barrier, parent-linked path trie, ambiguity-failing legacy path
 lookup and local `_unspanned` wrappers remain accepted migration choices until their owning cleanup
-steps above; they are not reopened as parallel frameworks.
+steps; they are not reopened as parallel frameworks.
 
-### Phase 1 external review checkpoint
+#### Later-phase prerequisites (R10)
 
-- [x] complete the remaining 1D, 1E, 1F, 1G and 1H slices (the open 1B4 lifecycle gate is reconciled; its frozen identity/render tail is 1F work)
-- [x] complete Phase 1's independent final reviews and required measurement/validation gates
-- [x] commit final corrections and closeout, verify the checkpoint sequence and worktree state
-- [x] pause for external user review before starting Phase 2
+- [ ] **R10a — diagnostic identity ownership (Phase 4):** make stable reason keys part of the final
+  diagnostic schema rather than an interim compiler-owned payload convention.
+- [ ] **R10b — draft/durable type separation (Phase 4):** define distinct draft and durable
+  diagnostic fact types before compact-record and type-display work begins.
+- [ ] **R10c — infrastructure/bug context (Phase 5):** settle self-contained context ownership for
+  infrastructure failures and compiler-bug reports before deleting the mixed error model.
+- [ ] **R10d — structural type-display dedup (Phase 4):** keep `TypeId` to `TypeDisplayId`
+  memoization mandatory, but require benchmark evidence before adding cross-identity structural
+  hash-consing.
 
 ---
 
