@@ -13,7 +13,7 @@ use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStrin
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
+    HtmlResourceOutputPlan, ResourceDiagnosticSite, ResourceUrlContext, ResourceUseKind,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::path::{Path, PathBuf};
@@ -58,7 +58,9 @@ pub(super) fn render_structural_content(
             };
             plan.plan_origin(
                 origin.clone(),
-                interned.first_authored_span,
+                interned
+                    .first_authored_span
+                    .map(ResourceDiagnosticSite::project),
                 context.clone(),
                 string_table,
                 ResourceUseKind::Executable,

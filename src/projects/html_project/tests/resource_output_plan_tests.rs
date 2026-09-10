@@ -1,7 +1,8 @@
 use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, RenderSourceContext};
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::ids::FunctionId;
@@ -13,9 +14,13 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
     let diagnostic = messages
@@ -90,6 +95,37 @@ fn authored_span(start: u32) -> SourceSpan {
     )
 }
 
+fn authored_site(start: u32) -> ResourceDiagnosticSite {
+    ResourceDiagnosticSite::project(authored_span(start))
+}
+
+fn retained_source_database(
+    directory: &Path,
+    relative_name: &str,
+    text: &str,
+    string_table: &mut StringTable,
+) -> (SourceDatabase, SourceId) {
+    let source_root = directory.join("src");
+    fs::create_dir_all(&source_root).expect("source root should exist");
+    let source_path = source_root.join(relative_name);
+    fs::write(&source_path, text).expect("source should be written");
+    let mut source_database = SourceDatabase::build(
+        std::iter::once(source_path.as_path()),
+        &source_root,
+        None,
+        string_table,
+    )
+    .expect("source database should build");
+    let source_id = source_database
+        .get_by_canonical_path(&source_path)
+        .expect("source should be registered")
+        .id;
+    source_database
+        .retain_text(source_id, text.to_owned())
+        .expect("source snapshot should be retained");
+    (source_database, source_id)
+}
+
 #[test]
 fn shared_origin_across_entries_emits_one_planned_record() {
     // WHAT: one origin observed across several contexts becomes one output record with one use
@@ -98,9 +134,9 @@ fn shared_origin_across_entries_emits_one_planned_record() {
     //      observing artefact kind.
     let mut string_table = StringTable::new();
     let origin = module_resource_origin("app", "docs", "assets/logo.svg");
-    let first_span = authored_span(0);
-    let second_span = authored_span(2);
-    let third_span = authored_span(4);
+    let first_span = authored_site(0);
+    let second_span = authored_site(2);
+    let third_span = authored_site(4);
 
     let mut plan = HtmlResourceOutputPlan::new("app");
 
@@ -149,7 +185,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
 
     plan.plan_origin(
         first,
-        Some(authored_span(0)),
+        Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -158,7 +194,7 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
     let error = plan
         .plan_origin(
             second,
-            Some(authored_span(2)),
+            Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -174,16 +210,12 @@ fn distinct_origins_colliding_at_provider_path_report_both_spans() {
         panic!("expected a resource output path collision reason");
     };
     assert_eq!(string_table.resolve(*output_path), "shared/logo.svg");
-    assert!(
-        string_table
-            .resolve(*existing_origin)
-            .contains("name 'one'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
-            .contains("name 'two'")
-    );
+    assert!(string_table
+        .resolve(*existing_origin)
+        .contains("name 'one'"));
+    assert!(string_table
+        .resolve(*conflicting_origin)
+        .contains("name 'two'"));
 }
 
 #[test]
@@ -207,7 +239,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
 
     plan.plan_origin(
         first,
-        Some(authored_span(0)),
+        Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -216,7 +248,7 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
     let error = plan
         .plan_origin(
             second,
-            Some(authored_span(2)),
+            Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -231,16 +263,12 @@ fn distinct_module_origins_with_same_package_name_report_roles() {
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert!(
-        string_table
-            .resolve(*existing_origin)
-            .contains("role 'normal'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
-            .contains("role 'support'")
-    );
+    assert!(string_table
+        .resolve(*existing_origin)
+        .contains("role 'normal'"));
+    assert!(string_table
+        .resolve(*conflicting_origin)
+        .contains("role 'support'"));
 }
 
 #[test]
@@ -266,7 +294,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
 
     plan.plan_origin(
         first,
-        Some(authored_span(0)),
+        Some(authored_site(0)),
         ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
@@ -275,7 +303,7 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
     let error = plan
         .plan_origin(
             second,
-            Some(authored_span(2)),
+            Some(authored_site(2)),
             ResourceUrlContext::page_document(Path::new("about.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -290,26 +318,18 @@ fn distinct_provider_origins_with_same_package_name_report_package_origins() {
     else {
         panic!("expected a resource output path collision reason");
     };
-    assert!(
-        string_table
-            .resolve(*existing_origin)
-            .contains("package origin 'builder'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
-            .contains("package origin 'dependency'")
-    );
-    assert!(
-        string_table
-            .resolve(*existing_origin)
-            .contains("name 'shared'")
-    );
-    assert!(
-        string_table
-            .resolve(*conflicting_origin)
-            .contains("name 'shared'")
-    );
+    assert!(string_table
+        .resolve(*existing_origin)
+        .contains("package origin 'builder'"));
+    assert!(string_table
+        .resolve(*conflicting_origin)
+        .contains("package origin 'dependency'"));
+    assert!(string_table
+        .resolve(*existing_origin)
+        .contains("name 'shared'"));
+    assert!(string_table
+        .resolve(*conflicting_origin)
+        .contains("name 'shared'"));
 }
 
 #[test]
@@ -326,7 +346,7 @@ fn reserved_html_output_rejects_resource_planning() {
     let error = plan
         .plan_origin(
             origin,
-            Some(authored_span(0)),
+            Some(authored_site(0)),
             ResourceUrlContext::page_document(Path::new("other.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -361,7 +381,7 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
     let error = plan
         .plan_origin(
             origin,
-            Some(authored_span(0)),
+            Some(authored_site(0)),
             ResourceUrlContext::page_document(Path::new("index.html")).unwrap(),
             &mut string_table,
             ResourceUseKind::Executable,
@@ -381,10 +401,237 @@ fn reserved_javascript_glue_output_rejects_resource_planning() {
         glue_path.to_str().unwrap()
     );
     assert_eq!(string_table.resolve(*artefact_kind), "JavaScript");
+    assert!(string_table
+        .resolve(*origin)
+        .contains("module-0123456789abcdef.js"));
+}
+#[test]
+fn resource_collision_render_keeps_project_primary_and_package_secondary_domains() {
+    let project_directory = tempfile::tempdir().expect("project directory should exist");
+    let package_directory = tempfile::tempdir().expect("package directory should exist");
+    let project_text = "project_collision_snapshot = 1\n";
+    let package_text = "package_collision_snapshot = 1\n";
+    let mut string_table = StringTable::new();
+    let (project_database, project_source) = retained_source_database(
+        project_directory.path(),
+        "main.moth",
+        project_text,
+        &mut string_table,
+    );
+    let (package_database, package_source) = retained_source_database(
+        package_directory.path(),
+        "main.moth",
+        package_text,
+        &mut string_table,
+    );
+    assert_eq!(
+        project_source, package_source,
+        "independent source databases should deliberately collide by SourceId"
+    );
+
+    let package_identity =
+        StablePackageIdentity::source_package(PackageOrigin::Dependency, "collision-pkg");
+    let project_local_span = LocalSpan::exact(0, 7, &mut ExtendedSpanBuilder::new())
+        .expect("project span should fit inline");
+    let package_local_span = LocalSpan::exact(0, 7, &mut ExtendedSpanBuilder::new())
+        .expect("package span should fit inline");
+    let project_origin = provider_resource_origin_with_package_origin(
+        "collision",
+        PackageOrigin::ProjectLocal,
+        "app",
+        "shared/output.js",
+    );
+    let package_origin = provider_resource_origin_with_package_origin(
+        "collision",
+        PackageOrigin::Dependency,
+        "collision-pkg",
+        "shared/output.js",
+    );
+    let project_site =
+        ResourceDiagnosticSite::project(SourceSpan::new(project_source, project_local_span));
+    let package_site = ResourceDiagnosticSite {
+        span: SourceSpan::new(package_source, package_local_span),
+        source_domain: Some(package_identity.clone()),
+    };
+
+    let mut plan = HtmlResourceOutputPlan::new("app");
+    plan.plan_origin(
+        package_origin,
+        Some(package_site),
+        ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
+        &mut string_table,
+        ResourceUseKind::Executable,
+    )
+    .expect("the package origin should claim the output first");
+    let mut messages = plan
+        .plan_origin(
+            project_origin,
+            Some(project_site),
+            ResourceUrlContext::PageDocument(PathBuf::from("other.html")),
+            &mut string_table,
+            ResourceUseKind::Executable,
+        )
+        .expect_err("the two provider origins should collide at their declared output path");
+
+    messages.set_source_database(Arc::new(project_database));
+    messages.install_source_contexts(
+        std::iter::once(RenderSourceContext {
+            diagnostic_range: 0..1,
+            source_database: Arc::new(package_database),
+            domain: Some(package_identity),
+        }),
+        0,
+    );
+    let messages = messages
+        .freeze_source_contexts()
+        .expect("mixed project/package source contexts should freeze");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("collision should retain one diagnostic");
+    let context = messages.diagnostic_render_context(0);
+    let primary = context
+        .primary_position(diagnostic)
+        .expect("project primary span should resolve");
+    let secondary = context
+        .label_position(&diagnostic.labels[0])
+        .expect("package secondary span should resolve through its domain handle");
     assert!(
-        string_table
-            .resolve(*origin)
-            .contains("module-0123456789abcdef.js")
+        primary.line.contains("project_collision_snapshot")
+            && !primary.line.contains("package_collision_snapshot"),
+        "primary should use the project snapshot, not the colliding package snapshot: {}",
+        primary.line
+    );
+    assert!(
+        secondary.line.contains("package_collision_snapshot")
+            && !secondary.line.contains("project_collision_snapshot"),
+        "secondary should use the package snapshot, not the colliding project snapshot: {}",
+        secondary.line
+    );
+    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    assert!(
+        rendered.contains("project_collision_snapshot"),
+        "HTML rendering should include the project primary excerpt: {rendered}"
+    );
+    assert!(
+        rendered.contains("src/main.moth"),
+        "HTML rendering should retain the package secondary source path: {rendered}"
+    );
+}
+
+#[test]
+fn reserved_package_resource_render_uses_package_extended_span_table() {
+    let project_directory = tempfile::tempdir().expect("project directory should exist");
+    let package_directory = tempfile::tempdir().expect("package directory should exist");
+    let extended_length = 1500u32;
+    let project_text = format!(
+        "project_reserved_snapshot {}\n",
+        "p".repeat(extended_length as usize)
+    );
+    let package_text = format!(
+        "package_reserved_snapshot {}\n",
+        "q".repeat(extended_length as usize)
+    );
+    let mut string_table = StringTable::new();
+    let (mut project_database, project_source) = retained_source_database(
+        project_directory.path(),
+        "main.moth",
+        &project_text,
+        &mut string_table,
+    );
+    let (mut package_database, package_source) = retained_source_database(
+        package_directory.path(),
+        "main.moth",
+        &package_text,
+        &mut string_table,
+    );
+    assert_eq!(
+        project_source, package_source,
+        "independent source databases should deliberately collide by SourceId"
+    );
+
+    let mut project_span_builder = ExtendedSpanBuilder::new();
+    LocalSpan::exact(0, extended_length, &mut project_span_builder)
+        .expect("project span should be representable");
+    assert_eq!(
+        project_span_builder.len(),
+        1,
+        "the project comparison span should use an extended row"
+    );
+    project_database
+        .install_extended_spans(project_source, project_span_builder.freeze())
+        .expect("project extended-span table should install");
+    let mut package_span_builder = ExtendedSpanBuilder::new();
+    let package_local_span = LocalSpan::exact(0, extended_length, &mut package_span_builder)
+        .expect("package span should be representable");
+    assert_eq!(
+        package_span_builder.len(),
+        1,
+        "the package diagnostic span must use an extended row"
+    );
+    package_database
+        .install_extended_spans(package_source, package_span_builder.freeze())
+        .expect("package extended-span table should install");
+    let package_identity =
+        StablePackageIdentity::source_package(PackageOrigin::Dependency, "reserved-pkg");
+    let package_origin = provider_resource_origin_with_package_origin(
+        "reserved",
+        PackageOrigin::Dependency,
+        "reserved-pkg",
+        "index.html",
+    );
+    let package_site = ResourceDiagnosticSite {
+        span: SourceSpan::new(package_source, package_local_span),
+        source_domain: Some(package_identity.clone()),
+    };
+    let mut plan = HtmlResourceOutputPlan::new("app");
+    plan.reserve_builder_output_path(Path::new("index.html"), "HTML page", &mut string_table)
+        .expect("builder output should reserve the page path");
+    let mut messages = plan
+        .plan_origin(
+            package_origin,
+            Some(package_site),
+            ResourceUrlContext::PageDocument(PathBuf::from("other.html")),
+            &mut string_table,
+            ResourceUseKind::Executable,
+        )
+        .expect_err("the package resource should collide with the reserved page path");
+
+    messages.set_source_database(Arc::new(project_database));
+    messages.install_source_contexts(
+        std::iter::once(RenderSourceContext {
+            diagnostic_range: 0..1,
+            source_database: Arc::new(package_database),
+            domain: Some(package_identity),
+        }),
+        0,
+    );
+    let messages = messages
+        .freeze_source_contexts()
+        .expect("mixed project/package source contexts should freeze");
+    let diagnostic = messages
+        .diagnostics()
+        .next()
+        .expect("reserved-path collision should retain one diagnostic");
+    let context = messages.diagnostic_render_context(0);
+    let primary = context
+        .primary_position(diagnostic)
+        .expect("package primary span should resolve");
+    assert_eq!(
+        primary.end.column, extended_length,
+        "the rendered package range should retain the extended span length"
+    );
+    assert!(
+        primary.line.contains("package_reserved_snapshot")
+            && !primary.line.contains("project_reserved_snapshot"),
+        "reserved-path diagnostics must render the package snapshot through its domain: {}",
+        primary.line
+    );
+    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    assert!(
+        rendered.contains("package_reserved_snapshot")
+            && !rendered.contains("project_reserved_snapshot"),
+        "HTML rendering must use the package's extended source table: {rendered}"
     );
 }
 #[test]
@@ -422,7 +669,7 @@ fn live_resource_use_spans_override_intern_span() {
         });
 
     let mut spans = HashMap::new();
-    record_reachable_resource_spans(&mut spans, &module, &reachability).unwrap();
+    record_reachable_resource_spans(&mut spans, &module, None, &reachability).unwrap();
     let mut union = ResourceOriginUnion::new();
     union.insert(origin);
     let mut plan = HtmlResourceOutputPlan::new("app");
@@ -435,11 +682,20 @@ fn live_resource_use_spans_override_intern_span() {
     .unwrap();
 
     let record = &plan.records[0];
-    assert_eq!(record.first_authored_span, Some(first_live_span));
+    assert_eq!(
+        record.first_authored_span,
+        Some(ResourceDiagnosticSite::project(first_live_span))
+    );
     assert!(record.has_executable_use);
     assert_eq!(record.uses.len(), 2);
-    assert_eq!(record.uses[0].authored_span, Some(first_live_span));
-    assert_eq!(record.uses[1].authored_span, Some(second_live_span));
+    assert_eq!(
+        record.uses[0].authored_span,
+        Some(ResourceDiagnosticSite::project(first_live_span))
+    );
+    assert_eq!(
+        record.uses[1].authored_span,
+        Some(ResourceDiagnosticSite::project(second_live_span))
+    );
 }
 
 #[test]
@@ -462,29 +718,38 @@ fn later_live_use_replaces_intern_fallback_span() {
         OriginAuthoredSpans {
             executable: Vec::new(),
             metadata: Vec::new(),
-            fallback: Some(intern_span),
+            fallback: Some(ResourceDiagnosticSite::project(intern_span)),
         },
     );
     plan.plan_union(&union, &fallback_spans, context.clone(), &mut string_table)
         .unwrap();
-    assert_eq!(plan.records[0].first_authored_span, Some(intern_span));
+    assert_eq!(
+        plan.records[0].first_authored_span,
+        Some(ResourceDiagnosticSite::project(intern_span))
+    );
 
     let mut live_spans = HashMap::new();
     live_spans.insert(
         origin,
         OriginAuthoredSpans {
-            executable: vec![Some(live_span)],
+            executable: vec![Some(ResourceDiagnosticSite::project(live_span))],
             metadata: Vec::new(),
-            fallback: Some(intern_span),
+            fallback: Some(ResourceDiagnosticSite::project(intern_span)),
         },
     );
     plan.plan_union(&union, &live_spans, context, &mut string_table)
         .unwrap();
 
     let record = &plan.records[0];
-    assert_eq!(record.first_authored_span, Some(live_span));
+    assert_eq!(
+        record.first_authored_span,
+        Some(ResourceDiagnosticSite::project(live_span))
+    );
     assert_eq!(record.uses.len(), 1);
-    assert_eq!(record.uses[0].authored_span, Some(live_span));
+    assert_eq!(
+        record.uses[0].authored_span,
+        Some(ResourceDiagnosticSite::project(live_span))
+    );
 }
 #[test]
 fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
@@ -517,8 +782,8 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
             span: Some(live_span),
         });
     let mut spans = HashMap::new();
-    record_reachable_resource_spans(&mut spans, &module, &reachability).unwrap();
-    record_const_fragment_resource_spans(&mut spans, &module);
+    record_reachable_resource_spans(&mut spans, &module, None, &reachability).unwrap();
+    record_const_fragment_resource_spans(&mut spans, &module, None);
 
     let mut union = ResourceOriginUnion::new();
     union.insert(origin.clone());
@@ -526,7 +791,7 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
     let mut plan = HtmlResourceOutputPlan::new("app");
     plan.plan_origin(
         origin.clone(),
-        Some(metadata_span),
+        Some(ResourceDiagnosticSite::project(metadata_span)),
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -534,7 +799,7 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
     .unwrap();
     plan.plan_origin(
         origin.clone(),
-        Some(fragment_span),
+        Some(ResourceDiagnosticSite::project(fragment_span)),
         context.clone(),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -544,20 +809,17 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
         .unwrap();
 
     let record = &plan.records[0];
-    assert_eq!(record.first_authored_span, Some(live_span));
+    assert_eq!(
+        record.first_authored_span,
+        Some(ResourceDiagnosticSite::project(live_span))
+    );
     assert!(record.has_executable_use);
-    assert!(
-        record
-            .uses
-            .iter()
-            .any(|use_record| use_record.authored_span == Some(fragment_span))
-    );
-    assert!(
-        record
-            .uses
-            .iter()
-            .any(|use_record| use_record.authored_span == Some(metadata_span))
-    );
+    assert!(record.uses.iter().any(|use_record| {
+        use_record.authored_span == Some(ResourceDiagnosticSite::project(fragment_span))
+    }));
+    assert!(record.uses.iter().any(|use_record| {
+        use_record.authored_span == Some(ResourceDiagnosticSite::project(metadata_span))
+    }));
 }
 
 #[test]
@@ -573,7 +835,7 @@ fn metadata_only_use_plans_output_without_an_executable_use() {
 
     plan.plan_origin(
         origin.clone(),
-        Some(metadata_span),
+        Some(ResourceDiagnosticSite::project(metadata_span)),
         ResourceUrlContext::PageDocument(PathBuf::from("index.html")),
         &mut string_table,
         ResourceUseKind::Metadata,
@@ -584,7 +846,10 @@ fn metadata_only_use_plans_output_without_an_executable_use() {
         .record_for_origin(&origin)
         .expect("a planned origin should be indexed");
     assert_eq!(record.output_path, PathBuf::from("assets/logo.svg"));
-    assert_eq!(record.first_authored_span, Some(metadata_span));
+    assert_eq!(
+        record.first_authored_span,
+        Some(ResourceDiagnosticSite::project(metadata_span))
+    );
     assert!(!record.has_executable_use);
     assert_eq!(record.uses.len(), 1);
 }

@@ -3,24 +3,23 @@
 //! WHAT: coordinates module output-path resolution, homepage checks, and backend selection.
 //! WHY: project builders own artifact assembly policy while compiler backends stay generic.
 use crate::backends::backend_feature_validation::{
-    BackendFeatureValidationError, BackendFeatureValidationInput,
-    validate_hir_backend_feature_support,
+    validate_hir_backend_feature_support, BackendFeatureValidationError,
+    BackendFeatureValidationInput,
 };
 use crate::backends::external_package_validation::{
-    BackendTarget, validate_hir_external_package_support,
+    validate_hir_external_package_support, BackendTarget,
 };
-use crate::build_system::BuildProfile;
 use crate::build_system::build::{
     BackendBuilder, DeferredResourceOutput, FileKind, OutputFile, Project, ProjectCompilation,
     ProjectEntry,
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::output::{BuilderKind, CleanupPolicy};
+use crate::build_system::BuildProfile;
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
-use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
@@ -28,6 +27,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::Flag;
 use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;
 use crate::projects::html_project::compile_input::{
     HtmlModuleCompileContext, HtmlModuleCompileInput,
@@ -43,18 +43,18 @@ use crate::projects::html_project::external_js::runtime_glue::{
     emit_build_runtime_modules, planned_runtime_module_output_paths,
 };
 use crate::projects::html_project::js_path::{
-    HtmlJsCompileInput, compile_html_module_js, html_output_path,
+    compile_html_module_js, html_output_path, HtmlJsCompileInput,
 };
 use crate::projects::html_project::output_plan::plan_wasm_output_from_logical_html_path;
 use crate::projects::html_project::page_metadata::extract_html_page_metadata;
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
 use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext, display_origin,
+    display_origin, HtmlResourceOutputPlan, ResourceDiagnosticSite, ResourceUrlContext,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use crate::projects::html_project::wasm::artifacts::{
-    CompiledHtmlWasmModule, compile_html_module_wasm,
+    compile_html_module_wasm, CompiledHtmlWasmModule,
 };
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
@@ -308,7 +308,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         for asset in runtime_emission_plan.js_assets().values() {
             resource_output_plan.plan_provider_runtime_asset(
                 asset.origin.clone(),
-                asset.source_span,
+                asset.source_span.map(ResourceDiagnosticSite::project),
                 string_table,
             )?;
         }

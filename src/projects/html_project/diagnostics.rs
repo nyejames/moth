@@ -8,9 +8,10 @@ use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage, InvalidConfigReason,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::projects::html_project::resource_output_plan::ResourceDiagnosticSite;
 use std::path::Path;
 
 pub(crate) fn missing_homepage_messages(
@@ -51,9 +52,9 @@ pub(crate) fn duplicate_html_output_path_messages(
 pub(crate) fn resource_output_path_collision_messages(
     output_path: &Path,
     existing_origin: &str,
-    existing_span: Option<SourceSpan>,
+    existing_span: Option<ResourceDiagnosticSite>,
     conflicting_origin: &str,
-    conflicting_span: Option<SourceSpan>,
+    conflicting_span: Option<ResourceDiagnosticSite>,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     let reason = InvalidConfigReason::ResourceOutputPathCollision {
@@ -61,11 +62,34 @@ pub(crate) fn resource_output_path_collision_messages(
         existing_origin: string_table.intern(existing_origin),
         conflicting_origin: string_table.intern(conflicting_origin),
     };
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, conflicting_span)
-        .with_labels(vec![DiagnosticLabel::secondary(
-            existing_span,
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )]);
+    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+        None,
+        reason,
+        conflicting_span.as_ref().map(|site| site.span),
+    );
+    if let Some(domain) = conflicting_span
+        .as_ref()
+        .and_then(|site| site.source_domain.clone())
+    {
+        diagnostic = diagnostic
+            .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(domain));
+    }
+
+    let existing_label = match existing_span {
+        Some(site) => match site.source_domain {
+            Some(domain) => DiagnosticLabel::secondary_with_frozen_identity(
+                Some(site.span),
+                Some(DiagnosticLabelMessage::PreviousDeclaration),
+                FrozenIdentityHandle::for_domain(domain),
+            ),
+            None => DiagnosticLabel::secondary(
+                Some(site.span),
+                Some(DiagnosticLabelMessage::PreviousDeclaration),
+            ),
+        },
+        None => DiagnosticLabel::secondary(None, Some(DiagnosticLabelMessage::PreviousDeclaration)),
+    };
+    let diagnostic = diagnostic.with_labels(vec![existing_label]);
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }
@@ -75,7 +99,7 @@ pub(crate) fn resource_output_path_reserved_messages(
     output_path: &Path,
     origin: &str,
     artefact_kind: &str,
-    span: Option<SourceSpan>,
+    span: Option<ResourceDiagnosticSite>,
     string_table: &mut StringTable,
 ) -> CompilerMessages {
     let reason = InvalidConfigReason::ResourceOutputPathReserved {
@@ -83,7 +107,15 @@ pub(crate) fn resource_output_path_reserved_messages(
         origin: string_table.intern(origin),
         artefact_kind: string_table.intern(artefact_kind),
     };
-    let diagnostic = CompilerDiagnostic::invalid_config_reason(None, reason, span);
+    let mut diagnostic = CompilerDiagnostic::invalid_config_reason(
+        None,
+        reason,
+        span.as_ref().map(|site| site.span),
+    );
+    if let Some(domain) = span.as_ref().and_then(|site| site.source_domain.clone()) {
+        diagnostic = diagnostic
+            .with_primary_frozen_identity_handle(FrozenIdentityHandle::for_domain(domain));
+    }
 
     CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
 }

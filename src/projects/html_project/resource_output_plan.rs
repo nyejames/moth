@@ -10,7 +10,7 @@
 //! create output files. The later emission phase consumes [`PlannedResourceOutput`] records.
 
 use crate::build_system::build::ProjectEntry;
-use crate::build_system::output::{OutputPathIdentity, output_path_identity};
+use crate::build_system::output::{output_path_identity, OutputPathIdentity};
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -30,6 +30,35 @@ use crate::projects::html_project::page_metadata::{HtmlPageMetadataPlan, Metadat
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+
+/// Cold source provenance retained by the HTML resource planner.
+///
+/// A `SourceSpan` carries only a numeric source ID. This builder-local wrapper keeps the stable
+/// package domain beside that ID until diagnostics cross the frozen rendering boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResourceDiagnosticSite {
+    pub(crate) span: SourceSpan,
+    pub(crate) source_domain: Option<StablePackageIdentity>,
+}
+
+impl ResourceDiagnosticSite {
+    pub(crate) fn project(span: SourceSpan) -> Self {
+        Self {
+            span,
+            source_domain: None,
+        }
+    }
+
+    fn from_span(
+        span: Option<SourceSpan>,
+        source_domain: Option<&StablePackageIdentity>,
+    ) -> Option<Self> {
+        span.map(|span| Self {
+            span,
+            source_domain: source_domain.cloned(),
+        })
+    }
+}
 
 /// The artefact whose URL rules observe one resource-bearing string.
 ///
@@ -61,7 +90,7 @@ impl ResourceUrlContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlannedResourceUse {
     pub(crate) context: ResourceUrlContext,
-    pub(crate) authored_span: Option<SourceSpan>,
+    pub(crate) authored_span: Option<ResourceDiagnosticSite>,
 }
 
 /// The lane through which one output record observes a resource URL use.
@@ -84,7 +113,7 @@ pub(crate) struct PlannedResourceOutput {
     pub(crate) origin: StableResourceOriginId,
     pub(crate) output_path: PathBuf,
     /// Exact span of the first authored owner when the record carries source-owned provenance.
-    pub(crate) first_authored_span: Option<SourceSpan>,
+    pub(crate) first_authored_span: Option<ResourceDiagnosticSite>,
     pub(crate) uses: Vec<PlannedResourceUse>,
     has_executable_use: bool,
 }
@@ -95,9 +124,9 @@ pub(crate) struct PlannedResourceOutput {
 /// page-metadata uses, which are output-live but not HIR-reachable.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OriginAuthoredSpans {
-    pub executable: Vec<Option<SourceSpan>>,
-    pub metadata: Vec<Option<SourceSpan>>,
-    pub fallback: Option<SourceSpan>,
+    pub executable: Vec<Option<ResourceDiagnosticSite>>,
+    pub metadata: Vec<Option<ResourceDiagnosticSite>>,
+    pub fallback: Option<ResourceDiagnosticSite>,
 }
 
 /// One page-observed URL use claimed while planning an origin.
@@ -149,7 +178,12 @@ impl HtmlResourceOutputPlan {
         let spans = first_authored_spans(entry)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         self.plan_union(entry.resource_union, &spans, context.clone(), string_table)?;
-        self.plan_page_metadata_uses(&page_metadata_plan.resource_uses, context, string_table)
+        self.plan_page_metadata_uses(
+            &page_metadata_plan.resource_uses,
+            context,
+            entry.source_domain,
+            string_table,
+        )
     }
 
     /// Reserve a known HTML, JavaScript, Wasm, CSS or manifest destination.
@@ -171,7 +205,7 @@ impl HtmlResourceOutputPlan {
                 output_path,
                 &display_origin(&record.origin),
                 artefact_kind,
-                record.first_authored_span,
+                record.first_authored_span.clone(),
                 string_table,
             ));
         }
@@ -188,7 +222,7 @@ impl HtmlResourceOutputPlan {
     pub(crate) fn plan_origin(
         &mut self,
         origin: StableResourceOriginId,
-        first_authored_span: Option<SourceSpan>,
+        first_authored_span: Option<ResourceDiagnosticSite>,
         context: ResourceUrlContext,
         string_table: &mut StringTable,
         use_kind: ResourceUseKind,
@@ -213,12 +247,13 @@ impl HtmlResourceOutputPlan {
         &mut self,
         resource_uses: &[MetadataResourceUse],
         context: ResourceUrlContext,
+        source_domain: Option<&StablePackageIdentity>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         for resource_use in resource_uses {
             self.plan_origin(
                 resource_use.origin.clone(),
-                resource_use.authored_span,
+                ResourceDiagnosticSite::from_span(resource_use.authored_span, source_domain),
                 context.clone(),
                 string_table,
                 ResourceUseKind::Metadata,
@@ -235,7 +270,7 @@ impl HtmlResourceOutputPlan {
     pub(crate) fn plan_provider_runtime_asset(
         &mut self,
         origin: StableResourceOriginId,
-        source_span: Option<SourceSpan>,
+        source_span: Option<ResourceDiagnosticSite>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let output_path = self
@@ -283,7 +318,7 @@ impl HtmlResourceOutputPlan {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    *authored_span,
+                    authored_span.clone(),
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Executable,
@@ -296,7 +331,7 @@ impl HtmlResourceOutputPlan {
                 self.plan_one_origin(
                     origin.clone(),
                     output_path.clone(),
-                    *authored_span,
+                    authored_span.clone(),
                     Some(ObservedResourceUse {
                         context: context.clone(),
                         kind: ResourceUseKind::Metadata,
@@ -306,7 +341,7 @@ impl HtmlResourceOutputPlan {
             }
 
             if authored_spans.executable.is_empty() && authored_spans.metadata.is_empty() {
-                if let Some(fallback_span) = authored_spans.fallback {
+                if let Some(fallback_span) = authored_spans.fallback.clone() {
                     self.plan_one_origin(
                         origin.clone(),
                         output_path,
@@ -330,7 +365,7 @@ impl HtmlResourceOutputPlan {
         &mut self,
         origin: StableResourceOriginId,
         output_path: PathBuf,
-        first_authored_span: Option<SourceSpan>,
+        first_authored_span: Option<ResourceDiagnosticSite>,
         observed_use: Option<ObservedResourceUse>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -342,9 +377,9 @@ impl HtmlResourceOutputPlan {
                 return Err(resource_output_path_collision_messages(
                     &output_path,
                     &display_origin(&record.origin),
-                    record.first_authored_span,
+                    record.first_authored_span.clone(),
                     &display_origin(&origin),
-                    first_authored_span,
+                    first_authored_span.clone(),
                     string_table,
                 ));
             }
@@ -353,20 +388,20 @@ impl HtmlResourceOutputPlan {
                 match observed_use.kind {
                     ResourceUseKind::Executable => {
                         if !record.has_executable_use {
-                            record.first_authored_span = first_authored_span;
+                            record.first_authored_span = first_authored_span.clone();
                             record.has_executable_use = true;
                         }
                     }
                     ResourceUseKind::Metadata => {
                         if !record.has_executable_use && record.uses.is_empty() {
-                            record.first_authored_span = first_authored_span;
+                            record.first_authored_span = first_authored_span.clone();
                         }
                     }
                 }
 
                 let use_record = PlannedResourceUse {
                     context: observed_use.context.clone(),
-                    authored_span: first_authored_span,
+                    authored_span: first_authored_span.clone(),
                 };
                 if !record.uses.contains(&use_record) {
                     record.uses.push(use_record);
@@ -381,7 +416,7 @@ impl HtmlResourceOutputPlan {
                 &output_path,
                 &display_origin(&origin),
                 &artefact_kind,
-                first_authored_span,
+                first_authored_span.clone(),
                 string_table,
             ));
         }
@@ -394,7 +429,7 @@ impl HtmlResourceOutputPlan {
             .map(|observed_use| {
                 vec![PlannedResourceUse {
                     context: observed_use.context,
-                    authored_span: first_authored_span,
+                    authored_span: first_authored_span.clone(),
                 }]
             })
             .unwrap_or_default();
@@ -447,29 +482,32 @@ fn first_authored_spans(
 ) -> Result<HashMap<StableResourceOriginId, OriginAuthoredSpans>, CompilerError> {
     let mut spans = HashMap::new();
     let mut module_views = Vec::with_capacity(1 + entry.linked_modules.len());
-    module_views.push((entry.module, entry.reachability));
+    module_views.push((entry.module, entry.source_domain, entry.reachability));
     module_views.extend(
         entry
             .linked_modules
             .iter()
-            .map(|linked| (linked.module, linked.reachability)),
+            .map(|linked| (linked.module, linked.source_domain, linked.reachability)),
     );
 
-    for (module, reachability) in &module_views {
-        record_reachable_resource_spans(&mut spans, module, reachability)?;
+    for (module, source_domain, reachability) in &module_views {
+        record_reachable_resource_spans(&mut spans, module, *source_domain, reachability)?;
     }
 
     // Only the selected entry root contributes compile-time fragments to its entry union.
-    record_const_fragment_resource_spans(&mut spans, entry.module);
+    record_const_fragment_resource_spans(&mut spans, entry.module, entry.source_domain);
 
-    for (module, _) in module_views {
+    for (module, source_domain, _) in module_views {
         for resource in module.executable.resource_table.origins() {
             spans
                 .entry(resource.origin.clone())
                 .or_insert_with(|| OriginAuthoredSpans {
                     executable: Vec::new(),
                     metadata: Vec::new(),
-                    fallback: resource.first_authored_span,
+                    fallback: ResourceDiagnosticSite::from_span(
+                        resource.first_authored_span,
+                        source_domain,
+                    ),
                 });
         }
     }
@@ -480,6 +518,7 @@ fn first_authored_spans(
 fn record_reachable_resource_spans(
     spans: &mut HashMap<StableResourceOriginId, OriginAuthoredSpans>,
     module: &Module,
+    source_domain: Option<&StablePackageIdentity>,
     reachability: &HirReachability,
 ) -> Result<(), CompilerError> {
     for resource_use in &reachability.reachable_resource_uses {
@@ -491,7 +530,10 @@ fn record_reachable_resource_spans(
             .entry(resource.origin.clone())
             .or_default()
             .executable
-            .push(resource_use.span);
+            .push(ResourceDiagnosticSite::from_span(
+                resource_use.span,
+                source_domain,
+            ));
     }
 
     Ok(())
@@ -500,6 +542,7 @@ fn record_reachable_resource_spans(
 fn record_const_fragment_resource_spans(
     spans: &mut HashMap<StableResourceOriginId, OriginAuthoredSpans>,
     module: &Module,
+    source_domain: Option<&StablePackageIdentity>,
 ) {
     for fragment in &module.metadata.const_top_level_fragments {
         let OwnedFoldedString::Pieces(pieces) = &fragment.value else {
@@ -508,11 +551,9 @@ fn record_const_fragment_resource_spans(
 
         for piece in pieces {
             if let OwnedFoldedStringPiece::Resource(origin) = piece {
-                spans
-                    .entry(origin.clone())
-                    .or_default()
-                    .metadata
-                    .push(fragment.span);
+                spans.entry(origin.clone()).or_default().metadata.push(
+                    ResourceDiagnosticSite::from_span(fragment.span, source_domain),
+                );
             }
         }
     }

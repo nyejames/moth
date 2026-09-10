@@ -2,16 +2,15 @@
 
 use super::*;
 use crate::backends::js::test_symbol_helpers::expected_dev_function_name;
-use crate::build_system::BuildProfile;
 use crate::build_system::build::{FileKind, Project, ProjectCompilation};
 use crate::build_system::create_project_modules::resource_inputs::{
     ResourceContentState, ResourceInputRegistry,
 };
 use crate::build_system::output::{
-    BuilderKind, CleanupPolicy, OutputOwner, OutputPlan, SingleFileOutputPlan, WriteMode,
-    WriteOptions, write_project_outputs,
+    write_project_outputs, BuilderKind, CleanupPolicy, OutputOwner, OutputPlan,
+    SingleFileOutputPlan, WriteMode, WriteOptions,
 };
-use crate::compiler_frontend::Flag;
+use crate::build_system::BuildProfile;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
@@ -32,6 +31,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
+use crate::compiler_frontend::Flag;
 use crate::projects::html_project::resource_output_plan::ResourceUseKind;
 use crate::projects::html_project::tests::test_support::{
     add_reachable_external_import, collect_output_paths, create_test_module, expect_html_output,
@@ -1083,12 +1083,10 @@ fn builder_rejects_invalid_origin_config() {
     else {
         panic!("invalid origin should remain a typed config diagnostic");
     };
-    assert!(
-        messages
-            .string_table
-            .resolve(*expected)
-            .contains("starts with '/'")
-    );
+    assert!(messages
+        .string_table
+        .resolve(*expected)
+        .contains("starts with '/'"));
 }
 
 #[test]
