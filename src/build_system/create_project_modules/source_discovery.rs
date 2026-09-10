@@ -49,9 +49,7 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
-use crate::compiler_frontend::symbols::string_interning::{
-    StringIdRemap, StringTable, StringTableForkSource,
-};
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::counter_observation;
@@ -72,7 +70,7 @@ use super::module_namespace::DirectoryDependencyResolution;
 use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
-use super::source_loading::{read_source_code, source_read_error};
+use super::source_loading::{SelectedSourceTextMap, read_source_code, source_read_error};
 use super::source_preparation::{
     PreparedDiscoverySource, prepare_discovery_source, prepare_discovery_template_source,
 };
@@ -84,12 +82,14 @@ use super::source_tree_index::{SourceClassification, SourceRecordIndex, SourceTr
 /// still letting markdown-heavy modules overlap independent filesystem reads.
 pub(super) const STAGE0_PARALLEL_SOURCE_LOAD_MIN_FILES: usize = 8;
 
+#[cfg(test)]
 /// Minimum owned-source batch size before Stage 0 overlaps independent reads and tokenization.
 ///
-/// Tiny directory modules stay on the cheaper iterator path; the directory boundary still keeps
-/// provider resolution serial while larger owned-source batches use Rayon for provider-free work.
+/// Kept only for the legacy threshold unit test; production discovery no longer speculatively
+/// prepares all owned candidates.
 const STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES: usize = 16;
 
+#[cfg(test)]
 pub(super) fn should_parallelize_owned_source_preparation(source_count: usize) -> bool {
     source_count >= STAGE0_PARALLEL_SOURCE_PREPARE_MIN_FILES
 }
@@ -324,13 +324,13 @@ pub(super) fn collect_reachable_input_files(
 
 /// Prepare one owned compiler-semantic source row directly into the module's input lane.
 ///
-/// WHAT: borrows the snapshot loaded into the source database and tokenizes selected Moth sources
-///       exactly once, producing the owned input consumed by this module's header preparation
-///       queue. The caller's queued set is the ownership proof: a canonical source row is handed
-///       to this function at most once for its owning module.
-/// WHY: `SourceTreeIndex` owns source identity and `SourceDatabase` owns source text; borrowing
-///      both avoids a second full source-string allocation while preserving the existing
-///      provider-independent preparation lane.
+/// WHAT: borrows a cached or newly selected snapshot and tokenizes selected Moth sources exactly
+///       once, producing the owned input consumed by this module's header preparation queue. The
+///       caller's queued set is the ownership proof: a canonical source row is handed to this
+///       function at most once for its owning module.
+/// WHY: `SourceTreeIndex` owns source identity, while `SourceDatabase` and the selected-text map
+///      own source snapshots. Borrowing either avoids a second full source-string allocation while
+///      allowing registration-only slots to stay pending until selection.
 pub(super) fn prepare_owned_source_input(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
@@ -338,8 +338,14 @@ pub(super) fn prepare_owned_source_input(
     source_spans: &mut SourceSpanBuilders<'_>,
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
+    selected_source_texts: &mut SelectedSourceTextMap,
 ) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let (source_id, kind, text) = owned_source_text(source_index, source_tree_index, source_files)?;
+    let (source_id, kind, text) = owned_source_text(
+        source_index,
+        source_tree_index,
+        source_files,
+        Some(selected_source_texts),
+    )?;
     let mut builder = source_spans.take_span_builder(source_id);
     let result = prepare_owned_source_text(
         source_id,
@@ -353,12 +359,12 @@ pub(super) fn prepare_owned_source_input(
     source_spans.retain_span_builder(source_id, builder);
     result
 }
-
 /// Loading failures precede span ownership; a loaded source has exactly one live builder.
 fn owned_source_text<'a>(
     source_index: SourceRecordIndex,
     source_tree_index: &SourceTreeIndex,
     source_files: &'a SourceDatabase,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
 ) -> Result<(SourceId, SourceFileKind, &'a str), SourceDiscoveryError> {
     let record = source_tree_index.source(source_index);
     let SourceClassification::CompilerSemantic(source_kind) = record.classification() else {
@@ -378,19 +384,23 @@ fn owned_source_text<'a>(
                 source_index.index(),
             )))
         })?;
-    let source_code = source_files.retained_text(source_id).ok_or_else(|| {
-        SourceDiscoveryError::from(
-            source_files
-                .source_load_error(source_id)
-                .cloned()
-                .unwrap_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Registered source row {} has no retained source text",
-                        source_index.index(),
-                    ))
-                }),
-        )
-    })?;
+    if let Some(source_code) = source_files.retained_text(source_id) {
+        return Ok((source_id, *source_kind, source_code));
+    }
+    if let Some(error) = source_files.source_load_error(source_id) {
+        return Err(SourceDiscoveryError::from(error.clone()));
+    }
+    let Some(selected_source_texts) = selected_source_texts else {
+        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
+            format!(
+                "Registered source row {} has no retained source text",
+                source_index.index()
+            ),
+        )));
+    };
+    let source_code = selected_source_texts
+        .load(record.canonical_path())
+        .map_err(SourceDiscoveryError::from)?;
     Ok((source_id, *source_kind, source_code))
 }
 
@@ -433,155 +443,6 @@ fn prepare_owned_source_text(
     Ok(PreparedSourceInput { source_id, source })
 }
 
-/// One provider-independent source input prepared against a batch-local string-table fork.
-///
-/// WHAT: retains either a tokenized source input or its source-local failure until the serial
-///       reachability walk decides whether the source is semantically reachable.
-/// WHY: batching all owned candidates can speculatively read/tokenize unreachable files, but it
-///      must not surface their diagnostics or merge their strings into the module unless the
-///      existing header-owned BFS reaches that source.
-pub(super) struct PreparedOwnedSource {
-    string_table: StringTable,
-    base_len: usize,
-    input: Result<PreparedSourceInput, SourceDiscoveryError>,
-}
-
-/// Prepare a module's provider-independent owned-source candidates as one deterministic batch.
-///
-/// Reads and tokenization touch no provider registry, resolution table or external cache, so a
-/// sufficiently large candidate batch can use Rayon. The returned map is consumed by the serial
-/// BFS in deterministic reachability order; selected inputs merge their local string delta and
-/// remap retained tokens immediately before header preparation. Retained outputs are later sorted
-/// by canonical source order before the module handoff. Unreachable candidates are dropped
-/// without merging, preserving the existing semantic source set and diagnostic behaviour.
-pub(super) fn prepare_owned_source_inputs(
-    source_indices: &[SourceRecordIndex],
-    source_tree_index: &SourceTreeIndex,
-    source_files: &SourceDatabase,
-    source_spans: &mut SourceSpanBuilders<'_>,
-    style_directives: &StyleDirectiveRegistry,
-    fork_source: &StringTableForkSource,
-    #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> FxHashMap<SourceRecordIndex, PreparedOwnedSource> {
-    let requests = source_indices
-        .iter()
-        .map(|&source_index| {
-            let request = owned_source_text(source_index, source_tree_index, source_files)
-                .map(|(id, kind, text)| (id, kind, text, source_spans.take_span_builder(id)));
-            (source_index, request)
-        })
-        .collect::<Vec<_>>();
-    let prepared = requests
-        .into_par_iter()
-        .map(|(source_index, request)| {
-            let (mut string_table, base_len) = fork_source.fork_for_module().into_parts();
-            let (input, span_owner) = match request {
-                Ok((source_id, kind, text, mut builder)) => {
-                    let input = crate::timed_stage_attributed!(
-                        crate::timing::TimingMetric::FrontendPrepare,
-                        timing_context,
-                        prepare_owned_source_text(
-                            source_id,
-                            kind,
-                            text,
-                            source_files,
-                            style_directives,
-                            &mut string_table,
-                            &mut builder,
-                        ),
-                    );
-                    (input, Some((source_id, builder)))
-                }
-                Err(error) => (Err(error), None),
-            };
-            (
-                source_index,
-                PreparedOwnedSource {
-                    string_table,
-                    base_len,
-                    input,
-                },
-                span_owner,
-            )
-        })
-        .collect::<Vec<_>>();
-
-    // Restore every original builder before reachability can discard a speculative outcome.
-    prepared
-        .into_iter()
-        .map(|(index, prepared, span_owner)| {
-            if let Some((source, builder)) = span_owner {
-                source_spans.retain_span_builder(source, builder);
-            }
-            (index, prepared)
-        })
-        .collect()
-}
-
-/// Merge one selected batched input into the module string table before header preparation.
-pub(super) fn merge_prepared_owned_source(
-    source_index: SourceRecordIndex,
-    prepared_sources: &mut FxHashMap<SourceRecordIndex, PreparedOwnedSource>,
-    string_table: &mut StringTable,
-) -> Result<PreparedSourceInput, SourceDiscoveryError> {
-    let Some(prepared) = prepared_sources.remove(&source_index) else {
-        return Err(SourceDiscoveryError::from(CompilerError::compiler_error(
-            format!(
-                "Prepared source row {} is absent from the owned-source batch",
-                source_index.index(),
-            ),
-        )));
-    };
-    let remap = string_table.merge_delta_from(&prepared.string_table, prepared.base_len);
-
-    match prepared.input {
-        Ok(mut input) => {
-            remap_prepared_source_input(&mut input, &remap)?;
-            Ok(input)
-        }
-        Err(error) => Err(remap_source_discovery_error(error, &remap)),
-    }
-}
-
-fn remap_prepared_source_input(
-    input: &mut PreparedSourceInput,
-    remap: &StringIdRemap,
-) -> Result<(), CompilerError> {
-    if let PreparedSourceKind::Moth { tokens } = &mut input.source {
-        tokens.remap_preparing_string_ids(remap)?;
-    }
-
-    Ok(())
-}
-
-fn remap_source_discovery_error(
-    error: SourceDiscoveryError,
-    remap: &StringIdRemap,
-) -> SourceDiscoveryError {
-    match error {
-        SourceDiscoveryError::Diagnostic(mut diagnostic) => {
-            diagnostic.remap_string_ids(remap);
-            SourceDiscoveryError::Diagnostic(diagnostic)
-        }
-        SourceDiscoveryError::Premerge(mut failure) => {
-            match &mut failure {
-                PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
-                PremergeFailure::Infrastructure(_) => {}
-                PremergeFailure::Mixed { batch, .. } => batch.remap_string_ids(remap),
-            }
-            SourceDiscoveryError::Premerge(failure)
-        }
-        SourceDiscoveryError::Finalized(mut boxed) => {
-            match &mut boxed.failure {
-                PremergeFailure::Diagnosed(batch) => batch.remap_string_ids(remap),
-                PremergeFailure::Infrastructure(_) => {}
-                PremergeFailure::Mixed { batch, .. } => batch.remap_string_ids(remap),
-            }
-            SourceDiscoveryError::Finalized(boxed)
-        }
-        SourceDiscoveryError::Infrastructure(error) => SourceDiscoveryError::Infrastructure(error),
-    }
-}
 type SourceIdentityMap = FxHashMap<SourceId, SourceId>;
 
 /// Join traversal-local preparation identities to the final source registrations.

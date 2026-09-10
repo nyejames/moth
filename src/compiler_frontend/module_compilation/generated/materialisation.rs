@@ -141,6 +141,10 @@ fn materialise_generated_request<'build>(
                 &compiler.string_table,
             )
         })?;
+    let declaring_source_identity_handle = match &declaring_context {
+        DeclaringMaterialisation::Published { context, .. } => context.frozen_identity_handle(),
+        DeclaringMaterialisation::Preparing(context) => context.frozen_identity_handle.clone(),
+    };
     let materialised = match declaring_context {
         DeclaringMaterialisation::Published {
             context: declaring_context,
@@ -250,17 +254,18 @@ fn materialise_generated_request<'build>(
             entry_file_path,
         )?;
     }
+    let generated_warnings = generated_ast.warnings.clone();
     // The generated preparation retains a second handle only while nested requests are
     // materialised; release it before lowering so the sidecar can own its table immutably.
     drop(generated_context);
 
-    let generated_warnings = generated_ast.warnings.clone();
     let generated_lowering = lower_hir(
         &mut generated_compiler,
         generated_ast,
         &generated_warnings,
         HirFunctionOriginLookup::default(),
         Some(Rc::clone(&module_resources)),
+        Some(&declaring_source_identity_handle),
     )?;
     let HirLoweringResult {
         mut hir_module,
@@ -294,7 +299,12 @@ fn materialise_generated_request<'build>(
         .function_ids_by_generated
         .insert(request.identity.clone(), function_id);
     increment_frontend_counter(FrontendCounter::ConvergenceGeneratedSidecarBorrowPasses);
-    let borrow_analysis = check_borrows(&generated_compiler, &hir_module, &generated_warnings)?;
+    let borrow_analysis = check_borrows(
+        &mut generated_compiler,
+        &hir_module,
+        &generated_warnings,
+        Some(&declaring_source_identity_handle),
+    )?;
     let functions = collect_module_function_link_facts(&hir_module).map_err(|error| {
         CompilerMessages::from_error_ref(error, &generated_compiler.string_table)
     })?;

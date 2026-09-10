@@ -12,7 +12,7 @@
 use super::compiler_errors::{CompilerError, CompilerMessages, RenderTypeContext};
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::sync::Arc;
 
@@ -73,6 +73,7 @@ impl DiagnosticBag {
     }
 
     /// Remap every interned string owned by the bagged diagnostics into the merged table.
+    #[allow(dead_code)]
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for diagnostic in &mut self.diagnostics {
             diagnostic.remap_string_ids(remap);
@@ -148,6 +149,21 @@ impl PremergeFailure {
             Self::Diagnosed(batch) => batch.prepend_diagnostics(prior_diagnostics),
             Self::Infrastructure(_) => {}
             Self::Mixed { batch, .. } => batch.prepend_diagnostics(prior_diagnostics),
+        }
+    }
+    /// Preserve existing mixed-domain owners while filling ownership for an unowned batch.
+    pub(crate) fn set_frozen_identity_handle_if_missing(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        match self {
+            Self::Diagnosed(batch) => {
+                batch.set_frozen_identity_handle_if_missing(frozen_identity_handle);
+            }
+            Self::Infrastructure(_) => {}
+            Self::Mixed { batch, .. } => {
+                batch.set_frozen_identity_handle_if_missing(frozen_identity_handle);
+            }
         }
     }
 
@@ -252,6 +268,26 @@ impl PremergeDiagnosticBatch {
     ) -> Self {
         Self::new(DiagnosticBag::from_diagnostics(diagnostics), string_table)
     }
+    /// Attach the generated-source owner only to spans that do not already have one.
+    ///
+    /// Existing primary and label owners are authoritative: this bridge supplies ownership for
+    /// legacy AST/HIR diagnostics without replacing mixed-domain provenance.
+    pub(crate) fn set_frozen_identity_handle_if_missing(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        for diagnostic in &mut self.bag.diagnostics {
+            if diagnostic.primary_span.is_some() {
+                diagnostic
+                    .set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+            }
+            for label in &mut diagnostic.labels {
+                if label.span.is_some() {
+                    label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+                }
+            }
+        }
+    }
 
     pub(crate) fn has_errors(&self) -> bool {
         self.bag.has_errors()
@@ -287,6 +323,7 @@ impl PremergeDiagnosticBatch {
     /// WHAT: remaps the bagged diagnostics and every retained type environment.
     /// WHY: per-file preparation uses local tables; merging them into the module table
     /// requires shifting every `StringId` so later stages resolve through one table.
+    #[allow(dead_code)]
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.bag.remap_string_ids(remap);
         for context in &mut self.render_type_contexts {

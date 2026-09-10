@@ -525,6 +525,10 @@ fn collect_namespace_source_paths(
 }
 
 impl ModuleMaterialisationContext {
+    pub(crate) fn frozen_identity_handle(&self) -> FrozenIdentityHandle {
+        self.frozen_identity_handle.clone()
+    }
+
     /// Build a test-only context with one artefact per identity and no real body payload.
     ///
     #[cfg(test)]

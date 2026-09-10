@@ -55,9 +55,10 @@ mod span_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+#[cfg(feature = "data_layout_memory_probe")]
+pub(crate) use database::SourceDatabaseRetentionMetrics;
 pub(crate) use database::{
-    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceDatabaseRetentionMetrics,
-    SourceSpanBuilders,
+    FrozenSourceDatabase, SourceDatabase, SourceDatabaseBuilder, SourceSpanBuilders,
 };
 pub(crate) use frozen_identity::{FrozenIdentityContext, FrozenIdentityHandle};
 pub(crate) use id::SourceId;

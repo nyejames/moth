@@ -54,6 +54,7 @@ impl<'a> SourceRegistrationIndex<'a> {
     }
 
     /// The canonical source paths in the order this owner produced them.
+    #[cfg(test)]
     pub(crate) fn canonical_paths(&self) -> impl ExactSizeIterator<Item = &'a Path> + '_ {
         self.rows.iter().map(|row| row.canonical_path)
     }

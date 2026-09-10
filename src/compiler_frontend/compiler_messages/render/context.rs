@@ -105,10 +105,9 @@ impl<'a> DiagnosticRenderContext<'a> {
                 return self.resolve_span_in_frozen(frozen_identity, span);
             }
 
-            // Legacy failure boundaries render before the final frozen identity is published.
-            // Their range-bound source database is the exact owner retained for that diagnostic;
-            // use it only while no message-level frozen context exists.
-            if self.frozen_identity.is_none() {
+            // A legacy handle without a stable domain may use the message's transitional source
+            // row. A donor-domain handle never authorizes requester-database fallback.
+            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
                 return self.resolve_span_in_database(span);
             }
             return None;
@@ -135,11 +134,9 @@ impl<'a> DiagnosticRenderContext<'a> {
                 return self.resolve_span_in_frozen(frozen_identity, span);
             }
 
-            // Legacy failure boundaries render before the final frozen identity is published.
-            // Their range-bound source database is the exact owner retained for that diagnostic;
-            // use it only while no message-level frozen context exists. A missing source database
-            // still returns no position, never a requester or project-root guess.
-            if self.frozen_identity.is_none() {
+            // A legacy handle without a stable domain may use the message's transitional source
+            // row. A donor-domain handle never authorizes requester-database fallback.
+            if self.frozen_identity.is_none() && frozen_identity_handle.domain().is_none() {
                 return self.resolve_span_in_database(span);
             }
             return None;
@@ -224,6 +221,31 @@ fn line_text_or_empty_file_eof<'a>(
 /// Display-cell tab stop for caret geometry. A tab advances the caret to the next multiple of
 /// this width, matching common terminal emulators and browsers.
 pub(crate) const RENDER_TAB_STOP_CELLS: usize = 8;
+
+/// Expand tabs using the same source-column display policy used by caret geometry.
+///
+/// The source excerpt is printed after the diagnostic gutter, so raw terminal tabs would use the
+/// gutter's absolute column as their origin while [`caret_cells`] starts at the source excerpt's
+/// first cell. Replacing tabs with spaces makes both views use the same source-relative tab stops.
+pub(crate) fn expand_tabs_for_display(line: &str) -> String {
+    let mut expanded = String::with_capacity(line.len());
+    let mut cells = 0usize;
+    for scalar in line.chars() {
+        let next_cells = advance_display_cells(cells, scalar);
+        if scalar == '\t' {
+            expanded.push_str(&" ".repeat(next_cells.saturating_sub(cells)));
+        } else {
+            expanded.push(scalar);
+        }
+        cells = next_cells;
+    }
+    expanded
+}
+
+/// Return the shared minimum-width gutter used by source and caret rows.
+pub(crate) fn display_gutter_width(display_line: i32) -> usize {
+    display_line.to_string().len().max(3)
+}
 
 /// Convert one retained source line plus scalar-column span bounds into caret geometry.
 ///

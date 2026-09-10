@@ -82,6 +82,14 @@ impl CompilerDiagnostic {
         self
     }
 
+    pub(crate) fn set_primary_frozen_identity_handle_if_missing(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        if self.primary_frozen_identity_handle.is_none() {
+            self.primary_frozen_identity_handle = Some(frozen_identity_handle);
+        }
+    }
     pub(crate) fn with_primary_frozen_identity_handle(
         mut self,
         frozen_identity_handle: FrozenIdentityHandle,

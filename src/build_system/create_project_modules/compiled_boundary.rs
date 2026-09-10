@@ -22,9 +22,9 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{
-    FrozenIdentityContext, SourceDatabase, SourceDatabaseRetentionMetrics,
-};
+#[cfg(feature = "data_layout_memory_probe")]
+use crate::compiler_frontend::source::SourceDatabaseRetentionMetrics;
+use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -931,9 +931,12 @@ impl TransientPremergeBatch {
 }
 /// Storage retained by the final diagnostic render boundary.
 ///
-/// The source fields count the exact frozen source layout; diagnostic fields count the records and
-/// label slots that remain reachable from the returned message vessel. A clean result returns
-/// zeroes because the render boundary intentionally skips freezing when there is nothing to render.
+/// The source fields count only frozen source owners reachable from the returned diagnostic
+/// vessel. Diagnostic fields count records and label slots, while `retained_identity_contexts`
+/// counts distinct frozen identity allocations reachable through range rows or donor-only handles.
+/// A clean result returns zeroes because the render boundary intentionally skips freezing when
+/// there is nothing to render.
+#[cfg(feature = "data_layout_memory_probe")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) source_snapshot_bytes: usize,
@@ -941,9 +944,10 @@ pub(crate) struct FrozenRenderRetentionMetrics {
     pub(crate) source_identity_slots: usize,
     pub(crate) diagnostic_records: usize,
     pub(crate) diagnostic_label_slots: usize,
-    pub(crate) frozen_context_records: usize,
+    pub(crate) retained_identity_contexts: usize,
 }
 
+#[cfg(feature = "data_layout_memory_probe")]
 impl FrozenRenderRetentionMetrics {
     fn add_source(&mut self, metrics: SourceDatabaseRetentionMetrics) {
         self.source_snapshot_bytes += metrics.source_snapshot_bytes;
@@ -951,6 +955,9 @@ impl FrozenRenderRetentionMetrics {
         self.source_identity_slots += metrics.source_identity_slots;
     }
 }
+
+#[cfg(not(feature = "data_layout_memory_probe"))]
+type FrozenRenderRetentionMetrics = ();
 
 /// Typed frontend outcome carrying every project and source-package graph boundary.
 ///
@@ -1071,7 +1078,7 @@ impl ProjectFrontendCompilation {
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
     ) -> Result<CompilerMessages, CompilerError> {
-        self.into_render_messages_with_frozen_identity_and_metrics(
+        self.into_render_messages_with_optional_retention(
             string_table,
             project_source,
             trailing_project_messages,
@@ -1079,12 +1086,30 @@ impl ProjectFrontendCompilation {
         .map(|(messages, _)| messages)
     }
 
+    #[cfg(feature = "data_layout_memory_probe")]
     pub(crate) fn into_render_messages_with_frozen_identity_and_metrics(
         self,
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
     ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+        self.into_render_messages_with_optional_retention(
+            string_table,
+            project_source,
+            trailing_project_messages,
+        )
+    }
+
+    fn into_render_messages_with_optional_retention(
+        self,
+        string_table: &mut StringTable,
+        project_source: Option<Arc<SourceDatabase>>,
+        trailing_project_messages: Option<CompilerMessages>,
+    ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+        // The second tuple member is a unit in normal builds. Retention scans and source
+        // accounting exist only in the data-layout probe feature, while production rendering
+        // still shares this one ownership-preserving implementation.
+
         let Self {
             mut project,
             source_packages,
@@ -1179,9 +1204,11 @@ impl ProjectFrontendCompilation {
         // success path retains no source snapshots, path trie or extended-span tables solely for
         // an empty message vessel.
         if messages.diagnostic_slice().is_empty() && !messages.has_infrastructure_error() {
+            let _ = std::mem::take(&mut messages.string_table);
             return Ok((messages, FrozenRenderRetentionMetrics::default()));
         }
 
+        #[cfg(feature = "data_layout_memory_probe")]
         let mut retention = FrozenRenderRetentionMetrics {
             diagnostic_records: messages.diagnostic_slice().len(),
             diagnostic_label_slots: messages
@@ -1191,6 +1218,8 @@ impl ProjectFrontendCompilation {
                 .sum(),
             ..FrozenRenderRetentionMetrics::default()
         };
+        #[cfg(not(feature = "data_layout_memory_probe"))]
+        let retention = ();
 
         let project_source = project_source.or(project_source_database);
         // Consume owners without cloning. An unexpectedly shared Arc is a caller bug.
@@ -1202,19 +1231,33 @@ impl ProjectFrontendCompilation {
             })?,
             None => SourceDatabase::empty(),
         };
-        retention.add_source(project_database.retention_metrics());
+        #[cfg(feature = "data_layout_memory_probe")]
+        let project_source_metrics = project_database.retention_metrics();
 
         let mut package_databases: Vec<Option<SourceDatabase>> =
             Vec::with_capacity(package_source_arcs.len());
+        #[cfg(feature = "data_layout_memory_probe")]
+        let mut package_source_metrics: Vec<Option<SourceDatabaseRetentionMetrics>> =
+            Vec::with_capacity(package_source_arcs.len());
         for source in package_source_arcs {
             match source {
-                Some(source) => package_databases
-                    .push(Some(Arc::try_unwrap(source).map_err(|_| {
-                    CompilerError::compiler_error(
-                        "package source database was unexpectedly shared at the frozen render tail",
-                    )
-                })?)),
-                None => package_databases.push(None),
+                Some(source) => {
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    let source_metrics = source.retention_metrics();
+                    let database = Arc::try_unwrap(source).map_err(|_| {
+                        CompilerError::compiler_error(
+                            "package source database was unexpectedly shared at the frozen render tail",
+                        )
+                    })?;
+                    package_databases.push(Some(database));
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    package_source_metrics.push(Some(source_metrics));
+                }
+                None => {
+                    package_databases.push(None);
+                    #[cfg(feature = "data_layout_memory_probe")]
+                    package_source_metrics.push(None);
+                }
             }
         }
         // Freeze only after every local table has been appended/remapped above.
@@ -1227,7 +1270,6 @@ impl ProjectFrontendCompilation {
         for database in package_databases {
             match database {
                 Some(database) => {
-                    retention.add_source(database.retention_metrics());
                     package_identities.push(Some(Arc::new(
                         FrozenIdentityContext::from_shared_strings(
                             frozen_root.shared_strings(),
@@ -1288,8 +1330,44 @@ impl ProjectFrontendCompilation {
                 identity,
             });
         }
-        retention.frozen_context_records = frozen_contexts.len();
         messages.install_frozen_identity_contexts(frozen_contexts, 0);
+        #[cfg(feature = "data_layout_memory_probe")]
+        {
+            // A range row is not a context count: repeated rows may share one context, and a
+            // donor-only handle can retain a context without contributing an ordinary range.
+            let mut retained_contexts = FxHashSet::<*const FrozenIdentityContext>::default();
+            for frozen_context in &messages.render_frozen_contexts {
+                retained_contexts.insert(Arc::as_ptr(&frozen_context.identity));
+            }
+            for diagnostic in messages.diagnostic_slice() {
+                if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                    && let Some(identity) = handle.get()
+                {
+                    retained_contexts.insert(identity as *const FrozenIdentityContext);
+                }
+                for label in &diagnostic.labels {
+                    if let Some(handle) = label.frozen_identity_handle.as_ref()
+                        && let Some(identity) = handle.get()
+                    {
+                        retained_contexts.insert(identity as *const FrozenIdentityContext);
+                    }
+                }
+            }
+            retention.retained_identity_contexts = retained_contexts.len();
+
+            if retained_contexts.contains(&Arc::as_ptr(&frozen_root)) {
+                retention.add_source(project_source_metrics);
+            }
+            for (identity, source_metrics) in
+                package_identities.iter().zip(package_source_metrics.iter())
+            {
+                if let (Some(identity), Some(source_metrics)) = (identity, source_metrics)
+                    && retained_contexts.contains(&Arc::as_ptr(identity))
+                {
+                    retention.add_source(*source_metrics);
+                }
+            }
+        }
         Ok((messages, retention))
     }
 }

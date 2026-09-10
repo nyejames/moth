@@ -65,7 +65,6 @@ struct BuildOutcome {
 
 enum BuildFailure {
     CompilerMessages(CompilerMessages),
-    RuntimeError { title: String, details: String },
 }
 
 /// Adapter for build execution used by the dev loop.
@@ -108,7 +107,6 @@ impl DevBuildExecutor for ProjectBuildExecutor {
 
         let mut build_result =
             build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)?;
-        let source_database = build_result.source_database.clone();
         let output_result = crate::timed_stage!(crate::timing::TimingMetric::BuildOutputTotal, {
             let output_plan = if let Some(plan) = build_result.directory_output_plan.as_ref() {
                 OutputPlan::Directory(plan.clone())
@@ -134,13 +132,22 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 &mut build_result.string_table,
             )
         });
-        if let Err(mut messages) = output_result {
-            let warning_offset = messages.diagnostic_slice().len();
-            messages.extend_diagnostics(build_result.warnings);
-            messages.install_source_contexts(build_result.warning_source_contexts, warning_offset);
-            if let Some(source_database) = source_database.as_ref() {
-                messages.set_source_database(source_database.clone());
-            }
+        if let Err(messages) = output_result {
+            let warning_messages = match build_result.take_warning_messages() {
+                Ok(warnings) => warnings,
+                Err(error) => {
+                    return Err(CompilerMessages::from_error(
+                        error,
+                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                    ));
+                }
+            };
+            let messages = if let Some(mut warnings) = warning_messages {
+                warnings.append_messages_preserving_context(messages);
+                warnings
+            } else {
+                messages
+            };
             return Err(messages);
         }
         Ok(build_result)
@@ -205,12 +212,6 @@ pub fn run_single_build_cycle(
                 Some(BuildFailure::CompilerMessages(messages)) => render_compiler_error_page(
                     &messages,
                     &project_root,
-                    &build_state.html_site_config.origin,
-                    build_state.last_build_version,
-                ),
-                Some(BuildFailure::RuntimeError { title, details }) => render_runtime_error_page(
-                    &title,
-                    &details,
                     &build_state.html_site_config.origin,
                     build_state.last_build_version,
                 ),
@@ -395,7 +396,6 @@ fn build_once(
             };
         }
     };
-    let source_database = build_result.source_database.clone();
     let output_dir = build_result
         .directory_output_plan
         .as_ref()
@@ -419,9 +419,32 @@ fn build_once(
         match parse_html_site_config(&build_result.config, &mut build_result.string_table) {
             Ok(config) => config,
             Err(error) => {
-                let mut messages = error.into_messages(build_result.string_table.clone());
-                if let Some(source_database) = source_database.as_ref() {
-                    messages.set_source_database(source_database.clone());
+                let warning_messages = match build_result.take_warning_messages() {
+                    Ok(warnings) => warnings,
+                    Err(error) => {
+                        let messages = CompilerMessages::from_error(
+                            error,
+                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                        );
+                        return BuildOutcome {
+                            build_succeeded: false,
+                            build_duration,
+                            entry_page_rel: None,
+                            html_site_config: None,
+                            diagnostics_summary: format_compiler_messages(&messages),
+                            success_messages: None,
+                            failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                            watch_scope: Some(watch_scope),
+                            output_dir: Some(output_dir),
+                        };
+                    }
+                };
+                let mut messages = error.into_messages(
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                );
+                if let Some(mut warnings) = warning_messages {
+                    warnings.append_messages_preserving_context(messages);
+                    messages = warnings;
                 }
                 return BuildOutcome {
                     build_succeeded: false,
@@ -451,20 +474,26 @@ fn build_once(
             format!("Build succeeded with warnings:\n{warnings_summary}")
         };
 
-        let success_messages = if build_result.warnings.is_empty() {
-            None
-        } else {
-            let mut messages = CompilerMessages::from_diagnostics(
-                build_result.warnings,
-                build_result.string_table,
-            );
-            messages.install_source_contexts(build_result.warning_source_contexts, 0);
-            if let Some(source_database) = source_database.as_ref() {
-                messages.set_source_database(source_database.clone());
+        let success_messages = match build_result.take_warning_messages() {
+            Ok(messages) => messages,
+            Err(error) => {
+                let messages = CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                );
+                return BuildOutcome {
+                    build_succeeded: false,
+                    build_duration,
+                    entry_page_rel: None,
+                    html_site_config: None,
+                    diagnostics_summary: format_compiler_messages(&messages),
+                    success_messages: None,
+                    failed_build: Some(BuildFailure::CompilerMessages(messages)),
+                    watch_scope: Some(watch_scope),
+                    output_dir: Some(output_dir),
+                };
             }
-            Some(messages)
         };
-
         BuildOutcome {
             build_succeeded: true,
             build_duration,
@@ -477,21 +506,32 @@ fn build_once(
             output_dir: Some(output_dir),
         }
     } else {
+        let mut messages = dev_server_error_messages(
+            entry_file,
+            "Build completed, but the project builder did not declare a dev entry page.",
+        );
+        match build_result.take_warning_messages() {
+            Ok(Some(mut warnings)) => {
+                warnings.append_messages_preserving_context(messages);
+                messages = warnings;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                messages = CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                );
+            }
+        }
+        let diagnostics_summary = format_compiler_messages(&messages);
         BuildOutcome {
             build_succeeded: false,
             build_duration,
             entry_page_rel: None,
             html_site_config: None,
-            diagnostics_summary: String::from(
-                "Build completed, but the project builder did not declare a dev entry page.",
-            ),
+            diagnostics_summary,
             success_messages: None,
-            failed_build: Some(BuildFailure::RuntimeError {
-                title: String::from("Missing Dev Entry"),
-                details: String::from(
-                    "Build completed, but the project builder did not declare a dev entry page.",
-                ),
-            }),
+            failed_build: Some(BuildFailure::CompilerMessages(messages)),
             watch_scope: Some(watch_scope),
             output_dir: Some(output_dir),
         }

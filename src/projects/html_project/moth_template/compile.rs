@@ -127,6 +127,7 @@ pub(crate) fn compile_moth_template_with_registry(
             warning_source_contexts.push(RenderSourceContext {
                 diagnostic_range: warning_start..warning_end,
                 source_database: Arc::clone(&source_database),
+                domain: None,
             });
         }
 

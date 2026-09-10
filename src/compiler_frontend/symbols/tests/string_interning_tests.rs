@@ -161,6 +161,19 @@ fn freezing_after_non_identity_merge_preserves_remapped_ids() {
 }
 
 #[test]
+fn frozen_resolve_rejects_foreign_out_of_range_id_predictably() {
+    let mut foreign_table = StringTable::new();
+    let foreign_id = foreign_table.intern("foreign");
+    let frozen = StringTable::new().freeze();
+
+    assert_eq!(frozen.try_resolve(foreign_id), None);
+    assert!(
+        std::panic::catch_unwind(|| frozen.resolve(foreign_id)).is_err(),
+        "an invalid frozen ID should panic through checked resolve rather than invoke UB"
+    );
+}
+
+#[test]
 #[should_panic(expected = "StringTable::freeze requires a merged root table")]
 fn freezing_module_fork_requires_merge_into_root_first() {
     let mut root = StringTable::new();

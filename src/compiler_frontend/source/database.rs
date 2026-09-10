@@ -71,11 +71,32 @@ pub struct FrozenSourceDatabase {
     loaded: Vec<SourceRecord>,
     paths: PathTable,
 }
+#[cfg(feature = "data_layout_memory_probe")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SourceDatabaseRetentionMetrics {
     pub(crate) source_snapshot_bytes: usize,
     pub(crate) extended_span_rows: usize,
     pub(crate) source_identity_slots: usize,
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl SourceDatabase {
+    /// Summarize the source allocations retained by this mutable boundary.
+    ///
+    /// The counters describe the exact storage that crosses the freeze boundary; construction-only
+    /// reverse lookup and load-failure state are intentionally excluded.
+    pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
+        SourceDatabaseRetentionMetrics {
+            source_snapshot_bytes: self.loaded.iter().map(|record| record.text.len()).sum(),
+            extended_span_rows: self
+                .loaded
+                .iter()
+                .filter_map(|record| record.extended_spans.as_ref())
+                .map(ExtendedSpanTable::len)
+                .sum(),
+            source_identity_slots: self.slots.len(),
+        }
+    }
 }
 
 impl Default for SourceDatabase {
@@ -93,22 +114,6 @@ impl Default for SourceDatabase {
 impl SourceDatabase {
     pub fn empty() -> Self {
         Self::default()
-    }
-    /// Summarize the source allocations retained by this mutable boundary.
-    ///
-    /// The counters describe the exact storage that crosses the freeze boundary; construction-only
-    /// reverse lookup and load-failure state are intentionally excluded.
-    pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
-        SourceDatabaseRetentionMetrics {
-            source_snapshot_bytes: self.loaded.iter().map(|record| record.text.len()).sum(),
-            extended_span_rows: self
-                .loaded
-                .iter()
-                .filter_map(|record| record.extended_spans.as_ref())
-                .map(ExtendedSpanTable::len)
-                .sum(),
-            source_identity_slots: self.slots.len(),
-        }
     }
 
     /// Consume the finalized mutable database into lookup-only source storage.
@@ -784,6 +789,7 @@ fn compilation_root_slot() -> SourceSlot {
 pub(crate) struct SourceDatabaseBuilder {
     sources: Arc<SourceDatabase>,
     live_builders: Vec<SpanBuilderState>,
+    pending_builders: FxHashMap<SourceId, ExtendedSpanBuilder>,
 }
 
 #[derive(Debug)]
@@ -803,6 +809,7 @@ impl SourceDatabaseBuilder {
         Self {
             sources: Arc::new(sources),
             live_builders: Vec::new(),
+            pending_builders: FxHashMap::default(),
         }
     }
 
@@ -823,12 +830,43 @@ impl SourceDatabaseBuilder {
             SourceSpanBuilders {
                 sources: &self.sources,
                 live_builders: &mut self.live_builders,
+                pending_builders: &mut self.pending_builders,
             },
         )
     }
 
     pub(crate) fn retain_span_builder(&mut self, source: SourceId, builder: ExtendedSpanBuilder) {
         self.split().1.retain_span_builder(source, builder);
+    }
+
+    /// Move builders collected while discovery was loading selected source text into the
+    /// database's dense live-builder table.
+    ///
+    /// Discovery may tokenize a selected source before its snapshot is retained. Such a source
+    /// keeps its builder in the pending side table until the selected-text map installs the
+    /// snapshot; no producer may escape without being adopted before the next stage.
+    pub(crate) fn adopt_pending_span_builders(&mut self) {
+        self.sync_loaded_records();
+        let pending = std::mem::take(&mut self.pending_builders);
+        for (source, builder) in pending {
+            let slot = self
+                .sources
+                .get(source)
+                .expect("pending span producer source must be registered; this is a compiler bug");
+            let SourceLoadStatus::Loaded(index) = slot.load else {
+                panic!(
+                    "pending span producer source {} was not retained before adoption; this is a compiler bug",
+                    source.index()
+                );
+            };
+            let live = &mut self.live_builders[index.index()];
+            assert!(
+                matches!(live, SpanBuilderState::Unprepared),
+                "source {} already owns a live span builder during pending adoption; this is a compiler bug",
+                source.index()
+            );
+            *live = SpanBuilderState::Live(builder);
+        }
     }
 
     /// Freeze every returned builder and consume construction state into lookup-only storage.
@@ -869,6 +907,10 @@ impl SourceDatabaseBuilder {
             };
             sources.install_extended_spans(source, builder.freeze())?;
         }
+        assert!(
+            self.pending_builders.is_empty(),
+            "pending span builders escaped source finalization; this is a compiler bug"
+        );
         Ok(sources)
     }
 
@@ -886,6 +928,7 @@ impl SourceDatabaseBuilder {
 pub(crate) struct SourceSpanBuilders<'a> {
     sources: &'a SourceDatabase,
     live_builders: &'a mut [SpanBuilderState],
+    pending_builders: &'a mut FxHashMap<SourceId, ExtendedSpanBuilder>,
 }
 
 impl<'a> SourceSpanBuilders<'a> {
@@ -895,41 +938,60 @@ impl<'a> SourceSpanBuilders<'a> {
     }
 
     pub(crate) fn take_span_builder(&mut self, source: SourceId) -> ExtendedSpanBuilder {
-        match std::mem::replace(self.live_slot(source), SpanBuilderState::CheckedOut) {
-            SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
-            SpanBuilderState::Live(builder) => builder,
-            SpanBuilderState::CheckedOut => panic!(
-                "source {} already has an outstanding span producer; this is a compiler bug",
+        let slot = self
+            .sources
+            .get(source)
+            .expect("span producer source must be registered; this is a compiler bug");
+        match slot.load {
+            SourceLoadStatus::Pending => self.pending_builders.remove(&source).unwrap_or_default(),
+            SourceLoadStatus::Failed(_) => panic!(
+                "span producer source {} has a recorded load failure; this is a compiler bug",
                 source.index()
             ),
+            SourceLoadStatus::Loaded(index) => {
+                match std::mem::replace(
+                    &mut self.live_builders[index.index()],
+                    SpanBuilderState::CheckedOut,
+                ) {
+                    SpanBuilderState::Unprepared => ExtendedSpanBuilder::new(),
+                    SpanBuilderState::Live(builder) => builder,
+                    SpanBuilderState::CheckedOut => panic!(
+                        "source {} already has an outstanding span producer; this is a compiler bug",
+                        source.index()
+                    ),
+                }
+            }
         }
     }
 
     /// Accept a producer's returned builder or adopt a discovery-prepared source's original.
     pub(crate) fn retain_span_builder(&mut self, source: SourceId, builder: ExtendedSpanBuilder) {
-        let slot = self.live_slot(source);
-        assert!(
-            !matches!(slot, SpanBuilderState::Live(_)),
-            "source {} already owns a live span builder; this is a compiler bug",
-            source.index()
-        );
-        *slot = SpanBuilderState::Live(builder);
-    }
-
-    fn live_slot(&mut self, source: SourceId) -> &mut SpanBuilderState {
         let slot = self
             .sources
             .get(source)
             .expect("span producer source must be registered; this is a compiler bug");
-        let SourceLoadStatus::Loaded(index) = slot.load else {
-            panic!("span producer source must be loaded; this is a compiler bug");
-        };
-        assert!(
-            self.sources.loaded[index.index()].extended_spans.is_none(),
-            "source {} was finalized before its last span producer; this is a compiler bug",
-            source.index()
-        );
-        &mut self.live_builders[index.index()]
+        match slot.load {
+            SourceLoadStatus::Pending => {
+                assert!(
+                    self.pending_builders.insert(source, builder).is_none(),
+                    "source {} already owns a pending span builder; this is a compiler bug",
+                    source.index()
+                );
+            }
+            SourceLoadStatus::Failed(_) => panic!(
+                "span producer source {} has a recorded load failure; this is a compiler bug",
+                source.index()
+            ),
+            SourceLoadStatus::Loaded(index) => {
+                let live = &mut self.live_builders[index.index()];
+                assert!(
+                    !matches!(live, SpanBuilderState::Live(_)),
+                    "source {} already owns a live span builder; this is a compiler bug",
+                    source.index()
+                );
+                *live = SpanBuilderState::Live(builder);
+            }
+        }
     }
 }
 

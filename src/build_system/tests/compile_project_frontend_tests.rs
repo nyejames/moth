@@ -328,8 +328,8 @@ fn unselected_preload_read_failure_stays_inert() {
         .id;
     assert!(source_files.retained_text(unselected_id).is_none());
     assert!(
-        source_files.source_load_error(unselected_id).is_some(),
-        "unselected preload failure should remain recorded on its slot"
+        source_files.source_load_error(unselected_id).is_none(),
+        "unselected source must remain pending without a filesystem read"
     );
 }
 

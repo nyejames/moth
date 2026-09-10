@@ -4,7 +4,8 @@
 //! WHY: this is the primary human-facing render path for compiler errors and warnings.
 
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, diagnostic_type_name, display_column_number, display_line_number,
+    DiagnosticPrimaryPosition, DiagnosticRenderContext, diagnostic_type_name,
+    display_column_number, display_gutter_width, display_line_number, expand_tabs_for_display,
     primary_caret_padding, primary_underline_length, relative_display_path_from_root,
     render_payload,
 };
@@ -13,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity,
 };
 use saying::say;
+use std::path::Path;
 
 pub(crate) fn print_diagnostic_with_context(
     diagnostic: &CompilerDiagnostic,
@@ -66,18 +68,16 @@ pub(crate) fn print_diagnostic_with_context(
             );
         }
 
-        let line = position.line;
-        if !line.is_empty() {
-            say!(Blue "    |");
-            let line_label = display_line.to_string();
-            let line_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-            say!(Blue line_padding, Bold Blue line_label, " | ", Reset line);
-            print!("{}", " ".repeat(display_line.to_string().len() + 4));
-
-            let underline_start = primary_caret_padding(position, line);
-            print!("{}", " ".repeat(underline_start));
-            let underline_length = primary_underline_length(position, line);
-            say!(Red "^".repeat(underline_length));
+        if let Some(frame) = terminal_source_frame(position) {
+            say!(Blue frame.gutter_marker.as_str(), "|");
+            say!(
+                Blue frame.line_padding.as_str(),
+                Bold Blue frame.line_label.as_str(),
+                " | ",
+                Reset frame.line_text.as_str()
+            );
+            print!("{}", frame.caret_padding);
+            say!(Red frame.carets.as_str());
         }
     }
 
@@ -90,10 +90,73 @@ pub(crate) fn print_diagnostic_with_context(
     }
 }
 
+struct TerminalSourceFrame {
+    gutter_marker: String,
+    line_padding: String,
+    line_label: String,
+    line_text: String,
+    caret_padding: String,
+    carets: String,
+}
+
+fn terminal_source_frame(position: &DiagnosticPrimaryPosition<'_>) -> Option<TerminalSourceFrame> {
+    let source_line = position.line;
+    if source_line.is_empty() {
+        return None;
+    }
+
+    let display_line = display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
+    let line_label = display_line.to_string();
+    let gutter_width = display_gutter_width(display_line);
+    let line_padding = " ".repeat(gutter_width.saturating_sub(line_label.len()));
+    let caret_padding = " ".repeat(gutter_width + 3);
+    let underline_start = primary_caret_padding(position, source_line);
+    let underline_length = primary_underline_length(position, source_line);
+
+    Some(TerminalSourceFrame {
+        gutter_marker: " ".repeat(gutter_width + 1),
+        line_padding,
+        line_label,
+        line_text: expand_tabs_for_display(source_line),
+        caret_padding: format!("{caret_padding}{:width$}", "", width = underline_start),
+        carets: "^".repeat(underline_length),
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn format_terminal_source_frame_for_test(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+) -> Option<String> {
+    let position = context.primary_position(diagnostic)?;
+    let frame = terminal_source_frame(&position)?;
+    Some(format!(
+        "{}|\n{}{} | {}\n{}{}",
+        frame.gutter_marker,
+        frame.line_padding,
+        frame.line_label,
+        frame.line_text,
+        frame.caret_padding,
+        frame.carets,
+    ))
+}
+
 pub(crate) fn format_label_messages_with_context(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
 ) -> Vec<String> {
+    let root = std::env::current_dir().unwrap_or_default();
+    format_label_messages_with_context_from_root(diagnostic, context, &root)
+}
+
+pub(crate) fn format_label_messages_with_context_from_root(
+    diagnostic: &CompilerDiagnostic,
+    context: DiagnosticRenderContext<'_>,
+    root: &Path,
+) -> Vec<String> {
+    let primary_display_path = context
+        .primary_position(diagnostic)
+        .map(|position| relative_display_path_from_root(position.path.as_path(), root));
     let mut rendered_labels = Vec::new();
 
     for label in &diagnostic.labels {
@@ -110,15 +173,22 @@ pub(crate) fn format_label_messages_with_context(
             }
             continue;
         };
+        let label_path = relative_display_path_from_root(position.path.as_path(), root);
+        let include_path = primary_display_path
+            .as_deref()
+            .is_none_or(|primary_path| primary_path != label_path);
         let label_line =
             display_line_number(i32::try_from(position.start.line).unwrap_or(i32::MAX));
         let label_col =
             display_column_number(i32::try_from(position.start.column).unwrap_or(i32::MAX));
         let message_text = diagnostic_label_message_text(message, context);
+        let location = if include_path && !label_path.is_empty() {
+            format!("{label_path}:{label_line}:{label_col}")
+        } else {
+            format!("{label_line}:{label_col}")
+        };
 
-        rendered_labels.push(format!(
-            "{style_name}: {label_line}:{label_col} - {message_text}"
-        ));
+        rendered_labels.push(format!("{style_name}: {location} - {message_text}"));
     }
 
     rendered_labels
@@ -139,7 +209,7 @@ pub(crate) fn format_payload_guidance(
     lines
 }
 
-fn diagnostic_label_message_text(
+pub(crate) fn diagnostic_label_message_text(
     message: &DiagnosticLabelMessage,
     context: DiagnosticRenderContext<'_>,
 ) -> String {

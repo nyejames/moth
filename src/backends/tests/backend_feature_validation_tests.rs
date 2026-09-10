@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticPayload, RuleDiagnosticKind, UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
@@ -32,7 +32,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -215,6 +215,93 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
     assert!(
         result.is_ok(),
         "Wasm validation should ignore unreachable float statements"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_reachable_generic_values_with_or_without_span() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let generic_type = type_environment.intern_generic_instance(
+        NominalTypeId(0),
+        vec![builtin_type_ids::STRING].into_boxed_slice(),
+    );
+    let spanful = Some(SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::source_start(),
+    ));
+
+    for span in [spanful, None] {
+        let module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Return(generic_expression(0, generic_type, span)),
+            )],
+        );
+        let diagnostic = wasm_feature_validation_diagnostic(
+            &module,
+            &type_environment,
+            &mut string_table,
+            "Wasm validation should reject reachable generic runtime values",
+        );
+
+        assert_unsupported_feature(
+            &diagnostic,
+            &mut string_table,
+            UnsupportedBackendFeatureReason::GenericRuntimeValues,
+        );
+        assert_eq!(
+            diagnostic.primary_span, span,
+            "generic runtime rejection should preserve optional source provenance"
+        );
+    }
+}
+
+#[test]
+fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let generic_type = type_environment.intern_generic_instance(
+        NominalTypeId(0),
+        vec![builtin_type_ids::STRING].into_boxed_slice(),
+    );
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(1)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Return(unit_expression(0)),
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(generic_expression(1, generic_type, None)),
+            ),
+        ],
+    );
+
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Wasm validation should ignore generic runtime values in unreachable helpers"
     );
 }
 
@@ -592,6 +679,17 @@ fn float_statement(
                 result,
             },
         },
+        span,
+    }
+}
+
+fn generic_expression(id: u32, ty: TypeId, span: Option<SourceSpan>) -> HirExpression {
+    HirExpression {
+        id: HirValueId(id),
+        kind: HirExpressionKind::TupleConstruct { elements: vec![] },
+        ty,
+        value_kind: ValueKind::RValue,
+        region: RegionId(0),
         span,
     }
 }

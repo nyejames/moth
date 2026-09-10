@@ -82,7 +82,7 @@ use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, Diagnostic
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
-    FrozenIdentityContext, SourceDatabase, SourceSpan, SpanCapacityError,
+    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceSpan, SpanCapacityError,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
 use std::collections::HashMap;
@@ -166,6 +166,7 @@ pub(crate) struct RenderFrozenContext {
 pub(crate) struct RenderSourceContext {
     pub(crate) diagnostic_range: Range<usize>,
     pub(crate) source_database: Arc<SourceDatabase>,
+    pub(crate) domain: Option<StablePackageIdentity>,
 }
 
 impl CompilerMessages {
@@ -317,6 +318,23 @@ impl CompilerMessages {
     ) {
         self.diagnostics.extend(diagnostics);
     }
+    /// Fill missing diagnostic span owners without replacing mixed-domain provenance.
+    pub(crate) fn set_frozen_identity_handle_if_missing(
+        &mut self,
+        frozen_identity_handle: FrozenIdentityHandle,
+    ) {
+        for diagnostic in &mut self.diagnostics {
+            if diagnostic.primary_span.is_some() {
+                diagnostic
+                    .set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+            }
+            for label in &mut diagnostic.labels {
+                if label.span.is_some() {
+                    label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+                }
+            }
+        }
+    }
 
     /// Consume the boundary container and return its ordered diagnostics.
     pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
@@ -459,11 +477,13 @@ impl CompilerMessages {
             self.render_source_contexts.push(RenderSourceContext {
                 diagnostic_range: 0..diagnostic_end,
                 source_database,
+                domain: None,
             });
         } else if self.infrastructure_error.is_some() {
             self.render_source_contexts.push(RenderSourceContext {
                 diagnostic_range: 0..1,
                 source_database,
+                domain: None,
             });
         }
     }
@@ -486,6 +506,72 @@ impl CompilerMessages {
             }));
     }
 
+    /// Extend package source rows to cover late diagnostics carrying that package domain.
+    ///
+    /// Matching diagnostics are split into contiguous ranges instead of widening one package row
+    /// across diagnostics owned by another domain. This keeps first-match render precedence
+    /// correct when late project and package diagnostics are interleaved.
+    pub(crate) fn extend_source_contexts_for_owned_handles(&mut self) {
+        let source_contexts = std::mem::take(&mut self.render_source_contexts);
+        let mut expanded_contexts = Vec::with_capacity(source_contexts.len());
+        for context in source_contexts {
+            let Some(domain) = context.domain.as_ref() else {
+                expanded_contexts.push(context);
+                continue;
+            };
+            let mut covered_indices = context.diagnostic_range.clone().collect::<Vec<_>>();
+            covered_indices.extend(self.diagnostics.iter().enumerate().filter_map(
+                |(index, diagnostic)| {
+                    let primary_matches = diagnostic
+                        .primary_frozen_identity_handle
+                        .as_ref()
+                        .is_some_and(|handle| handle.domain() == Some(domain));
+                    let label_matches = diagnostic.labels.iter().any(|label| {
+                        label
+                            .frozen_identity_handle
+                            .as_ref()
+                            .is_some_and(|handle| handle.domain() == Some(domain))
+                    });
+                    (primary_matches || label_matches).then_some(index)
+                },
+            ));
+            covered_indices.sort_unstable();
+            covered_indices.dedup();
+            if covered_indices.is_empty() {
+                expanded_contexts.push(context);
+                continue;
+            }
+
+            let mut ranges = Vec::new();
+            let mut start = covered_indices[0];
+            let mut end = start + 1;
+            for index in covered_indices.into_iter().skip(1) {
+                if index == end {
+                    end += 1;
+                } else {
+                    ranges.push(start..end);
+                    start = index;
+                    end = index + 1;
+                }
+            }
+            ranges.push(start..end);
+
+            let RenderSourceContext {
+                source_database,
+                domain,
+                ..
+            } = context;
+            for diagnostic_range in ranges {
+                expanded_contexts.push(RenderSourceContext {
+                    diagnostic_range,
+                    source_database: Arc::clone(&source_database),
+                    domain: domain.clone(),
+                });
+            }
+        }
+        self.render_source_contexts = expanded_contexts;
+    }
+
     /// Install precomputed frozen identity contexts for diagnostics appended at `diagnostic_offset`.
     ///
     /// WHAT: offsets each incoming frozen range by the diagnostic offset, mirroring
@@ -504,6 +590,112 @@ impl CompilerMessages {
                 frozen_context.diagnostic_range.end += diagnostic_offset;
                 frozen_context
             }));
+    }
+    /// Replace transitional source rows with frozen identity rows without copying source or
+    /// diagnostic storage.
+    ///
+    /// The first source row consumes the aggregate string table; subsequent rows share that
+    /// frozen string allocation while moving only their own source database. This is the final
+    /// report handoff used by successful build/dev warning paths.
+    pub(crate) fn freeze_source_contexts(mut self) -> Result<Self, CompilerError> {
+        let source_contexts = std::mem::take(&mut self.render_source_contexts)
+            .into_iter()
+            .filter(|context| !context.diagnostic_range.is_empty())
+            .collect::<Vec<_>>();
+        if source_contexts.is_empty() {
+            return Ok(self);
+        }
+
+        let mut database_owners = HashMap::<*const SourceDatabase, Arc<SourceDatabase>>::new();
+        let mut context_rows = Vec::with_capacity(source_contexts.len());
+        for source_context in source_contexts {
+            let RenderSourceContext {
+                diagnostic_range,
+                source_database,
+                domain,
+            } = source_context;
+            let database_key = Arc::as_ptr(&source_database);
+            database_owners
+                .entry(database_key)
+                .or_insert(source_database);
+            context_rows.push((diagnostic_range, domain, database_key));
+        }
+
+        let mut identity_by_database =
+            HashMap::<*const SourceDatabase, Arc<FrozenIdentityContext>>::new();
+        let mut frozen_root: Option<Arc<FrozenIdentityContext>> = None;
+        let mut frozen_contexts = Vec::with_capacity(context_rows.len());
+        for (diagnostic_range, domain, database_key) in context_rows {
+            let identity = if let Some(identity) = identity_by_database.get(&database_key) {
+                Arc::clone(identity)
+            } else {
+                let source_database = database_owners.remove(&database_key).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "source database owner disappeared at the frozen render handoff",
+                    )
+                })?;
+                let database = Arc::try_unwrap(source_database).map_err(|_| {
+                    CompilerError::compiler_error(
+                        "source database was unexpectedly shared at the frozen render handoff",
+                    )
+                })?;
+                let identity = match frozen_root.as_ref() {
+                    Some(root) => Arc::new(FrozenIdentityContext::from_shared_strings(
+                        root.shared_strings(),
+                        database,
+                    )),
+                    None => {
+                        let identity = Arc::new(FrozenIdentityContext::from_parts(
+                            *std::mem::take(&mut self.string_table),
+                            database,
+                        ));
+                        frozen_root = Some(Arc::clone(&identity));
+                        identity
+                    }
+                };
+                identity_by_database.insert(database_key, Arc::clone(&identity));
+                identity
+            };
+            frozen_contexts.push((diagnostic_range, domain, identity));
+        }
+
+        for (diagnostic_range, domain, identity) in &frozen_contexts {
+            for diagnostic in self
+                .diagnostics
+                .iter()
+                .skip(diagnostic_range.start)
+                .take(diagnostic_range.end.saturating_sub(diagnostic_range.start))
+            {
+                if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
+                    && handle.get().is_none()
+                    && domain
+                        .as_ref()
+                        .is_none_or(|domain| handle.domain() == Some(domain))
+                {
+                    handle.install(Arc::clone(identity))?;
+                }
+                for label in &diagnostic.labels {
+                    if let Some(handle) = label.frozen_identity_handle.as_ref()
+                        && handle.get().is_none()
+                        && domain
+                            .as_ref()
+                            .is_none_or(|domain| handle.domain() == Some(domain))
+                    {
+                        handle.install(Arc::clone(identity))?;
+                    }
+                }
+            }
+        }
+
+        self.render_frozen_contexts = frozen_contexts
+            .into_iter()
+            .map(|(diagnostic_range, _, identity)| RenderFrozenContext {
+                diagnostic_range,
+                identity,
+            })
+            .collect();
+        self.ensure_frozen_identity_handles_installed()?;
+        Ok(self)
     }
 
     pub(crate) fn with_type_context_for_all_diagnostics(
@@ -723,7 +915,7 @@ impl CompilerMessages {
             if diagnostic
                 .primary_frozen_identity_handle
                 .as_ref()
-                .is_some_and(|handle| handle.get().is_none())
+                .is_some_and(|handle| handle.domain().is_some() && handle.get().is_none())
             {
                 return Err(CompilerError::compiler_error(
                     "diagnostic primary reached the frozen render boundary without its donor identity",
@@ -733,7 +925,7 @@ impl CompilerMessages {
                 let Some(handle) = label.frozen_identity_handle.as_ref() else {
                     continue;
                 };
-                if handle.get().is_none() {
+                if handle.domain().is_some() && handle.get().is_none() {
                     return Err(CompilerError::compiler_error(
                         "diagnostic label reached the frozen render boundary without its donor identity",
                     ));

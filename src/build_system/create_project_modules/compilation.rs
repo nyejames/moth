@@ -53,7 +53,7 @@ use super::project_roots;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery;
 use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
-use super::source_loading::load_registered_source_texts;
+use super::source_loading::SelectedSourceTextMap;
 
 mod canonical;
 mod deferred_check_only;
@@ -332,45 +332,9 @@ fn finalize_package_failure(
 ) -> DirectoryPremergeFailure {
     match builder.finish() {
         Ok(source) => DirectoryPremergeFailure::package(failure, source),
-        Err(finish_error) => DirectoryPremergeFailure::project(match failure {
-            PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
-                batch,
-                error: finish_error,
-            },
-            PremergeFailure::Mixed {
-                batch,
-                error: original,
-            } => {
-                // Both sides stay observable: the original render identity wins, and the
-                // finish message chains deterministically behind the original message.
-                let mut chained = original;
-                chained.msg = format!(
-                    "{original_msg}; package source finalization also failed: {finish_msg}",
-                    original_msg = chained.msg,
-                    finish_msg = finish_error.msg,
-                );
-                for (key, value) in finish_error.metadata {
-                    chained.metadata.entry(key).or_insert(value);
-                }
-                PremergeFailure::Mixed {
-                    batch,
-                    error: chained,
-                }
-            }
-            PremergeFailure::Infrastructure(mut original) => {
-                // Both sides stay observable: the original failure remains authoritative, and
-                // the finish message chains deterministically behind the original message.
-                original.msg = format!(
-                    "{original_msg}; package source finalization also failed: {finish_msg}",
-                    original_msg = original.msg,
-                    finish_msg = finish_error.msg,
-                );
-                for (key, value) in finish_error.metadata {
-                    original.metadata.entry(key).or_insert(value);
-                }
-                PremergeFailure::Infrastructure(original)
-            }
-        }),
+        Err(finish_error) => {
+            DirectoryPremergeFailure::project(append_finish_failure(failure, finish_error))
+        }
     }
 }
 /// Chain a failed source finalization beside an existing typed failure.
@@ -761,12 +725,8 @@ fn compile_directory_frontend_in_premerge_lane(
                 Some(&project_path_resolver),
                 string_table,
             )?;
-        load_registered_source_texts(
-            project_sources.sources_mut(),
-            &project_registration_index,
-            string_table,
-        )?;
         let (project_source_files, mut project_source_spans) = project_sources.split();
+        let mut selected_source_texts = SelectedSourceTextMap::default();
         let config_globals = builder_surface.config_globals().clone();
 
         // 2. Build every source-package inventory and the project inventory before semantic
@@ -812,24 +772,15 @@ fn compile_directory_frontend_in_premerge_lane(
                 string_table,
             )?;
             let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
-            if let Err(error) = load_registered_source_texts(
-                package_sources.sources_mut(),
-                &package_registration_index,
-                string_table,
-            ) {
-                return Err(finalize_package_failure(
-                    PremergeFailure::Infrastructure(error),
-                    package_sources,
-                ));
-            }
+            let mut package_selected_source_texts = SelectedSourceTextMap::default();
             let (package_source_files, mut package_source_spans) = package_sources.split();
             timing_scope_attributed!(
                 timing_guard_build_boundary_inventory_2,
                 crate::timing::TimingMetric::BoundaryInventory,
                 Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
             );
-            let package_waves =
-                match module_inventory::discover_all_modules_in_package_with_check_only(
+            let package_waves_result =
+                module_inventory::discover_all_modules_in_package_with_check_only(
                     config,
                     &package_path_resolver,
                     package_source_files,
@@ -840,15 +791,27 @@ fn compile_directory_frontend_in_premerge_lane(
                     package_resolution,
                     &mut resource_inputs,
                     mode.includes_check_only(),
+                    &mut package_selected_source_texts,
                     string_table,
                     #[cfg(feature = "timers")]
                     timing_boundary,
-                ) {
-                    Ok(module_waves) => module_waves,
-                    Err(failure) => {
-                        return Err(finalize_package_failure(failure, package_sources));
-                    }
-                };
+                );
+            let _ = package_source_spans;
+            let package_retain_result =
+                package_selected_source_texts.retain_into(package_sources.sources_mut());
+            package_sources.adopt_pending_span_builders();
+            if let Err(error) = package_retain_result {
+                return Err(finalize_package_failure(
+                    PremergeFailure::Infrastructure(error),
+                    package_sources,
+                ));
+            }
+            let package_waves = match package_waves_result {
+                Ok(module_waves) => module_waves,
+                Err(failure) => {
+                    return Err(finalize_package_failure(failure, package_sources));
+                }
+            };
             // Merge canonical contract spans before any transient package job forks its string
             // table. Every later transient fact can then share this boundary prefix safely.
             let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
@@ -899,8 +862,8 @@ fn compile_directory_frontend_in_premerge_lane(
                 project_timing_boundary
             )),
         );
-        let mut project_schedule =
-            match module_inventory::discover_all_modules_in_project_with_check_only(
+        let project_schedule_result =
+            module_inventory::discover_all_modules_in_project_with_check_only(
                 config,
                 &project_path_resolver,
                 project_source_files,
@@ -911,22 +874,25 @@ fn compile_directory_frontend_in_premerge_lane(
                 directory_dependency_resolution,
                 &mut resource_inputs,
                 mode.includes_check_only(),
+                &mut selected_source_texts,
                 string_table,
                 #[cfg(feature = "timers")]
                 project_timing_boundary,
-            ) {
-                Ok(schedule) => schedule,
-                Err(failure) => {
-                    return Err(failure.into());
-                }
-            };
-        // Merge all canonical project contract spans before transient jobs fork their local
-        // string-table base. Project fixed/direct fields are also materialized now so their spans
-        // belong to the same inherited prefix used by every check-only job.
-        let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
-            project_schedule.waves(),
-            string_table,
-        );
+            );
+        let mut project_schedule = match project_schedule_result {
+            Ok(schedule) => schedule,
+            Err(failure) => {
+                let _ = project_source_spans;
+                let retain_result =
+                    selected_source_texts.retain_into(project_sources.sources_mut());
+                project_sources.adopt_pending_span_builders();
+                let failure = match retain_result {
+                    Ok(()) => failure,
+                    Err(error) => append_finish_failure(failure, error),
+                };
+                return Err(DirectoryPremergeFailure::project(failure));
+            }
+        };
         let effective_project_fields =
             config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
@@ -957,20 +923,44 @@ fn compile_directory_frontend_in_premerge_lane(
                     package_index,
                 );
                 let (_, mut source_spans) = inventory.source_files.split();
-                if let Err(failure) = inventory.schedule.prepare_check_only_jobs(
+                let mut selected_source_texts = SelectedSourceTextMap::default();
+                let preparation_result = inventory.schedule.prepare_check_only_jobs(
                     style_directives,
                     &mut source_spans,
                     &inventory.path_resolver,
                     &mut external_imports,
                     package_resolution,
                     string_table,
-                ) {
-                    let inventory = source_package_inventories.swap_remove(index);
-                    return Err(finalize_package_failure(failure, inventory.source_files));
+                    &mut selected_source_texts,
+                );
+                let _ = source_spans;
+                let retain_result =
+                    selected_source_texts.retain_into(inventory.source_files.sources_mut());
+                inventory.source_files.adopt_pending_span_builders();
+                match (preparation_result, retain_result) {
+                    (Ok(()), Ok(())) => {}
+                    (Ok(()), Err(error)) => {
+                        let inventory = source_package_inventories.swap_remove(index);
+                        return Err(finalize_package_failure(
+                            PremergeFailure::Infrastructure(error),
+                            inventory.source_files,
+                        ));
+                    }
+                    (Err(failure), Ok(())) => {
+                        let inventory = source_package_inventories.swap_remove(index);
+                        return Err(finalize_package_failure(failure, inventory.source_files));
+                    }
+                    (Err(failure), Err(error)) => {
+                        let inventory = source_package_inventories.swap_remove(index);
+                        return Err(finalize_package_failure(
+                            append_finish_failure(failure, error),
+                            inventory.source_files,
+                        ));
+                    }
                 }
             }
         }
-        if mode.includes_check_only() {
+        let project_check_only_result = if mode.includes_check_only() {
             project_schedule.prepare_check_only_jobs(
                 style_directives,
                 &mut project_source_spans,
@@ -978,8 +968,32 @@ fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 string_table,
-            )?;
+                &mut selected_source_texts,
+            )
+        } else {
+            Ok(())
+        };
+        let _ = project_source_spans;
+        let project_retain_result =
+            selected_source_texts.retain_into(project_sources.sources_mut());
+        project_sources.adopt_pending_span_builders();
+        match (project_check_only_result, project_retain_result) {
+            (Ok(()), Ok(())) => {}
+            (Ok(()), Err(error)) => {
+                return Err(DirectoryPremergeFailure::project(
+                    PremergeFailure::Infrastructure(error),
+                ));
+            }
+            (Err(failure), Ok(())) => {
+                return Err(DirectoryPremergeFailure::project(failure));
+            }
+            (Err(failure), Err(error)) => {
+                return Err(DirectoryPremergeFailure::project(append_finish_failure(
+                    failure, error,
+                )));
+            }
         }
+        let project_source_files = Arc::clone(project_sources.sources());
 
         let (
             project_module_waves,
@@ -987,6 +1001,10 @@ fn compile_directory_frontend_in_premerge_lane(
             project_source_package_dependencies,
             project_check_only_jobs,
         ) = project_schedule.into_parts();
+        let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
+            &project_module_waves,
+            string_table,
+        );
         let mut all_project_source_facts = project_source_facts.clone();
         if mode.includes_check_only() {
             all_project_source_facts.extend(
@@ -1253,14 +1271,12 @@ fn compile_directory_frontend_in_premerge_lane(
                 project_timing_boundary
             )),
         );
-        // The typed lane returns premerge batches with local tables; retain each with a
-        // project domain tag. No `CompilerMessages` vessel is built here.
         let (project_boundary, project_batches) = canonical::compile_module_waves_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
                 build_profile,
                 &project_path_resolver,
-                Arc::clone(project_source_files),
+                project_source_files,
                 style_directives,
                 &external_packages,
                 builder_surface,

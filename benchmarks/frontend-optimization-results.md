@@ -3525,43 +3525,52 @@ cargo run --quiet --locked --package moth --bin data_layout_memory_probe \
   --features data_layout_memory_probe -- <entry>
 ```
 
-The host and toolchain were the same Apple M1 Pro / `aarch64-apple-darwin` / Rust 1.97.1
-environment recorded for the Phase 1 closeout. `total_ms` is the benchmark report's direct elapsed
-time. `live_bytes_delta` and `peak_live_bytes_delta` are aggregate global-allocator deltas from the
-benchmark process; they are repeatable allocation proxies, not owner attribution. The `retained.*`
-columns are exact post-render-boundary layout counts from the returned report.
-The probe was rerun after the package-domain frozen-handle correction. All five runs reproduced
-the retained-layout counts and allocator deltas for each workload; elapsed time is reported as the
-median with the inclusive five-run range.
+`data_layout_memory_probe` expands to `timers` and `benchmark_counters`; the allocator and source/layout
+accounting scans are compiled only in this probe feature lane. `total_ms` is the benchmark report's
+direct elapsed time. Current probe output names the three allocator lifetimes explicitly:
+`peak_allocation_bytes_delta` is the aggregate peak live-allocation delta, `live_report_bytes_delta`
+is sampled while the owner-preserving benchmark result still holds the final `CompilerMessages`,
+and `after_report_drop_bytes_delta` is sampled after both that owner and the public report are
+dropped. All three are process-global allocator proxies, not owner attribution.
 
-| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Median live bytes delta | Median peak bytes delta | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Frozen contexts |
+The five-run rows below are the earlier evidence captured before the owner-preserving split. Their
+former `live_bytes_delta` values are retained as **after-render-owner-drop proxies** (the diagnostic
+owner had dropped, but the small public report value was still alive); they are not live-report
+measurements and are not relabelled as the new `after_report_drop_bytes_delta` field. The earlier
+source/layout columns also counted frozen package databases before final-report reachability was
+known, so they remain historical layout context until the three workloads are rerun with the
+current probe. Peak measurements remain valid and useful for comparison. The current
+`retained.*` semantics are: source bytes, extended rows and identity slots are counted only for
+frozen identity contexts reachable from the final report; `retained.identity_contexts` counts
+distinct range-row and donor-only-handle contexts; diagnostic-free package databases are excluded.
+The five-run elapsed value is the median with the inclusive five-run range.
+
+| Workload | Outcome | Errors / warnings | Median total ms (five-run range) | Historical after-render-owner-drop proxy | Median peak allocation bytes delta | Historical snapshot bytes† | Historical extended rows† | Historical source identity slots† | Diagnostic records† | Label slots† | Historical identity contexts† |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `docs` | Success | 0 / 0 | 1882.574334 (1862.175625–1949.929875) | 455,591 | 24,090,042 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `warning-heavy.moth` | Success | 0 / 39 | 39.082500 (21.830833–51.667542) | 18,093 | 2,699,354 | 1,200 | 0 | 2 | 39 | 0 | 1 |
 | `diagnosed/` | Diagnosed | 40 / 0 | 80.131417 (68.767375–103.873583) | 23,339 | 2,108,546 | 5,116 | 0 | 45 | 40 | 0 | 1 |
 
-The five-run median and inclusive min–max range for every allocator and retained-layout field are:
+The five-run median and inclusive min–max range for the historical allocator proxy and retained
+layout fields are:
 
-| Workload | Live bytes delta | Peak bytes delta | Snapshot bytes | Extended rows | Source identity slots | Diagnostic records | Label slots | Frozen contexts |
+| Workload | After-render-owner-drop proxy | Peak allocation bytes delta | Historical snapshot bytes† | Historical extended rows† | Historical source identity slots† | Diagnostic records† | Label slots† | Historical identity contexts† |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `docs` | 455,591 (455,591–455,591) | 24,090,042 (24,090,042–24,090,042) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) | 0 (0–0) |
 | `warning-heavy.moth` | 18,093 (18,093–18,093) | 2,699,354 (2,699,354–2,699,354) | 1,200 (1,200–1,200) | 0 (0–0) | 2 (2–2) | 39 (39–39) | 0 (0–0) | 1 (1–1) |
 | `diagnosed/` | 23,339 (23,339–23,339) | 2,108,546 (2,108,546–2,108,546) | 5,116 (5,116–5,116) | 0 (0–0) | 45 (45–45) | 40 (40–40) | 0 (0–0) | 1 (1–1) |
 
-The current peak and after-report allocator proxies are directly comparable with the recovered
-predecessor's same-workload owner-final probe:
+The historical peak and after-render-owner-drop proxies remain directly comparable with the
+recovered predecessor's same-workload owner-final probe:
 
-| Workload | Predecessor peak bytes | Current peak bytes | Peak delta | Predecessor after-report bytes | Current after-report bytes |
+| Workload | Predecessor peak bytes | Historical current peak bytes | Peak delta | Predecessor after-report bytes | Historical current after-render-owner-drop proxy |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `docs` | 29,216,701 | 24,090,042 | -17.55% | 455,591 | 455,591 |
 | `warning-heavy.moth` | 3,306,673 | 2,699,354 | -18.37% | 18,093 | 18,093 |
 | `diagnosed/` | 2,579,817 | 2,108,546 | -18.27% | 23,339 | 23,339 |
 
-The current report's layout columns are intentionally separated: source snapshot bytes,
-extended-span rows, source identity slots, diagnostic records, diagnostic label slots and frozen
-context records. `docs` reaches the clean-result fast path and therefore retains no source or
-diagnostic render context after the report; the predecessor owner ledger sampled construction-time
-semantic/render owners and is not a post-boundary snapshot measure. The predecessor's semantic and
-rendered owner rows remain historical context, while the five-run current allocator comparison and
-exact returned-layout counts close the retained-memory evidence gap without claiming a complete
-common/cold heap partition.
+† Historical layout values are retained for provenance only and do not establish current
+post-reachability source retention. Rerun each workload with the command above to populate
+`live_report_bytes_delta`, `after_report_drop_bytes_delta`, and the corrected
+`retained.identity_contexts` values. The corrected probe still does not partition common versus
+cold allocations or attribute allocator bytes to individual owners.

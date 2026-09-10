@@ -15,6 +15,7 @@ pub(crate) enum BorrowCheckError {
 }
 
 impl BorrowCheckError {
+    #[cfg(test)]
     pub(crate) fn into_diagnostic_or_infrastructure(
         self,
     ) -> Result<CompilerDiagnostic, CompilerError> {

@@ -17,7 +17,7 @@
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, check_borrows as run_borrow_checker,
+    BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::{
@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::{
     Stage0ResolutionFacts,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::PremergeFailure;
+use crate::compiler_frontend::compiler_messages::{PremergeDiagnosticBatch, PremergeFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -517,6 +517,35 @@ impl<'a> CompilerFrontend<'a> {
     // ------------------------------
     //  BORROW CHECKING AND ANALYSIS
     // ------------------------------
+    pub(in crate::compiler_frontend) fn check_borrows_premerge(
+        &mut self,
+        hir_module: &HirModule,
+        frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    ) -> Result<BorrowCheckReport, PremergeFailure> {
+        match run_borrow_checker(
+            hir_module,
+            self.external_package_registry.as_ref(),
+            &self.string_table,
+        ) {
+            Ok(report) => Ok(report),
+            Err(BorrowCheckError::Diagnostic(mut diagnostic)) => {
+                if let Some(handle) = frozen_identity_handle {
+                    diagnostic.set_primary_frozen_identity_handle_if_missing(handle.clone());
+                }
+                let mut batch = PremergeFailure::from(PremergeDiagnosticBatch::from_diagnostic(
+                    diagnostic,
+                    std::mem::take(&mut self.string_table),
+                ));
+                if let Some(handle) = frozen_identity_handle {
+                    batch.set_frozen_identity_handle_if_missing(handle.clone());
+                }
+                Err(batch)
+            }
+            Err(BorrowCheckError::Infrastructure(error)) => Err(PremergeFailure::from(*error)),
+        }
+    }
+
+    #[cfg(test)]
     pub(in crate::compiler_frontend) fn check_borrows(
         &self,
         hir_module: &HirModule,

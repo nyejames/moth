@@ -4,6 +4,7 @@
 //! WHY: the helper is the single point of truth for call-site-primary generic instantiation
 //! diagnostics and should be tested in isolation.
 
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     GenericInstantiationDiagnosticContext, conflicting_generic_function_argument,
     with_generic_instantiation_context,
@@ -17,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
     SourceId, SourceSpan,
@@ -423,4 +425,60 @@ fn donor_owned_label_uses_installed_donor_context() {
             .is_none(),
         "an uninstalled donor owner must not fall back to requester context"
     );
+}
+
+#[test]
+fn generic_reanchoring_preserves_mixed_domain_label_owners() {
+    let body_span = make_span(1, 10, 1);
+    let call_span = make_span(2, 20, 1);
+    let declaration_span = make_span(1, 30, 1);
+    let existing_owner = FrozenIdentityHandle::for_domain(StablePackageIdentity::source_package(
+        PackageOrigin::ProjectLocal,
+        "existing",
+    ));
+    let donor_owner = FrozenIdentityHandle::for_domain(StablePackageIdentity::source_package(
+        PackageOrigin::ProjectLocal,
+        "donor",
+    ));
+    let call_site_owner =
+        FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("requester"));
+    let mut diagnostic = CompilerDiagnostic::type_mismatch(
+        builtin_type_ids::INT,
+        builtin_type_ids::STRING,
+        TypeMismatchContext::FunctionArgument,
+        Some(body_span),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(body_span),
+        Some(DiagnosticLabelMessage::PreviousDeclaration),
+        existing_owner.clone(),
+    )]);
+    diagnostic.primary_frozen_identity_handle = Some(existing_owner.clone());
+
+    let transformed = with_generic_instantiation_context(
+        diagnostic,
+        GenericInstantiationDiagnosticContext {
+            call_span: Some(call_span),
+            declaration_span: Some(declaration_span),
+            frozen_identity_handle: Some(donor_owner.clone()),
+            call_site_frozen_identity_handle: Some(call_site_owner),
+            substitutions: Vec::new(),
+        },
+    );
+
+    assert_eq!(
+        transformed
+            .primary_frozen_identity_handle
+            .as_ref()
+            .map(FrozenIdentityHandle::domain),
+        Some(Some(&StablePackageIdentity::project_local("requester"))),
+    );
+    assert!(transformed.labels.iter().any(|label| {
+        label.span == Some(body_span)
+            && label.frozen_identity_handle.as_ref() == Some(&existing_owner)
+    }));
+    assert!(transformed.labels.iter().any(|label| {
+        label.span == Some(declaration_span)
+            && label.frozen_identity_handle.as_ref() == Some(&donor_owner)
+    }));
 }

@@ -15,7 +15,8 @@ use crate::compiler_frontend::module_compilation::artefact::{
 };
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -92,7 +93,7 @@ fn frontend_check_borrows_propagates_failures() {
     let external_package_registry =
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
     let source_files = Arc::new(SourceDatabase::empty());
-    let frontend = CompilerFrontend::new(
+    let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
         string_table,
         &style_directives,
@@ -100,15 +101,26 @@ fn frontend_check_borrows_propagates_failures() {
         None,
         &source_files,
     );
-    let messages = frontend
-        .check_borrows(&hir)
+    let generated_owner =
+        FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("generated"));
+    let failure = frontend
+        .check_borrows_premerge(&hir, Some(&generated_owner))
         .expect_err("borrow checking should fail");
+    let messages = failure.into_messages(&StringTable::new());
 
-    assert!(
-        messages
-            .error_diagnostics()
-            .any(|diagnostic| diagnostic.kind
-                == DiagnosticKind::Borrow(BorrowDiagnosticKind::SharedMutableConflict))
+    let diagnostic = messages
+        .error_diagnostics()
+        .find(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Borrow(BorrowDiagnosticKind::SharedMutableConflict)
+        })
+        .expect("borrow checking should preserve the diagnosed conflict");
+    assert_eq!(
+        diagnostic
+            .primary_frozen_identity_handle
+            .as_ref()
+            .and_then(FrozenIdentityHandle::domain),
+        Some(&StablePackageIdentity::project_local("generated")),
+        "generated borrow diagnostics must retain their HIR owner domain"
     );
 }
 

@@ -553,6 +553,7 @@ impl FileTokens {
     }
 
     /// Remap a token stream while it still owns its mutable path table.
+    #[allow(dead_code)]
     pub(crate) fn remap_preparing_string_ids(
         &mut self,
         remap: &StringIdRemap,

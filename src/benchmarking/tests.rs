@@ -188,6 +188,8 @@ fn frontend_benchmark_retains_source_package_warning() {
     let root = temp_dir.path();
     let package = root.join("src/warnpkg");
     let src = root.join("src");
+    let clean_package = root.join("src/cleanpkg");
+    std::fs::create_dir_all(&clean_package).expect("should create clean package root");
     std::fs::create_dir_all(&package).expect("should create package root");
     std::fs::create_dir_all(&src).expect("should create entry root");
     std::fs::write(
@@ -201,6 +203,11 @@ fn frontend_benchmark_retains_source_package_warning() {
         "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
+    std::fs::write(
+        clean_package.join("+package.moth"),
+        "export:\n    run || -> Int:\n        return 1\n    ;\n;\n",
+    )
+    .expect("should write diagnostic-free package root");
 
     let options = FrontendBenchmarkOptions {
         entry_path: root.to_path_buf(),
@@ -225,6 +232,11 @@ fn frontend_benchmark_retains_source_package_warning() {
     );
     assert_eq!(report.outcome, FrontendBenchmarkOutcome::Success);
     assert_eq!(report.error_count, 0);
+    #[cfg(feature = "data_layout_memory_probe")]
+    assert_eq!(
+        report.retention.retained_identity_contexts, 1,
+        "a diagnostic-free package database must not count as a retained frozen identity context"
+    );
 }
 
 #[test]

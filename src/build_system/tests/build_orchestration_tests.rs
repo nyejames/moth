@@ -87,7 +87,7 @@ fn build_project_returns_result_without_writing_files() {
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let result = build_project(
+    let mut result = build_project(
         &builder,
         entry_file
             .to_str()
@@ -99,6 +99,22 @@ fn build_project_returns_result_without_writing_files() {
 
     assert!(!result.project.output_files.is_empty());
     assert_path_missing(&root.join("index.html"));
+    assert!(
+        result
+            .take_warning_messages()
+            .expect("clean report handoff should succeed")
+            .is_none(),
+        "clean build should publish no warning report"
+    );
+    assert_eq!(
+        result.string_table.len(),
+        0,
+        "clean build should release its compiler identity table at the report boundary"
+    );
+    assert!(
+        result.source_database.is_none(),
+        "clean build should not retain a source database"
+    );
 }
 
 #[test]
@@ -124,6 +140,68 @@ fn build_project_preserves_builder_warnings_in_build_result() {
             "build result should include backend warnings"
         );
     }
+}
+
+#[test]
+fn build_project_preserves_package_warnings_on_late_backend_failure() {
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let root = _temp.path().to_path_buf();
+    let package = root.join("packages/warnpkg");
+    let src = root.join("src");
+    fs::create_dir_all(&package).expect("should create package root");
+    fs::create_dir_all(&src).expect("should create project source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"late_failure\",\n    entry_root = \"src\",\n|\nhtml #= ||\n",
+    )
+    .expect("should write project config");
+    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(
+        package.join("@mod.moth"),
+        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => result = \"one\"\n    \"one\" => result = \"one\"\n    else => result = \"other\"\n;\n",
+    )
+    .expect("should write warning package root");
+
+    let builder = ProjectBuilder::new(Box::new(LateFailureBuilder {
+        package_root: package,
+    }));
+    let Err(messages) = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    ) else {
+        panic!("late backend failure should return compiler messages");
+    };
+
+    assert!(messages.has_infrastructure_error());
+    assert!(
+        messages.warning_count() >= 1,
+        "frontend package warnings must survive a late backend failure"
+    );
+    let warning_contexts_are_frozen = messages
+        .diagnostics()
+        .enumerate()
+        .filter(|(_, diagnostic)| diagnostic.severity == DiagnosticSeverity::Warning)
+        .map(|(index, diagnostic)| {
+            (
+                messages
+                    .diagnostic_render_context(index)
+                    .frozen_identity
+                    .is_some(),
+                terse::format_terse_diagnostic_with_context(
+                    diagnostic,
+                    messages.diagnostic_render_context(index),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        warning_contexts_are_frozen
+            .iter()
+            .any(|(frozen, rendered)| *frozen && rendered.contains("@mod.moth")),
+        "package warning should retain a frozen package source owner: {warning_contexts_are_frozen:?}"
+    );
 }
 
 #[test]

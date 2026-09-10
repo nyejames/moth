@@ -74,19 +74,21 @@ CURRENT_SLICE:
   handles; each project/package diagnostic range resolves through its own frozen context;
   authored extended-span exhaustion is `MOTH-SYNTAX-0036`; clean outcomes skip the frozen render
   tail.
-- Validation evidence: focused ownership, capacity, merge, renderer and retention regressions pass;
-  the feature matrix and full local validation gate are recorded in the correction checkpoint;
-  the five-run retained-layout/allocator probe is recorded there and in
+- Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
+  The clean full gate passed on 2026-09-10 at commit `d8c182e9b`: native featured all-target
+  Clippy, 5,095 moth tests, 17 CLI tests, 825 xtask tests, integration 1,951/1,951, source audit
+  1,325 files, docs check, 82 benchmark preflights, three scaling series and timer erasure.
+  The five-run retained-layout/allocator probe is recorded in
   `benchmarks/frontend-optimization-results.md`.
 - Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
   cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  stale diagnostic-boxing comment cleanup `eb6416312`; the external-review correction checkpoint is
-  the commit containing the correction section below.
+  stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoint
+  `d8c182e9b`.
 - Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
 
-Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0` and
-`eb6416312`; the plan and evidence closeout sequence is committed through `1f6d4a81` (following
-`38e68d2a5`).
+Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
+`eb6416312` and `d8c182e9b`; the plan and evidence closeout sequence is committed through
+the correction checkpoint.
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
@@ -1252,6 +1254,61 @@ The complete validation gate then passed:
 
 The correction checkpoint is the commit containing this section. No Phase 2 slice starts from this
 plan until that commit has passed the independent final audit.
+
+### Follow-up correction contract (current workspace)
+
+The next external review identified eight incomplete production contracts. This follow-up closes
+them without changing the fixed common layouts or starting Phase 2:
+
+| Finding | Phase 1 contract now enforced |
+| --- | --- |
+| Generated ownership stopped at AST | Generated materialisation retains the declaring frozen-identity handle through HIR lowering, borrow checking and backend target validation. Re-anchoring preserves existing primary/label owners, compares duplicate sites with their identity domains, and never falls back from an unresolved donor-domain handle to the requester database. |
+| Provenance-independent Wasm validation | Generic runtime validation returns an occurrence with an independent optional span. Reachable spanful and spanless occurrences take the same unsupported-feature path; only reachability controls acceptance. |
+| String lookup safety | Mutable and frozen string resolvers use checked lookup. An in-range ID still requires the correct identity domain; a foreign out-of-range ID is a compiler-invariant failure, never undefined behaviour. |
+| Build/dev report ownership | Early frontend diagnosis, generated post-HIR failure, late backend/output failure, warning success and clean success each have an explicit terminal owner. Warnings and package/generated source contexts move into the final frozen report before late failures; clean consumers release the mutable table and source owner. |
+| Selected source loading | Registration assigns deterministic slots without reading files. Canonical discovery and explicit check-only preparation load selected semantic sources once; provider-only and unselected sources remain pending. |
+| Rendered output correctness | Terminal source/caret rows share gutter and tab policies; related sites retain their paths/messages; HTML retains secondary labels and escapes dynamic path text. |
+| Retention evidence | Feature-gated accounting distinguishes peak, live-report and after-owner-drop measurements. Retained-context counts are distinct and include donor-only handles; diagnostic-free package databases do not inflate the final report count. |
+| Failure handoffs | Production borrow failures move a premerge batch with its table once. Package finalization uses the existing append/finish helper; the remaining AST/HIR compatibility classifier is test-only and explicitly deferred. |
+
+#### Cold ownership contract for the final common layouts
+
+The common `DiagnosticRecord` remains 32 bytes and the common `SecondaryDiagnosticLabel` remains
+12 bytes. Their compact spans are meaningful only in the identity domain of the enclosing report
+context. Rare mixed-domain sites carry an optional typed `FrozenIdentityHandle` in cold diagnostic
+or label ownership storage; the handle names the immutable string/source context that resolves the
+span. No common record grows an `Arc`, path table, or rendered coordinate, and no renderer guesses
+an owner from a colliding requester database.
+
+#### Production lifecycle gates
+
+Every Phase 1 outcome must cross one of these gates exactly once:
+
+1. early diagnosed/blocked frontend result;
+2. generated post-HIR diagnostic or warning;
+3. late backend or output-builder failure;
+4. successful build with warnings;
+5. clean successful build.
+
+The first four retain the final diagnostic owner and all source-domain associations. The fifth
+drops compiler identity storage once no compact-ID consumer remains. A focused test that exercises
+only frozen frontend diagnostics does not close the build/dev gates.
+
+#### Deferred representation work
+
+Parent-linked path tables, compact span encoding, token-store consolidation and declarative
+token/diagnostic schemas remain deferred to their planned migration slices. This correction pass
+adds no second interner, scheduler, observer API or ubiquitous per-node owner.
+
+#### Follow-up validation evidence (2026-09-10)
+
+The follow-up correction checkpoint is `d8c182e9b`. Focused suites cover generated ownership,
+provenance-independent Wasm validation, checked string lookup, selected-source loading,
+terminal/HTML rendering, report aggregation and retention accounting. The clean `just validate`
+gate then passed native featured all-target Clippy, 5,095 moth tests, 17 CLI tests, 825 xtask tests,
+integration 1,951/1,951, source audit (1,325 files), docs, benchmark sanity (82 preflights),
+all three scaling budgets and timer erasure. `cargo fmt --all -- --check` and `git diff --check`
+also pass; the clean gate left no generated changes in the worktree.
 
 ### Review-derived corrections supporting Phase 1 closeout
 

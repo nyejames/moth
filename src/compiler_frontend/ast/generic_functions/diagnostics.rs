@@ -119,28 +119,38 @@ pub(crate) fn with_generic_instantiation_context(
 
     if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
         for label in &mut diagnostic.labels {
-            label.set_frozen_identity_handle(frozen_identity_handle.clone());
+            label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
         }
     }
 
     let body_span = diagnostic.primary_span;
+    let body_frozen_identity_handle = diagnostic.primary_frozen_identity_handle.take();
     if call_span.is_some() {
         diagnostic.primary_frozen_identity_handle = call_site_frozen_identity_handle;
+    } else {
+        diagnostic.primary_frozen_identity_handle = body_frozen_identity_handle.clone();
     }
     diagnostic.primary_span = call_span;
     let mut new_labels = Vec::with_capacity(diagnostic.labels.len() + 3);
 
     if let Some(span) = body_span
-        && !diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(span))
+        && !diagnostic.labels.iter().any(|label| {
+            label.span == Some(span)
+                && label_owner_domain_matches(
+                    label.frozen_identity_handle.as_ref(),
+                    body_frozen_identity_handle
+                        .as_ref()
+                        .or(frozen_identity_handle.as_ref()),
+                )
+        })
     {
-        let label = match frozen_identity_handle.as_ref() {
+        let body_frozen_identity_handle =
+            body_frozen_identity_handle.or_else(|| frozen_identity_handle.clone());
+        let label = match body_frozen_identity_handle {
             Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
                 Some(span),
                 Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
-                frozen_identity_handle.clone(),
+                frozen_identity_handle,
             ),
             None => DiagnosticLabel::secondary(
                 Some(span),
@@ -151,10 +161,13 @@ pub(crate) fn with_generic_instantiation_context(
     }
 
     if let Some(span) = declaration_span
-        && !diagnostic
-            .labels
-            .iter()
-            .any(|label| label.span == Some(span))
+        && !diagnostic.labels.iter().any(|label| {
+            label.span == Some(span)
+                && label_owner_domain_matches(
+                    label.frozen_identity_handle.as_ref(),
+                    frozen_identity_handle.as_ref(),
+                )
+        })
     {
         let label = match frozen_identity_handle.as_ref() {
             Some(frozen_identity_handle) => DiagnosticLabel::secondary_with_frozen_identity(
@@ -188,4 +201,12 @@ pub(crate) fn with_generic_instantiation_context(
     new_labels.extend(diagnostic.labels);
     diagnostic.labels = new_labels;
     diagnostic
+}
+
+fn label_owner_domain_matches(
+    label_owner: Option<&FrozenIdentityHandle>,
+    expected_owner: Option<&FrozenIdentityHandle>,
+) -> bool {
+    label_owner.map(FrozenIdentityHandle::domain)
+        == expected_owner.map(FrozenIdentityHandle::domain)
 }

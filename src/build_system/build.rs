@@ -99,6 +99,29 @@ fn attach_owned_source_database(
     }
 }
 
+fn finalize_backend_failure_messages(
+    backend_messages: CompilerMessages,
+    warnings: Vec<CompilerDiagnostic>,
+    string_table: StringTable,
+    warning_source_contexts: Vec<RenderSourceContext>,
+    project_source_database: Option<Arc<SourceDatabase>>,
+) -> CompilerMessages {
+    let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
+    messages.install_source_contexts(warning_source_contexts, 0);
+    messages.append_messages_preserving_context(backend_messages);
+    messages.extend_source_contexts_for_owned_handles();
+    if let Some(source_database) = project_source_database {
+        messages.set_source_database(source_database);
+    }
+    match messages.freeze_source_contexts() {
+        Ok(messages) => messages,
+        Err(error) => CompilerMessages::from_error(
+            error,
+            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+        ),
+    }
+}
+
 // -------------------------
 //  Project Aggregation
 // -------------------------
@@ -1596,6 +1619,32 @@ impl BuildResult {
             .map(|source_context| source_context.source_database.as_ref())
             .or(self.source_database.as_deref())
     }
+
+    /// Move successful-build warnings into their one final frozen render owner.
+    ///
+    /// The output writer consumes the mutable build table first; this method is the terminal
+    /// report publication point. Clean builds release the table and source snapshots immediately.
+    pub(crate) fn take_warning_messages(
+        &mut self,
+    ) -> Result<Option<CompilerMessages>, CompilerError> {
+        if self.warnings.is_empty() {
+            let _ = std::mem::take(&mut self.string_table);
+            self.warning_source_contexts.clear();
+            self.source_database.take();
+            return Ok(None);
+        }
+
+        let warnings = std::mem::take(&mut self.warnings);
+        let string_table = std::mem::take(&mut self.string_table);
+        let source_contexts = std::mem::take(&mut self.warning_source_contexts);
+        let source_database = self.source_database.take();
+        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
+        messages.install_source_contexts(source_contexts, 0);
+        if let Some(source_database) = source_database {
+            messages.set_source_database(source_database);
+        }
+        messages.freeze_source_contexts().map(Some)
+    }
 }
 
 // -------------------------
@@ -1677,7 +1726,8 @@ pub fn build_project(
             return Err(messages);
         }
     };
-    let (mut warnings, warning_source_contexts) = collect_success_warnings(&project_compilation);
+    let (mut warnings, mut warning_source_contexts) =
+        collect_success_warnings(&project_compilation);
 
     // --------------------------------------------
     // BUILD PROJECT USING THE APPROPRIATE BUILDER
@@ -1695,10 +1745,15 @@ pub fn build_project(
     );
     let project = match project_result {
         Ok(project) => project,
-        Err(mut compiler_messages) => {
-            compiler_messages.string_table = Box::new(string_table);
-            attach_source_database(&mut compiler_messages, project_source_files.as_ref());
-            return Err(compiler_messages);
+        Err(compiler_messages) => {
+            let messages = finalize_backend_failure_messages(
+                compiler_messages,
+                warnings,
+                string_table,
+                warning_source_contexts,
+                project_source_files.take(),
+            );
+            return Err(messages);
         }
     };
 
@@ -1715,9 +1770,16 @@ pub fn build_project(
             let error = CompilerError::compiler_error(
                 "Directory output settings were not available after bootstrap validation.",
             );
-            let mut messages = CompilerMessages::from_error(error, string_table);
-            attach_source_database(&mut messages, project_source_files.as_ref());
-            return Err(messages);
+            return Err(finalize_backend_failure_messages(
+                CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                ),
+                warnings,
+                string_table,
+                warning_source_contexts,
+                project_source_files.take(),
+            ));
         };
 
         Some(validated_output_settings.select(
@@ -1728,18 +1790,22 @@ pub fn build_project(
     } else {
         None
     };
-    // Direct-project resolution records are a bootstrap-to-frontend handoff. No current build or
-    // dev consumer retains them after the semantic boundary has consumed their values and
-    // provenance; persistent retention belongs to the deferred incremental artefact owner.
+    // Direct-project resolution records are consumed by the semantic boundary and are not
+    // retained in the successful build result.
     config.config_resolution_records.clear();
-
+    let source_database = (!warnings.is_empty())
+        .then_some(project_source_files)
+        .flatten();
+    if warnings.is_empty() {
+        warning_source_contexts.clear();
+    }
     Ok(BuildResult {
         project,
         config,
         warnings,
         string_table,
         warning_source_contexts,
-        source_database: project_source_files,
+        source_database,
         output_owner,
         directory_output_plan,
     })
@@ -1853,10 +1919,6 @@ fn collect_success_warnings(
         );
         let warning_end = warnings.len();
 
-        if warning_start == warning_end {
-            continue;
-        }
-
         if let Some(source_database) = project_compilation
             .source_packages
             .source_database(PackageBoundaryId::from_index(package_index))
@@ -1864,6 +1926,7 @@ fn collect_success_warnings(
             warning_source_contexts.push(RenderSourceContext {
                 diagnostic_range: warning_start..warning_end,
                 source_database: Arc::clone(source_database),
+                domain: Some(package.package_identity.clone()),
             });
         }
     }

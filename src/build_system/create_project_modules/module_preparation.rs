@@ -40,6 +40,7 @@ use crate::timed_stage_attributed;
 
 use super::prepared_module::PreparedModule;
 use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
+use super::source_loading::SelectedSourceTextMap;
 
 use rayon::prelude::*;
 use std::ops::Range;
@@ -223,15 +224,16 @@ fn source_id_for_canonical_path(
         .map(|record| record.id)
 }
 
-/// Borrow the exact source snapshot retained by the compilation boundary.
+/// Borrow the exact source snapshot selected for the compilation boundary.
 ///
-/// A failed preload is returned at the same preparation boundary that previously performed the
-/// filesystem read, preserving the selected-source error lane. Unselected source failures remain
-/// inert because this helper is only called for a source that is being prepared.
-fn retained_source_text(
-    source_files: &SourceDatabase,
+/// Directory discovery keeps source slots pending until the reachability walk selects them. The
+/// selected map supplies those not-yet-retained snapshots; cached snapshots remain borrowed from
+/// the boundary database.
+fn retained_source_text<'a>(
+    source_files: &'a SourceDatabase,
     source_id: SourceId,
-) -> Result<&str, CompilerError> {
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+) -> Result<&'a str, CompilerError> {
     if source_files.get(source_id).is_none() {
         return Err(CompilerError::compiler_error(format!(
             "source identity {} is absent from the source database",
@@ -239,24 +241,37 @@ fn retained_source_text(
         )));
     }
 
-    source_files.retained_text(source_id).ok_or_else(|| {
-        source_files
-            .source_load_error(source_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "registered source identity {} has no retained source text",
-                    source_id.index()
-                ))
-            })
-    })
+    if let Some(source) = source_files.retained_text(source_id) {
+        return Ok(source);
+    }
+    if let Some(error) = source_files.source_load_error(source_id) {
+        return Err(error.clone());
+    }
+
+    let path = source_files
+        .get(source_id)
+        .and_then(|record| record.canonical_os_path.as_deref())
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "source identity {} has no canonical filesystem path",
+                source_id.index()
+            ))
+        })?;
+    let Some(selected_source_texts) = selected_source_texts else {
+        return Err(CompilerError::compiler_error(format!(
+            "registered source identity {} has no retained source text",
+            source_id.index()
+        )));
+    };
+    selected_source_texts.load(path)
 }
 
-fn source_byte_len(
-    source_files: &SourceDatabase,
+fn source_byte_len<'a>(
+    source_files: &'a SourceDatabase,
     source_id: SourceId,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
 ) -> Result<usize, CompilerError> {
-    retained_source_text(source_files, source_id).map(str::len)
+    retained_source_text(source_files, source_id, selected_source_texts).map(str::len)
 }
 
 /// Incremental provider-independent syntax preparation for one indexed directory module.
@@ -264,8 +279,10 @@ fn source_byte_len(
 /// Stage 0 prepares each selected source once, reads its retained dependency shells from the same
 /// header output and only then decides which same-module source to prepare next. This keeps
 /// semantic reachability and header ownership aligned without a second lexical dependency scanner.
-pub(super) struct ModuleSyntaxDiscovery<'a> {
+pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     context: &'a ModulePreparationContext<'a>,
+    /// Source text selected during this walk but not retained in the boundary database yet.
+    selected_source_texts: &'texts mut SelectedSourceTextMap,
     entry_file_path: PathBuf,
     /// Explicit file role for transient entry selections; canonical module roots derive this from
     /// `active_root_role`.
@@ -309,21 +326,24 @@ impl ModulePreparationContext<'_> {
     /// origin-table handle, so no module or worker can allocate or copy boundary identities while
     /// preparation is in flight. Failures travel in the premerge lane; the final boundary owns
     /// the single vessel conversion.
-    pub(super) fn begin_syntax_discovery<'a>(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn begin_syntax_discovery<'a, 'texts>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
         registered_sources: RegisteredModuleSources,
         entry_file_path: &Path,
         entry_file_role: Option<FileRole>,
         string_table: StringTable,
+        selected_source_texts: &'texts mut SelectedSourceTextMap,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-    ) -> Result<ModuleSyntaxDiscovery<'a>, PremergeFailure> {
+    ) -> Result<ModuleSyntaxDiscovery<'a, 'texts>, PremergeFailure> {
         let candidate_source_ids = registered_sources.candidate_source_ids;
         let mut prepared_outputs = Vec::new();
         prepared_outputs.resize_with(candidate_source_ids.len(), || None);
 
         Ok(ModuleSyntaxDiscovery {
             context: self,
+            selected_source_texts,
             entry_file_path: entry_file_path.to_path_buf(),
             entry_file_role,
             active_root_role: stable_origin.role(),
@@ -852,25 +872,29 @@ impl ModulePreparationContext<'_> {
                     },
                 ),
                 source => {
-                    let delta =
-                        match frontend_source(source, source_id, prepare_context.source_files) {
-                            Ok(source) => CompilerFrontend::prepare_file_frontend_local(
-                                prepare_context,
-                                FrontendFilePrepareInput {
-                                    source,
-                                    source_id,
-                                    span_builder,
-                                    const_template_offset,
-                                    runtime_fragment_offset,
-                                },
-                                &mut local_string_table,
-                            ),
-                            Err(error) => SourcePreparationDelta {
-                                file_id: source_id,
+                    let delta = match frontend_source(
+                        source,
+                        source_id,
+                        prepare_context.source_files,
+                        None,
+                    ) {
+                        Ok(source) => CompilerFrontend::prepare_file_frontend_local(
+                            prepare_context,
+                            FrontendFilePrepareInput {
+                                source,
+                                source_id,
                                 span_builder,
-                                result: Err(FileFrontendPrepareFailure::Infrastructure(error)),
+                                const_template_offset,
+                                runtime_fragment_offset,
                             },
-                        };
+                            &mut local_string_table,
+                        ),
+                        Err(error) => SourcePreparationDelta {
+                            file_id: source_id,
+                            span_builder,
+                            result: Err(FileFrontendPrepareFailure::Infrastructure(error)),
+                        },
+                    };
                     (PreparedFileStringDomain::ChunkLocal, delta)
                 }
             };
@@ -895,10 +919,16 @@ impl ModulePreparationContext<'_> {
         }
     }
 }
-
-impl ModuleSyntaxDiscovery<'_> {
+impl ModuleSyntaxDiscovery<'_, '_> {
     pub(super) fn string_table_mut(&mut self) -> &mut StringTable {
         &mut self.string_table
+    }
+
+    /// Borrow both mutable selection inputs for one source preparation call.
+    pub(super) fn source_preparation_inputs_mut(
+        &mut self,
+    ) -> (&mut StringTable, &mut SelectedSourceTextMap) {
+        (&mut self.string_table, self.selected_source_texts)
     }
 
     /// Resolve one prepared file-reference row while keeping the source table and its string
@@ -952,7 +982,11 @@ impl ModuleSyntaxDiscovery<'_> {
         }
 
         let source_id = source.source_id();
-        let source_byte_len = source_byte_len(self.context.source_files, source_id)?;
+        let source_byte_len = source_byte_len(
+            self.context.source_files,
+            source_id,
+            Some(self.selected_source_texts),
+        )?;
         self.contains_moth_template |= source.is_moth_template();
         let entry_file_id =
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
@@ -968,7 +1002,12 @@ impl ModuleSyntaxDiscovery<'_> {
             entry_file_path: &self.entry_file_path,
             options: &options,
         };
-        let frontend_source = frontend_source(source.source, source_id, self.context.source_files)?;
+        let frontend_source = frontend_source(
+            source.source,
+            source_id,
+            self.context.source_files,
+            Some(self.selected_source_texts),
+        )?;
         let input = FrontendFilePrepareInput {
             source: frontend_source,
             source_id,
@@ -1115,11 +1154,12 @@ fn record_successful_prepared_outputs(outputs: &[FileFrontendPrepareOutput]) {
     add_frontend_counter(FrontendCounter::TokenCount, token_count);
 }
 
-fn frontend_source(
+fn frontend_source<'a>(
     source: PreparedSourceKind,
     source_id: SourceId,
-    sources: &SourceDatabase,
-) -> Result<FrontendFilePrepareSource<'_>, CompilerError> {
+    sources: &'a SourceDatabase,
+    selected_source_texts: Option<&'a mut SelectedSourceTextMap>,
+) -> Result<FrontendFilePrepareSource<'a>, CompilerError> {
     let source_path = source_path_for_id(sources, source_id)?;
     Ok(match source {
         PreparedSourceKind::Moth { tokens } => FrontendFilePrepareSource::Moth {
@@ -1127,11 +1167,11 @@ fn frontend_source(
             tokens,
         },
         PreparedSourceKind::MothTemplate => FrontendFilePrepareSource::MothTemplate {
-            source_code: retained_source_text(sources, source_id)?,
+            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
             source_path,
         },
         PreparedSourceKind::PlainMarkdown => FrontendFilePrepareSource::PlainMarkdown {
-            source_code: retained_source_text(sources, source_id)?,
+            source_code: retained_source_text(sources, source_id, selected_source_texts)?,
             source_path,
         },
         PreparedSourceKind::MothPrepared { .. }
@@ -1195,7 +1235,6 @@ fn validate_distinct_chunk_indexes(
             )));
         }
     }
-
     Ok(())
 }
 
@@ -1204,7 +1243,7 @@ pub(super) fn record_module_input_counters(
     source_files: &SourceDatabase,
 ) -> Result<usize, CompilerError> {
     let source_byte_count = module.iter().try_fold(0usize, |count, input| {
-        source_byte_len(source_files, input.source_id()).map(|length| count + length)
+        source_byte_len(source_files, input.source_id(), None).map(|length| count + length)
     })?;
 
     add_frontend_counter(FrontendCounter::ModuleCount, 1);

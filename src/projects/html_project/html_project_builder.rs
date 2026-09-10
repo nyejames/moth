@@ -22,7 +22,10 @@ use crate::builder_surface::config_schema::{
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
+use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;
@@ -58,6 +61,23 @@ use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+fn generated_source_identity_handle(hir: &HirModule) -> Option<FrozenIdentityHandle> {
+    hir.function_ids_by_generated
+        .keys()
+        .next()
+        .map(|identity: &GeneratedFunctionIdentity| {
+            FrozenIdentityHandle::for_domain(
+                identity.declaration().module_origin().package().clone(),
+            )
+        })
+}
+
+fn attach_module_source_identity(messages: &mut CompilerMessages, hir: &HirModule) {
+    if let Some(handle) = generated_source_identity_handle(hir) {
+        messages.set_frozen_identity_handle_if_missing(handle);
+    }
+}
 
 const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 
@@ -166,10 +186,10 @@ impl BackendBuilder for HtmlProjectBuilder {
                         diagnostic,
                     ),
                 ) => {
-                    return Err(CompilerMessages::from_diagnostic_ref(
-                        diagnostic,
-                        string_table,
-                    ));
+                    let mut messages =
+                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+                    attach_module_source_identity(&mut messages, &module.executable.hir);
+                    return Err(messages);
                 }
                 Err(
                     crate::projects::html_project::page_metadata::PageMetadataError::Infrastructure(
@@ -494,7 +514,11 @@ impl HtmlProjectBuilder {
             backend_target,
             string_table,
         )
-        .map_err(|diagnostic| CompilerMessages::from_diagnostic_ref(diagnostic, string_table))?;
+        .map_err(|diagnostic| {
+            let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+            attach_module_source_identity(&mut messages, &module.executable.hir);
+            messages
+        })?;
 
         validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -507,16 +531,17 @@ impl HtmlProjectBuilder {
         )
         .map_err(|error| match error {
             BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
                     .with_type_context_for_all_diagnostics(
                         module.executable.type_environment.clone(),
-                    )
+                    );
+                attach_module_source_identity(&mut messages, &module.executable.hir);
+                messages
             }
             BackendFeatureValidationError::Infrastructure(error) => {
                 CompilerMessages::from_error_ref(*error, string_table)
             }
         })?;
-
         for linked in &linked_modules {
             validate_hir_external_package_support(
                 linked.reachability,
@@ -525,7 +550,9 @@ impl HtmlProjectBuilder {
                 string_table,
             )
             .map_err(|diagnostic| {
-                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                let mut messages = CompilerMessages::from_diagnostic_ref(diagnostic, string_table);
+                attach_module_source_identity(&mut messages, &linked.module.executable.hir);
+                messages
             })?;
             validate_hir_backend_feature_support(
                 BackendFeatureValidationInput {
@@ -538,10 +565,13 @@ impl HtmlProjectBuilder {
             )
             .map_err(|error| match error {
                 BackendFeatureValidationError::Diagnostic(diagnostic) => {
-                    CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
-                        .with_type_context_for_all_diagnostics(
-                            linked.module.executable.type_environment.clone(),
-                        )
+                    let mut messages =
+                        CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                            .with_type_context_for_all_diagnostics(
+                                linked.module.executable.type_environment.clone(),
+                            );
+                    attach_module_source_identity(&mut messages, &linked.module.executable.hir);
+                    messages
                 }
                 BackendFeatureValidationError::Infrastructure(error) => {
                     CompilerMessages::from_error_ref(*error, string_table)

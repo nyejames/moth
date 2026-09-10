@@ -10,8 +10,9 @@ use crate::build_system::output::{
     WriteMode, WriteOptions, write_project_outputs as write_project_outputs_with_table,
 };
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
-use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
     NameNamespace, RuleDiagnosticKind,
@@ -275,6 +276,48 @@ impl BackendBuilder for WarningBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        Vec::new()
+    }
+}
+
+struct LateFailureBuilder {
+    package_root: PathBuf,
+}
+
+impl BackendBuilder for LateFailureBuilder {
+    fn build_backend(
+        &self,
+        _project_compilation: super::ProjectCompilation,
+        _config: &Config,
+        _build_profile: BuildProfile,
+        _flags: &[Flag],
+        string_table: &mut StringTable,
+    ) -> Result<Project, CompilerMessages> {
+        Err(CompilerMessages::from_error_ref(
+            CompilerError::compiler_error("injected late backend failure"),
+            string_table,
+        ))
+    }
+
+    fn validate_project_config(
+        &self,
+        _config: &Config,
+        _string_table: &mut StringTable,
+    ) -> Result<(), ProjectConfigError> {
+        Ok(())
+    }
+
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface.source_packages.register_filesystem_root(
+            "warnpkg",
+            self.package_root.clone(),
+            PackageOrigin::Builder,
+        );
+        surface
     }
 
     fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {

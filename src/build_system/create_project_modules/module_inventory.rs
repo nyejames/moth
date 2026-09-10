@@ -47,10 +47,9 @@ use super::project_structure_diagnostics::{config_diagnostic, path_id};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
     ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
-    StructuralProviderAction, merge_prepared_owned_source, prepare_owned_source_input,
-    prepare_owned_source_inputs, resolve_structural_provider_reference,
-    should_parallelize_owned_source_preparation,
+    StructuralProviderAction, prepare_owned_source_input, resolve_structural_provider_reference,
 };
+use super::source_loading::SelectedSourceTextMap;
 use super::source_tree_index::{
     SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
 };
@@ -172,12 +171,13 @@ fn resolve_directory_dependency_path(
             PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(diagnostic, table))
         })
 }
-
 /// Borrowed Stage 0 services and live source spans for one serial discovery pass.
 struct ModuleDiscoveryContext<'a, 'sources> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
     source_spans: &'a mut SourceSpanBuilders<'sources>,
+    /// Snapshots selected by the reachability walk and retained after the walk completes.
+    selected_source_texts: &'a mut SelectedSourceTextMap,
     directory_dependency_resolution: DirectoryDependencyResolution<'a>,
     project_module_graph: &'a ProjectModuleGraph,
     /// One boundary-owned source-origin table shared by every prepared module and check-only
@@ -227,6 +227,7 @@ impl ModuleCompilationSchedule {
     /// builder view and source-origin table while transient provider mutations remain isolated
     /// to the job. Failures travel in the premerge lane; the final boundary owns the single
     /// vessel conversion.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn prepare_check_only_jobs(
         &mut self,
         style_directives: &StyleDirectiveRegistry,
@@ -235,6 +236,7 @@ impl ModuleCompilationSchedule {
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
         string_table: &mut StringTable,
+        selected_source_texts: &mut SelectedSourceTextMap,
     ) -> Result<(), PremergeFailure> {
         let specs = std::mem::take(&mut self.check_only_specs);
         if specs.is_empty() {
@@ -267,6 +269,7 @@ impl ModuleCompilationSchedule {
                 Arc::clone(&self.source_module_origins),
                 stable_origin,
                 &fork_source,
+                selected_source_texts,
             )?);
         }
         Ok(())
@@ -319,6 +322,7 @@ pub(crate) fn discover_all_modules_in_project(
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
+    let mut selected_source_texts = SelectedSourceTextMap::default();
     discover_all_modules_in_project_with_check_only(
         config,
         project_path_resolver,
@@ -330,6 +334,7 @@ pub(crate) fn discover_all_modules_in_project(
         directory_dependency_resolution,
         resource_inputs,
         false,
+        &mut selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -339,7 +344,6 @@ pub(crate) fn discover_all_modules_in_project(
 /// Discover a project inventory and optionally prepare transient check-only units.
 ///
 /// The default project discovery path remains canonical-only. Check mode opts in explicitly so
-/// malformed or otherwise failing unselected sources do not affect build/dev commands.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_project_with_check_only(
     config: &Config,
@@ -352,6 +356,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
@@ -367,6 +372,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         resource_inputs,
         true,
         include_check_only,
+        selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -375,7 +381,6 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
 /// Discover a source-package inventory and optionally prepare transient check-only units.
 ///
 /// Source packages use the same explicit opt-in as the project boundary; their canonical graph
-/// jobs and provider bindings remain unchanged in either mode.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
@@ -388,6 +393,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
@@ -403,6 +409,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
         resource_inputs,
         false,
         include_check_only,
+        selected_source_texts,
         string_table,
         #[cfg(feature = "timers")]
         timing_boundary,
@@ -422,6 +429,7 @@ fn discover_all_modules_in_boundary(
     resource_inputs: &mut ResourceInputRegistry,
     require_normal_entry: bool,
     include_check_only: bool,
+    selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
     #[cfg(feature = "timers")] timing_boundary: crate::timing::TimingBoundaryId,
 ) -> Result<ModuleCompilationSchedule, PremergeFailure> {
@@ -464,6 +472,7 @@ fn discover_all_modules_in_boundary(
             project_path_resolver,
             style_directives,
             source_spans,
+            selected_source_texts,
             directory_dependency_resolution,
             project_module_graph,
             source_module_origins: Arc::clone(&source_module_origins),
@@ -599,6 +608,7 @@ fn prepare_check_only_module(
     source_module_origins: Arc<SourceModuleOriginTable>,
     stable_origin: StableModuleOriginIdentity,
     fork_source: &StringTableForkSource,
+    selected_source_texts: &mut SelectedSourceTextMap,
 ) -> Result<CheckOnlyModuleCompilationJob, PremergeFailure> {
     let candidate_source_ids = compiler_source_ids_for_indices(
         candidate_source_indices,
@@ -654,6 +664,7 @@ fn prepare_check_only_module(
         &entry_file_path,
         Some(FileRole::Normal),
         local_string_table,
+        selected_source_texts,
         #[cfg(feature = "timers")]
         None,
     )?;
@@ -700,15 +711,20 @@ fn prepare_check_only_module(
                 ))
             })?;
         let current_file_path = current_source.canonical_path().to_path_buf();
-        let input = prepare_owned_source_input(
-            current_source_index,
-            source_tree_index,
-            preparation_context.source_files,
-            source_spans,
-            style_directives,
-            syntax.string_table_mut(),
-        )
-        .map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        let input_result = {
+            let (syntax_string_table, selected_source_texts) =
+                syntax.source_preparation_inputs_mut();
+            prepare_owned_source_input(
+                current_source_index,
+                source_tree_index,
+                preparation_context.source_files,
+                source_spans,
+                style_directives,
+                syntax_string_table,
+                selected_source_texts,
+            )
+        };
+        let input = input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
         // `prepare_source` already returns the premerge lane, so propagate directly without
         // building an intermediate vessel.
         let prepared_output = syntax.prepare_source(input, source_spans)?;
@@ -849,15 +865,21 @@ fn prepare_check_only_module(
                 target_source_index.index()
             ))
         })?;
-        let target_input = prepare_owned_source_input(
-            target_source_index,
-            source_tree_index,
-            preparation_context.source_files,
-            source_spans,
-            style_directives,
-            syntax.string_table_mut(),
-        )
-        .map_err(|error| error.into_failure(syntax.string_table_mut()))?;
+        let target_input_result = {
+            let (syntax_string_table, selected_source_texts) =
+                syntax.source_preparation_inputs_mut();
+            prepare_owned_source_input(
+                target_source_index,
+                source_tree_index,
+                preparation_context.source_files,
+                source_spans,
+                style_directives,
+                syntax_string_table,
+                selected_source_texts,
+            )
+        };
+        let target_input =
+            target_input_result.map_err(|error| error.into_failure(syntax.string_table_mut()))?;
         // Already in the premerge lane; propagate without an intermediate vessel.
         let target_output = syntax.prepare_source(target_input, source_spans)?;
         let mut nested_content_sources = Vec::new();
@@ -1056,6 +1078,7 @@ fn discover_modules_serial_provider_capable(
         project_path_resolver,
         style_directives,
         source_spans,
+        selected_source_texts,
         directory_dependency_resolution,
         project_module_graph,
         source_module_origins,
@@ -1115,26 +1138,11 @@ fn discover_modules_serial_provider_capable(
             seed.module_id.index() as u32,
             &timing_logical_module_path,
         );
+        #[cfg(feature = "timers")]
+        let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
 
         let fork = fork_source.fork_for_module();
         let (local_string_table, string_table_base_len) = fork.into_parts();
-        #[cfg(feature = "timers")]
-        let timing_context = Some(crate::timing::TimingContext::for_module(timing_module_key));
-        let mut prepared_owned_sources = should_parallelize_owned_source_preparation(
-            candidate_source_indices.len(),
-        )
-        .then(|| {
-            prepare_owned_source_inputs(
-                &candidate_source_indices,
-                source_tree_index,
-                source_files,
-                source_spans,
-                style_directives,
-                &fork_source,
-                #[cfg(feature = "timers")]
-                timing_context,
-            )
-        });
         let mut syntax = preparation_context.begin_syntax_discovery(
             stable_origin.clone(),
             RegisteredModuleSources {
@@ -1144,6 +1152,7 @@ fn discover_modules_serial_provider_capable(
             &seed.entry_path,
             None,
             local_string_table,
+            selected_source_texts,
             #[cfg(feature = "timers")]
             timing_context,
         )?;
@@ -1175,25 +1184,23 @@ fn discover_modules_serial_provider_capable(
                 .source(source_index)
                 .canonical_path()
                 .to_path_buf();
-            let input_result = match prepared_owned_sources.as_mut() {
-                Some(prepared_sources) => merge_prepared_owned_source(
-                    source_index,
-                    prepared_sources,
-                    syntax.string_table_mut(),
-                ),
-                None => crate::timed_stage_attributed!(
-                    crate::timing::TimingMetric::FrontendPrepare,
-                    timing_context,
+            let input_result = crate::timed_stage_attributed!(
+                crate::timing::TimingMetric::FrontendPrepare,
+                timing_context,
+                {
+                    let (syntax_string_table, selected_source_texts) =
+                        syntax.source_preparation_inputs_mut();
                     prepare_owned_source_input(
                         source_index,
                         source_tree_index,
                         source_files,
                         source_spans,
                         style_directives,
-                        syntax.string_table_mut(),
-                    ),
-                ),
-            };
+                        syntax_string_table,
+                        selected_source_texts,
+                    )
+                },
+            );
             let input = match input_result {
                 Ok(input) => input,
                 Err(error) => return Err(error.into_failure(syntax.string_table_mut())),

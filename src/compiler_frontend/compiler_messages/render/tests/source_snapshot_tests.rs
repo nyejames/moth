@@ -4,11 +4,15 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_diagnostics_html_with_context;
 use crate::compiler_frontend::compiler_messages::render::primary_underline_length;
-use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_with_context;
+use crate::compiler_frontend::compiler_messages::render::terminal::{
+    format_label_messages_with_context, format_label_messages_with_context_from_root,
+    format_terminal_source_frame_for_test,
+};
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
 use crate::compiler_frontend::compiler_messages::{DiagnosticLabel, DiagnosticLabelMessage};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
+    SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::fs;
@@ -494,6 +498,77 @@ fn renderers_expand_a_preceding_tab_to_the_configured_stop_for_carets() {
 }
 
 #[test]
+fn terminal_source_and_caret_rows_share_gutter_and_tab_geometry() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let target_lines = [0usize, 9, 99, 999];
+    let mut source = String::new();
+    let mut target_offsets = Vec::new();
+    for line in 0..1000 {
+        if target_lines.contains(&line) {
+            target_offsets.push(source.len());
+            source.push_str("\tb\n");
+        } else {
+            source.push_str("noop\n");
+        }
+    }
+
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        &source,
+        &mut string_table,
+    );
+    let name = string_table.intern("b");
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    for (line, offset) in target_lines.into_iter().zip(target_offsets) {
+        let diagnostic = CompilerDiagnostic::unknown_value_name(
+            name,
+            Some(inline_span(source_id, (offset + 1) as u32, 1)),
+        );
+        let frame = format_terminal_source_frame_for_test(&diagnostic, context)
+            .expect("the terminal source frame should resolve");
+        let rows = frame.lines().collect::<Vec<_>>();
+        assert_eq!(
+            rows.len(),
+            3,
+            "line {line} should emit marker, source and caret rows"
+        );
+        let gutter_width = (line + 1).to_string().len().max(3);
+        let expected_source_label = format!("{:>width$} | ", line + 1, width = gutter_width);
+        assert!(
+            rows[1].starts_with(&expected_source_label),
+            "line {} should use the expected source gutter width: {frame}",
+            line + 1
+        );
+        let source_b = rows[1]
+            .find('b')
+            .expect("the expanded source row should retain the diagnosed scalar");
+        let caret = rows[2]
+            .find('^')
+            .expect("the caret row should retain the diagnosed underline");
+        assert_eq!(
+            source_b,
+            caret,
+            "line {} should align the caret with the expanded leading tab",
+            line + 1
+        );
+        assert_eq!(
+            rows[2].find('^').expect("caret should be present"),
+            rows[1]
+                .find(" | ")
+                .expect("source row should have a gutter")
+                + 3
+                + 8,
+            "line {} should expand a leading tab from the source-column origin",
+            line + 1
+        );
+    }
+}
+
+#[test]
 fn renderers_count_a_wide_cjk_scalar_as_two_cells_for_carets() {
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let mut string_table = StringTable::new();
@@ -554,6 +629,110 @@ fn renderers_count_a_combining_mark_as_zero_cells_for_carets() {
     );
 }
 
+#[test]
+fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
+    let primary_directory = tempfile::tempdir().expect("primary directory should exist");
+    let donor_directory = tempfile::tempdir().expect("donor directory should exist");
+    let mut primary_strings = StringTable::new();
+    let (primary_database, primary_source) = retained_source_database(
+        primary_directory.path(),
+        "caller.moth",
+        "missing\n",
+        &mut primary_strings,
+    );
+    let missing_name = primary_strings.intern("missing");
+    let primary_identity = Arc::new(FrozenIdentityContext::from_parts(
+        primary_strings,
+        primary_database,
+    ));
+
+    let mut donor_strings = StringTable::new();
+    let (donor_database, donor_source) = retained_source_database(
+        donor_directory.path(),
+        "donor.moth",
+        "generic body\n",
+        &mut donor_strings,
+    );
+    let donor_identity = Arc::new(FrozenIdentityContext::from_parts(
+        donor_strings,
+        donor_database,
+    ));
+    let donor_handle = FrozenIdentityHandle::new();
+    donor_handle
+        .install(Arc::clone(&donor_identity))
+        .expect("donor identity should install exactly once");
+
+    let diagnostic = CompilerDiagnostic::unknown_value_name(
+        missing_name,
+        Some(inline_span(primary_source, 0, 7)),
+    )
+    .with_labels(vec![DiagnosticLabel::secondary_with_frozen_identity(
+        Some(inline_span(donor_source, 0, 7)),
+        Some(DiagnosticLabelMessage::GenericInstantiationBodySite),
+        donor_handle,
+    )]);
+    let context = DiagnosticRenderContext::new(primary_identity.strings())
+        .with_frozen_identity(&primary_identity);
+
+    let terminal_labels = format_label_messages_with_context_from_root(
+        &diagnostic,
+        context,
+        primary_directory.path(),
+    );
+    assert_eq!(
+        terminal_labels,
+        vec!["info: src/donor.moth:1:1 - generic body operation failed here"],
+        "terminal related-site output should retain the resolved donor path and label message",
+    );
+
+    let html = render_diagnostics_html_with_context(
+        std::slice::from_ref(&diagnostic),
+        primary_directory.path(),
+        context,
+    );
+    assert!(
+        html.contains(
+            r#"class="diagnostic-label">info: src/donor.moth:1:1 - generic body operation failed here</p>"#,
+        ),
+        "HTML should render the related-site path and message without dropping the label: {html}",
+    );
+    assert_eq!(
+        html.matches("source-frame").count(),
+        1,
+        "secondary labels should not duplicate the primary source geometry: {html}",
+    );
+}
+
+#[test]
+fn html_escapes_dynamic_relative_source_paths() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "bad<&.moth",
+        "value\n",
+        &mut string_table,
+    );
+    let name = string_table.intern("value");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 0, 5)));
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    let html = render_diagnostics_html_with_context(
+        std::slice::from_ref(&diagnostic),
+        temporary_directory.path(),
+        context,
+    );
+    assert!(
+        html.contains("src/bad&lt;&amp;.moth:1:1"),
+        "relative source paths must be HTML escaped in location text: {html}",
+    );
+    assert!(
+        !html.contains("src/bad<&.moth:1:1"),
+        "raw relative source path markup must never be emitted: {html}",
+    );
+}
 /// A compilation-root span names no physical source, so renderers omit a source frame even when
 /// another retained snapshot is attached.
 #[test]

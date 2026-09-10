@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildBootstrap, ProjectBuilder, bootstrap_project_build};
+#[cfg(feature = "data_layout_memory_probe")]
 use crate::build_system::create_project_modules::compiled_boundary::FrozenRenderRetentionMetrics;
 use crate::build_system::create_project_modules::{
     FrontendCompilationMode, compile_project_frontend_with_inputs,
@@ -82,9 +83,10 @@ pub enum FrontendBenchmarkOutcome {
 
 /// Retained source and diagnostic storage observed at the frontend render boundary.
 ///
-/// These values are layout counters, not allocator ownership attribution. The probe records them
-/// beside live/peak allocator deltas so repeated runs can distinguish retained source snapshots,
-/// extended span rows, source identities and diagnostic labels.
+/// These values are layout counters, not allocator ownership attribution. They are populated only
+/// with the `data_layout_memory_probe` feature; normal benchmark builds carry zeroes. The probe
+/// records them beside peak, live-report and after-report-drop allocator deltas so repeated runs
+/// distinguish construction pressure from report-owner retention.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrontendBenchmarkRetention {
     pub source_snapshot_bytes: usize,
@@ -92,9 +94,11 @@ pub struct FrontendBenchmarkRetention {
     pub source_identity_slots: usize,
     pub diagnostic_records: usize,
     pub diagnostic_label_slots: usize,
-    pub frozen_context_records: usize,
+    /// Distinct frozen identity contexts reachable from range rows or donor-only handles.
+    pub retained_identity_contexts: usize,
 }
 
+#[cfg(feature = "data_layout_memory_probe")]
 impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
     fn from(metrics: FrozenRenderRetentionMetrics) -> Self {
         Self {
@@ -103,7 +107,7 @@ impl From<FrozenRenderRetentionMetrics> for FrontendBenchmarkRetention {
             source_identity_slots: metrics.source_identity_slots,
             diagnostic_records: metrics.diagnostic_records,
             diagnostic_label_slots: metrics.diagnostic_label_slots,
-            frozen_context_records: metrics.frozen_context_records,
+            retained_identity_contexts: metrics.retained_identity_contexts,
         }
     }
 }
@@ -233,24 +237,51 @@ fn build_config_inputs_from_options(
 
     Ok(typed_inputs)
 }
-
-impl std::error::Error for FrontendBenchmarkError {}
-
 /// Run one frontend benchmark for the given entry path.
 ///
-/// WHAT: validates the path, bootstraps an HTML project build, compiles through
-/// the frontend pipeline, and returns total plus per-stage timings. User
-/// diagnostics are a completed `Diagnosed` report; infrastructure failures
-/// remain typed errors.
-/// WHY: this is the narrow dev-tooling entry point that keeps benchmark
-/// orchestration out of the compiler frontend while reusing production setup.
-///
-/// Stage timings are populated when the `timers` feature is enabled and a
-/// collection scope is active during compilation. Counters are additionally
-/// populated when `benchmark_counters` is also enabled.
+/// The ordinary API drops the completed render message owner before returning. The memory probe
+/// uses the feature-gated owner-preserving API below so its allocator sample can distinguish live
+/// report retention from the after-report-drop baseline.
 pub fn run_frontend_benchmark(
     options: FrontendBenchmarkOptions,
 ) -> Result<FrontendBenchmarkReport, FrontendBenchmarkError> {
+    run_frontend_benchmark_with_owner_internal(options).map(|(report, _)| report)
+}
+
+/// Completed benchmark report plus its live diagnostic/render owner.
+///
+/// This type exists only in the data-layout probe lane. Keeping the owner private prevents normal
+/// callers from depending on compiler message internals while the value itself keeps that owner
+/// alive until [`Self::into_report`] is called.
+#[cfg(feature = "data_layout_memory_probe")]
+#[derive(Debug)]
+pub struct FrontendBenchmarkReportWithOwner {
+    pub report: FrontendBenchmarkReport,
+    owner: CompilerMessages,
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl FrontendBenchmarkReportWithOwner {
+    /// Drop the live report owner and return the public report value.
+    pub fn into_report(self) -> FrontendBenchmarkReport {
+        let Self { report, owner } = self;
+        drop(owner);
+        report
+    }
+}
+
+/// Run a frontend benchmark while retaining the final diagnostic/render owner.
+#[cfg(feature = "data_layout_memory_probe")]
+pub fn run_frontend_benchmark_with_report_owner(
+    options: FrontendBenchmarkOptions,
+) -> Result<FrontendBenchmarkReportWithOwner, FrontendBenchmarkError> {
+    run_frontend_benchmark_with_owner_internal(options)
+        .map(|(report, owner)| FrontendBenchmarkReportWithOwner { report, owner })
+}
+
+fn run_frontend_benchmark_with_owner_internal(
+    options: FrontendBenchmarkOptions,
+) -> Result<(FrontendBenchmarkReport, CompilerMessages), FrontendBenchmarkError> {
     let start = Instant::now();
 
     // Acquire the raw session before even path validation. A benchmark must
@@ -333,6 +364,7 @@ pub fn run_frontend_benchmark(
         FrontendCompilationMode::Canonical,
     ) {
         Ok(frontend) => {
+            #[cfg(feature = "data_layout_memory_probe")]
             let (messages, retention) = frontend
                 .into_render_messages_with_frozen_identity_and_metrics(
                     &mut string_table,
@@ -344,7 +376,23 @@ pub fn run_frontend_benchmark(
                     diagnostic_codes: Vec::new(),
                     message: error.msg,
                 })?;
-            (messages, FrontendBenchmarkRetention::from(retention), false)
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let messages = frontend
+                .into_render_messages_with_frozen_identity(
+                    &mut string_table,
+                    project_source_files.take(),
+                    None,
+                )
+                .map_err(|error| FrontendBenchmarkError {
+                    kind: FrontendBenchmarkFailureKind::Compilation,
+                    diagnostic_codes: Vec::new(),
+                    message: error.msg,
+                })?;
+            #[cfg(feature = "data_layout_memory_probe")]
+            let retention = FrontendBenchmarkRetention::from(retention);
+            #[cfg(not(feature = "data_layout_memory_probe"))]
+            let retention = FrontendBenchmarkRetention::default();
+            (messages, retention, false)
         }
         Err(messages) => (messages, FrontendBenchmarkRetention::default(), true),
     };
@@ -419,18 +467,21 @@ pub fn run_frontend_benchmark(
         }
     };
 
-    Ok(FrontendBenchmarkReport {
-        outcome,
-        error_count,
-        diagnostic_codes,
-        timing_schema_version,
-        total_ms,
-        warning_count,
-        warning_codes,
-        retention,
-        stages,
-        counters,
-    })
+    Ok((
+        FrontendBenchmarkReport {
+            outcome,
+            error_count,
+            diagnostic_codes,
+            timing_schema_version,
+            total_ms,
+            warning_count,
+            warning_codes,
+            retention,
+            stages,
+            counters,
+        },
+        messages,
+    ))
 }
 
 fn format_compiler_messages(messages: &CompilerMessages) -> String {

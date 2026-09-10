@@ -42,11 +42,13 @@ impl DiagnosticLabel {
         }
     }
 
-    pub(crate) fn set_frozen_identity_handle(
+    pub(crate) fn set_frozen_identity_handle_if_missing(
         &mut self,
         frozen_identity_handle: FrozenIdentityHandle,
     ) {
-        self.frozen_identity_handle = Some(frozen_identity_handle);
+        if self.frozen_identity_handle.is_none() {
+            self.frozen_identity_handle = Some(frozen_identity_handle);
+        }
     }
 
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {

@@ -36,6 +36,13 @@ pub(crate) enum GeneratedDeclarationIdentity {
 }
 
 impl GeneratedDeclarationIdentity {
+    pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
+        match self {
+            Self::Public(origin) => origin.module_origin(),
+            Self::ModulePrivate(identity) => identity.module_origin(),
+        }
+    }
+
     pub(crate) fn defining_name(&self) -> &str {
         match self {
             Self::Public(origin) => origin.defining_name(),
@@ -119,6 +126,10 @@ impl ModulePrivateExecutableIdentity {
 
     pub(crate) fn defining_name(&self) -> &str {
         &self.defining_name
+    }
+
+    pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
+        &self.module_origin
     }
 }
 

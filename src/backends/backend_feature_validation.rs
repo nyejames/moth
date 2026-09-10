@@ -350,7 +350,8 @@ fn validate_wasm_generic_runtime_values(
         )));
     };
 
-    let Some(span) = first_generic_runtime_module_span(hir, type_environment, reachable_blocks)
+    let Some(occurrence) =
+        first_generic_runtime_module_occurrence(hir, type_environment, reachable_blocks)
     else {
         return Ok(());
     };
@@ -358,10 +359,20 @@ fn validate_wasm_generic_runtime_values(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         string_table.intern(target.as_str()),
         UnsupportedBackendFeatureReason::GenericRuntimeValues,
-        Some(span),
+        occurrence.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// A reachable unsupported generic value, with optional source provenance.
+///
+/// WHAT: keeps semantic detection separate from diagnostic placement so a spanless value still
+///       produces the unsupported-feature diagnostic.
+/// WHY: generated or synthetic HIR may legitimately omit source spans.
+#[derive(Clone, Copy, Debug)]
+struct GenericRuntimeValueOccurrence {
+    span: Option<SourceSpan>,
 }
 
 /// Finds the first reachable expression whose type is a generic instance.
@@ -369,103 +380,97 @@ fn validate_wasm_generic_runtime_values(
 /// WHAT: scans only reachable blocks so dead helper bodies do not fail backend validation.
 /// WHY: generic runtime value detection needs the module TypeEnvironment, which is not available
 ///      in backend-neutral HIR reachability collection.
-fn first_generic_runtime_module_span(
+fn first_generic_runtime_module_occurrence(
     module: &HirModule,
     type_environment: &TypeEnvironment,
     reachable_blocks: &FxHashSet<BlockId>,
-) -> Option<SourceSpan> {
+) -> Option<GenericRuntimeValueOccurrence> {
     for block in &module.blocks {
         if !reachable_blocks.contains(&block.id) {
             continue;
         }
 
         for statement in &block.statements {
-            if let Some(span) =
-                first_generic_runtime_statement_span(statement, module, type_environment)
+            if let Some(occurrence) =
+                first_generic_runtime_statement_occurrence(statement, type_environment)
             {
-                return Some(span);
+                return Some(occurrence);
             }
         }
 
-        if let Some(span) =
-            first_generic_runtime_terminator_span(&block.terminator, module, type_environment)
+        if let Some(occurrence) =
+            first_generic_runtime_terminator_occurrence(&block.terminator, type_environment)
         {
-            return Some(span);
+            return Some(occurrence);
         }
     }
 
     None
 }
 
-fn first_generic_runtime_statement_span(
+fn first_generic_runtime_statement_occurrence(
     statement: &HirStatement,
-    module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceSpan> {
+) -> Option<GenericRuntimeValueOccurrence> {
     match &statement.kind {
         HirStatementKind::Assign { value, .. }
         | HirStatementKind::Expr(value)
         | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            first_generic_runtime_expression_span(value, module, type_environment)
+            first_generic_runtime_expression_occurrence(value, type_environment)
         }
         HirStatementKind::Call { args, .. } => args
             .iter()
-            .find_map(|arg| first_generic_runtime_expression_span(arg, module, type_environment)),
+            .find_map(|arg| first_generic_runtime_expression_occurrence(arg, type_environment)),
         HirStatementKind::CastOp { source, .. } => {
-            first_generic_runtime_expression_span(source, module, type_environment)
+            first_generic_runtime_expression_occurrence(source, type_environment)
         }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            first_generic_runtime_expression_span(source, module, type_environment)
+            first_generic_runtime_expression_occurrence(source, type_environment)
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            first_generic_runtime_expression_span(receiver, module, type_environment).or_else(
-                || {
-                    args.iter().find_map(|arg| {
-                        first_generic_runtime_expression_span(arg, module, type_environment)
-                    })
-                },
-            )
+            first_generic_runtime_expression_occurrence(receiver, type_environment).or_else(|| {
+                args.iter().find_map(|arg| {
+                    first_generic_runtime_expression_occurrence(arg, type_environment)
+                })
+            })
         }
         HirStatementKind::NumericOp { operands, .. } => match operands {
             HirNumericOperands::Unary { operand } => {
-                first_generic_runtime_expression_span(operand, module, type_environment)
+                first_generic_runtime_expression_occurrence(operand, type_environment)
             }
             HirNumericOperands::Binary { left, right } => {
-                first_generic_runtime_expression_span(left, module, type_environment).or_else(
-                    || first_generic_runtime_expression_span(right, module, type_environment),
-                )
+                first_generic_runtime_expression_occurrence(left, type_environment).or_else(|| {
+                    first_generic_runtime_expression_occurrence(right, type_environment)
+                })
             }
         },
         HirStatementKind::Drop(_) => None,
     }
 }
 
-fn first_generic_runtime_terminator_span(
+fn first_generic_runtime_terminator_occurrence(
     terminator: &HirTerminator,
-    module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceSpan> {
+) -> Option<GenericRuntimeValueOccurrence> {
     match terminator {
         HirTerminator::If { condition, .. } => {
-            first_generic_runtime_expression_span(condition, module, type_environment)
+            first_generic_runtime_expression_occurrence(condition, type_environment)
         }
         HirTerminator::FallibleBranch { result, .. }
         | HirTerminator::Return(result)
         | HirTerminator::ReturnSuccess(result)
         | HirTerminator::ReturnError(result) => {
-            first_generic_runtime_expression_span(result, module, type_environment)
+            first_generic_runtime_expression_occurrence(result, type_environment)
         }
         HirTerminator::Match { scrutinee, arms } => {
-            first_generic_runtime_expression_span(scrutinee, module, type_environment).or_else(
-                || {
-                    arms.iter().find_map(|arm| {
-                        arm.guard.as_ref().and_then(|guard| {
-                            first_generic_runtime_expression_span(guard, module, type_environment)
-                        })
+            first_generic_runtime_expression_occurrence(scrutinee, type_environment).or_else(|| {
+                arms.iter().find_map(|arm| {
+                    arm.guard.as_ref().and_then(|guard| {
+                        first_generic_runtime_expression_occurrence(guard, type_environment)
                     })
-                },
-            )
+                })
+            })
         }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
@@ -476,22 +481,23 @@ fn first_generic_runtime_terminator_span(
     }
 }
 
-fn first_generic_runtime_expression_span(
+fn first_generic_runtime_expression_occurrence(
     expression: &HirExpression,
-    _module: &HirModule,
     type_environment: &TypeEnvironment,
-) -> Option<SourceSpan> {
+) -> Option<GenericRuntimeValueOccurrence> {
     if matches!(
         type_environment.get(expression.ty),
         Some(TypeDefinition::GenericInstance(_))
     ) {
-        return expression.span;
+        return Some(GenericRuntimeValueOccurrence {
+            span: expression.span,
+        });
     }
 
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            first_generic_runtime_expression_span(left, _module, type_environment)
-                .or_else(|| first_generic_runtime_expression_span(right, _module, type_environment))
+            first_generic_runtime_expression_occurrence(left, type_environment)
+                .or_else(|| first_generic_runtime_expression_occurrence(right, type_environment))
         }
         HirExpressionKind::UnaryOp { operand, .. }
         | HirExpressionKind::TupleGet { tuple: operand, .. }
@@ -502,27 +508,27 @@ fn first_generic_runtime_expression_span(
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
-        } => first_generic_runtime_expression_span(operand, _module, type_environment),
+        } => first_generic_runtime_expression_occurrence(operand, type_environment),
         HirExpressionKind::StructConstruct { fields, .. } => {
             fields.iter().find_map(|(_, value)| {
-                first_generic_runtime_expression_span(value, _module, type_environment)
+                first_generic_runtime_expression_occurrence(value, type_environment)
             })
         }
         HirExpressionKind::Collection(items)
-        | HirExpressionKind::TupleConstruct { elements: items } => items.iter().find_map(|item| {
-            first_generic_runtime_expression_span(item, _module, type_environment)
-        }),
+        | HirExpressionKind::TupleConstruct { elements: items } => items
+            .iter()
+            .find_map(|item| first_generic_runtime_expression_occurrence(item, type_environment)),
         HirExpressionKind::MapLiteral(entries) => entries.iter().find_map(|entry| {
-            first_generic_runtime_expression_span(&entry.key, _module, type_environment).or_else(
-                || first_generic_runtime_expression_span(&entry.value, _module, type_environment),
+            first_generic_runtime_expression_occurrence(&entry.key, type_environment).or_else(
+                || first_generic_runtime_expression_occurrence(&entry.value, type_environment),
             )
         }),
         HirExpressionKind::Range { start, end } => {
-            first_generic_runtime_expression_span(start, _module, type_environment)
-                .or_else(|| first_generic_runtime_expression_span(end, _module, type_environment))
+            first_generic_runtime_expression_occurrence(start, type_environment)
+                .or_else(|| first_generic_runtime_expression_occurrence(end, type_environment))
         }
         HirExpressionKind::VariantConstruct { fields, .. } => fields.iter().find_map(|field| {
-            first_generic_runtime_expression_span(&field.value, _module, type_environment)
+            first_generic_runtime_expression_occurrence(&field.value, type_environment)
         }),
         HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)

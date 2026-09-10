@@ -4,14 +4,17 @@
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_messages::render::terminal::format_label_messages_with_context_from_root;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, display_column_number, display_line_number, primary_caret_padding,
-    primary_underline_length, relative_display_path_from_root, render_payload,
+    DiagnosticRenderContext, display_column_number, display_gutter_width, display_line_number,
+    expand_tabs_for_display, primary_caret_padding, primary_underline_length,
+    relative_display_path_from_root, render_payload,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
 use crate::compiler_frontend::utilities::basic::{normalize_path, portable_path_text};
 #[cfg(test)]
 use std::path::Path;
+
 fn severity_display(severity: DiagnosticSeverity) -> (&'static str, &'static str, &'static str) {
     match severity {
         DiagnosticSeverity::Error => (
@@ -36,25 +39,28 @@ fn render_source_frame(
     let display_root = normalize_path(project_root);
     let relative_path =
         relative_display_path_from_root(primary_position.path.as_path(), &display_root);
+    let escaped_relative_path = escape_html(&relative_path);
     let line = display_line_number(i32::try_from(primary_position.start.line).unwrap_or(i32::MAX));
     let column =
         display_column_number(i32::try_from(primary_position.start.column).unwrap_or(i32::MAX));
     let source_line = primary_position.line;
     let line_label = line.to_string();
-    let gutter_padding = " ".repeat(3usize.saturating_sub(line_label.len()));
-    let escaped_line = escape_html(source_line);
+    let gutter_width = display_gutter_width(line);
+    let gutter_padding = " ".repeat(gutter_width.saturating_sub(line_label.len()));
+    let empty_line_label = " ".repeat(line_label.len());
+    let escaped_line = escape_html(&expand_tabs_for_display(source_line));
 
     let location = match primary_position.host_path {
         Some(host_path) => format!(
             r#"<a class="source-location" href="file://{}">--> {}:{}:{}</a>"#,
             escape_html(&portable_path_text(host_path)),
-            relative_path,
+            escaped_relative_path,
             line,
             column,
         ),
         None => format!(
             r#"<span class="source-location">--> {}:{}:{}</span>"#,
-            relative_path, line, column
+            escaped_relative_path, line, column
         ),
     };
 
@@ -68,7 +74,7 @@ fn render_source_frame(
     let underlines = "^".repeat(underline_length);
 
     format!(
-        r#"<div class="source-frame">{location}<br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}  | </span><span class="source-caret">{padding}{underlines}</span></div>"#
+        r#"<div class="source-frame">{location}<br><span class="source-line-number">{gutter_padding}{line_label} | </span><span class="source-line">{escaped_line}</span><br><span class="source-line-number">{gutter_padding}{empty_line_label} | </span><span class="source-caret">{padding}{underlines}</span></div>"#
     )
 }
 
@@ -192,6 +198,12 @@ fn render_diagnostic_card(
 
     body.push_str(&source_frame);
 
+    for label in format_label_messages_with_context_from_root(diagnostic, context, project_root) {
+        body.push_str(&format!(
+            r#"<p class="diagnostic-label">{}</p>"#,
+            escape_html(&label)
+        ));
+    }
     format!(
         r#"<article class="diagnostic"{data_code}><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">{title}</span></div>{body}</article>"#,
         title = escape_html(descriptor.title),

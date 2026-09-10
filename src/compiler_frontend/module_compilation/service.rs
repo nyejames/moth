@@ -654,6 +654,7 @@ fn run_semantic_stages(
             &warnings,
             function_origin_lookup,
             Some(Rc::clone(&module_resources)),
+            None,
         )
     )?;
     let HirLoweringResult {
@@ -681,7 +682,7 @@ fn run_semantic_stages(
     let bootstrap_borrow_analysis = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendBorrowInitial,
         timing_context,
-        check_borrows(compiler, &hir_module, &warnings)
+        check_borrows(compiler, &hir_module, &warnings, None)
     )?;
     install_exact_concrete_call_summaries(
         &mut materialisation_context_builder,
