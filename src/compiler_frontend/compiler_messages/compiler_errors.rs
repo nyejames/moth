@@ -488,6 +488,21 @@ impl CompilerMessages {
         }
     }
 
+    /// Extend the domain-less project source row across diagnostics appended after build output.
+    ///
+    /// Late output-plan/write failures are produced after the warning rows were collected. They
+    /// still belong to the project source database, so keep that fallback range aligned through
+    /// the final combined freeze without widening package-domain rows.
+    pub(crate) fn extend_project_source_context_to_diagnostics(&mut self) {
+        let diagnostic_end = self.diagnostics.len();
+        for source_context in &mut self.render_source_contexts {
+            if source_context.domain.is_none() && !source_context.diagnostic_range.is_empty() {
+                source_context.diagnostic_range.end =
+                    source_context.diagnostic_range.end.max(diagnostic_end);
+            }
+        }
+    }
+
     /// Install precomputed source contexts for diagnostics appended at `diagnostic_offset`.
     ///
     /// Successful-build warnings are collected before the final project-owned warnings are

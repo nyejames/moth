@@ -22,8 +22,8 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages,
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticPayload, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidGenericInstantiationReason,
+    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
+    InvalidDependencyClauseReason, InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
@@ -1516,7 +1516,7 @@ html #= ||\n",
     )
     .expect("should write config");
     let package_source = format!(
-        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\nexport:\n    {function_name} type T |{parameter_name} T| -> Int:\n        return {inner_name}({parameter_name}, 1)\n    ;\n;\n",
+        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\nexport:\n    {function_name} type T |{parameter_name} T| -> Int:\n        if \"one\" is:\n            \"one\" => return 1\n            \"one\" => return 1\n            else => return 1\n        ;\n        return {inner_name}({parameter_name}, 1)\n    ;\n;\n",
     );
     let project_source = format!("@pkg {function_name}\nvalue Int = {function_name}(1)\n");
     fs::write(&package_path, &package_source).expect("should write package source");
@@ -1578,13 +1578,10 @@ html #= ||\n",
     let (diagnostic_index, diagnostic) = messages
         .diagnostics()
         .enumerate()
-        .next()
-        .expect("imported generic materialisation should retain one diagnostic");
-    assert!(
-        matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }),
-        "expected the imported generic body mismatch diagnostic, got {:?}",
-        diagnostic.payload
-    );
+        .find(|(_, diagnostic)| {
+            matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. })
+        })
+        .expect("imported generic materialisation should retain one type mismatch diagnostic");
 
     let context = messages.diagnostic_render_context(diagnostic_index);
     let primary = context
@@ -1679,6 +1676,23 @@ html #= ||\n",
         project_slot.canonical_os_path.as_deref(),
         Some(project_path.as_path()),
         "a package span must not be resolved through the project identity context"
+    );
+    let (warning_index, warning) = messages
+        .diagnostics()
+        .enumerate()
+        .find(|(_, diagnostic)| {
+            diagnostic.severity == DiagnosticSeverity::Warning && diagnostic.primary_span.is_some()
+        })
+        .expect("generated generic body should retain a spanful warning");
+    let warning_context = messages.diagnostic_render_context(warning_index);
+    let warning_position = warning_context
+        .primary_position(warning)
+        .expect("generated warning should resolve through its donor identity");
+    assert_eq!(warning_position.host_path, Some(package_path.as_path()));
+    assert!(
+        warning_position.path.ends_with("@mod.moth"),
+        "generated warning should use the package snapshot: {}",
+        warning_position.path.display()
     );
 }
 

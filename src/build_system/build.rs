@@ -1645,6 +1645,7 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
+
         Ok(Some(messages))
     }
 
@@ -1658,6 +1659,37 @@ impl BuildResult {
         self.take_warning_messages_before_freeze()?
             .map(|messages| messages.freeze_source_contexts())
             .transpose()
+    }
+    /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
+    ///
+    /// Clean builds still retain the project source database until output succeeds or fails. A
+    /// late failure therefore receives the same source table/range owner as authored warnings
+    /// instead of falling back to an empty table after clean-success cleanup.
+    pub(crate) fn take_output_failure_messages(
+        &mut self,
+        late_messages: CompilerMessages,
+    ) -> Result<CompilerMessages, CompilerError> {
+        let messages = if self.warnings.is_empty() {
+            let string_table = std::mem::take(&mut self.string_table);
+            let source_database = self.source_database.take();
+            self.warning_source_contexts.clear();
+            let mut messages = CompilerMessages::from_diagnostics(Vec::new(), string_table);
+            messages.append_messages_preserving_context(late_messages);
+            if let Some(source_database) = source_database {
+                messages.set_source_database(source_database);
+            }
+            messages
+        } else {
+            let mut messages = self.take_warning_messages_before_freeze()?.ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "warning report owner disappeared during output failure handoff",
+                )
+            })?;
+            messages.append_messages_preserving_context(late_messages);
+            messages.extend_project_source_context_to_diagnostics();
+            messages
+        };
+        messages.freeze_source_contexts()
     }
 }
 
@@ -1807,9 +1839,7 @@ pub fn build_project(
     // Direct-project resolution records are consumed by the semantic boundary and are not
     // retained in the successful build result.
     config.config_resolution_records.clear();
-    let source_database = (!warnings.is_empty())
-        .then_some(project_source_files)
-        .flatten();
+    let source_database = project_source_files;
     if warnings.is_empty() {
         warning_source_contexts.clear();
     }

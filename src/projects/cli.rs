@@ -384,8 +384,8 @@ fn build_command_outcome(
                     }
                 }
                 Err(BuildOutputStageError::Write(messages)) => {
-                    let warning_messages = match build_result.take_warning_messages() {
-                        Ok(warnings) => warnings,
+                    let messages = match build_result.take_output_failure_messages(messages) {
+                        Ok(messages) => messages,
                         Err(error) => {
                             return BuildCommandOutcome::OutputPlanError {
                                 messages: CompilerMessages::from_error(
@@ -394,35 +394,21 @@ fn build_command_outcome(
                                 ),
                             };
                         }
-                    };
-                    let messages = if let Some(mut warnings) = warning_messages {
-                        warnings.append_messages_preserving_context(messages);
-                        warnings
-                    } else {
-                        messages
                     };
                     BuildCommandOutcome::WriteError(messages)
                 }
                 Err(BuildOutputStageError::OutputPlan(error)) => {
-                    let warning_messages = match build_result.take_warning_messages() {
-                        Ok(warnings) => warnings,
-                        Err(error) => {
-                            return BuildCommandOutcome::OutputPlanError {
-                                messages: CompilerMessages::from_error(
-                                    error,
-                                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                                ),
-                            };
-                        }
-                    };
-                    let mut messages = CompilerMessages::from_error(
+                    let messages = CompilerMessages::from_error(
                         error,
                         crate::compiler_frontend::symbols::string_interning::StringTable::new(),
                     );
-                    if let Some(mut warnings) = warning_messages {
-                        warnings.append_messages_preserving_context(messages);
-                        messages = warnings;
-                    }
+                    let messages = match build_result.take_output_failure_messages(messages) {
+                        Ok(messages) => messages,
+                        Err(error) => CompilerMessages::from_error(
+                            error,
+                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                        ),
+                    };
                     BuildCommandOutcome::OutputPlanError { messages }
                 }
             }

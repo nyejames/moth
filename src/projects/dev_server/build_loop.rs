@@ -133,20 +133,12 @@ impl DevBuildExecutor for ProjectBuildExecutor {
             )
         });
         if let Err(messages) = output_result {
-            let warning_messages = match build_result.take_warning_messages() {
-                Ok(warnings) => warnings,
-                Err(error) => {
-                    return Err(CompilerMessages::from_error(
-                        error,
-                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                    ));
-                }
-            };
-            let messages = if let Some(mut warnings) = warning_messages {
-                warnings.append_messages_preserving_context(messages);
-                warnings
-            } else {
-                messages
+            let messages = match build_result.take_output_failure_messages(messages) {
+                Ok(messages) => messages,
+                Err(error) => CompilerMessages::from_error(
+                    error,
+                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                ),
             };
             return Err(messages);
         }

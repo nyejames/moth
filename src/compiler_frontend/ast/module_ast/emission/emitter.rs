@@ -71,6 +71,20 @@ use std::rc::Rc;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::timed_stage_attributed_opt;
 
+fn attach_frozen_identity_handle_to_diagnostic(
+    diagnostic: &mut CompilerDiagnostic,
+    frozen_identity_handle: &FrozenIdentityHandle,
+) {
+    if diagnostic.primary_span.is_some() {
+        diagnostic.set_primary_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+    }
+    for label in &mut diagnostic.labels {
+        if label.span.is_some() {
+            label.set_frozen_identity_handle_if_missing(frozen_identity_handle.clone());
+        }
+    }
+}
+
 pub(in crate::compiler_frontend::ast) struct AstEmission {
     /// Typed AST nodes emitted for this module (functions, structs, generic instances).
     pub(in crate::compiler_frontend::ast) ast: Vec<AstNode>,
@@ -751,6 +765,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
         );
+        let warning_start = self.warnings.len();
         let body = match function_body_to_ast(
             &mut token_stream,
             context,
@@ -758,7 +773,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut self.warnings,
             string_table,
         ) {
-            Ok(body) => body,
+            Ok(body) => {
+                if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
+                    for warning in &mut self.warnings[warning_start..] {
+                        attach_frozen_identity_handle_to_diagnostic(
+                            warning,
+                            frozen_identity_handle,
+                        );
+                    }
+                }
+                body
+            }
             Err(ExpressionParseError::Diagnostic(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     diagnostic,

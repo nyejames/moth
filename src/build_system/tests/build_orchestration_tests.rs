@@ -2246,6 +2246,94 @@ fn valid_distinct_output_folders_resolve_unchanged() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn late_output_failure_keeps_authored_setting_source_owner() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let source_root = root.join("src");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::write(
+        root.join("config.moth"),
+        "project #= |\n    name = \"docs\",\n    entry_root = \"src\",\n|\nhtml #= |\n    dev_output = \"dev\",\n    release_output = \"release\",\n|\n",
+    )
+    .expect("should write config");
+    fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
+        .expect("should write home page");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let first_build = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("first build should compile");
+    let first_plan = first_build
+        .directory_output_plan
+        .clone()
+        .expect("directory build should carry an output plan");
+    write_project_outputs(
+        &first_build.project,
+        &WriteOptions {
+            output_plan: OutputPlan::Directory(first_plan),
+            write_mode: WriteMode::AlwaysWrite,
+        },
+    )
+    .expect("first build should create its manifest");
+
+    let mut second_build = build_project(
+        &builder,
+        root.to_str().expect("project path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("second build should compile");
+    let second_plan = second_build
+        .directory_output_plan
+        .clone()
+        .expect("second build should carry an output plan");
+    let setting_span = second_plan
+        .setting_span
+        .expect("validated output plan should retain its authored setting span");
+    let late_messages = write_project_outputs(
+        &second_build.project,
+        &WriteOptions {
+            output_plan: OutputPlan::Directory(ValidatedOutputPlan {
+                output_root: second_plan.output_root.clone(),
+                project_root: second_plan.project_root.clone(),
+                entry_root: second_plan.entry_root.clone(),
+                owner: OutputOwner {
+                    builder: BuilderKind::Test,
+                    profile: BuildProfile::Dev,
+                },
+                setting_span: Some(setting_span),
+            }),
+            write_mode: WriteMode::AlwaysWrite,
+        },
+    )
+    .expect_err("a foreign output owner should produce a late diagnostic");
+
+    let messages = second_build
+        .take_output_failure_messages(late_messages)
+        .expect("late output report should freeze");
+    let diagnostic = messages
+        .error_diagnostics()
+        .next()
+        .expect("late output diagnostic should remain");
+    assert_eq!(diagnostic.primary_span, Some(setting_span));
+    let context = messages.diagnostic_render_context(0);
+    assert!(
+        context.frozen_identity.is_some(),
+        "late output diagnostic should retain the project source owner"
+    );
+    let rendered = terse::format_terse_diagnostic_with_context(diagnostic, context);
+    assert!(
+        rendered.contains("config.moth"),
+        "late output diagnostic should render its authored config path: {rendered}"
+    );
+}
+
 #[test]
 fn first_dev_and_release_builds_create_independent_owned_manifests() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
