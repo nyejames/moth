@@ -18,9 +18,12 @@ functions until a separate language decision changes binding-backed receiver met
 ```text
 STATUS: designed, queued
 CURRENT_SLICE: wait for native result slots and Core constant-evaluation infrastructure
-BLOCKERS: merge the package-foundation baseline, then land the compiler-owned native result-slot and Core const-eval prerequisite
-NEXT_ACTION: after that prerequisite lands, audit its final Text evaluator owner and run Phase 0 from current main
+BLOCKERS: land the compiler-owned native result-slot and Core const-eval prerequisite
+NEXT_ACTION: after that prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
 ```
+
+The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
+only remaining blocker.
 
 The prerequisite compiler work establishes truthful zero/one/many result slots, adds
 `ExternalConstEvalOp`, adds one AST-owned Core constant-evaluation path and proves it with the existing
@@ -319,9 +322,9 @@ Use the same explicit Moth whitespace set for Rust trim operations. Fallible Rus
 return their successful value or the canonical Text `BuiltinErrorCode` so future fallible const eval
 can reuse them directly.
 
-All Rust operations use the existing const-evaluation budget, concrete-text requirement and current
-Int range. Structural resource/site-root strings remain unavailable for character inspection until
-the existing fold owner can produce concrete text.
+All Rust operations use whatever evaluation bound the prerequisite delivers, plus the existing
+concrete-text requirement and current Int range. Structural resource/site-root strings remain
+unavailable for character inspection until the existing fold owner can produce concrete text.
 
 ### Constant-evaluation registration
 

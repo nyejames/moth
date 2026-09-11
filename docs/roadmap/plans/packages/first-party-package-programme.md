@@ -17,10 +17,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active parallel programme
-CURRENT_SLICE: Phase 0 - harden package foundations and first-party dependency policy
-BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint after the foundation baseline is merged
-NEXT_ACTION: finish the first-party dependency guard corrections, retain the accepted core-text.md design, then land the compiler checkpoint before Text implementation starts
+STATUS: active parallel programme, parked on its compiler prerequisite
+CURRENT_SLICE: none - Phase 0 foundations and Phase 1 workflow activation are delivered and merged
+BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails repository-wide on pre-existing `clippy::result_large_err` owned by the source/token/diagnostic data-layout plan
+NEXT_ACTION: land the compiler checkpoint, then start Phase 2 from main with `core-text.md`
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -419,7 +419,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Active next | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 0 | Package foundations | this plan | Delivered and merged | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | Designed, queued behind native result slots and Core const evaluation | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
@@ -600,7 +600,7 @@ Delivered before Phase 0:
 
 ### Phase 0 - package foundations hardening
 
-In progress:
+Delivered and merged:
 
 - removed `PackageOrigin::Standard` and Standard-tier documentation
 - kept `PackageOrigin::Dependency` for later package-system work
@@ -609,22 +609,34 @@ In progress:
   and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
 
-Do not activate `@core/text` implementation until this phase stays green.
+The guard classifies module loading lexically through the HTML JS scanner: static and dynamic
+`import`, `require` and re-export forms. Classic-worker `importScripts`, `new Worker(url)` and
+specifiers hidden in `eval`/`new Function` strings are outside lexical classification. Close that
+boundary in the Phase 10 guard audit, either by extending the scanner dispatch or by naming the
+exclusion in the validation ownership statement.
+
+Phase 0's mandatory `just validate` gate currently fails on `clippy::result_large_err` across 102
+build-system, frontend and benchmark `Result` boundaries. The root cause is diagnostic and error
+payload layout owned by `compiler-source-token-and-diagnostic-data-layout-plan.md`, whose exit
+criteria require removing it without boxing or lint suppression. Package work must not box shared
+diagnostic payloads to make the gate green.
+
+That red lane is a recorded external blocker, not a waiver: no code-bearing package phase starts
+while it is red. Phase 2 resumes from a `main` carrying both the compiler checkpoint and the
+data-layout correction, so the programme neither fixes the lint nor skips the gate.
 
 ### Phase 1 - activate the living package workflow
 
-- create and accept `core-text.md` from the required living-plan structure
-- complete the `@core/text` API and implementation audit
-- settle its useful v1 scope with the user
-- update the tracker and package progress row
-- verify that package-plan links and lifecycle wording remain accurate
-- commit the accepted text plan before implementation starts
+Delivered and merged:
 
-The design file and progress tracking may be prepared on this planning branch while Phase 0 closes.
-That does not authorize package code before the compiler prerequisite below.
+- created and accepted `core-text.md` from the required living-plan structure
+- completed the `@core/text` API and implementation audit, recorded as its current surface and
+  implementation debt
+- settled the useful v1 scope with the user
+- updated the tracker row and the packages-and-builders Core text rows
+- verified package-plan links and lifecycle wording
 
-Mandatory closeout: documentation, design-boundary, merge-isolation and validation audit. No text
-implementation belongs in this phase.
+No `@core/text` implementation belongs in this phase, and none landed.
 
 ### Compiler foundation checkpoint before package implementation
 

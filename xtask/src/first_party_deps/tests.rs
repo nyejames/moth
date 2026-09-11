@@ -156,6 +156,28 @@ fn rejects_an_unapproved_static_import() {
 }
 
 #[test]
+fn rejects_require_dynamic_import_and_re_export_module_loading() {
+    let source = r#"
+const helper = require("./helper.js");
+const lazy = import("./helper.js");
+export * from "lodash";
+"#;
+    let findings = audit_javascript_source("fixture.js", source);
+
+    assert_eq!(
+        findings.len(),
+        3,
+        "require, dynamic import and star re-export are each module loading: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport),
+        "every non-static-import loading form uses the unapproved-module rule: {findings:?}"
+    );
+}
+
+#[test]
 fn syntax_only_exports_are_not_dependencies_and_invalid_runtime_imports_are_typed() {
     let source = r#"
 const localName = value;
