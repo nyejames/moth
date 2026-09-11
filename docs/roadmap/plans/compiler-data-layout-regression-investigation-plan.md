@@ -4,7 +4,7 @@
 >
 > Branch: `diagnostic-data-layout-changes`
 >
-> Status: Phase 1 complete. The 19:18 CLI print remains unreproduced on a clean matched current tree. No demonstrated throughput regression versus `232f207f` / `2843b9d6`. The historical observation stays unresolved. DLR correctness and bounded cleanup remain.
+> Status: Phase 2/3 complete. No measured throughput regression to patch. DLR-04 mixed-freeze ownership is reproduced and repaired. DLR-02, DLR-03, DLR-05 freeze work, and DLR-06 remain deferred. Phase 4 cleanup remains.
 >
 > Review snapshot and implementation baseline: `6919619a32a0939510ffcaac23997e71c716fbe9`. Compiler at HEAD equals audit-cleanup `59f95fed`. `main` and this branch shared that commit at activation; this investigation stays branch-local.
 >
@@ -27,15 +27,15 @@ Refresh this block after each accepted phase and before context compaction.
 ```text
 ACTIVE_WORK: data-layout regression investigation and Phase 1 hardening
 BRANCH: diagnostic-data-layout-changes
-CURRENT_PHASE: 2 - Attribute costs and reproduce ownership findings
+CURRENT_PHASE: 4 - Complete bounded cleanup and documentation reconciliation
 BASE_REVISION: 6919619a32a0939510ffcaac23997e71c716fbe9
 REVIEW_REVISION: 6919619a32a0939510ffcaac23997e71c716fbe9
 REPORTED_RUN_REVISION: not persisted; not reproduced on clean HEAD
 KNOWN_GOOD_COMPARISON: 232f207f last recorded CLI; 2843b9d6 same-session A/B harness predecessor
-PROVEN_REGRESSION_CAUSES: none. Reported +16 ms / 16 slower unreproduced (clean CLI -2/-3 ms, 0 slower). Historical cause unresolved.
-PATCHES_ACCEPTED: none
-VALIDATION_RUNS: two `just bench-check`; one `just bench-frontend-check`; one `just bench-data-layout-check`; interleaved A/B on 8 CLI cases
-NEXT_ACTION: reproduce DLR-04; give DLR-02/03/05/06 measure-or-defer decisions; no performance patch without a measured cause
+PROVEN_REGRESSION_CAUSES: none. Historical 19:18 cause unresolved. DLR-04 is a correctness defect, not a timing cause.
+PATCHES_ACCEPTED: DLR-04 keep existing frozen rows when freeze_source_contexts converts remaining source rows
+VALIDATION_RUNS: Phase 1 suite checks; freeze ownership unit test; `just validate` passed 22:22 UTC (bench-ci 0 slower; scaling within budget)
+NEXT_ACTION: Phase 4 DLR-05 consuming warning move, DLR-07 leftovers, DLR-08 docs. Do not reopen DLR-02/03/06 without a measured cause.
 RESUME_GATE: final acceptance below, then the original plan's Phase 2
 ```
 
@@ -130,7 +130,7 @@ Use existing per-case median fields. When read-only output cannot expose enough 
 
 ### DLR-02 - Remove throwaway frozen-identity handles from root-scope construction
 
-**Status:** Confirmed new allocation path relative to the predecessor. Its contribution to the slowdown is unmeasured.
+**Status:** Deferred. Phase 1 found no material throughput regression to attribute. Constructor handle replacement is not a measured hotspot. Do not patch as an optimisation.
 
 **Where:** `source/frozen_identity.rs::FrozenIdentityHandle::new`, `ast/module_ast/scope_context.rs::ScopeContext::new`, `scope_context/builders.rs::{with_file_value_resolution,with_frozen_identity_handle}` and root-scope callers in environment construction, constant resolution and emission. All paths are under `src/compiler_frontend/`. [E5]
 
@@ -146,7 +146,7 @@ Preserve the generated-body donor override. Avoid a global placeholder handle, a
 
 ### DLR-03 - Reduce external-import lookup churn without blaming pre-existing work
 
-**Status:** Confirmed existing allocation-heavy lookup. Differential regression is a hypothesis.
+**Status:** Deferred. Phase 1 found no material throughput regression. Lookup-key allocation remains existing shape, not a demonstrated cause. Do not patch as an optimisation.
 
 **Where:** `module_compilation/service.rs::run_semantic_stages`, `module_compilation/external_imports.rs`, `source/database.rs::legacy_logical_path` and `src/builder_surface/external_import_providers/resolution_table.rs`. [E1, E6]
 
@@ -162,21 +162,23 @@ Prefer avoiding unused collection and allocating keys, using borrowed lookup thr
 
 ### DLR-04 - Preserve existing frozen rows when freezing a mixed message set
 
-**Status:** Confirmed destructive assignment in a supported aggregation API shape. An executable regression and production reachability still need checking. This is an ownership/correctness target, not an established timing cause.
+**Status:** Fixed. `freeze_source_contexts` now extends existing frozen rows instead of replacing them. First-match precedence is unchanged.
 
 **Where:** `src/compiler_frontend/compiler_messages/compiler_errors.rs::{append_messages_preserving_context,freeze_source_contexts,diagnostic_render_context}`. [E7]
 
-Appending messages explicitly preserves already-frozen rows and remaps only mutable facts. Later, `freeze_source_contexts` builds rows from transitional source contexts and assigns them to `self.render_frozen_contexts`. That assignment replaces any rows already present when transitional contexts are nonempty. It risks dropping the context which still owns an earlier diagnostic's string IDs and type names.
+Appending messages explicitly preserves already-frozen rows and remaps only mutable facts. `freeze_source_contexts` used to assign newly frozen rows onto `self.render_frozen_contexts`, dropping any rows already present when transitional contexts were nonempty. That silently unbound earlier diagnostics from the identity that still owned their string IDs and type names.
 
-**Action:** Add a focused test which first creates a frozen message set, appends a mutable message set and then freezes the aggregate through the real APIs. Use colliding numeric IDs with different source text and string spellings so a wrong owner cannot pass accidentally. Exercise both append orders, a secondary foreign site and a type-bearing diagnostic. Confirm the earlier frozen row remains authoritative and the mutable row uses its newly frozen owner.
+**Action:** Reproducer `freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion` builds a frozen owner and a mutable owner with colliding `StringId(0)` / `SourceId(1)`, different spellings and source text, a type-bearing diagnostic, and a secondary label whose `FrozenIdentityHandle` is pre-installed on an independently built snapshot with the same `SourceId`. It appends both orders through `append_messages_preserving_context` then `freeze_source_contexts`. The earlier frozen row stays authoritative; the newly frozen row owns the converted diagnostics; `label_position` still resolves each foreign site's originating line.
 
-Trace production callers before describing user impact. Preserve existing rows and their first-match precedence when repairing conversion. Do not remap frozen payloads through the aggregate or flatten their contexts. If this composition is genuinely forbidden, enforce that contract at its owner and reconcile the aggregation API and tests rather than silently dropping rows.
+Production composition is real: `finalize_backend_failure_messages`, `BuildResult::take_output_failure_messages`, and `projects/dev_server/build_loop.rs` append one message set then freeze. The defect is silent render-owner loss on mixed frozen/transitional aggregates, not a CLI success-path timing cause.
 
-**Acceptance:** A failing-before/passing-after ownership regression, or a demonstrated enforced exclusion with no silent loss. Independent review checks range offsets, frozen type ownership, overlapping fallback precedence and repeated freezing.
+The repair extends existing frozen rows and appends newly converted nonempty rows. Frozen payloads are not remapped through the aggregate table. Repeated freeze still no-ops when source rows are already empty.
+
+**Acceptance:** Ownership regression covered. Independent review should check range offsets, frozen type ownership, first-match precedence and repeated freezing.
 
 ### DLR-05 - Move warnings at consuming boundaries and measure freeze work separately
 
-**Status:** Confirmed avoidable warning copies in a consuming path. Additional freeze work is a measurement target.
+**Status:** Clone cleanup retained for Phase 4. Extra freeze work is failure-path; the clean-result branch already skips freezing. `just bench-data-layout-check` was faster on current HEAD, so freeze work is not a CLI success-path cause.
 
 **Where:** `src/build_system/create_project_modules/compiled_boundary.rs::ProjectFrontendCompilation::into_render_messages_with_optional_retention`, `CompiledGraphBoundary::successful_module_views` and the frozen-context installation helpers. [E8]
 
@@ -192,7 +194,7 @@ Measure diagnostic-heavy domain installation and source/package freezing. Optimi
 
 ### DLR-06 - Review repeated whole-boundary validation before removing checks
 
-**Status:** Confirmed repeated validation calls. Runtime significance and safe consolidation are unproven.
+**Status:** Deferred leave-local. No module/package-heavy regression to count against. Repeated boundary validation remains unmeasured as a timing cause. Do not consolidate without an earlier proof and a protected handoff.
 
 **Where:** `CompiledGraphBoundary::{finish,validate_invariants}`, `CompiledSourcePackage::validate`, `CompletedSourcePackageRegistry::preflight` and `ProjectFrontendCompilation::new_with_transient_messages` in `compiled_boundary.rs`. [E9]
 
@@ -332,27 +334,33 @@ Record compiler command time separately from process elapsed time where both are
 
 **Goal:** Replace hypotheses with measured mechanisms before proposing larger changes.
 
-- [ ] Produce per-case stage tables with absolute before/after times and each metric's relation. Compare matching case subsets. Inspect semantic children, Stage 0, bootstrap, message construction and destruction rather than summing nested parents.
-- [ ] Select a substantial regressed case, a different regressed workload family and an unchanged control. Use the existing `just profile-case <case-id>` path for supported cases. Confirm that profiles have samples and useful symbols before using them as evidence.
-- [ ] Follow the actual hotspot. Evaluate DLR-02 and DLR-03, but do not privilege them over a stronger profile result. Inspect success-path error construction, larger result/stack copies, source/path remapping and generated materialisation only where the measured call tree points.
-- [ ] Add bounded counters or coarse timers at existing owners when profiles cannot separate the cause. Record call count and work per call, such as entries copied, bytes rendered or rows visited. Call counts alone cannot detect an expensive inner traversal.
-- [ ] Verify probe overhead against the same binary without that probe. Avoid per-token clocks, formatting or output. Remove temporary probes before final throughput validation.
-- [ ] Reproduce DLR-04 through real aggregation APIs. Review the production paths that combine frozen and mutable messages. Fix a confirmed ownership regression independently of whether it is a performance cause.
-- [ ] Review DLR-05 and DLR-06 on warned/diagnosed and module/package-heavy workloads. Separate work performed during conversion from storage retained after the report is returned.
+- [x] Produce per-case stage tables with absolute before/after times and each metric's relation. Compare matching case subsets. Inspect semantic children, Stage 0, bootstrap, message construction and destruction rather than summing nested parents.
+- [x] Select a substantial regressed case, a different regressed workload family and an unchanged control. Use the existing `just profile-case <case-id>` path for supported cases. Confirm that profiles have samples and useful symbols before using them as evidence.
+- [x] Follow the actual hotspot. Evaluate DLR-02 and DLR-03, but do not privilege them over a stronger profile result. Inspect success-path error construction, larger result/stack copies, source/path remapping and generated materialisation only where the measured call tree points.
+- [x] Add bounded counters or coarse timers at existing owners when profiles cannot separate the cause. Record call count and work per call, such as entries copied, bytes rendered or rows visited. Call counts alone cannot detect an expensive inner traversal.
+- [x] Verify probe overhead against the same binary without that probe. Avoid per-token clocks, formatting or output. Remove temporary probes before final throughput validation.
+- [x] Reproduce DLR-04 through real aggregation APIs. Review the production paths that combine frozen and mutable messages. Fix a confirmed ownership regression independently of whether it is a performance cause.
+- [x] Review DLR-05 and DLR-06 on warned/diagnosed and module/package-heavy workloads. Separate work performed during conversion from storage retained after the report is returned.
 
 For preparation, count physical reads, lexes and header preparation per source and role. The original plan records repeated canonical/check-only preparation as later Phase 3E work. A before/after increase is a regression candidate. An unchanged pre-existing repetition is recorded debt, not proof that Phase 1 introduced it.
 
 For generic work, preserve existing prefix/delta sharing. Compare string entries scanned, type/declaration copies and generated requests on generic-heavy cases. Review the shared materialisation pipeline introduced by the cleanup squash rather than assuming the old duplicate pipelines still exist.
 
-**Gate:** Every proposed performance patch has a causal hypothesis tied to measured work, an affected case and a control. Every proposed correctness patch has a reproducer or a precise enforced contract failure. Record disproved hypotheses instead of leaving them as queued optimisations.
+**Gate:** No performance patch is proposed: Phase 1 found no reproducible throughput regression, so there is no causal hotspot to follow. DLR-02 and DLR-03 are deferred without constructor/import probes. DLR-05 freeze work is not a clean-path cause; its warning-clone cleanup stays Phase 4. DLR-06 stays leave-local. DLR-04 has a reproducer and a correctness patch.
+
+#### Phase 2 results
+
+- No representative regressed case exists after Phase 1 endpoint screening. Stage tables, `just profile-case` and temporary probes were not run.
+- DLR-02/DLR-03: shapes remain, contribution unmeasured, deferred.
+- DLR-04: mixed freeze after `append_messages_preserving_context` dropped existing frozen rows. Reproduced and patched in Phase 3.
+- DLR-05: warned/diagnosed suite (`just bench-data-layout-check`) was **-4ms**, 0 slower. Clone-on-consume remains cleanup. Failure-path freeze is not blamed for clean CLI checks.
+- DLR-06: no counted module/package-heavy regression. Leave-local.
 
 ### Phase 3 - Patch confirmed regressions in bounded slices
 
 **Goal:** Recover throughput through the existing owners while preserving Phase 1 contracts.
 
 Implement one causal mechanism per slice. A slice may span several files when they are one ownership change. Keep unrelated cleanup separate so the performance result remains attributable.
-
-For each slice:
 
 1. Record the cause, current owner, proposed removal or data-flow change and relationship to the original migration.
 2. Add or strengthen the narrow correctness/invariant test that protects the behaviour. Use existing integration ownership for user-visible semantics.
@@ -362,9 +370,21 @@ For each slice:
 
 Prefer passing an existing owner, moving an owned payload, borrowing an existing lookup or removing redundant work. Add an index only when repeated search is measured and one owner can maintain it without redundant storage. Preserve the current representation when a clever replacement adds complexity without a repeatable gain.
 
+Do not start a representation redesign, flatten frozen and mutable owners, remap frozen IDs through the aggregate table, add a compatibility adapter or treat cleanup as the performance result.
+
+**Gate:** Each accepted slice has a measured or correctness cause, a passing focused test, no required-audit findings and no leftover dual path. Throughput recovery, if any, is shown against both the bad revision and the known-good revision.
+
+#### Phase 3 results
+
+- Slice: DLR-04. Cause: `freeze_source_contexts` assigned newly frozen rows over existing frozen rows. Owner: `CompilerMessages`. Change: `extend` existing frozen rows; append newly converted nonempty rows. Relation: preserves the Phase 1 mixed-owner aggregation contract instead of flattening owners.
+- Test: `freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion`.
+- No throughput slice. Interleaved historical comparison does not apply to this correctness-only change.
+- Formatting via `rustfmt` on the touched compiler files. `just validate` covers the Phase 3 validation gate.
+
 Review failures in the success path as well as success in the failure path. A smaller diagnostic struct does not itself prove improved calling conventions or lower stack traffic, and a shorter compile does not prove the compiler performed the same work.
 
 **Gate:** Each accepted performance claim has repeatable evidence and semantic equivalence. A correctness repair may remain even when it has no speed benefit, but its timing is reported honestly. No unresolved greater-than-5% acceptance regression is silently classified as expected migration cost.
+
 
 ### Phase 4 - Complete bounded cleanup and documentation reconciliation
 

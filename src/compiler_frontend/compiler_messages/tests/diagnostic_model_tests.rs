@@ -29,7 +29,8 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, FrozenIdentityContext, LocalSpan, SourceDatabase, SourceId, SourceSpan,
+    ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
+    SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -765,6 +766,201 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
     assert!(rendered.contains("unfrozen-name"), "{rendered}");
     assert!(rendered.contains("expected FrozenType"), "{rendered}");
     assert!(rendered.contains("expected UnfrozenType"), "{rendered}");
+}
+
+fn colliding_owner_messages(
+    name: &str,
+    type_name: &str,
+    primary: &Path,
+    primary_text: &str,
+    foreign_text: &str,
+) -> CompilerMessages {
+    let mut string_table = StringTable::new();
+    let name_id = string_table.intern(name);
+    assert_eq!(name_id, StringId::from_index(0));
+    let type_path = InternedPath::from_single_str(type_name, &mut string_table);
+
+    let mut source_database =
+        SourceDatabase::build(std::iter::once(primary), primary, None, &mut string_table)
+            .expect("colliding owner source identities should build");
+    let primary_source = source_database
+        .get_by_canonical_path(primary)
+        .expect("colliding owner entry should be registered")
+        .id;
+    assert_eq!(primary_source, SourceId::from_index(1));
+    source_database
+        .retain_text(primary_source, primary_text.to_owned())
+        .expect("colliding owner source text should be retained");
+
+    let mut foreign_table = StringTable::new();
+    let foreign_path = Path::new("/package/foreign.moth");
+    let mut foreign_database = SourceDatabase::build(
+        std::iter::once(foreign_path),
+        foreign_path,
+        None,
+        &mut foreign_table,
+    )
+    .expect("foreign source identities should build");
+    let foreign_source = foreign_database
+        .get_by_canonical_path(foreign_path)
+        .expect("foreign source should be registered")
+        .id;
+    assert_eq!(
+        foreign_source, primary_source,
+        "independently built domains should exercise colliding SourceIds"
+    );
+    foreign_database
+        .retain_text(foreign_source, foreign_text.to_owned())
+        .expect("foreign source text should be retained");
+    let foreign_handle = FrozenIdentityHandle::new();
+    foreign_handle
+        .install(Arc::new(FrozenIdentityContext::from_parts(
+            foreign_table,
+            foreign_database,
+        )))
+        .expect("foreign identity should install once");
+
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let primary_span = Some(exact_span(primary_source, 0, 1, &mut span_builder));
+    let foreign_span = exact_span(foreign_source, 0, 1, &mut span_builder);
+
+    let mut type_environment = TypeEnvironment::new();
+    let (_, expected_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: type_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let unknown_name =
+        CompilerDiagnostic::unknown_value_name(name_id, primary_span).with_labels(vec![
+            DiagnosticLabel::secondary_with_frozen_identity(
+                Some(foreign_span),
+                Some(DiagnosticLabelMessage::PreviousDeclaration),
+                foreign_handle,
+            ),
+        ]);
+    let type_mismatch = CompilerDiagnostic::type_mismatch(
+        expected_type,
+        type_environment.builtins().int,
+        TypeMismatchContext::Assignment,
+        primary_span,
+    );
+
+    let mut messages =
+        CompilerMessages::from_diagnostics(vec![unknown_name, type_mismatch], string_table)
+            .with_type_context_for_all_diagnostics(type_environment);
+    messages.set_source_database(Arc::new(source_database));
+    messages
+}
+
+fn assert_foreign_secondary_site(messages: &CompilerMessages, diagnostic_index: usize, line: &str) {
+    let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
+    let position = messages
+        .diagnostic_render_context(diagnostic_index)
+        .label_position(&diagnostic.labels[0])
+        .expect("foreign secondary site should resolve through its installed owner");
+    assert_eq!(position.line, line);
+}
+
+fn assert_mixed_freeze_keeps_originating_owners(
+    first: CompilerMessages,
+    second: CompilerMessages,
+    first_name: &str,
+    second_name: &str,
+    first_type: &str,
+    second_type: &str,
+    first_foreign_line: &str,
+    second_foreign_line: &str,
+) {
+    let first_len = first.diagnostic_slice().len();
+    let mut messages = first;
+    messages.append_messages_preserving_context(second);
+    let messages = messages
+        .freeze_source_contexts()
+        .expect("mixed frozen and transitional owners should freeze together");
+
+    let first_identity = messages
+        .frozen_identity_context_for_diagnostic(0)
+        .expect("first diagnostic should keep its originating frozen owner");
+    assert_eq!(
+        first_identity.try_resolve_string(StringId::from_index(0)),
+        Some(first_name)
+    );
+    assert_foreign_secondary_site(&messages, 0, first_foreign_line);
+
+    let second_identity = messages
+        .frozen_identity_context_for_diagnostic(first_len)
+        .expect("appended diagnostic should keep its originating frozen owner");
+    assert_eq!(
+        second_identity.try_resolve_string(StringId::from_index(0)),
+        Some(second_name)
+    );
+    assert_foreign_secondary_site(&messages, first_len, second_foreign_line);
+
+    let rendered =
+        crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
+            &messages,
+        )
+        .join("\n");
+    assert!(rendered.contains(first_name), "{rendered}");
+    assert!(rendered.contains(second_name), "{rendered}");
+    assert!(rendered.contains(first_type), "{rendered}");
+    assert!(rendered.contains(second_type), "{rendered}");
+}
+
+#[test]
+fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
+    let primary = Path::new("/project/main.moth");
+
+    assert_mixed_freeze_keeps_originating_owners(
+        colliding_owner_messages(
+            "frozen-name",
+            "FrozenType",
+            primary,
+            "frozen_primary_alpha",
+            "frozen_foreign_omega",
+        )
+        .freeze_source_contexts()
+        .expect("frozen owner should freeze before mixed aggregation"),
+        colliding_owner_messages(
+            "mutable-name",
+            "MutableType",
+            primary,
+            "mutable_primary_gamma",
+            "mutable_foreign_delta",
+        ),
+        "frozen-name",
+        "mutable-name",
+        "FrozenType",
+        "MutableType",
+        "frozen_foreign_omega",
+        "mutable_foreign_delta",
+    );
+    assert_mixed_freeze_keeps_originating_owners(
+        colliding_owner_messages(
+            "mutable-name",
+            "MutableType",
+            primary,
+            "mutable_primary_gamma",
+            "mutable_foreign_delta",
+        ),
+        colliding_owner_messages(
+            "frozen-name",
+            "FrozenType",
+            primary,
+            "frozen_primary_alpha",
+            "frozen_foreign_omega",
+        )
+        .freeze_source_contexts()
+        .expect("frozen owner should freeze before mixed aggregation"),
+        "mutable-name",
+        "frozen-name",
+        "MutableType",
+        "FrozenType",
+        "mutable_foreign_delta",
+        "frozen_foreign_omega",
+    );
 }
 
 #[test]

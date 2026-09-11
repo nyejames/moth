@@ -531,13 +531,15 @@ impl CompilerMessages {
                 frozen_context
             }));
     }
-    /// Replace transitional source rows with frozen identity rows without copying source or
-    /// diagnostic storage.
+    /// Convert remaining transitional source rows into frozen identity rows without copying source
+    /// or diagnostic storage, and without discarding frozen rows already present.
     ///
-    /// The first source row consumes the aggregate string table; subsequent rows share that
-    /// frozen string allocation while moving only their own source database. Empty package rows
-    /// are retained only when an explicitly owned diagnostic span needs their domain. They supply
-    /// the corresponding frozen handle but never become default render ranges.
+    /// Existing frozen identity rows stay at the front so first-match lookup still prefers the
+    /// earlier owner. The first newly frozen source row consumes the aggregate string table;
+    /// subsequent rows share that frozen string allocation while moving only their own source
+    /// database. Empty package rows are retained only when an explicitly owned diagnostic span
+    /// needs their domain. They supply the corresponding frozen handle but never become default
+    /// render ranges.
     pub(crate) fn freeze_source_contexts(mut self) -> Result<Self, CompilerError> {
         let mut required_handle_domains = HashSet::new();
         for diagnostic in &self.diagnostics {
@@ -670,15 +672,17 @@ impl CompilerMessages {
             }
         }
 
-        self.render_frozen_contexts = frozen_contexts
-            .into_iter()
-            .filter_map(|(diagnostic_range, _, identity)| {
-                (!diagnostic_range.is_empty()).then_some(RenderFrozenContext {
-                    diagnostic_range,
-                    identity,
-                })
-            })
-            .collect();
+        self.render_frozen_contexts
+            .extend(
+                frozen_contexts
+                    .into_iter()
+                    .filter_map(|(diagnostic_range, _, identity)| {
+                        (!diagnostic_range.is_empty()).then_some(RenderFrozenContext {
+                            diagnostic_range,
+                            identity,
+                        })
+                    }),
+            );
         self.ensure_frozen_identity_handles_installed()?;
         Ok(self)
     }
