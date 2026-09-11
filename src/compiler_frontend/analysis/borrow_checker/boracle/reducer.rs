@@ -6,9 +6,6 @@
 //!      still describes the same reference and experiment classes and outcome identity. Runtime
 //!      conflict traces and outcome counts are deliberately not compared because reductions
 //!      densely renumber rows and may change how many executions are explored.
-// Reduction has no production caller. This test-time developer facility has a reachable workflow
-// deferred in the roadmap without an owning plan, so keep its complete surface warning-free.
-#![allow(dead_code)]
 
 use super::differential::{OracleComparisonClass, OracleComparisonSet, compare_problem_parts};
 use super::oracle::{OracleBounds, OracleLimitReason, OracleOutcome, execute_bounded};
@@ -707,7 +704,7 @@ fn remap_parts(parts: BorrowProblemParts, keep: &KeepRows) -> Option<BorrowProbl
             Some(Event {
                 id: mapped(&event_map, index)?,
                 point: mapped(&point_map, event.point.index())?,
-                source: event.source.clone(),
+                source: event.source,
                 kind: remap_event_kind(
                     &event.kind,
                     &binding_map,

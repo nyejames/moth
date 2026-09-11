@@ -103,6 +103,27 @@ fn nested_route_resource_is_relative_to_context_parent() {
 }
 
 #[test]
+fn mixed_case_prefixes_follow_output_identity_and_preserve_url_spelling() {
+    let resource_origin = origin("Docs", "Assets/Logo.svg");
+    let mut plan = HtmlResourceOutputPlan::new("renderer-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    plan_origin_for(
+        &mut plan,
+        resource_origin.clone(),
+        context.clone(),
+        &mut StringTable::new(),
+    );
+
+    let rendered = renderer(&plan, &context, "/")
+        .render_owned(&OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Resource(resource_origin),
+        ]))
+        .expect("resource URL should render");
+
+    assert_eq!(rendered, "./Assets/Logo.svg");
+}
+
+#[test]
 fn parent_relative_resource_retains_parent_segments() {
     let resource_origin = origin("docs", "assets/logo.svg");
     let mut plan = HtmlResourceOutputPlan::new("renderer-tests");
@@ -179,51 +200,6 @@ fn one_planned_origin_renders_relative_to_each_consuming_page() {
             .render_owned(&value)
             .unwrap(),
         "../assets/logo.svg"
-    );
-}
-
-#[test]
-fn stylesheet_and_page_contexts_use_their_own_parents() {
-    let resource_origin = origin("assets", "site.css");
-    let mut plan = HtmlResourceOutputPlan::new("renderer-tests");
-    let page_context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
-    let stylesheet_context =
-        ResourceUrlContext::Stylesheet(PathBuf::from("styles/nested/main.css"));
-    let mut string_table = StringTable::new();
-    plan_origin_for(
-        &mut plan,
-        resource_origin.clone(),
-        page_context.clone(),
-        &mut string_table,
-    );
-    plan_origin_for(
-        &mut plan,
-        resource_origin.clone(),
-        stylesheet_context.clone(),
-        &mut string_table,
-    );
-    let value = OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(resource_origin)]);
-
-    assert_eq!(
-        renderer(&plan, &page_context, "/")
-            .render_owned(&value)
-            .unwrap(),
-        "../assets/site.css"
-    );
-    assert_eq!(
-        renderer(&plan, &stylesheet_context, "/")
-            .render_owned(&value)
-            .unwrap(),
-        "../../assets/site.css"
-    );
-    assert_ne!(
-        renderer(&plan, &page_context, "/")
-            .render_owned(&value)
-            .unwrap(),
-        renderer(&plan, &stylesheet_context, "/")
-            .render_owned(&value)
-            .unwrap(),
-        "page and stylesheet parents must produce different relatives"
     );
 }
 

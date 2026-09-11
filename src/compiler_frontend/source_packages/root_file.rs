@@ -30,10 +30,6 @@ pub(crate) struct PreparedSourcePackageRoots {
 }
 
 impl PreparedSourcePackageRoots {
-    pub(crate) fn empty() -> Self {
-        Self::default()
-    }
-
     /// Build one prepared contract from Stage 0's validated canonical roots and root files.
     pub(crate) fn from_entries(
         entries: impl IntoIterator<Item = (String, PathBuf, PathBuf)>,

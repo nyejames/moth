@@ -61,58 +61,19 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+// WHAT: route the per-path preparation observer to test-owned storage only in test builds.
+// WHY: `synthetic_preparation_*` and repeated-template tests assert that each path is prepared
+// exactly once and retained snapshots are never prepared again; the shipping fallback is inline.
 #[cfg(test)]
-use std::collections::HashMap;
-#[cfg(test)]
-use std::sync::{LazyLock, Mutex};
+#[path = "pipeline_test_support.rs"]
+pub(crate) mod test_support;
 
-#[cfg(test)]
-static FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-#[cfg(test)]
-static FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST: Mutex<Option<PathBuf>> = Mutex::new(None);
+#[cfg(not(test))]
+mod test_support {
+    use super::FrontendFilePrepareSource;
 
-#[cfg(test)]
-fn record_file_frontend_prepare_for_test(source: &FrontendFilePrepareSource<'_>) {
-    let source_path = match source {
-        FrontendFilePrepareSource::Moth { source_path, .. }
-        | FrontendFilePrepareSource::MothTemplate { source_path, .. }
-        | FrontendFilePrepareSource::PlainMarkdown { source_path, .. } => source_path,
-    };
-    let prefix = FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST
-        .lock()
-        .expect("file preparation test hook lock poisoned");
-    if prefix
-        .as_ref()
-        .is_none_or(|tracked_prefix| source_path.starts_with(tracked_prefix))
-    {
-        *FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
-            .lock()
-            .expect("file preparation count test hook lock poisoned")
-            .entry(source_path.clone())
-            .or_insert(0) += 1;
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn reset_file_frontend_prepare_count_for_test(tracked_prefix: &Path) {
-    *FILE_FRONTEND_PREPARE_TRACK_PREFIX_FOR_TEST
-        .lock()
-        .expect("file preparation test hook lock poisoned") = Some(tracked_prefix.to_path_buf());
-    FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
-        .lock()
-        .expect("file preparation count test hook lock poisoned")
-        .clear();
-}
-
-#[cfg(test)]
-pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usize {
-    FILE_FRONTEND_PREPARE_COUNTS_FOR_TEST
-        .lock()
-        .expect("file preparation count test hook lock poisoned")
-        .get(path)
-        .copied()
-        .unwrap_or(0)
+    #[inline(always)]
+    pub(super) fn record_prepare(_source: &FrontendFilePrepareSource<'_>) {}
 }
 
 pub(crate) struct CompilerFrontend<'a> {
@@ -294,8 +255,7 @@ impl CompilerFrontend<'static> {
         local_string_table: &mut StringTable,
     ) -> SourcePreparationDelta {
         add_frontend_counter(FrontendCounter::FilePreparationPassCount, 1);
-        #[cfg(test)]
-        record_file_frontend_prepare_for_test(&input.source);
+        test_support::record_prepare(&input.source);
 
         let file_id = input.source_id;
         let mut span_builder = input.span_builder;

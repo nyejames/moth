@@ -73,8 +73,12 @@ fn borrow_problem_copy_provenance_dump_is_deterministic() {
 fn boracle_loans_track_cfg_kills_at_relevant_points() {
     let problem = loan_conflict_problem();
     let origins = super::OriginSolver::solve(&problem).expect("origins should solve");
-    let solution =
-        super::LoanSolver::solve(&problem, &origins).expect("loan conflict problem should solve");
+    let solution = super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("loan conflict problem should solve");
     let loan = solution
         .loans()
         .first()
@@ -88,8 +92,12 @@ fn boracle_loans_track_cfg_kills_at_relevant_points() {
 fn boracle_conflicts_produce_structured_overlap_witnesses() {
     let problem = loan_conflict_problem();
     let origins = super::OriginSolver::solve(&problem).expect("origins should solve");
-    let solution =
-        super::LoanSolver::solve(&problem, &origins).expect("loan conflict problem should solve");
+    let solution = super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("loan conflict problem should solve");
 
     assert_eq!(solution.conflicts().len(), 1);
     let conflict = &solution.conflicts()[0];
@@ -124,27 +132,6 @@ fn boracle_calls_project_alias_result_provenance_through_arguments() {
             .loans()
             .iter()
             .any(|loan| loan.uses.as_ref() == [UseId::new(0)])
-    );
-}
-
-#[test]
-fn boracle_empty_alias_params_problem_is_rejected_as_malformed_input() {
-    // WHAT: an empty AliasParams index list claims the result derives from call arguments
-    // while naming none of them.
-    // WHY: that is malformed normalized input. Accepting it used to publish the call-result
-    // origin as a fresh independent generation. `BorrowProblem::new` must reject it with a
-    // CompilerError naming the origin, call, event and result place; the solver never sees
-    // the problem, and no flow can make the result look fresh.
-    let error = BorrowProblem::new(alias_params_call_parts(Vec::new()))
-        .expect_err("empty AliasParams must be rejected before the origin solver runs");
-
-    assert!(
-        error.msg.contains("empty AliasParams")
-            && error.msg.contains("CallEffect event")
-            && error.msg.contains("result place")
-            && error.msg.contains("EventId(2)")
-            && error.msg.contains("PlaceId(1)"),
-        "expected the rejection to name origin, call, event and result place, got: {error:?}"
     );
 }
 
@@ -223,26 +210,10 @@ fn boracle_alias_params_with_partial_argument_state_stays_conservatively_unknown
 }
 
 #[test]
-fn boracle_aggregates_retain_stored_child_trace() {
+fn boracle_aggregate_child_access_remains_conflicting() {
     let problem = aggregate_problem();
-    let solution = super::OriginSolver::solve(&problem).expect("aggregate problem should solve");
-
-    assert!(solution.traces().iter().any(|trace| {
-        trace.rule == super::OriginTraceRule::Aggregate
-            && trace.input_origins.as_ref() == [ValueOriginId::new(0)]
-    }));
-    assert_eq!(
-        solution
-            .origins_after_event(EventId::new(2), PlaceId::new(3))
-            .expect("projected child state should be retained"),
-        [ValueOriginId::new(0)]
-    );
-    assert!(solution.traces().iter().any(|trace| {
-        trace.event == EventId::new(2)
-            && trace.rule == super::OriginTraceRule::Projection
-            && trace.input_origins.as_ref() == [ValueOriginId::new(0)]
-    }));
     let report = super::BoracleSolver::solve(&problem).expect("aggregate report should solve");
+
     assert!(
         report
             .loans
@@ -301,22 +272,6 @@ fn boracle_mixed_binding_preserves_alias_and_slot_write_possibilities() {
     let problem = mixed_binding_problem();
     let solution = super::OriginSolver::solve(&problem).expect("mixed binding should solve");
 
-    assert_eq!(
-        solution
-            .origins_after_event(EventId::new(7), PlaceId::new(1))
-            .expect("mixed write should publish every possible origin"),
-        [ValueOriginId::new(0), ValueOriginId::new(2)]
-    );
-    assert_eq!(
-        solution
-            .origins_after_event(EventId::new(14), PlaceId::new(1))
-            .expect("later mixed replacement should remove the old slot generation"),
-        [ValueOriginId::new(0), ValueOriginId::new(3)]
-    );
-    assert!(solution.traces().iter().any(|trace| {
-        trace.event == EventId::new(7) && trace.rule == super::OriginTraceRule::Mixed
-    }));
-    assert!(solution.is_write_through_event(EventId::new(7)));
     assert!(matches!(
         solution
             .relations()
@@ -331,23 +286,12 @@ fn boracle_mixed_binding_preserves_alias_and_slot_write_possibilities() {
     ));
 
     let report = super::BoracleSolver::solve(&problem).expect("mixed binding report should solve");
-    let mixed_event_loans = report
-        .loans
-        .loans()
-        .iter()
-        .filter(|loan| loan.issue_event == Some(EventId::new(7)))
-        .collect::<Vec<_>>();
-    assert_eq!(mixed_event_loans.len(), 1);
-    assert_eq!(
-        mixed_event_loans[0].origins,
-        vec![ValueOriginId::new(2)].into_boxed_slice()
-    );
     assert!(
         report
             .loans
             .conflicts()
             .iter()
-            .any(|witness| { witness.access_use == Some(UseId::new(1)) })
+            .any(|witness| witness.access_use == Some(UseId::new(1)))
     );
 }
 
@@ -466,57 +410,7 @@ fn boracle_dead_exclusive_loan_is_only_enabled_by_its_experiment() {
 }
 
 #[test]
-fn boracle_reactivity_is_observability_metadata_not_a_loan() {
-    let report =
-        super::BoracleSolver::solve(&reactive_problem()).expect("reactive problem should solve");
-
-    assert_eq!(report.reactive_observations.len(), 1);
-    assert!(report.loans.loans().is_empty());
-    assert!(!report.final_use_candidate_for_place(PlaceId::new(0)));
-}
-
-#[test]
-fn boracle_optional_transfer_requires_a_proven_final_use() {
-    let report = super::BoracleSolver::solve(&copy_problem()).expect("copy problem should solve");
-
-    assert!(!report.final_use_candidate_at(PlaceId::new(0), PointId::new(0)));
-    assert!(report.final_use_candidate_at(PlaceId::new(0), PointId::new(5)));
-    assert!(!report.final_use_candidate_for_origin_after_event(
-        ValueOriginId::new(0),
-        EventId::new(1),
-        PointId::new(2),
-    ));
-    assert!(report.final_use_candidate_for_origin_after_event(
-        ValueOriginId::new(0),
-        EventId::new(2),
-        PointId::new(3),
-    ));
-}
-
-#[test]
-fn boracle_origin_and_loan_last_use_queries_stop_at_exact_events() {
-    let copy_report =
-        super::BoracleSolver::solve(&copy_problem()).expect("copy report should solve");
-    let origin_after_copy = copy_report
-        .origin_last_use_after_event
-        .iter()
-        .find(|result| {
-            result.subject == LastUseSubject::Origin(ValueOriginId::new(0))
-                && result.span == LastUseLocation::after_event(EventId::new(1), PointId::new(2))
-        })
-        .expect("origin query after copy event should be present");
-    assert_eq!(origin_after_copy.status, FutureUseStatus::MustBeUsed);
-
-    let origin_after_read = copy_report
-        .origin_last_use_after_event
-        .iter()
-        .find(|result| {
-            result.subject == LastUseSubject::Origin(ValueOriginId::new(0))
-                && result.span == LastUseLocation::after_event(EventId::new(2), PointId::new(3))
-        })
-        .expect("origin query after final read should be present");
-    assert_eq!(origin_after_read.status, FutureUseStatus::NoFutureUse);
-
+fn boracle_loan_last_use_query_stops_at_exact_event() {
     let loan_report =
         super::BoracleSolver::solve(&loan_conflict_problem()).expect("loan report should solve");
     let loan_after_issue = loan_report
@@ -524,7 +418,7 @@ fn boracle_origin_and_loan_last_use_queries_stop_at_exact_events() {
         .iter()
         .find(|result| {
             result.subject == LastUseSubject::Loan(LoanId::new(0))
-                && result.span == LastUseLocation::after_event(EventId::new(0), PointId::new(1))
+                && result.location == LastUseLocation::after_event(EventId::new(0), PointId::new(1))
         })
         .expect("loan query after issue should be present");
     assert_eq!(loan_after_issue.status, FutureUseStatus::MustBeUsed);
@@ -2446,37 +2340,6 @@ fn aggregate_problem() -> BorrowProblem {
     .expect("aggregate problem should validate")
 }
 
-fn reactive_problem() -> BorrowProblem {
-    BorrowProblem::new(with_return_terminator(BorrowProblemParts {
-        bindings: vec![Binding::synthetic(BindingId::new(0))],
-        points: vec![
-            ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
-            ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
-            ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
-        ],
-        blocks: vec![CfgBlock::new(
-            BlockId::new(0),
-            PointId::new(0),
-            PointId::new(2),
-            vec![EventId::new(0)],
-        )],
-        entry: BlockId::new(0),
-        exits: vec![BlockId::new(0)],
-        places: vec![Place::new(PlaceId::new(0), BindingId::new(0), Vec::new())],
-        origins: vec![ValueOrigin::fresh(ValueOriginId::new(0))],
-        events: vec![Event::new(
-            EventId::new(0),
-            PointId::new(1),
-            EventKind::ReactiveObserve {
-                place: PlaceId::new(0),
-            },
-            EventSource::none(),
-        )],
-        ..BorrowProblemParts::default()
-    }))
-    .expect("reactive problem should validate")
-}
-
 fn projection_replacement_problem() -> BorrowProblem {
     let projection = super::super::problem::ProjectionElem::FixedIndex(0);
     BorrowProblem::new(with_return_terminator(BorrowProblemParts {
@@ -2824,6 +2687,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
                 kind: HirExpressionKind::Load(HirPlace::Local(result)),
                 ty: builtin_type_ids::INT,
                 value_kind: ValueKind::Place,
+                region,
                 span: None,
             }),
         }],

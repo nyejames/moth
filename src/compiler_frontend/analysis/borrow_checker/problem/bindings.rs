@@ -39,6 +39,7 @@ impl Binding {
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn synthetic(id: BindingId) -> Self {
         Self::new(id, None, None, false, false, EventSource::none())
     }

@@ -247,7 +247,10 @@ impl<'a> CommentScanner<'a> {
     // ------------------------
 
     fn current_char(&self) -> char {
-        self.source[self.pos..].chars().next().unwrap_or('\0')
+        self.source[self.pos..]
+            .chars()
+            .next()
+            .expect("scanner is not at end")
     }
 
     fn is_at_end(&self) -> bool {

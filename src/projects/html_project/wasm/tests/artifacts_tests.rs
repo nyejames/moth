@@ -4,6 +4,7 @@ use super::*;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::output_plan::derive_logical_html_path;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext,
@@ -53,14 +54,16 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
+    let route =
+        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
     let output_plan = HtmlResourceOutputPlan::new("");
-    let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let resource_url_context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let structural_url_renderer =
         StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
         &mut string_table,
-        Path::new("index.html"),
+        &route,
         &structural_url_renderer,
     )
     .expect("wasm mode compilation should succeed");
@@ -160,14 +163,16 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
+    let route = derive_logical_html_path(Path::new("src/docs/@page.moth"), Some(Path::new("src")))
+        .expect("nested route should resolve");
     let output_plan = HtmlResourceOutputPlan::new("");
-    let resource_url_context = ResourceUrlContext::PageDocument(PathBuf::from("docs/index.html"));
+    let resource_url_context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let structural_url_renderer =
         StructuralUrlRenderer::new(&output_plan, &resource_url_context, "/");
     let compiled = compile_html_module_wasm(
         &compile_input,
         &mut string_table,
-        Path::new("docs/index.html"),
+        &route,
         &structural_url_renderer,
     )
     .expect("wasm mode compilation should succeed for nested route");

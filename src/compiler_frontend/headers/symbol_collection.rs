@@ -54,7 +54,9 @@ pub(super) fn build_module_symbols(
             .insert(file_output.source_file.to_owned(), file_output.file_id);
 
         for header in &file_output.headers {
-            if let Some(mut diagnostic) = validate_declared_name(header, string_table) {
+            if let Some(mut diagnostic) =
+                validate_declared_name(header, file_output.file_role, string_table)
+            {
                 capture(file_output.file_id, &mut diagnostic)
                     .map_err(HeaderPreparationFailure::Infrastructure)?;
                 diagnostic_bag.push(diagnostic);
@@ -106,11 +108,12 @@ pub(super) fn build_module_symbols(
 
 fn validate_declared_name(
     header: &Header,
+    file_role: FileRole,
     string_table: &StringTable,
 ) -> Option<CompilerDiagnostic> {
     let symbol_name = header.tokens.src_path.name()?;
 
-    let symbol_name_text = string_table.resolve(symbol_name).to_owned();
+    let symbol_name_text = string_table.resolve(symbol_name);
 
     if let Err(diagnostic) =
         ensure_not_keyword_shadow_identifier(symbol_name, header.name_span, string_table)
@@ -118,17 +121,29 @@ fn validate_declared_name(
         return Some(diagnostic);
     }
 
-    if is_reserved_builtin_symbol(&symbol_name_text) {
-        return Some(CompilerDiagnostic::reserved_builtin_name(
+    if is_reserved_builtin_symbol(symbol_name_text) {
+        return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,
+            ReservedNameOwner::BuiltinType,
             header.name_span,
         ));
     }
 
-    if is_core_cast_trait_name(&symbol_name_text) {
+    if is_core_cast_trait_name(symbol_name_text) {
         return Some(CompilerDiagnostic::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
+            header.name_span,
+        ));
+    }
+
+    if file_role == FileRole::ActiveModuleRoot
+        && !matches!(&header.kind, HeaderKind::StartFunction)
+        && symbol_name_text == IMPLICIT_START_FUNC_NAME
+    {
+        return Some(CompilerDiagnostic::reserved_name_collision(
+            symbol_name,
+            ReservedNameOwner::ImplicitStart,
             header.name_span,
         ));
     }

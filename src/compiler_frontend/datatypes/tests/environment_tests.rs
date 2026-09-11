@@ -446,7 +446,8 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
     assert_eq!(borrowed_variants.map(|variants| variants.len()), Some(1));
 
     let ready_variant = env
-        .variant_for(status_type_id, ready_name)
+        .variants_for(status_type_id)
+        .and_then(|variants| variants.iter().find(|variant| variant.name == ready_name))
         .expect("direct variant lookup should find base choice variant");
     assert_eq!(ready_variant.tag, 0);
 }
@@ -531,7 +532,8 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
     assert_eq!(borrowed_variants.map(|variants| variants.len()), Some(1));
 
     let full_variant = env
-        .variant_for(state_of_string, full_name)
+        .variants_for(state_of_string)
+        .and_then(|variants| variants.iter().find(|variant| variant.name == full_name))
         .expect("direct variant lookup should find substituted generic variant");
     let ChoiceVariantPayloadDefinition::Record { fields } = &full_variant.payload else {
         panic!("generic choice variant should keep record payload fields");
@@ -945,19 +947,6 @@ fn struct_and_choice_share_nominal_id_space() {
         struct_nominal, choice_nominal,
         "structs and choices should not share NominalTypeId"
     );
-}
-
-#[test]
-fn numeric_query_recognizes_numeric_builtins() {
-    let env = TypeEnvironment::new();
-
-    assert!(env.is_numeric(env.builtins().int));
-    assert!(env.is_numeric(env.builtins().float));
-    // Decimal is intentionally inactive in the Alpha surface: it remains seeded in
-    // the environment for stable TypeId layout, but it must not be treated as numeric.
-    assert!(!env.is_numeric(env.builtins().decimal));
-    assert!(!env.is_numeric(env.builtins().bool));
-    assert!(!env.is_numeric(env.builtins().string));
 }
 
 #[test]
@@ -1448,17 +1437,11 @@ fn map_shape_queries_work() {
     let map_type = env.intern_map(string, int);
 
     assert!(env.is_map_type(map_type));
-    assert_eq!(env.map_key_type(map_type), Some(string));
-    assert_eq!(env.map_value_type(map_type), Some(int));
-
     let shape = env.map_shape(map_type).expect("should have a shape");
     assert_eq!(shape.key_type, string);
     assert_eq!(shape.value_type, int);
 
-    // Non-map returns None
     assert!(!env.is_map_type(string));
-    assert_eq!(env.map_key_type(string), None);
-    assert_eq!(env.map_value_type(string), None);
     assert_eq!(env.map_shape(string), None);
 }
 

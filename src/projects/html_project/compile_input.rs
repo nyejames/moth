@@ -13,9 +13,9 @@ use crate::compiler_frontend::hir::reachability::HirReachability;
 use crate::compiler_frontend::module_compilation::{ModuleRootActivity, ResolvedConstFragment};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::output_plan::CanonicalPageRoute;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
-use std::path::Path;
 use std::sync::Arc;
 
 /// Module-level inputs shared by all HTML builder compilation paths.
@@ -42,7 +42,8 @@ pub(crate) struct HtmlModuleCompileInput<'a> {
 pub(crate) struct HtmlModuleCompileContext<'a> {
     pub(crate) entry: ProjectEntry<'a>,
     pub(crate) page_metadata_plan: &'a HtmlPageMetadataPlan,
-    pub(crate) logical_html_output_path: &'a Path,
+    /// Canonical route projections shared by JS output, Wasm placement and the HTML shell.
+    pub(crate) route: &'a CanonicalPageRoute,
     pub(crate) structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub(crate) project_name: &'a str,
     pub(crate) document_config: &'a HtmlDocumentConfig,

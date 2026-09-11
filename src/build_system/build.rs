@@ -1887,11 +1887,7 @@ pub(crate) fn bootstrap_project_build(
 
     // Seed the build table with the compiler-owned symbols that per-file frontend tables will
     // also need as a stable prefix once file preparation becomes independent.
-    let preseeded = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
-    let mut string_table = preseeded.string_table;
-    // The bootstrap path only needs the preseeded table today. File-local preparation will keep
-    // these typed IDs alongside its local outputs once fixed-symbol IDs are consumed directly.
-    let _compiler_symbol_ids = preseeded.compiler_symbol_ids;
+    let mut string_table = CompilerSymbolSet::preseeded_table(FILE_MIN_UNIQUE_SYMBOLS_CAPACITY);
 
     // Compute the builder's frontend surface once so config loading and frontend compilation
     // see the same set of allowed config keys, external packages, and source-backed packages.

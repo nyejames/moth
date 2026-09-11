@@ -25,7 +25,9 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase};
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
@@ -1317,11 +1319,12 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         [&root_file, &icon_template],
         &root_file,
         Some(
-            &crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new(
+            &crate::compiler_frontend::paths::path_resolution::ProjectPathResolver::new_with_module_roots(
                 project_root.clone(),
                 project_root,
-                crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
+                PreparedSourcePackageRoots::default(),
                 &crate::builder_surface::SourceFileKindRegistry::default(),
+                ModuleRootTable::empty(),
             )
             .expect("fixture resolver should build"),
         ),

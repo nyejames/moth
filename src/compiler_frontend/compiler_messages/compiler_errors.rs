@@ -703,6 +703,9 @@ impl CompilerMessages {
     /// failure. Those warnings must stay before the failure without disconnecting diagnostics from
     /// their frozen identity snapshot, retained source snapshot or render type table. Frozen IDs
     /// are already final and are only shifted, never remapped.
+    // The compiler-source-token-and-diagnostic-data-layout plan retains direct-template warning
+    // contexts. Test-gated template pipelines and diagnostic aggregation tests consume this method.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn prepend_diagnostics_preserving_context(
         &mut self,
         prior_diagnostics: impl IntoIterator<Item = CompilerDiagnostic>,

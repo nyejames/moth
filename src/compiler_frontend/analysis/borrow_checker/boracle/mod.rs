@@ -26,16 +26,24 @@ mod differential;
 mod loans;
 mod oracle;
 mod origins;
+#[cfg(test)]
 mod reducer;
 mod relations;
 mod report;
 mod service;
 
+// WHY: These re-exports are the Boracle feature-lane surface for the parent service and focused
+// tests. The unused-import allowances are local to optional surface declarations whose consumers
+// vary between feature-only and test builds; they do not suppress implementation warnings.
 #[allow(unused_imports)]
 pub(crate) use differential::{
     OracleComparison, OracleComparisonClass, OracleComparisonSet, OracleComparisonSeverity,
-    compare_problem_parts, compare_reference_and_experiments,
+    compare_reference_and_experiments,
 };
+
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use differential::compare_problem_parts;
 
 #[allow(unused_imports)]
 pub(crate) use loans::{
@@ -47,6 +55,7 @@ pub(crate) use oracle::{
 };
 #[allow(unused_imports)]
 pub(crate) use origins::{OriginFact, OriginSolution, OriginSolver, OriginTrace, OriginTraceRule};
+#[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) use reducer::{
     ReducedProblem, ReductionPass, ReductionSize, reduce_problem, reduction_size,
@@ -59,7 +68,7 @@ pub(crate) use relations::{
     OriginRelationKind, OriginRelations, OriginUnknownEvidence, PrecisionLossReason,
 };
 #[allow(unused_imports)]
-pub(crate) use report::{BoracleReport, BoracleSolver, ReactiveObservation};
+pub(crate) use report::{BoracleReport, BoracleSolver};
 #[cfg(test)]
 pub(crate) use service::solve_hir_module;
 #[allow(unused_imports)]

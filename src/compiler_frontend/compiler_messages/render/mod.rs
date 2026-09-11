@@ -36,15 +36,16 @@ pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace,
-    GenericApplicationErrorReason, IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleOperandReason,
+    BorrowAccessKind, CssTemplateWarning, DeferredFeatureReason, DiagnosticOperator,
+    DiagnosticPlace, GenericApplicationErrorReason, HtmlTemplateWarning,
+    IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
+    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
+    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, InvalidTemplateDirectiveReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
-    UnsupportedOperatorCategory,
+    InvalidPageMetadataReason, InvalidTemplateDirectiveReason, MalformedTemplateReason,
+    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
+    SourceSpanCapacityResource, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -56,6 +57,81 @@ use crate::compiler_frontend::source_packages::root_file::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
+
+pub(crate) fn malformed_template_message(
+    reason: MalformedTemplateReason,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match reason {
+        MalformedTemplateReason::Css(reason) => css_template_warning_message(reason, string_table),
+        MalformedTemplateReason::Html(reason) => html_template_warning_message(reason),
+    }
+}
+
+fn css_template_warning_message(
+    reason: CssTemplateWarning,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    match reason {
+        CssTemplateWarning::MismatchedClosingBrace { expected } => format!(
+            "Malformed template: Mismatched closing brace. Expected '{expected}' to close before '}}'."
+        ),
+        CssTemplateWarning::UnexpectedClosingBrace => {
+            "Malformed template: Unexpected closing brace '}' with no matching '{'.".to_owned()
+        }
+        CssTemplateWarning::MismatchedClosingParenthesis { expected } => format!(
+            "Malformed template: Mismatched closing parenthesis. Expected '{expected}' to close before ')'."
+        ),
+        CssTemplateWarning::UnexpectedClosingParenthesis => {
+            "Malformed template: Unexpected closing parenthesis ')' with no matching '('.".to_owned()
+        }
+        CssTemplateWarning::UnclosedDelimiter { opening } => {
+            format!("Malformed template: Unclosed '{opening}' in CSS template body.")
+        }
+        CssTemplateWarning::InlineSelectorBlock => {
+            "Malformed template: Inline '$css(\"inline\")' templates only allow declarations and cannot contain selector blocks.".to_owned()
+        }
+        CssTemplateWarning::MissingSelectorOrAtRulePrelude => {
+            "Malformed template: CSS block is missing a selector or at-rule prelude before '{'."
+                .to_owned()
+        }
+        CssTemplateWarning::NestedBlock => {
+            "Malformed template: Nested CSS blocks are only lightly validated in '$css'. Use nested at-rules for predictable results.".to_owned()
+        }
+        CssTemplateWarning::TopLevelContent => {
+            "Malformed template: Top-level CSS content should be selector blocks or at-rules."
+                .to_owned()
+        }
+        CssTemplateWarning::MalformedDeclaration => {
+            "Malformed template: Malformed CSS declaration. Expected 'property: value'."
+                .to_owned()
+        }
+        CssTemplateWarning::InvalidPropertyName { name } => format!(
+            "Malformed template: Malformed CSS declaration. Invalid property name '{}'.",
+            string_table.resolve(name)
+        ),
+        CssTemplateWarning::MissingDeclarationValue => {
+            "Malformed template: Malformed CSS declaration. Missing value after ':'."
+                .to_owned()
+        }
+    }
+}
+
+fn html_template_warning_message(reason: HtmlTemplateWarning) -> String {
+    match reason {
+        HtmlTemplateWarning::ScriptTag => {
+            "Malformed template: Potentially unsafe '<script' tag found in '$html' template."
+                .to_owned()
+        }
+        HtmlTemplateWarning::JavascriptUrl => {
+            "Malformed template: Potentially unsafe 'javascript:' URL found in '$html' template."
+                .to_owned()
+        }
+        HtmlTemplateWarning::InlineEventHandler => {
+            "Malformed template: Potentially unsafe inline 'on*=' event handler found in '$html' template.".to_owned()
+        }
+    }
+}
 
 pub(crate) fn invalid_generic_application_message(
     reason: GenericApplicationErrorReason,

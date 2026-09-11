@@ -14,6 +14,9 @@ use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
+use crate::compiler_frontend::compiler_messages::{
+    CssTemplateWarning, MalformedTemplateReason, SyntaxDiagnosticKind,
+};
 
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -71,9 +74,8 @@ impl TemplateFormatter for CssValidationTemplateFormatter {
     ) -> Result<FormatterResult, CompilerMessages> {
         let flattened_input = PassThroughFormatterInput::from_input(input, string_table);
         let warnings = flattened_input.map_warnings(
-            validate_css_source(&flattened_input.flattened_source, self.mode),
-            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::malformed_css_template,
-            string_table,
+            validate_css_source(&flattened_input.flattened_source, self.mode, string_table),
+            SyntaxDiagnosticKind::MalformedCssTemplate,
         );
         Ok(flattened_input.into_formatter_result(warnings))
     }
@@ -88,13 +90,17 @@ struct ScanState {
     escaped: bool,
 }
 
-fn validate_css_source(source: &str, mode: CssFormatterMode) -> Vec<SourceWarning> {
+fn validate_css_source(
+    source: &str,
+    mode: CssFormatterMode,
+    string_table: &mut StringTable,
+) -> Vec<SourceWarning> {
     // WHAT: one pass for delimiter integrity + one pass for statement/block shape.
     // WHY: keeps diagnostics cheap while still catching common malformed templates.
     let chars: Vec<char> = source.chars().collect();
     let mut warnings = Vec::new();
     validate_balanced_delimiters(&chars, &mut warnings);
-    validate_css_shape(&chars, mode, &mut warnings);
+    validate_css_shape(&chars, mode, &mut warnings, string_table);
     warnings
 }
 
@@ -118,10 +124,9 @@ fn validate_balanced_delimiters(chars: &[char], warnings: &mut Vec<SourceWarning
                 Some((open, open_index)) => {
                     push_warning(
                         warnings,
-                        format!(
-                            "Mismatched closing brace. Expected '{}' to close before '}}'.",
-                            matching_closer(open)
-                        ),
+                        CssTemplateWarning::MismatchedClosingBrace {
+                            expected: matching_closer(open),
+                        },
                         open_index,
                         open_index.saturating_add(1),
                     );
@@ -129,7 +134,7 @@ fn validate_balanced_delimiters(chars: &[char], warnings: &mut Vec<SourceWarning
                 None => {
                     push_warning(
                         warnings,
-                        "Unexpected closing brace '}' with no matching '{'.",
+                        CssTemplateWarning::UnexpectedClosingBrace,
                         index,
                         index.saturating_add(1),
                     );
@@ -140,10 +145,9 @@ fn validate_balanced_delimiters(chars: &[char], warnings: &mut Vec<SourceWarning
                 Some((open, open_index)) => {
                     push_warning(
                         warnings,
-                        format!(
-                            "Mismatched closing parenthesis. Expected '{}' to close before ')'.",
-                            matching_closer(open)
-                        ),
+                        CssTemplateWarning::MismatchedClosingParenthesis {
+                            expected: matching_closer(open),
+                        },
                         open_index,
                         open_index.saturating_add(1),
                     );
@@ -151,7 +155,7 @@ fn validate_balanced_delimiters(chars: &[char], warnings: &mut Vec<SourceWarning
                 None => {
                     push_warning(
                         warnings,
-                        "Unexpected closing parenthesis ')' with no matching '('.",
+                        CssTemplateWarning::UnexpectedClosingParenthesis,
                         index,
                         index.saturating_add(1),
                     );
@@ -166,14 +170,19 @@ fn validate_balanced_delimiters(chars: &[char], warnings: &mut Vec<SourceWarning
     for (open, open_index) in stack {
         push_warning(
             warnings,
-            format!("Unclosed '{open}' in CSS template body."),
+            CssTemplateWarning::UnclosedDelimiter { opening: open },
             open_index,
             open_index.saturating_add(1),
         );
     }
 }
 
-fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec<SourceWarning>) {
+fn validate_css_shape(
+    chars: &[char],
+    mode: CssFormatterMode,
+    warnings: &mut Vec<SourceWarning>,
+    string_table: &mut StringTable,
+) {
     let mut index = 0usize;
     let mut state = ScanState::default();
     let mut depth = 0usize;
@@ -195,7 +204,7 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
                 if mode == CssFormatterMode::Inline {
                     push_warning(
                         warnings,
-                        "Inline '$css(\"inline\")' templates only allow declarations and cannot contain selector blocks.",
+                        CssTemplateWarning::InlineSelectorBlock,
                         index,
                         index.saturating_add(1),
                     );
@@ -205,7 +214,7 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
                 else {
                     push_warning(
                         warnings,
-                        "CSS block is missing a selector or at-rule prelude before '{'.",
+                        CssTemplateWarning::MissingSelectorOrAtRulePrelude,
                         index,
                         index.saturating_add(1),
                     );
@@ -222,12 +231,7 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
                 // Nested selectors are usually only sensible under at-rules.
                 // We warn conservatively to avoid pretending this parser fully understands nesting.
                 if depth > 0 && !parent_is_at_rule && !is_at_rule {
-                    push_warning(
-                        warnings,
-                        "Nested CSS blocks are only lightly validated in '$css'. Use nested at-rules for predictable results.",
-                        start,
-                        end,
-                    );
+                    push_warning(warnings, CssTemplateWarning::NestedBlock, start, end);
                 }
 
                 depth += 1;
@@ -239,7 +243,7 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
                 if mode == CssFormatterMode::Inline {
                     push_warning(
                         warnings,
-                        "Inline '$css(\"inline\")' templates only allow declarations and cannot contain selector blocks.",
+                        CssTemplateWarning::InlineSelectorBlock,
                         index,
                         index.saturating_add(1),
                     );
@@ -253,6 +257,7 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
                         depth,
                         mode,
                         warnings,
+                        string_table,
                     );
                     depth -= 1;
                     let _ = block_is_at_rule.pop();
@@ -262,7 +267,15 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
             }
             ';' => {
                 // `;` closes one declaration/statement segment.
-                validate_statement_segment(chars, statement_start, index, depth, mode, warnings);
+                validate_statement_segment(
+                    chars,
+                    statement_start,
+                    index,
+                    depth,
+                    mode,
+                    warnings,
+                    string_table,
+                );
                 statement_start = index + 1;
                 if depth == 0 {
                     prelude_start = index + 1;
@@ -274,7 +287,15 @@ fn validate_css_shape(chars: &[char], mode: CssFormatterMode, warnings: &mut Vec
         index += 1;
     }
 
-    validate_statement_segment(chars, statement_start, chars.len(), depth, mode, warnings);
+    validate_statement_segment(
+        chars,
+        statement_start,
+        chars.len(),
+        depth,
+        mode,
+        warnings,
+        string_table,
+    );
 }
 
 fn validate_statement_segment(
@@ -284,6 +305,7 @@ fn validate_statement_segment(
     depth: usize,
     mode: CssFormatterMode,
     warnings: &mut Vec<SourceWarning>,
+    string_table: &mut StringTable,
 ) {
     let Some((text, trimmed_start, trimmed_end)) = trimmed_segment(chars, start, end) else {
         return;
@@ -303,6 +325,7 @@ fn validate_statement_segment(
                     trimmed_start,
                     trimmed_end,
                     warnings,
+                    string_table,
                 );
             }
             CssFormatterMode::Block => {
@@ -310,7 +333,7 @@ fn validate_statement_segment(
                 if !normalized_text.starts_with('@') {
                     push_warning(
                         warnings,
-                        "Top-level CSS content should be selector blocks or at-rules.",
+                        CssTemplateWarning::TopLevelContent,
                         trimmed_start,
                         trimmed_end,
                     );
@@ -325,7 +348,13 @@ fn validate_statement_segment(
         return;
     }
 
-    validate_declaration_statement(normalized_text, trimmed_start, trimmed_end, warnings);
+    validate_declaration_statement(
+        normalized_text,
+        trimmed_start,
+        trimmed_end,
+        warnings,
+        string_table,
+    );
 }
 
 fn validate_declaration_statement(
@@ -333,6 +362,7 @@ fn validate_declaration_statement(
     start_offset: usize,
     end_offset: usize,
     warnings: &mut Vec<SourceWarning>,
+    string_table: &mut StringTable,
 ) {
     // Declaration check intentionally stays simple:
     // - must contain one `:` split point
@@ -342,7 +372,7 @@ fn validate_declaration_statement(
     let Some(colon_index) = statement_chars.iter().position(|ch| *ch == ':') else {
         push_warning(
             warnings,
-            "Malformed CSS declaration. Expected 'property: value'.",
+            CssTemplateWarning::MalformedDeclaration,
             start_offset,
             end_offset,
         );
@@ -357,7 +387,9 @@ fn validate_declaration_statement(
     if !is_valid_property_name(&property) {
         push_warning(
             warnings,
-            format!("Malformed CSS declaration. Invalid property name '{property}'."),
+            CssTemplateWarning::InvalidPropertyName {
+                name: string_table.intern(&property),
+            },
             start_offset,
             start_offset.saturating_add(colon_index.max(1)),
         );
@@ -372,7 +404,7 @@ fn validate_declaration_statement(
         let value_offset = start_offset.saturating_add(colon_index);
         push_warning(
             warnings,
-            "Malformed CSS declaration. Missing value after ':'.",
+            CssTemplateWarning::MissingDeclarationValue,
             value_offset,
             value_offset.saturating_add(1),
         );
@@ -405,14 +437,14 @@ fn is_valid_property_name(property: &str) -> bool {
 
 fn push_warning(
     warnings: &mut Vec<SourceWarning>,
-    message: impl Into<String>,
+    reason: CssTemplateWarning,
     start_offset: usize,
     end_offset: usize,
 ) {
     // Ensure every warning has at least a single-character highlight.
     let end_offset = end_offset.max(start_offset.saturating_add(1));
     warnings.push(SourceWarning {
-        message: message.into(),
+        reason: MalformedTemplateReason::Css(reason),
         start_offset,
         end_offset,
     });

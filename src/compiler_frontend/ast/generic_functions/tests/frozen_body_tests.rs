@@ -8,11 +8,13 @@
 //! seam from that resolved AST representation without retaining donor `StringId`/`InternedPath`/
 //! `ResourceId` handles or a mirrored token-kind enum.
 
-use super::{
-    FrozenStringPool, GenericFunctionBody, GenericFunctionTemplate, ModuleMaterialisationContext,
-    ModuleMaterialisationInput, ModuleMaterialisationPreparation, StableBodySyntax,
-    StableResolvedFileReferenceOutcome, check_materialisation_row_identity,
-};
+use super::super::{GenericFunctionBody, GenericFunctionTemplate};
+use super::ModuleMaterialisationInput;
+use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
+use super::frozen_file_references::StableResolvedFileReferenceOutcome;
+use super::frozen_syntax::{FrozenStringPool, StableBodySyntax};
+use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::stable_types::GeneratedFoldedValueMaterialiser;
 use crate::compiler_frontend::ast::Stage0ResolutionFacts;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
@@ -1468,7 +1470,7 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
     let external_registry = ExternalPackageRegistry::new();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
-    let mut materialiser = super::GeneratedFoldedValueMaterialiser {
+    let mut materialiser = GeneratedFoldedValueMaterialiser {
         type_environment: &mut type_environment,
         external_registry: &external_registry,
         nominal_source: &fixture.preparation,
@@ -1833,7 +1835,7 @@ fn invalid_frozen_path_handle_returns_compiler_error() {
 fn stale_in_range_template_row_fails_declaration_identity_validation() {
     let expected = generated_identity("expected");
     let stale = generated_identity("stale");
-    let context = super::ModuleMaterialisationContext::from_identities_for_test(vec![
+    let context = ModuleMaterialisationContext::from_identities_for_test(vec![
         expected.declaration().clone(),
     ]);
     let artefact = &context.artefacts[0];

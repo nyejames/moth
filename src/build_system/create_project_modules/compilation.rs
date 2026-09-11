@@ -6,10 +6,9 @@
 use crate::{timing_scope, timing_scope_attributed};
 
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
-#[cfg(feature = "boracle")]
-use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 use crate::compiler_frontend::module_compilation::{
-    CompiledModuleArtifact, GeneratedFunctionDelta, ProviderMaterialisationRegistry,
+    CompiledModuleArtifact, GeneratedFunctionDelta, ModuleSemanticResult,
+    ProviderMaterialisationRegistry,
 };
 
 use crate::compiler_frontend::FrontendBuildProfile;
@@ -32,7 +31,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::Config;
 
-use std::ffi::OsStr;
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -115,6 +113,52 @@ pub(super) fn publish_module_and_generated(
     Ok(())
 }
 
+/// Publish one successful compiler result through the shared boundary tail.
+///
+/// WHAT: merges the module-local string-table delta, remaps the module and generated records when
+///       needed, and publishes the complete module result and its sidecars.
+/// WHY: the build-system contract makes publication atomic, so this is the single
+///      merge-remap-publish tail shared by canonical directory and synthetic single-file lanes.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn publish_compiled_module(
+    modules: &mut ModuleArtifactStore,
+    generated: &mut BoundaryGeneratedFunctionStore,
+    materialisations: &mut ProviderMaterialisationRegistry,
+    resource_inputs: &mut ResourceInputRegistry,
+    module_id: ModuleId,
+    expected_origin: &StableModuleOriginIdentity,
+    compiled: ModuleSemanticResult,
+    string_table_base_len: usize,
+    string_table: &mut StringTable,
+) -> Result<(), CompilerError> {
+    let remap = string_table.merge_delta_from(&compiled.string_table, string_table_base_len);
+    let ModuleSemanticResult {
+        mut module,
+        mut generated_delta,
+        resource_source_associations,
+        string_table: _,
+        public_interface,
+    } = compiled;
+    if !remap.is_identity() {
+        module.remap_string_ids(&remap);
+        generated_delta.remap_string_ids(&remap);
+    }
+    publish_module_and_generated(ModuleBoundaryPublication {
+        modules,
+        generated,
+        materialisations,
+        resource_inputs,
+        module_id,
+        expected_origin,
+        artifact: CompiledModuleArtifact {
+            module,
+            interface: public_interface,
+        },
+        generated_delta,
+        resource_source_associations,
+    })
+}
+
 /// Add one newly published module's generic templates to the boundary materialisation registry.
 ///
 /// WHY: later modules in this boundary materialise concrete generics from their declaring module's
@@ -165,73 +209,10 @@ fn seed_completed_package_materialisations(
 //  Single-File Compilation
 // -------------------------
 
-#[allow(dead_code)]
-/// Compile a single `.moth` file as its own module.
-pub(crate) fn compile_single_file_frontend(
-    config: &Config,
-    build_profile: FrontendBuildProfile,
-    style_directives: &StyleDirectiveRegistry,
-    builder_surface: &mut BuilderSurface,
-    extension: &OsStr,
-    string_table: &mut StringTable,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    let mut project_source_files = None;
-    compile_single_file_frontend_with_inputs(
-        config,
-        build_profile,
-        style_directives,
-        builder_surface,
-        extension,
-        string_table,
-        &mut project_source_files,
-        &BuildConfigInputSet::new(),
-        FrontendCompilationMode::Canonical,
-    )
-}
-
-/// Compile one source file with an explicit command-owned build-config input set.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn compile_single_file_frontend_with_inputs(
-    config: &Config,
-    build_profile: FrontendBuildProfile,
-    style_directives: &StyleDirectiveRegistry,
-    builder_surface: &mut BuilderSurface,
-    extension: &OsStr,
-    string_table: &mut StringTable,
-    project_source_files: &mut Option<Arc<SourceDatabase>>,
-    build_config_inputs: &BuildConfigInputSet,
-    mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, CompilerMessages> {
-    single_file::compile_single_file_frontend_with_inputs(
-        config,
-        build_profile,
-        style_directives,
-        builder_surface,
-        extension,
-        string_table,
-        project_source_files,
-        build_config_inputs,
-        mode,
-    )
-}
 #[cfg(feature = "boracle")]
-pub(crate) fn compile_single_file_boracle_frontend(
-    config: &Config,
-    build_profile: FrontendBuildProfile,
-    style_directives: &StyleDirectiveRegistry,
-    builder_surface: &mut BuilderSurface,
-    extension: &OsStr,
-    string_table: &mut StringTable,
-) -> Result<BoracleModuleInput, CompilerMessages> {
-    single_file::compile_single_file_boracle_frontend(
-        config,
-        build_profile,
-        style_directives,
-        builder_surface,
-        extension,
-        string_table,
-    )
-}
+pub(crate) use single_file::compile_single_file_boracle_frontend;
+/// Compile a single `.moth` file as its own module.
+pub(crate) use single_file::compile_single_file_frontend_with_inputs;
 
 // -------------------------
 //  Directory Compilation

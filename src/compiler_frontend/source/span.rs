@@ -19,7 +19,6 @@ use super::span_encoding::{
 };
 use super::{FrozenIdentityContext, FrozenSourceDatabase, SourceDatabase, SourceId, SourceRecord};
 
-use std::cmp::Ordering;
 use std::mem::size_of;
 use std::num::NonZeroU32;
 
@@ -37,8 +36,7 @@ const _: () = assert!(size_of::<ExtendedSpan>() == 8);
 /// resolution knows the identity it looked the record up by, so it can name that source when a
 /// span reaches an absent or too-short table; resolving through a bare record cannot, because a
 /// [`SourceRecord`] carries no identity. [`SourceSpan`] is what a consumer crossing a source
-/// boundary must hold: it checks that two operands name the same source before joining,
-/// overlapping or containing them.
+/// boundary must hold: it checks that two operands name the same source before joining them.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LocalSpan(NonZeroU32);
@@ -230,46 +228,10 @@ impl LocalSpan {
     }
 }
 
-/// The consumer half of a local span.
-///
-/// WHY: resolving against a `SourceRecord` needs the table installed there, and insertion points,
-/// emptiness and joins are source-span operations used by diagnostics, syntax and renderers.
-/// Tests exercise every operation here; any remaining allowance names a genuinely deferred
-/// consumer rather than hiding an already-used API.
 impl LocalSpan {
     // The reserved-value test reads the packed logical word without exposing its representation.
     pub(super) fn logical_word(self) -> u32 {
         load_logical(self.0)
-    }
-
-    /// Zero-length span at `offset`, used for insertion points, EOF and file-level failures.
-    #[allow(dead_code)]
-    pub fn insertion_point(
-        offset: u32,
-        extended: &mut ExtendedSpanBuilder,
-    ) -> Result<Self, SpanCapacityError> {
-        Self::exact(offset, 0, extended)
-    }
-
-    /// Resolve through a loaded record's frozen extended-span table.
-    ///
-    /// Inline spans remain valid before the builder is installed. An extended span reaching an
-    /// absent table is a compiler bug because its producer failed to install that builder.
-    #[allow(dead_code)]
-    pub fn resolve(self, source: &SourceRecord) -> ResolvedByteRange {
-        self.resolve_with(record_resolver(source, None))
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(self, source: &SourceRecord) -> bool {
-        let range = self.resolve(source);
-        range.start() == range.end()
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty_with(self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        let range = self.resolve_with(resolver);
-        range.start() == range.end()
     }
 
     fn resolve_from_record(
@@ -300,8 +262,7 @@ impl LocalSpan {
     }
 }
 
-/// Global spans reach production with the diagnostics of slice 1D3, the first values that cross
-/// a source boundary. This module's tests prove every operation below.
+/// Global spans cross a source boundary and validate resolver identity before reading local bytes.
 impl SourceSpan {
     pub fn new(source: SourceId, local: LocalSpan) -> Self {
         Self { source, local }
@@ -321,20 +282,12 @@ impl SourceSpan {
     /// Panics when the resolver claims a different source or claims none: a global span may
     /// never resolve through another source's extended table, because that reads a row of
     /// foreign source bytes.
+    // Test-only API retained for source/tests/span_tests.rs and frontend test modules; production
+    // consumers use `byte_range`.
     #[allow(dead_code)]
     pub fn resolve_with(self, resolver: ExtendedSpanResolver<'_>) -> ResolvedByteRange {
         self.reject_foreign_resolver(resolver);
         self.local.resolve_with(resolver)
-    }
-
-    /// Emptiness through a resolver qualified for this span's own source.
-    ///
-    /// # Panics
-    /// Panics under the same wrong-source pairing as [`Self::resolve_with`].
-    #[allow(dead_code)]
-    pub fn is_empty_with(self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        self.reject_foreign_resolver(resolver);
-        self.local.is_empty_with(resolver)
     }
 
     /// Resolve against the source owner that owns this span's identity.
@@ -380,38 +333,6 @@ impl SourceSpan {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn start<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
-        self.byte_range(sources).start()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn end<S: SourceSpanDatabase>(self, sources: &S) -> u32 {
-        self.byte_range(sources).end()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn overlaps<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
-        if self.source != other.source {
-            return false;
-        }
-
-        let left = self.byte_range(sources);
-        let right = other.byte_range(sources);
-        left.start().max(right.start()) < left.end().min(right.end())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn contains<S: SourceSpanDatabase>(self, other: Self, sources: &S) -> bool {
-        if self.source != other.source {
-            return false;
-        }
-
-        let outer = self.byte_range(sources);
-        let inner = other.byte_range(sources);
-        outer.start() <= inner.start() && outer.end() >= inner.end()
-    }
-
     /// Smallest span covering both inputs.
     ///
     /// Cross-source joins are rejected rather than coerced. Capacity failures from the local
@@ -439,82 +360,11 @@ impl SourceSpan {
         })
     }
 
-    /// Whether the two ranges share at least one byte.
-    ///
-    /// WHY: overlap is the non-emptiness of the intersection, so a zero-length span overlaps
-    /// nothing, not even the range it sits inside. Comparing endpoints pairwise instead would make
-    /// an insertion point overlap a range when it is strictly interior and not when it sits on
-    /// either edge, so neither answer would mean anything. Use [`Self::contains_with`] to ask
-    /// whether an insertion point lies inside a range, boundaries included.
-    ///
-    /// Ranges from different sources never overlap.
-    ///
-    /// # Panics
-    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
-    /// still return `false` without resolving anything.
-    #[allow(dead_code)]
-    pub fn overlaps_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        if self.source != other.source {
-            return false;
-        }
-
-        self.reject_foreign_resolver(resolver);
-        let left = self.local.resolve_with(resolver);
-        let right = other.local.resolve_with(resolver);
-        let shared_start = left.start().max(right.start());
-        let shared_end = left.end().min(right.end());
-
-        shared_start < shared_end
-    }
-
-    /// `self` contains `other` when both share a source and `other`'s range lies inside `self`.
-    ///
-    /// Ranges from different sources are never containment, even when the byte ranges coincide.
-    ///
-    /// # Panics
-    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
-    /// still return `false` without resolving anything.
-    #[allow(dead_code)]
-    pub fn contains_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> bool {
-        if self.source != other.source {
-            return false;
-        }
-
-        self.reject_foreign_resolver(resolver);
-        let left = self.local.resolve_with(resolver);
-        let right = other.local.resolve_with(resolver);
-
-        left.start() <= right.start() && left.end() >= right.end()
-    }
-
-    /// Deterministic display order: source identity, then start, then end.
-    ///
-    /// # Panics
-    /// Panics when the resolver is not qualified for this span's source. Cross-source operands
-    /// order by identity without resolving anything.
-    #[allow(dead_code)]
-    pub fn source_order_with(self, other: Self, resolver: ExtendedSpanResolver<'_>) -> Ordering {
-        match self.source.cmp(&other.source) {
-            Ordering::Equal => {
-                self.reject_foreign_resolver(resolver);
-                let left = self.local.resolve_with(resolver);
-                let right = other.local.resolve_with(resolver);
-
-                left.start()
-                    .cmp(&right.start())
-                    .then(left.end().cmp(&right.end()))
-            }
-
-            order => order,
-        }
-    }
-
     /// Reject a resolver that does not claim this span's source.
     ///
     /// WHY: the span's local indexes were encoded against its own source's table; a foreign or
     /// unqualified resolver would return a row of different source bytes. This is a compiler
     /// invariant failure, not a recoverable condition.
-    #[allow(dead_code)]
     fn reject_foreign_resolver(self, resolver: ExtendedSpanResolver<'_>) {
         match resolver.source_identity {
             Some(identity) if identity == self.source => {}
@@ -553,6 +403,8 @@ impl ExtendedSpanBuilder {
     /// WHY: a builder belongs to one source while it produces spans; qualifying at the builder
     /// names that source once instead of at every operation. Producers resolve their own local
     /// spans, so the qualified form first reaches compilation with the consumer migrations.
+    // Test-only API retained for source/tests/span_tests.rs and frontend test modules; production
+    // consumers resolve through source owners.
     #[allow(dead_code)]
     pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
         self.resolver().for_source(source)
@@ -576,18 +428,14 @@ impl ExtendedSpanBuilder {
     }
 }
 
-// Frozen-table readers switch over with the source-span migration in slices 1D3/1E.
+// Frozen-table readers resolve through the installed source record; tests may inspect a standalone table.
 impl ExtendedSpanTable {
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
+    // Test-only API owned by the frontend source test module source/tests/span_tests.rs; production
+    // consumers resolve through installed source records.
     /// The bare resolver for this table's own source-local work.
     #[allow(dead_code)]
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
@@ -595,14 +443,6 @@ impl ExtendedSpanTable {
             entries: Some(&self.entries),
             source_identity: None,
         }
-    }
-
-    /// The resolver qualified for `source`, required by global [`SourceSpan`] operations.
-    ///
-    /// The table is installed on a record whose source is known at the install site.
-    #[allow(dead_code)]
-    pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
-        self.resolver().for_source(source)
     }
 }
 

@@ -29,8 +29,8 @@ use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, 
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, param,
-    symbol, test_if_branch_metadata, test_source_location,
+    assignment_target, function_node, make_test_variable, node, param_with_datatype,
+    reference_expr_with_datatype, symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -301,7 +301,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sink,
-                    immutable_reference_expr(
+                    reference_expr_with_datatype(
                         first_ref,
                         DataType::Int,
                         builtin_type_ids::INT,
@@ -1019,7 +1019,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         HandledFallibleHostFunctionCallInput {
             id: external_id,
             args: vec![CallArgument::positional(
-                immutable_reference_expr(
+                reference_expr_with_datatype(
                     input_name.clone(),
                     DataType::StringSlice,
                     builtin_type_ids::STRING,
@@ -1038,7 +1038,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
     let unknown = function_node(
         unknown_name.clone(),
         FunctionSignature {
-            parameters: vec![param(
+            parameters: vec![param_with_datatype(
                 input_name,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
@@ -1115,7 +1115,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     Expression::handled_fallible_function_call_with_typed_arguments(
                         unknown_name.clone(),
                         vec![CallArgument::positional(
-                            immutable_reference_expr(
+                            reference_expr_with_datatype(
                                 argument_name,
                                 DataType::StringSlice,
                                 builtin_type_ids::STRING,

@@ -226,10 +226,10 @@ fn admitted_attribution_policy_survives_session_drain() {
         || "test-project".to_owned(),
     );
     let context = Some(crate::timing::TimingContext::for_boundary(boundary));
-    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+    let pause = crate::timing::enabled::runtime::test_support::pause_record_admission_for_test();
 
     let recorder = std::thread::spawn(move || {
-        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
+        crate::timing::enabled::runtime::test_support::target_record_admission_pause_for_current_thread();
         crate::timing::record_pipeline_timing_attributed(
             TimingMetric::BoundaryInventory,
             std::time::Duration::from_millis(7),
@@ -237,7 +237,7 @@ fn admitted_attribution_policy_survives_session_drain() {
         );
     });
     if let Err(observed) =
-        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+        crate::timing::enabled::runtime::test_support::wait_for_paused_record_admission_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -245,7 +245,8 @@ fn admitted_attribution_policy_survives_session_drain() {
     }
 
     let finisher = std::thread::spawn(move || timing_session.finish());
-    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    if let Err(observed) =
+        crate::timing::enabled::runtime::test_support::wait_for_session_deactivation_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -290,11 +291,11 @@ fn attributed_duration_context_uses_admitted_session_policy() {
         crate::timing::TimingBoundaryKind::MainProject,
         || "test-project".to_owned(),
     );
-    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+    let pause = crate::timing::enabled::runtime::test_support::pause_record_admission_for_test();
     let (context_sender, context_receiver) = std::sync::mpsc::channel();
 
     let recorder = std::thread::spawn(move || {
-        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
+        crate::timing::enabled::runtime::test_support::target_record_admission_pause_for_current_thread();
         record_attributed_duration!(
             TimingMetric::BoundaryInventory,
             std::time::Duration::from_millis(7),
@@ -307,7 +308,7 @@ fn attributed_duration_context_uses_admitted_session_policy() {
         )
     });
     if let Err(observed) =
-        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+        crate::timing::enabled::runtime::test_support::wait_for_paused_record_admission_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -322,7 +323,8 @@ fn attributed_duration_context_uses_admitted_session_policy() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    if let Err(observed) =
+        crate::timing::enabled::runtime::test_support::wait_for_session_deactivation_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -391,10 +393,10 @@ fn admitted_attribution_survives_session_drain() {
         || "test-project".to_owned(),
     );
     let module = crate::timing::register_timing_module(boundary, 0, "entry", 1, 128);
-    let pause = crate::timing::enabled::runtime::pause_record_admission_for_test();
+    let pause = crate::timing::enabled::runtime::test_support::pause_record_admission_for_test();
 
     let recorder = std::thread::spawn(move || {
-        crate::timing::enabled::runtime::target_record_admission_pause_for_current_thread();
+        crate::timing::enabled::runtime::test_support::target_record_admission_pause_for_current_thread();
         let mut start = crate::timing::start_pipeline_timing(TimingMetric::FrontendBindHeaders);
         crate::timing::record_started_pipeline_timing_attributed(
             TimingMetric::FrontendBindHeaders,
@@ -403,7 +405,7 @@ fn admitted_attribution_survives_session_drain() {
         )
     });
     if let Err(observed) =
-        crate::timing::enabled::runtime::wait_for_paused_record_admission_for_test()
+        crate::timing::enabled::runtime::test_support::wait_for_paused_record_admission_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -417,7 +419,8 @@ fn admitted_attribution_survives_session_drain() {
             .send(timing_session.finish())
             .expect("the finish receiver should remain available");
     });
-    if let Err(observed) = crate::timing::enabled::runtime::wait_for_session_deactivation_for_test()
+    if let Err(observed) =
+        crate::timing::enabled::runtime::test_support::wait_for_session_deactivation_for_test()
     {
         pause.release();
         surface_thread_panic("recorder", recorder);
@@ -1163,14 +1166,14 @@ fn summary_mode_command_session_collects_snapshot() {
 fn summary_mode_does_not_clock_or_record_detailed_metrics() {
     let _test_guard = collector_test_guard();
     let session = start_test_command_session(TimingCommandKind::Check, timer_mode_summary());
-    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
+    crate::timing::enabled::runtime::test_support::reset_timing_clock_reads_for_test();
     crate::timing::enabled::collector::reset_lock_acquisitions_for_test();
 
     let value = timed_stage!(TimingMetric::ConfigAstTotal, 42);
 
     assert_eq!(value, 42);
     assert_eq!(
-        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
+        crate::timing::enabled::runtime::test_support::timing_clock_reads_for_test(),
         0,
         "summary mode must not clock detailed schema metrics"
     );
@@ -1335,7 +1338,7 @@ fn lazy_boundary_name_is_not_evaluated_without_a_session() {
 #[test]
 fn inactive_metrics_skip_pipeline_clock_and_collector_lock() {
     let _test_guard = collector_test_guard();
-    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
+    crate::timing::enabled::runtime::test_support::reset_timing_clock_reads_for_test();
     crate::timing::enabled::collector::reset_lock_acquisitions_for_test();
 
     let runs = Cell::new(0);
@@ -1351,7 +1354,7 @@ fn inactive_metrics_skip_pipeline_clock_and_collector_lock() {
         "the production expression must still run once"
     );
     assert_eq!(
-        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
+        crate::timing::enabled::runtime::test_support::timing_clock_reads_for_test(),
         0,
         "inactive metric timing must not read the pipeline clock"
     );
@@ -1411,14 +1414,14 @@ fn silent_counter_summary_session_collects_counters_without_metric_clocks() {
             .metrics()
     );
 
-    crate::timing::enabled::runtime::reset_timing_clock_reads_for_test();
+    crate::timing::enabled::runtime::test_support::reset_timing_clock_reads_for_test();
     crate::timing::enabled::collector::reset_lock_acquisitions_for_test();
     let value = timed_stage!(TimingMetric::FrontendPrepare, 42);
     crate::timing::record_counter("silent.counter_only", 3.0);
 
     assert_eq!(value, 42);
     assert_eq!(
-        crate::timing::enabled::runtime::timing_clock_reads_for_test(),
+        crate::timing::enabled::runtime::test_support::timing_clock_reads_for_test(),
         0,
         "counter-only sessions must not clock timer metrics"
     );

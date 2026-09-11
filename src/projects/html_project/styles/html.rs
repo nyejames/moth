@@ -14,6 +14,9 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 
+use crate::compiler_frontend::compiler_messages::{
+    HtmlTemplateWarning, MalformedTemplateReason, SyntaxDiagnosticKind,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::styles::validation::{PassThroughFormatterInput, SourceWarning};
@@ -48,8 +51,7 @@ impl TemplateFormatter for HtmlValidationTemplateFormatter {
         let flattened_input = PassThroughFormatterInput::from_input(input, string_table);
         let warnings = flattened_input.map_warnings(
             validate_html_source(&flattened_input.flattened_source),
-            crate::compiler_frontend::compiler_messages::CompilerDiagnostic::malformed_html_template,
-            string_table,
+            SyntaxDiagnosticKind::MalformedHtmlTemplate,
         );
 
         Ok(flattened_input.into_formatter_result(warnings))
@@ -64,14 +66,14 @@ fn validate_html_source(source: &str) -> Vec<SourceWarning> {
     push_literal_match_warnings(
         &chars,
         "<script",
-        "Potentially unsafe '<script' tag found in '$html' template.",
+        HtmlTemplateWarning::ScriptTag,
         &mut warnings,
     );
 
     push_literal_match_warnings(
         &chars,
         "javascript:",
-        "Potentially unsafe 'javascript:' URL found in '$html' template.",
+        HtmlTemplateWarning::JavascriptUrl,
         &mut warnings,
     );
 
@@ -82,7 +84,7 @@ fn validate_html_source(source: &str) -> Vec<SourceWarning> {
 fn push_literal_match_warnings(
     chars: &[char],
     pattern: &str,
-    message: &str,
+    reason: HtmlTemplateWarning,
     warnings: &mut Vec<SourceWarning>,
 ) {
     let pattern_chars: Vec<char> = pattern.chars().collect();
@@ -93,7 +95,7 @@ fn push_literal_match_warnings(
     for index in 0..=chars.len() - pattern_chars.len() {
         if chars[index..index + pattern_chars.len()] == *pattern_chars {
             warnings.push(SourceWarning {
-                message: message.to_owned(),
+                reason: MalformedTemplateReason::Html(reason),
                 start_offset: index,
                 end_offset: index + pattern_chars.len(),
             });
@@ -134,9 +136,7 @@ fn scan_inline_event_handler_warnings(chars: &[char]) -> Vec<SourceWarning> {
 
         if cursor < chars.len() && chars[cursor] == '=' {
             warnings.push(SourceWarning {
-                message:
-                    "Potentially unsafe inline 'on*=' event handler found in '$html' template."
-                        .to_owned(),
+                reason: MalformedTemplateReason::Html(HtmlTemplateWarning::InlineEventHandler),
                 start_offset: index,
                 end_offset: cursor.saturating_add(1),
             });

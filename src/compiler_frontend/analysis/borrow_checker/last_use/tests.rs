@@ -33,7 +33,10 @@ fn last_use_single_block_reports_must_after_entry() {
     let analysis =
         LastUseAnalysis::from_problem(&problem).expect("single-use problem should analyze");
     let result = analysis
-        .query_place(PlaceId::new(0), LastUseLocation::at_point(PointId::new(0)))
+        .query(
+            LastUseSubject::Place(PlaceId::new(0)),
+            LastUseLocation::at_point(PointId::new(0)),
+        )
         .expect("single-block query should succeed");
 
     assert_eq!(result.status, FutureUseStatus::MustBeUsed);
@@ -70,7 +73,10 @@ fn last_use_ignores_an_unreachable_use() {
     let analysis =
         LastUseAnalysis::from_problem(&problem).expect("unreachable-use problem should analyze");
     let result = analysis
-        .query_place(PlaceId::new(0), LastUseLocation::at_point(PointId::new(0)))
+        .query(
+            LastUseSubject::Place(PlaceId::new(0)),
+            LastUseLocation::at_point(PointId::new(0)),
+        )
         .expect("unreachable query should succeed");
 
     assert_eq!(result.status, FutureUseStatus::NoFutureUse);

@@ -473,28 +473,6 @@ fn require_symbolic_spacing(
     Ok(())
 }
 
-fn less_than_is_generic_angle_start(
-    stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
-    whitespace_before_current: bool,
-) -> bool {
-    matches!(context.previous_token_kind, Some(TokenKind::Symbol(_)))
-        && !whitespace_before_current
-        && stream
-            .peek()
-            .is_some_and(|character| character.is_uppercase())
-}
-
-fn greater_than_is_generic_angle_end(
-    stream: &mut TokenStream<'_>,
-    context: LexerTokenContext<'_>,
-    whitespace_before_current: bool,
-) -> bool {
-    matches!(context.previous_token_kind, Some(TokenKind::Symbol(_)))
-        && !whitespace_before_current
-        && matches!(stream.peek(), Some('(' | ','))
-}
-
 fn less_than_is_template_tag_start(
     stream: &mut TokenStream<'_>,
     context: LexerTokenContext<'_>,
@@ -909,7 +887,7 @@ fn get_token_kind(
                 return_token!(TokenKind::Arrow, stream);
             }
 
-            if next_char.is_numeric() {
+            if next_char.is_ascii_digit() {
                 if context.previous_can_end_expression()
                     && !line_initial_match_arm_header(stream, context)
                 {
@@ -1155,9 +1133,7 @@ fn get_token_kind(
                 }
             }
 
-            if !greater_than_is_generic_angle_end(stream, context, whitespace_before_current)
-                && !greater_than_is_template_tag_end(stream, context, whitespace_before_current)
-            {
+            if !greater_than_is_template_tag_end(stream, context, whitespace_before_current) {
                 require_symbolic_spacing(
                     stream,
                     context,
@@ -1191,9 +1167,7 @@ fn get_token_kind(
                 }
             }
 
-            if !less_than_is_generic_angle_start(stream, context, whitespace_before_current)
-                && !less_than_is_template_tag_start(stream, context, whitespace_before_current)
-            {
+            if !less_than_is_template_tag_start(stream, context, whitespace_before_current) {
                 require_symbolic_spacing(
                     stream,
                     context,
@@ -1263,7 +1237,7 @@ fn get_token_kind(
         }
 
         // Numeric literals
-        if current_char.is_numeric() {
+        if current_char.is_ascii_digit() {
             return tokenize_numeric_literal(
                 current_char,
                 stream,

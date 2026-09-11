@@ -9,9 +9,6 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::moth_template::scope::{
-    MothTemplatePathScope, MothTemplateScopeConstant,
-};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,8 +16,6 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MothTemplateCompileRequest {
     pub(crate) input: MothTemplateInput,
-    pub(crate) default_module_constants: Vec<MothTemplateScopeConstant>,
-    pub(crate) module_constants_by_path: Vec<MothTemplatePathScope>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,8 +43,6 @@ impl MothTemplateCompileRequest {
         self,
         string_table: &mut StringTable,
     ) -> Result<Vec<MothTemplateSourceUnit>, CompilerMessages> {
-        self.validate_no_caller_scope_constants(string_table)?;
-
         let units = match self.input {
             MothTemplateInput::File(path) => vec![read_file_unit(path, None, string_table)?],
 
@@ -83,39 +76,6 @@ impl MothTemplateCompileRequest {
         reject_duplicate_source_paths(&units, string_table)?;
 
         Ok(units)
-    }
-
-    fn validate_no_caller_scope_constants(
-        &self,
-        string_table: &mut StringTable,
-    ) -> Result<(), CompilerMessages> {
-        if let Some(scope) = self
-            .module_constants_by_path
-            .iter()
-            .find(|scope| !scope.constants.is_empty())
-        {
-            let messages = unsupported_scope_constant_messages(&scope.source_path, string_table);
-            return Err(messages);
-        }
-
-        if !self.default_module_constants.is_empty() {
-            let location_path = match &self.input {
-                MothTemplateInput::File(path) => path,
-                MothTemplateInput::Directory { path, .. } => path,
-                MothTemplateInput::Files(paths) => paths
-                    .first()
-                    .map(PathBuf::as_path)
-                    .unwrap_or_else(|| Path::new("<moth-template>")),
-                MothTemplateInput::Sources(sources) => sources
-                    .first()
-                    .map(|source| source.display_path.as_path())
-                    .unwrap_or_else(|| Path::new("<moth-template>")),
-            };
-            let messages = unsupported_scope_constant_messages(location_path, string_table);
-            return Err(messages);
-        }
-
-        Ok(())
     }
 }
 
@@ -438,29 +398,6 @@ fn reject_duplicate_source_paths(
             string_table.clone(),
         ))
     }
-}
-
-fn unsupported_scope_constant_messages(
-    location_path: &Path,
-    string_table: &mut StringTable,
-) -> CompilerMessages {
-    let path = match InternedPath::try_from_filesystem_path(location_path, string_table) {
-        Ok(interned) => interned,
-        Err(NonUtf8PathComponent { path: bad_path }) => {
-            return CompilerMessages::from_error_ref(
-                CompilerError::file_error(
-                    &bad_path,
-                    format!(
-                        "Moth template scope path {bad_path:?} contains a non-UTF-8 component; Moth identity requires UTF-8 paths."
-                    ),
-                ),
-                string_table,
-            );
-        }
-    };
-    let diagnostic = CompilerDiagnostic::invalid_moth_template_api_scope_item(path, None);
-
-    CompilerMessages::from_diagnostics(vec![diagnostic], string_table.clone())
 }
 
 fn normalized_relative_path(root: &Path, path: &Path) -> PathBuf {

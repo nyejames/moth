@@ -13,6 +13,19 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering};
 
 use super::schema::{TimingLevel, TimingMetric};
 use super::session::TimingCommandKind;
+// WHAT: the test build routes admission observation into a child module that can reach private
+//       runtime atomics; the shipping fallback keeps the hot path branch-free.
+// WHY: `admitted_attribution_*` tests must pause one admitted recorder without exposing
+//      synchronization state as production API.
+#[cfg(test)]
+#[path = "runtime_test_support.rs"]
+pub(crate) mod test_support;
+
+#[cfg(not(test))]
+mod test_support {
+    #[inline(always)]
+    pub(super) fn observe_record_admission() {}
+}
 
 /// Output mode controlling how timing information reaches the user.
 ///
@@ -393,8 +406,6 @@ pub(crate) fn activate_session(
     command: Option<TimingCommandKind>,
     configuration: TimingSessionConfiguration,
 ) {
-    #[cfg(test)]
-    note_session_deactivated_for_test(false);
     ACTIVE_COMMAND_KIND.store(command_code(command), Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(configuration.suppress_output(), Ordering::Relaxed);
     ACTIVE_CHANNEL_BITS.store(configuration.active_bits(), Ordering::Release);
@@ -407,8 +418,6 @@ pub(crate) fn deactivate_session() {
     ACTIVE_COMMAND_KIND.store(0, Ordering::Release);
     ACTIVE_CHANNEL_BITS.store(0, Ordering::Release);
     ACTIVE_OUTPUT_SUPPRESSED.store(false, Ordering::Relaxed);
-    #[cfg(test)]
-    note_session_deactivated_for_test(true);
 }
 
 /// Begin one lock-free record admission window for the current session.
@@ -433,8 +442,9 @@ pub(crate) fn begin_record() -> Option<TimingRecordAdmission> {
                 command: command_from_code(command_code),
                 output_suppressed,
             };
-            #[cfg(test)]
-            pause_after_record_admission_for_test();
+            // The child observes this exact post-validation point; its shipping counterpart is a
+            // no-op, so admission remains a lock-free production path.
+            test_support::observe_record_admission();
             return Some(admission);
         }
 
@@ -528,199 +538,14 @@ pub(crate) fn counter_bench_output_active() -> bool {
     channel_active(ACTIVE_COUNTER_BENCH_OUTPUT)
 }
 
+/// Observe one timing clock read for optimization tests.
+///
+/// WHY: the enabled guard reaches this narrow bridge immediately after admission; keeping the
+/// counter storage in the test child module preserves the no-clock-on-inactive-metric assertion
+/// without adding test state to the runtime.
 #[cfg(test)]
-use std::sync::atomic::AtomicUsize;
-
-#[cfg(test)]
-static TIMING_CLOCK_READS: AtomicUsize = AtomicUsize::new(0);
-
-/// Record one timer-clock read in tests without adding production work.
-#[cfg(test)]
-pub(crate) fn record_timing_clock_read_for_test() {
-    TIMING_CLOCK_READS.fetch_add(1, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-pub(crate) fn reset_timing_clock_reads_for_test() {
-    TIMING_CLOCK_READS.store(0, Ordering::Relaxed);
-}
-
-#[cfg(test)]
-pub(crate) fn timing_clock_reads_for_test() -> usize {
-    TIMING_CLOCK_READS.load(Ordering::Relaxed)
-}
-
-// ---------------------------------------------------------------------------
-//  Drain-synchronization seam for collector tests
-// ---------------------------------------------------------------------------
-//
-// Session drain has two transient orderings a test must observe: a recorder
-// that has been admitted but has not published its observation, and a session
-// that has cleared its fast-path bits but has not finished draining. A test
-// stops the targeted recorder inside that window and waits for the matching
-// state.
-//
-// The seam is a condition variable, not atomics plus `yield_now`: a spin count
-// is a CPU-speed timeout rather than synchronization, and it reports nothing
-// about the state it gave up on. The wait deadline below exists only so a
-// broken ordering fails instead of hanging the suite.
-
-#[cfg(test)]
-use std::sync::{Condvar, Mutex};
-#[cfg(test)]
-use std::time::Duration;
-
-/// The transient drain state a collector test can wait on.
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RecordAdmissionState {
-    /// The targeted recorder must stop after admission until the test releases it.
-    pub(crate) paused: bool,
-    /// The targeted recorder reached the pause point inside its admission window.
-    pub(crate) admission_reached: bool,
-    /// A session cleared its fast-path bits and is now draining admitted recorders.
-    pub(crate) session_deactivated: bool,
-}
-
-#[cfg(test)]
-impl std::fmt::Display for RecordAdmissionState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "paused={}, admission_reached={}, session_deactivated={}",
-            self.paused, self.admission_reached, self.session_deactivated
-        )
-    }
-}
-
-#[cfg(test)]
-static RECORD_ADMISSION_STATE: Mutex<RecordAdmissionState> = Mutex::new(RecordAdmissionState {
-    paused: false,
-    admission_reached: false,
-    session_deactivated: false,
-});
-
-#[cfg(test)]
-static RECORD_ADMISSION_SIGNAL: Condvar = Condvar::new();
-
-/// Deadlock protection for the drain waits, never the synchronization itself.
-#[cfg(test)]
-const RECORD_ADMISSION_WAIT_DEADLINE: Duration = Duration::from_secs(30);
-
-#[cfg(test)]
-thread_local! {
-    /// Marks the one recorder thread selected by a drain-synchronization test.
-    ///
-    /// A process-global pause can accidentally capture unrelated parallel tests that also record
-    /// timings. Keeping targeting thread-local makes the synchronization hook observational for
-    /// every other test thread.
-    static RECORD_ADMISSION_PAUSE_TARGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-fn lock_record_admission_state() -> std::sync::MutexGuard<'static, RecordAdmissionState> {
-    RECORD_ADMISSION_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Apply one state change and wake every waiter.
-#[cfg(test)]
-fn publish_record_admission_state(update: impl FnOnce(&mut RecordAdmissionState)) {
-    update(&mut lock_record_admission_state());
-    RECORD_ADMISSION_SIGNAL.notify_all();
-}
-
-/// Wait until `reached` holds, or report the state the wait gave up on.
-#[cfg(test)]
-fn wait_for_record_admission_state(
-    reached: impl Fn(&RecordAdmissionState) -> bool,
-) -> Result<(), RecordAdmissionState> {
-    let (state, wait_result) = RECORD_ADMISSION_SIGNAL
-        .wait_timeout_while(
-            lock_record_admission_state(),
-            RECORD_ADMISSION_WAIT_DEADLINE,
-            |state| !reached(state),
-        )
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    if wait_result.timed_out() {
-        Err(*state)
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-pub(crate) struct RecordAdmissionPauseGuard;
-
-#[cfg(test)]
-impl RecordAdmissionPauseGuard {
-    pub(crate) fn release(&self) {
-        publish_record_admission_state(|state| state.paused = false);
-    }
-}
-
-#[cfg(test)]
-impl Drop for RecordAdmissionPauseGuard {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn pause_record_admission_for_test() -> RecordAdmissionPauseGuard {
-    publish_record_admission_state(|state| {
-        *state = RecordAdmissionState {
-            paused: true,
-            admission_reached: false,
-            session_deactivated: false,
-        };
-    });
-    RecordAdmissionPauseGuard
-}
-
-/// Block until the targeted recorder is parked inside its admission window.
-#[cfg(test)]
-pub(crate) fn wait_for_paused_record_admission_for_test() -> Result<(), RecordAdmissionState> {
-    wait_for_record_admission_state(|state| state.admission_reached)
-}
-
-/// Block until a session has cleared its fast-path bits and started draining.
-#[cfg(test)]
-pub(crate) fn wait_for_session_deactivation_for_test() -> Result<(), RecordAdmissionState> {
-    wait_for_record_admission_state(|state| state.session_deactivated)
-}
-
-#[cfg(test)]
-fn note_session_deactivated_for_test(deactivated: bool) {
-    publish_record_admission_state(|state| state.session_deactivated = deactivated);
-}
-
-#[cfg(test)]
-pub(crate) fn target_record_admission_pause_for_current_thread() {
-    RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.set(true));
-}
-
-/// Park the targeted recorder after admission until the owning test releases it.
-#[cfg(test)]
-fn pause_after_record_admission_for_test() {
-    if !RECORD_ADMISSION_PAUSE_TARGET.with(|target| target.replace(false)) {
-        return;
-    }
-
-    let mut state = lock_record_admission_state();
-    if !state.paused {
-        return;
-    }
-
-    state.admission_reached = true;
-    RECORD_ADMISSION_SIGNAL.notify_all();
-    while state.paused {
-        state = RECORD_ADMISSION_SIGNAL
-            .wait(state)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-    }
+pub(crate) fn observe_timing_clock_read() {
+    test_support::record_timing_clock_read();
 }
 
 #[cfg(test)]

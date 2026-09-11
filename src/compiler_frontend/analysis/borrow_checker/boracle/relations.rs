@@ -8,9 +8,6 @@
 //! This module intentionally stops at source-semantic provenance. It does not own lifetime
 //! topology, `PlaceOverlap`, retained-edge counting (REC), or experiment selection.
 
-// Some constructors exist for focused tests and dumps that the solver does not yet emit.
-#![allow(dead_code)]
-
 use super::super::problem::{ProjectionElem, ValueOriginId};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,10 +23,6 @@ impl CopyGraphId {
     pub(crate) const fn new(raw: u32) -> Self {
         Self(raw)
     }
-
-    pub(crate) const fn raw(self) -> u32 {
-        self.0
-    }
 }
 
 /// Why an overlap fact remains imprecise rather than proving either side independent.
@@ -37,10 +30,18 @@ impl CopyGraphId {
 pub(crate) enum PrecisionLossReason {
     UnknownCallResult,
     MissingLocalSummary,
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (dynamic-index precision).
     DynamicIndex,
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (storage-domain precision).
     ConservativeStorageDomain,
     PathJoin,
+    #[allow(dead_code)]
+    // Boracle conflict-directed relational refinement plan: docs/roadmap/plans/boracle-next-research-plans/boracle-conflict-directed-relational-refinement-plan.md (mixed-mode precision).
     MixedBindingMode,
+    #[allow(dead_code)]
+    // Boracle loop-generation plan: docs/roadmap/plans/boracle-next-research-plans/boracle-loop-generation-epochs-and-edge-last-use-plan.md (generation widening).
     LoopGenerationWidening,
     ExternalOpaqueValue,
 }
@@ -50,8 +51,14 @@ pub(crate) enum PrecisionLossReason {
 pub(crate) enum DisjointReason {
     DifferentFreshGenerations,
     ExplicitCopy,
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (fixed-field disjointness).
     DistinctFixedFields,
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (fixed-index disjointness).
     DistinctFixedIndices,
+    #[allow(dead_code)]
+    // Boracle conflict-directed relational refinement plan: docs/roadmap/plans/boracle-next-research-plans/boracle-conflict-directed-relational-refinement-plan.md (experimental proof evidence).
     ExperimentProof,
 }
 
@@ -61,11 +68,23 @@ pub(crate) enum DisjointReason {
 /// over origin sets remain symmetric; direction is only evidence about how the pair was formed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OriginRelationKind {
-    Projection { projection: ProjectionElem },
-    AggregateChild { projection: ProjectionElem },
-    CopyCorrespondence { copy_graph: CopyGraphId },
-    MayAlias { reason: PrecisionLossReason },
-    ProvenDisjoint { reason: DisjointReason },
+    Projection {
+        projection: ProjectionElem,
+    },
+    AggregateChild {
+        projection: ProjectionElem,
+    },
+    CopyCorrespondence {
+        copy_graph: CopyGraphId,
+    },
+    MayAlias {
+        reason: PrecisionLossReason,
+    },
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
+    ProvenDisjoint {
+        reason: DisjointReason,
+    },
 }
 
 /// Typed fact attached to a relationship row.
@@ -94,6 +113,8 @@ pub(crate) enum OriginRelationEvidence {
         right: ValueOriginId,
         reason: PrecisionLossReason,
     },
+    #[allow(dead_code)]
+    // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
     ProvenDisjoint {
         left: ValueOriginId,
         right: ValueOriginId,
@@ -192,7 +213,7 @@ impl OriginRelation {
             },
         )
     }
-
+    #[allow(dead_code)] // Boracle aggregate-copy plan: docs/roadmap/plans/boracle-next-research-plans/boracle-aggregate-copy-and-builtin-storage-provenance-plan.md (positive disjoint relation rows).
     pub(crate) const fn proven_disjoint(
         left: ValueOriginId,
         right: ValueOriginId,
@@ -243,6 +264,8 @@ pub(crate) struct OriginUnknownEvidence {
     pub(crate) relation: Option<OriginRelationEvidence>,
 }
 
+// LEAVE-LOCAL: counterparts are boracle/oracle/conflicts.rs:23 DynamicOverlap and problem/places.rs:64 PlaceOverlap.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 /// Result of asking whether two origin sets can observe one source-semantic generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OriginOverlapDecision {
@@ -255,6 +278,8 @@ pub(crate) enum OriginOverlapDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OriginRegistration {
     Fresh(ValueOriginId),
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Derived(ValueOriginId),
     Unknown {
         id: ValueOriginId,
@@ -275,13 +300,15 @@ impl OriginRegistration {
         Self::Unknown { id, reason }
     }
 
+    #[cfg(test)]
     pub(crate) const fn unknown_call_result(id: ValueOriginId) -> Self {
         Self::unknown(id, PrecisionLossReason::UnknownCallResult)
     }
 
     const fn id(self) -> ValueOriginId {
         match self {
-            Self::Fresh(id) | Self::Derived(id) => id,
+            Self::Fresh(id) => id,
+            Self::Derived(id) => id,
             Self::Unknown { id, .. } => id,
         }
     }
@@ -289,7 +316,8 @@ impl OriginRegistration {
     const fn unknown_reason(self) -> Option<PrecisionLossReason> {
         match self {
             Self::Unknown { reason, .. } => Some(reason),
-            Self::Fresh(_) | Self::Derived(_) => None,
+            Self::Fresh(_) => None,
+            Self::Derived(_) => None,
         }
     }
 
@@ -354,17 +382,7 @@ impl OriginRelations {
         })
     }
 
-    /// Construct a table whose registered IDs are all independent fresh generations.
-    pub(crate) fn from_fresh_origins(
-        origins: impl IntoIterator<Item = ValueOriginId>,
-        relations: impl IntoIterator<Item = OriginRelation>,
-    ) -> Result<Self, CompilerError> {
-        Self::new(
-            origins.into_iter().map(OriginRegistration::fresh),
-            relations,
-        )
-    }
-
+    #[cfg(test)]
     pub(crate) fn rows(&self) -> &[OriginRelation] {
         &self.rows
     }
@@ -387,6 +405,7 @@ impl OriginRelations {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn mixed_generation_sets(&self) -> &[Box<[ValueOriginId]>] {
         &self.mixed_generation_sets
     }
@@ -720,8 +739,8 @@ fn validate_contradictions(rows: &[OriginRelation]) -> Result<(), CompilerError>
             OriginRelationKind::Projection { .. }
             | OriginRelationKind::AggregateChild { .. }
             | OriginRelationKind::MayAlias { .. } => fact.0 = true,
-            OriginRelationKind::CopyCorrespondence { .. }
-            | OriginRelationKind::ProvenDisjoint { .. } => fact.1 = true,
+            OriginRelationKind::CopyCorrespondence { .. } => fact.1 = true,
+            OriginRelationKind::ProvenDisjoint { .. } => fact.1 = true,
         }
     }
 

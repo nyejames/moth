@@ -8,18 +8,20 @@
 //! This module must not mutate HIR, perform backend ownership lowering, or use diagnostics as
 //! analysis state. External-call access policy belongs in the metadata/transfer owners below.
 //!
-//! This also owns shared future seams:
-//! - `problem`: shared borrow-problem vocabulary for future boracle-style analyses
-//! - `last_use`: shared last-use analysis vocabulary for future boracle-style analyses
-//! - `boracle`: feature-gated Boracle lane entrypoint, currently isolated from the alpha path
+//! The `problem` and `last_use` seams compile only for the Boracle lane and its tests:
+//! they are not part of the default compiler path. `boracle` is feature-gated and currently
+//! isolated from the alpha path; the shared seams remain available to that lane and their tests.
+//! The normal checker owns the metadata/transfer path below.
 
 #[cfg(feature = "boracle")]
 mod boracle;
 mod diagnostics;
 mod engine;
 mod error;
+#[cfg(any(feature = "boracle", test))]
 mod last_use;
 mod metadata;
+#[cfg(any(feature = "boracle", test))]
 mod problem;
 mod state;
 mod transfer;
@@ -35,6 +37,9 @@ pub(crate) use types::{
 };
 pub(crate) type BorrowFacts = BorrowAnalysis;
 
+// WHY: These optional re-exports expose the Boracle service to project tooling and focused tests.
+// The feature-lane rows are consumed by the project command when enabled, while the test-only
+// helper is gated separately. Keep allowances local to this optional boundary.
 #[cfg(all(feature = "boracle", test))]
 #[allow(unused_imports)]
 pub(crate) use boracle::solve_hir_module;

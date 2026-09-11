@@ -12,7 +12,9 @@
 //! - Findings, the atomic JSON report and the `first-party-deps` command result.
 //!
 //! # What this module does NOT own
-//! - JavaScript lexical scanning or the runtime-module allowlist; those live in `moth::first_party_js`.
+//! - JavaScript lexical scanning or the runtime-module allowlist; those live in the HTML JS parser
+//!   and `RuntimeModuleRegistry`. `moth::first_party_js` maps scanner diagnostics onto this audit's
+//!   two rules.
 //! - User-owned or future dependency packages and their manifests.
 //! - Package declarations, aliases, resolution or package-graph design.
 //! - Generated HTML runtime glue, documentation, tests, benchmarks or repository-root manifests.
@@ -338,14 +340,10 @@ fn audit_javascript_source(file: &str, source: &str) -> Vec<FirstPartyDepsFindin
         .map(|finding| FirstPartyDepsFinding {
             file: file.to_owned(),
             rule: match finding.kind {
-                FirstPartyJavascriptImportFindingKind::DynamicImport
-                | FirstPartyJavascriptImportFindingKind::ArbitraryImport
-                | FirstPartyJavascriptImportFindingKind::CommonJsRequire
-                | FirstPartyJavascriptImportFindingKind::ReExportFrom => {
+                FirstPartyJavascriptImportFindingKind::UnapprovedModuleImport => {
                     FirstPartyDepsRule::UnapprovedModuleImport
                 }
-                FirstPartyJavascriptImportFindingKind::UnsupportedRuntimeImportForm
-                | FirstPartyJavascriptImportFindingKind::UnknownRuntimeImportName => {
+                FirstPartyJavascriptImportFindingKind::InvalidRuntimeImport => {
                     FirstPartyDepsRule::InvalidRuntimeImport
                 }
             },

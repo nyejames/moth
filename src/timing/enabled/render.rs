@@ -14,6 +14,7 @@ use super::summary::{
 use std::time::Duration;
 
 const MAX_SLOWEST_MODULE_IDENTITY_WIDTH: usize = 48;
+pub(crate) const ACCOUNTING_NOTE: &str = "Only pipeline rows account for the command total. Remaining sections are overlapping attribution.";
 
 /// Print one complete report.
 pub(crate) fn render_timing_summary_report(report: &TimingSummaryReport) {
@@ -41,10 +42,7 @@ pub(crate) fn render_timing_summary_report(report: &TimingSummaryReport) {
             }
             TimingReportItem::AccountingNote => {
                 saying::say!();
-                saying::say!(Dark Yellow
-                    "Only pipeline rows account for the command total. ",
-                    "Remaining sections are overlapping attribution."
-                );
+                saying::say!(Dark Yellow ACCOUNTING_NOTE);
             }
             TimingReportItem::CompilationBoundaries(boundaries) => {
                 saying::say!();
@@ -56,19 +54,6 @@ pub(crate) fn render_timing_summary_report(report: &TimingSummaryReport) {
             }
         }
     }
-}
-
-/// Build the exact heading line text, including the total in its own field.
-///
-/// The renderer colours the title and duration separately; this pure helper
-/// pins the layout without capturing terminal output.
-#[cfg(test)]
-pub(crate) fn report_title_text(report: &TimingSummaryReport) -> String {
-    format!(
-        "{}  {}",
-        report.title,
-        format_duration(report.command_total)
-    )
 }
 
 fn render_section(section: &TimingSummarySection) {
@@ -124,10 +109,6 @@ pub(crate) fn boundary_section_title() -> &'static str {
     "Compilation boundaries · accumulated work"
 }
 
-/// The accounting note text, printed once after the pipeline section.
-#[cfg(test)]
-pub(crate) const ACCOUNTING_NOTE_TEXT: &str = "Only pipeline rows account for the command total. Remaining sections are overlapping attribution.";
-
 fn render_slowest_module(slowest_module: &TimingSlowestModuleSummary) {
     saying::say!(Blue "Slowest module");
 
@@ -144,15 +125,6 @@ fn render_slowest_module(slowest_module: &TimingSlowestModuleSummary) {
     );
 }
 
-/// Build the exact display text for one row.
-#[cfg(test)]
-pub(crate) fn render_row_text(row: &TimingSummaryRow, label_width: usize, depth: usize) -> String {
-    let indent = "  ".repeat(depth);
-    let indented_label = format!("{indent}{}", row.label);
-    let label = format!("{indented_label:<width$}", width = label_width);
-    format!("{label}  {}", format_value(row))
-}
-
 /// Return the width of the widest fully indented row label in a section.
 fn max_row_label_width(rows: &[TimingSummaryRow], depth: usize) -> usize {
     rows.iter()
@@ -164,40 +136,6 @@ fn max_row_label_width(rows: &[TimingSummaryRow], depth: usize) -> usize {
         .unwrap_or(0)
 }
 
-/// Expose the renderer's recursive width calculation to layout tests.
-#[cfg(test)]
-pub(crate) fn section_label_width(rows: &[TimingSummaryRow]) -> usize {
-    max_row_label_width(rows, 0)
-}
-
-/// Build the exact display text for one boundary row.
-#[cfg(test)]
-pub(crate) fn boundary_row_text(boundary: &TimingBoundarySummary, label_width: usize) -> String {
-    boundary_row_text_with_width(
-        boundary,
-        label_width,
-        boundary_module_word(boundary.module_count).len(),
-    )
-}
-
-/// Build a boundary row with an explicit shared module-count column width.
-#[cfg(test)]
-pub(crate) fn boundary_row_text_with_width(
-    boundary: &TimingBoundarySummary,
-    label_width: usize,
-    module_width: usize,
-) -> String {
-    let module_word = boundary_module_word(boundary.module_count);
-    format!(
-        "{:<label_width$}  {module_word:<module_width$}  {value}",
-        boundary.label,
-        label_width = label_width,
-        module_word = module_word,
-        module_width = module_width,
-        value = format_duration(boundary.total),
-    )
-}
-
 fn boundary_module_word(module_count: u64) -> String {
     let word = if module_count == 1 {
         "module"
@@ -205,19 +143,6 @@ fn boundary_module_word(module_count: u64) -> String {
         "modules"
     };
     format!("{module_count} {word}")
-}
-
-/// Build the exact display text for the slowest-module row.
-#[cfg(test)]
-pub(crate) fn slowest_module_text(slowest_module: &TimingSlowestModuleSummary) -> String {
-    let file_word = module_file_word(slowest_module.source_file_count);
-    format!(
-        "{}  {} · {} · {:.1}KiB",
-        truncate_logical_identity(slowest_module.identity.as_ref()),
-        format_duration(slowest_module.total),
-        file_word,
-        slowest_module.source_byte_count as f64 / 1024.0,
-    )
 }
 
 /// Keep the concise report bounded while preserving the logical identity's
@@ -256,3 +181,7 @@ fn format_value(row: &TimingSummaryRow) -> String {
 fn format_duration(duration: Duration) -> String {
     format!("{:.2}ms", duration.as_secs_f64() * 1000.0)
 }
+
+#[cfg(test)]
+#[path = "render_test_support.rs"]
+pub(crate) mod test_support;

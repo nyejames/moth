@@ -46,11 +46,12 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
-    expressions_to_owned_render_node, register_local, runtime_template_expression, setup_builder,
+    HirBuilder, expressions_to_owned_render_node, register_local, runtime_template_expression,
+    setup_builder, validate_module_for_tests,
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FieldId, FunctionId, LocalId, StructId,
+    ChoiceId, FieldId, FunctionId, HirValueId, LocalId, StructId,
 };
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -65,11 +66,12 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::tests::hir_fixture_support::raw_template_expression_for_hir_invariant;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     choice_construct_expr, const_record_reference_expr, field_access_node, handled_result_expr,
-    inferred_type_reference_expr, option_none_expr, result_carrier_type_id, runtime_expr,
-    runtime_operand_item, runtime_operator_item,
+    option_none_expr, result_carrier_type_id, runtime_expr, runtime_operand_item,
+    runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -275,7 +277,6 @@ fn runtime_template_conditional_loop_expression(
 
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
 }
-
 fn loop_binding(name: &str, type_id: TypeId, string_table: &mut StringTable) -> Declaration {
     Declaration {
         id: InternedPath::from_single_str(name, string_table),
@@ -289,6 +290,65 @@ fn loop_binding(name: &str, type_id: TypeId, string_table: &mut StringTable) -> 
         binding_span: None,
         config_qualifier: None,
     }
+}
+fn declared_entry_block<'b>(builder: &'b HirBuilder<'_>) -> &'b HirBlock {
+    let entry_id = super::start_function(&builder.module).entry;
+    builder
+        .module
+        .blocks
+        .iter()
+        .find(|block| block.id == entry_id)
+        .unwrap_or_else(|| panic!("declared HIR entry block {entry_id:?} should exist"))
+}
+
+fn assert_no_synthesized_helper_functions(builder: &HirBuilder<'_>) {
+    assert_eq!(
+        builder.module.functions.len(),
+        1,
+        "runtime-template lowering should retain only its declared start function"
+    );
+    let start_function = builder
+        .module
+        .start_function
+        .expect("expression fixture should declare a start function");
+    assert!(
+        builder
+            .module
+            .functions
+            .iter()
+            .any(|function| function.id == start_function),
+        "the sole expression-fixture function should be its declared start function"
+    );
+}
+
+#[test]
+fn expression_test_builder_produces_valid_hir_module_metadata() {
+    let mut string_table = StringTable::new();
+    let mut builder = setup_builder(&mut string_table);
+    let entry_id = super::start_function(&builder.module).entry;
+    let entry_block = builder
+        .module
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == entry_id)
+        .expect("expression fixture should expose its declared entry block");
+    let region = entry_block.region;
+    entry_block.terminator =
+        HirTerminator::Return(crate::compiler_frontend::hir::expressions::HirExpression {
+            id: HirValueId(0),
+            kind: HirExpressionKind::TupleConstruct { elements: vec![] },
+            ty: builtin_type_ids::NONE,
+            value_kind: ValueKind::Const,
+            region,
+            span: None,
+        });
+
+    validate_module_for_tests(
+        &builder.module,
+        &*builder.string_table,
+        &builder.type_environment,
+    )
+    .expect("the shared expression builder fixture should satisfy HIR validation");
 }
 
 #[test]
@@ -335,14 +395,8 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
         .expect("slot-shaped runtime templates should lower in HIR");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    assert_no_synthesized_helper_functions(&builder);
+    let entry_block = declared_entry_block(&builder);
     assert!(block_assigns_string_literal(entry_block, "before "));
     assert!(block_assigns_string_literal(entry_block, "after"));
 }
@@ -515,7 +569,7 @@ fn lowers_reference_to_registered_local() {
         span,
     );
 
-    let expr = inferred_type_reference_expr(
+    let expr = reference_expr_with_type_id(
         x,
         builtin_type_ids::INT,
         span,
@@ -545,7 +599,7 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
         Expression::int(3, span, ValueMode::ImmutableOwned),
     );
 
-    let expr = inferred_type_reference_expr(
+    let expr = reference_expr_with_type_id(
         third_const,
         builtin_type_ids::INT,
         span,
@@ -584,14 +638,14 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     );
 
     let items = vec![
-        runtime_operand_item(inferred_type_reference_expr(
+        runtime_operand_item(reference_expr_with_type_id(
             x,
             builtin_type_ids::INT,
             span,
             ValueMode::ImmutableReference,
         )),
         runtime_operand_item(Expression::int(2, span, ValueMode::ImmutableOwned)),
-        runtime_operand_item(inferred_type_reference_expr(
+        runtime_operand_item(reference_expr_with_type_id(
             y,
             builtin_type_ids::INT,
             span,
@@ -1119,7 +1173,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        inferred_type_reference_expr(
+        reference_expr_with_type_id(
             receiver_name,
             receiver_type_id,
             span,
@@ -1175,7 +1229,7 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
-        inferred_type_reference_expr(
+        reference_expr_with_type_id(
             receiver_name,
             builtin_type_ids::INT,
             span,
@@ -1335,18 +1389,12 @@ fn runtime_template_expression_lowers_inline_to_accumulator() {
         .expect("runtime template lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
+    assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
         lowered.value.kind,
         HirExpressionKind::Copy(HirPlace::Local(_))
     ));
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     assert!(block_assigns_string_literal(entry_block, "hello"));
 }
 
@@ -1372,18 +1420,12 @@ fn runtime_template_handoff_expression_lowers_inline_to_accumulator() {
         .expect("owned runtime template handoff expression should lower");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
+    assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
         lowered.value.kind,
         HirExpressionKind::Copy(HirPlace::Local(_))
     ));
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     assert!(block_assigns_string_literal(entry_block, "hello"));
 }
 
@@ -1420,13 +1462,7 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
         .expect("owned nested runtime template handoffs should lower");
 
     assert!(lowered.prelude.is_empty());
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     assert_eq!(
         count_empty_string_initializers(entry_block),
         1,
@@ -1454,14 +1490,8 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
         .expect("runtime template lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    assert_no_synthesized_helper_functions(&builder);
+    let entry_block = declared_entry_block(&builder);
     assert!(block_assigns_coerced_int_chunk(entry_block, 5));
 }
 
@@ -1492,7 +1522,7 @@ fn reactive_linear_template_keeps_subscription_chunks_lazy() {
         span,
     });
 
-    let count_expression = inferred_type_reference_expr(
+    let count_expression = reference_expr_with_type_id(
         count_path,
         builtin_type_ids::INT,
         span,
@@ -1525,16 +1555,13 @@ fn reactive_linear_template_keeps_subscription_chunks_lazy() {
         expression_contains_load_of_local(&lowered.value, count_local),
         "reactive template snapshot body should reread the subscribed source"
     );
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     assert!(
-        entry_block.statements.is_empty(),
-        "direct subscription chunks should not be materialized into eager snapshot statements"
+        entry_block
+            .statements
+            .iter()
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
+        "direct subscription chunks should not be materialized into eager snapshot assignments"
     );
 }
 
@@ -1568,14 +1595,8 @@ fn runtime_template_lowers_nested_templates_in_order() {
         .expect("nested runtime template lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    assert_no_synthesized_helper_functions(&builder);
+    let entry_block = declared_entry_block(&builder);
     assert!(block_assigns_string_literal(entry_block, "A"));
     assert!(block_assigns_string_literal(entry_block, "B"));
     assert!(block_assigns_string_literal(entry_block, "C"));
@@ -1600,7 +1621,7 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         span,
     );
 
-    let condition = inferred_type_reference_expr(
+    let condition = reference_expr_with_type_id(
         show_name,
         builtin_type_ids::BOOL,
         span,
@@ -1629,26 +1650,24 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         .expect("runtime Bool template if should lower inline");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
+    assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
         lowered.value.kind,
         HirExpressionKind::Copy(HirPlace::Local(_))
     ));
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
-    assert_eq!(entry_block.statements.len(), 1);
+    let entry_block = declared_entry_block(&builder);
+    assert_eq!(
+        count_empty_string_initializers(entry_block),
+        1,
+        "inline template if should initialize exactly one runtime accumulator"
+    );
 
     let (then_block, else_block) = match &entry_block.terminator {
-        HirTerminator::If {
+        &HirTerminator::If {
             then_block,
             else_block,
             ..
-        } => (*then_block, *else_block),
+        } => (then_block, else_block),
         other => panic!("expected inline template if terminator, got {other:?}"),
     };
 
@@ -1708,7 +1727,7 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         span,
     );
 
-    let condition = inferred_type_reference_expr(
+    let condition = reference_expr_with_type_id(
         show_name,
         builtin_type_ids::BOOL,
         span,
@@ -1745,15 +1764,9 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         2,
         "control-flow template lowering must not synthesize a helper that could intercept `!`"
     );
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     let then_block_id = match &entry_block.terminator {
-        HirTerminator::If { then_block, .. } => *then_block,
+        &HirTerminator::If { then_block, .. } => then_block,
         other => panic!("expected inline template if terminator, got {other:?}"),
     };
     let then_block = builder
@@ -1793,7 +1806,7 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
         span,
     );
 
-    let condition = inferred_type_reference_expr(
+    let condition = reference_expr_with_type_id(
         show_name,
         builtin_type_ids::BOOL,
         span,
@@ -1815,19 +1828,13 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
     builder
         .lower_expression(&expr)
         .expect("runtime Bool template if without else should lower inline");
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     let (then_block, else_block) = match &entry_block.terminator {
-        HirTerminator::If {
+        &HirTerminator::If {
             then_block,
             else_block,
             ..
-        } => (*then_block, *else_block),
+        } => (then_block, else_block),
         other => panic!("expected inline template if terminator, got {other:?}"),
     };
 
@@ -1846,8 +1853,11 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
 
     assert!(block_assigns_string_literal(then_block, "shown"));
     assert!(
-        else_block.statements.is_empty(),
-        "false/no-else path should not append to the runtime template accumulator"
+        else_block
+            .statements
+            .iter()
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
+        "false/no-else path should not append an assignment to the runtime template accumulator"
     );
 }
 
@@ -1865,7 +1875,7 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         span,
     );
 
-    let condition = inferred_type_reference_expr(
+    let condition = reference_expr_with_type_id(
         show_name,
         builtin_type_ids::BOOL,
         span,
@@ -1883,15 +1893,9 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
     builder
         .lower_expression(&expr)
         .expect("runtime Bool template if should coerce dynamic branch chunks");
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     let then_block = match &entry_block.terminator {
-        HirTerminator::If { then_block, .. } => *then_block,
+        &HirTerminator::If { then_block, .. } => then_block,
         other => panic!("expected inline template if terminator, got {other:?}"),
     };
     let then_block = builder
@@ -1925,8 +1929,8 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
     );
 
     let scrutinee =
-        inferred_type_reference_expr(maybe_name, option_string, span, ValueMode::ImmutableOwned);
-    let then_content = vec![inferred_type_reference_expr(
+        reference_expr_with_type_id(maybe_name, option_string, span, ValueMode::ImmutableOwned);
+    let then_content = vec![reference_expr_with_type_id(
         capture_path.clone(),
         builtin_type_ids::STRING,
         span,
@@ -1953,18 +1957,31 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         .expect("runtime option-present template if should lower inline");
 
     assert!(lowered.prelude.is_empty());
-    assert!(builder.module.functions.is_empty());
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    assert_no_synthesized_helper_functions(&builder);
+    let entry_block = declared_entry_block(&builder);
     assert_eq!(
-        entry_block.statements.len(),
-        2,
-        "entry block should initialize the accumulator and materialize the option scrutinee once"
+        count_empty_string_initializers(entry_block),
+        1,
+        "option template should initialize exactly one runtime accumulator"
+    );
+    assert_eq!(
+        entry_block
+            .statements
+            .iter()
+            .filter(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Assign { value, .. }
+                        if matches!(
+                            &value.kind,
+                            HirExpressionKind::Load(HirPlace::Local(_))
+                                | HirExpressionKind::Copy(HirPlace::Local(_))
+                        )
+                )
+            })
+            .count(),
+        1,
+        "option template should materialize the scrutinee exactly once before matching"
     );
 
     let (present_block_id, absent_block_id) = match &entry_block.terminator {
@@ -2044,8 +2061,8 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
     );
 
     let scrutinee =
-        inferred_type_reference_expr(maybe_name, option_string, span, ValueMode::ImmutableOwned);
-    let then_content = vec![inferred_type_reference_expr(
+        reference_expr_with_type_id(maybe_name, option_string, span, ValueMode::ImmutableOwned);
+    let then_content = vec![reference_expr_with_type_id(
         capture_path.clone(),
         builtin_type_ids::STRING,
         span,
@@ -2065,13 +2082,7 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
     builder
         .lower_expression(&expr)
         .expect("runtime option-present template if without else should lower inline");
-
-    let entry_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == BlockId(0))
-        .expect("entry block should exist");
+    let entry_block = declared_entry_block(&builder);
     let absent_block_id = match &entry_block.terminator {
         HirTerminator::Match { arms, .. } => arms[1].body,
         other => panic!("expected option-present template if match terminator, got {other:?}"),
@@ -2084,8 +2095,11 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
         .expect("absent block should exist");
 
     assert!(
-        absent_block.statements.is_empty(),
-        "absent/no-else branch should not append to the runtime template accumulator"
+        absent_block
+            .statements
+            .iter()
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
+        "absent/no-else branch should not append an assignment to the runtime template accumulator"
     );
     assert!(
         absent_block.locals.is_empty(),
@@ -2110,7 +2124,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         builtin_type_ids::INT,
         span,
     );
-    let body_content = vec![inferred_type_reference_expr(
+    let body_content = vec![reference_expr_with_type_id(
         item_path,
         builtin_type_ids::INT,
         span,
@@ -2118,7 +2132,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
     )];
     let range = RangeLoopSpec {
         start: Expression::int(0, span, ValueMode::ImmutableOwned),
-        end: inferred_type_reference_expr(
+        end: reference_expr_with_type_id(
             limit_path,
             builtin_type_ids::INT,
             span,
@@ -2144,7 +2158,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         .lower_expression(&expr)
         .expect("runtime range template loop should lower inline");
 
-    assert!(builder.module.functions.is_empty());
+    assert_no_synthesized_helper_functions(&builder);
     assert!(
         builder.module.blocks.iter().any(block_marks_loop_emitted),
         "range template loop body should mark that at least one iteration emitted"
@@ -2191,13 +2205,13 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
         collection_type,
         span,
     );
-    let body_content = vec![inferred_type_reference_expr(
+    let body_content = vec![reference_expr_with_type_id(
         item_path,
         builtin_type_ids::INT,
         span,
         ValueMode::ImmutableReference,
     )];
-    let iterable = inferred_type_reference_expr(
+    let iterable = reference_expr_with_type_id(
         items_path,
         collection_type,
         span,
@@ -2267,7 +2281,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
         span,
         ValueMode::ImmutableOwned,
     )];
-    let condition = inferred_type_reference_expr(
+    let condition = reference_expr_with_type_id(
         keep_going_path,
         builtin_type_ids::BOOL,
         span,
@@ -2286,7 +2300,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
         .lower_expression(&expr)
         .expect("runtime conditional template loop should lower inline");
 
-    assert!(builder.module.functions.is_empty());
+    assert_no_synthesized_helper_functions(&builder);
     assert!(
         builder.module.blocks.iter().any(block_marks_loop_emitted),
         "conditional template loop body should mark emitted output when its body has render pieces"
@@ -2319,7 +2333,7 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
     let body_content: Vec<Expression> = vec![];
     let range = RangeLoopSpec {
         start: Expression::int(0, span, ValueMode::ImmutableOwned),
-        end: inferred_type_reference_expr(
+        end: reference_expr_with_type_id(
             limit_path,
             builtin_type_ids::INT,
             span,
@@ -2503,7 +2517,7 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
         span,
     );
 
-    let expr = inferred_type_reference_expr(
+    let expr = reference_expr_with_type_id(
         local_b,
         builtin_type_ids::INT,
         span,
@@ -2636,7 +2650,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
         }
     ));
 
-    let temp_reference = inferred_type_reference_expr(
+    let temp_reference = reference_expr_with_type_id(
         temp_name,
         builtin_type_ids::INT,
         span,
@@ -2690,7 +2704,7 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         span,
     );
 
-    let base_expression = inferred_type_reference_expr(
+    let base_expression = reference_expr_with_type_id(
         local_name,
         local_struct_type_id,
         span,
@@ -2759,7 +2773,7 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
 
     builder.test_register_module_constant(format_name.clone(), format_constant);
 
-    let format_reference = inferred_type_reference_expr(
+    let format_reference = reference_expr_with_type_id(
         format_name,
         format_type_id,
         span,
@@ -2888,7 +2902,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         span,
     );
 
-    let receiver_expression = inferred_type_reference_expr(
+    let receiver_expression = reference_expr_with_type_id(
         receiver_name,
         receiver_type_id,
         span,
@@ -3080,7 +3094,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
     );
 
     let receiver_expression =
-        inferred_type_reference_expr(scores_name, map_type, span, ValueMode::MutableReference);
+        reference_expr_with_type_id(scores_name, map_type, span, ValueMode::MutableReference);
     let fallible_int_result = result_carrier_type_id(
         &mut builder.type_environment,
         builtin_type_ids::INT,

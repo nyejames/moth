@@ -24,10 +24,7 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node,
-};
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, param_with_type_id,
+    function_node, make_test_variable, node, param_with_type_id, reference_expr_with_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -152,7 +149,7 @@ fn reactive_template_dependency_metadata_is_bound_to_hir_value() {
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
-                    inferred_type_reference_expr(
+                    reference_expr_with_type_id(
                         view_path,
                         builtin_type_ids::STRING,
                         None,
@@ -197,7 +194,7 @@ fn reachability_records_reactive_runtime_fragment_and_external_sinks() {
     let template_metadata = metadata_with_subscription(count_source.clone(), None);
 
     let reactive_view_reference = || {
-        inferred_type_reference_expr(
+        reference_expr_with_type_id(
             view_path.clone(),
             builtin_type_ids::STRING,
             None,

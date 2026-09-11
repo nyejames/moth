@@ -42,10 +42,10 @@ use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExter
 use crate::projects::html_project::external_js::runtime_glue::{
     emit_build_runtime_modules, planned_runtime_module_output_paths,
 };
-use crate::projects::html_project::js_path::{
-    HtmlJsCompileInput, compile_html_module_js, html_output_path,
+use crate::projects::html_project::js_path::{HtmlJsCompileInput, compile_html_module_js};
+use crate::projects::html_project::output_plan::{
+    derive_logical_html_path, plan_wasm_output_from_route,
 };
-use crate::projects::html_project::output_plan::plan_wasm_output_from_logical_html_path;
 use crate::projects::html_project::page_metadata::extract_html_page_metadata;
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
 use crate::projects::html_project::resource_output_plan::{
@@ -155,24 +155,17 @@ impl BackendBuilder for HtmlProjectBuilder {
         let artifact_entries = project_compilation.entries();
         for entry in artifact_entries.iter().cloned() {
             let module = entry.module;
-            // Derive the canonical page route once. Both JS-only and HTML+Wasm output modes
-            // consume this same path — downstream code must not re-derive route semantics.
-            let logical_html_output_path = html_output_path(
+            // Derive the canonical page route once. JS-only and HTML+Wasm output modes consume
+            // projections from this same value — downstream code must not re-derive route semantics.
+            let route = derive_logical_html_path(
                 &module.metadata.entry_point,
                 entry_paths.resolved_entry_root.as_deref(),
             )
             .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
-            let wasm_route_plan = if wasm_enabled {
-                Some(
-                    plan_wasm_output_from_logical_html_path(&logical_html_output_path)
-                        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
-                )
-            } else {
-                None
-            };
+            let wasm_route_plan = wasm_enabled.then(|| plan_wasm_output_from_route(&route));
             let planned_html_output_path = wasm_route_plan
                 .as_ref()
-                .map_or(logical_html_output_path.as_path(), |plan| {
+                .map_or(route.logical_html_path.as_path(), |plan| {
                     plan.html_path.as_path()
                 });
             let start_function = module
@@ -243,7 +236,7 @@ impl BackendBuilder for HtmlProjectBuilder {
                 HtmlModuleCompileContext {
                     entry,
                     page_metadata_plan: &page_metadata_plan,
-                    logical_html_output_path: &logical_html_output_path,
+                    route: &route,
                     structural_url_renderer: &structural_url_renderer,
                     project_name: config.project_name.as_str(),
                     document_config: &document_config,
@@ -367,16 +360,7 @@ impl BackendBuilder for HtmlProjectBuilder {
         );
         builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
-        crate::builder_surface::core_packages::register_core_math_package(
-            &mut builder_surface.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_text_package(
-            &mut builder_surface.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_random_package(
-            &mut builder_surface.binding_packages,
-        );
-        crate::builder_surface::core_packages::register_core_time_package(
+        crate::builder_surface::core_packages::register_optional_core_packages(
             &mut builder_surface.binding_packages,
         );
 
@@ -510,7 +494,7 @@ impl HtmlProjectBuilder {
                     ..
                 },
             page_metadata_plan,
-            logical_html_output_path,
+            route,
             structural_url_renderer,
             project_name,
             document_config,
@@ -623,7 +607,7 @@ impl HtmlProjectBuilder {
             let compiled_wasm = compile_html_module_wasm(
                 &compile_input,
                 string_table,
-                logical_html_output_path,
+                route,
                 structural_url_renderer,
             )?;
             Ok(CompiledHtmlModuleArtifacts::from_wasm(compiled_wasm))
@@ -637,9 +621,9 @@ impl HtmlProjectBuilder {
                     module_private_function_names,
                     generated_function_names,
                     all_generated_function_names,
-                    compile_input: &compile_input,
                     structural_url_renderer,
-                    output_path: logical_html_output_path.to_path_buf(),
+                    compile_input: &compile_input,
+                    route,
                 },
                 string_table,
             )?;

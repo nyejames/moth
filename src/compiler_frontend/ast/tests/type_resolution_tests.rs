@@ -641,21 +641,21 @@ fn assert_map_shape(ast: &Ast, type_id: TypeId, expected_key: TypeId, expected_v
         "expected {:?} to be a map TypeId",
         type_id
     );
+    let shape = ast
+        .type_environment
+        .map_shape(type_id)
+        .expect("expected map shape");
+    assert_eq!(shape.key_type, expected_key, "map key TypeId mismatch");
     assert_eq!(
-        ast.type_environment.map_key_type(type_id),
-        Some(expected_key),
-        "map key TypeId mismatch"
-    );
-    assert_eq!(
-        ast.type_environment.map_value_type(type_id),
-        Some(expected_value),
+        shape.value_type, expected_value,
         "map value TypeId mismatch"
     );
 }
 
 fn map_value_type(ast: &Ast, type_id: TypeId) -> TypeId {
     ast.type_environment
-        .map_value_type(type_id)
+        .map_shape(type_id)
+        .map(|shape| shape.value_type)
         .expect("expected map value TypeId")
 }
 
@@ -835,13 +835,17 @@ fn map_type_resolves_for_supported_key() {
 
     let type_id = resolved.type_id.expect("should have a type id");
     assert!(resolution_context.type_environment.is_map_type(type_id));
+    let shape = resolution_context
+        .type_environment
+        .map_shape(type_id)
+        .expect("String key map should have a shape");
     assert_eq!(
-        resolution_context.type_environment.map_key_type(type_id),
-        Some(resolution_context.type_environment.builtins().string)
+        shape.key_type,
+        resolution_context.type_environment.builtins().string
     );
     assert_eq!(
-        resolution_context.type_environment.map_value_type(type_id),
-        Some(resolution_context.type_environment.builtins().int)
+        shape.value_type,
+        resolution_context.type_environment.builtins().int
     );
 }
 

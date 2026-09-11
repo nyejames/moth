@@ -1,10 +1,12 @@
 //! Scans JavaScript source text for supported export declarations.
 //!
 //! WHAT: identifies `export function name(...)` and `export const name = (...) => { ... }`
-//!       patterns, counts plain JS parameters, and rejects unsupported export forms.
-//! WHY: the binder needs a list of JS exports to match against `@moth.sig` annotations.
-//!      Keeping export scanning separate from comment extraction lets each stage stay
-//!      focused and testable.
+//!       patterns, counts plain JS parameters, and provides shared JS lexical skipping used by
+//!       import scanning.
+//! WHY: the binder needs a list of JS exports to match against `@moth.sig` annotations, while
+//!      import scanning reuses this module's cursor and lexical boundaries.
+//!      Keeping export scanning separate from comment extraction lets each stage stay focused
+//!      and testable.
 //!
 //! Supported export forms:
 //! - `export function jsName(param1, param2) { ... }`
@@ -24,18 +26,10 @@ use super::parsed_js_module::{
 };
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
 
-/// Classification of a scanned JS export.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JsExportKind {
-    Function,
-    ConstArrow,
-}
-
 /// A single JS export discovered by the scanner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsExport {
     pub js_name: String,
-    pub kind: JsExportKind,
     pub parameter_count: usize,
     pub span: JsSourceSpan,
 }
@@ -51,21 +45,21 @@ pub struct ExportScanResult {
 ///
 /// WHAT: finds `export function` / `export const` declarations and validates
 ///       `import` statements against the provided runtime module registry.
-/// WHY: the caller decides which JS runtime modules are registered; the scanner
-///      stays agnostic to v1 vs later registry shapes.
+/// WHY: one scanner cursor coordinates export recognition with the import policy
+///      implemented in `import_scan`.
 pub fn scan_exports(source: &str, registry: &RuntimeModuleRegistry) -> ExportScanResult {
     let mut scanner = ExportScanner::new(source, registry);
     scanner.scan()
 }
 
-struct ExportScanner<'a> {
+pub(super) struct ExportScanner<'a> {
     source: &'a str,
     bytes: &'a [u8],
-    pos: usize,
+    pub(super) pos: usize,
     exports: Vec<JsExport>,
-    runtime_imports: Vec<ParsedRuntimeImport>,
-    diagnostics: Vec<JsParserDiagnostic>,
-    registry: &'a RuntimeModuleRegistry,
+    pub(super) runtime_imports: Vec<ParsedRuntimeImport>,
+    pub(super) diagnostics: Vec<JsParserDiagnostic>,
+    pub(super) registry: &'a RuntimeModuleRegistry,
 }
 
 impl<'a> ExportScanner<'a> {
@@ -214,7 +208,6 @@ impl<'a> ExportScanner<'a> {
                     let span = self.make_span(export_start_byte);
                     self.exports.push(JsExport {
                         js_name,
-                        kind: JsExportKind::Function,
                         parameter_count,
                         span,
                     });
@@ -260,7 +253,6 @@ impl<'a> ExportScanner<'a> {
                         let span = self.make_span(export_start_byte);
                         self.exports.push(JsExport {
                             js_name,
-                            kind: JsExportKind::ConstArrow,
                             parameter_count,
                             span,
                         });
@@ -361,117 +353,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    // ------------------------
-    //  Import statement scanning
-    // ------------------------
-
-    fn read_import_statement(&mut self) {
-        let import_start_byte = self.pos;
-
-        self.advance_chars("import".len());
-        self.skip_whitespace();
-
-        // Dynamic import: `import(...)`
-        if self.consume_char('(') {
-            self.emit_diagnostic(
-                "Dynamic `import()` is not supported in Moth JS modules.",
-                JsDiagnosticKind::DynamicImport,
-                JsSourceSpan::range(import_start_byte, self.pos),
-            );
-            self.skip_to_statement_end();
-            return;
-        }
-
-        let statement_end = self.find_statement_end_byte();
-        let statement = &self.source[self.pos..statement_end];
-        let specifier = extract_static_import_specifier(statement);
-
-        let Some(specifier) = specifier else {
-            self.emit_diagnostic(
-                "JavaScript static import is not supported in Moth JS module files yet. \
-                 Only registered Moth core runtime modules are supported.",
-                JsDiagnosticKind::ArbitraryImport,
-                JsSourceSpan::range(import_start_byte, self.pos),
-            );
-            self.advance_to_byte(statement_end);
-            self.skip_to_statement_end();
-            return;
-        };
-
-        if self.registry.is_registered(&specifier) {
-            let span = JsSourceSpan::range(import_start_byte, statement_end);
-
-            match parse_named_import_names(statement) {
-                Ok(names) if !names.is_empty() => {
-                    let mut valid_names = Vec::new();
-                    let mut has_unknown = false;
-
-                    for name in names {
-                        if self.registry.is_exported_name(&specifier, &name) {
-                            valid_names.push(name);
-                        } else {
-                            has_unknown = true;
-                            self.emit_diagnostic(
-                                format!(
-                                    "Unknown runtime import name `{name}` from module `{specifier}`."
-                                ),
-                                JsDiagnosticKind::UnknownRuntimeImportName,
-                                span.clone(),
-                            );
-                        }
-                    }
-
-                    if !has_unknown {
-                        self.runtime_imports.push(ParsedRuntimeImport {
-                            module_name: specifier,
-                            imported_names: valid_names,
-                            span,
-                        });
-                    }
-                }
-                _ => {
-                    self.emit_diagnostic(
-                        "Unsupported runtime import form. Only named static imports such as \
-                         `import { mothOk, mothErr } from \"@moth/runtime\";` are supported.",
-                        JsDiagnosticKind::UnsupportedRuntimeImportForm,
-                        span,
-                    );
-                }
-            }
-        } else {
-            self.emit_diagnostic(
-                format!(
-                    "JavaScript import `{specifier}` is not supported in Moth JS module files yet. \
-                     Only registered Moth core runtime modules are supported."
-                ),
-                JsDiagnosticKind::ArbitraryImport,
-                JsSourceSpan::range(import_start_byte, self.pos),
-            );
-        }
-
-        self.advance_to_byte(statement_end);
-        self.skip_to_statement_end();
-    }
-
-    fn read_require_statement(&mut self) {
-        let require_start_byte = self.pos;
-
-        self.advance_chars("require".len());
-        self.skip_whitespace_and_comments();
-
-        if !self.consume_char('(') {
-            return;
-        }
-
-        self.emit_diagnostic(
-            "CommonJS `require()` is not supported in Moth JS modules.",
-            JsDiagnosticKind::CommonJsRequire,
-            JsSourceSpan::range(require_start_byte, self.pos),
-        );
-        self.skip_to_statement_end();
-    }
-
-    fn slash_starts_regular_expression(&self) -> bool {
+    pub(super) fn slash_starts_regular_expression(&self) -> bool {
         let prefix = self.source[..self.pos].trim_end();
         let Some(previous) = prefix.chars().next_back() else {
             return true;
@@ -531,7 +413,7 @@ impl<'a> ExportScanner<'a> {
         )
     }
 
-    fn skip_regular_expression(&mut self) {
+    pub(super) fn skip_regular_expression(&mut self) {
         self.advance_char();
         let mut in_character_class = false;
 
@@ -655,7 +537,7 @@ impl<'a> ExportScanner<'a> {
     //  Helpers
     // ------------------------
 
-    fn parse_identifier(&mut self) -> Option<String> {
+    pub(super) fn parse_identifier(&mut self) -> Option<String> {
         self.skip_whitespace();
 
         let mut name = String::new();
@@ -679,126 +561,7 @@ impl<'a> ExportScanner<'a> {
         Some(name)
     }
 
-    fn find_statement_end_byte(&self) -> usize {
-        let mut index = self.pos;
-        let mut paren_depth: usize = 0;
-        let mut brace_depth: usize = 0;
-        let mut bracket_depth: usize = 0;
-
-        while index < self.bytes.len() {
-            let ch = self.source[index..].chars().next().unwrap_or('\0');
-
-            // Skip quoted strings so their contents cannot break statement boundaries.
-            if ch == '"' || ch == '\'' {
-                index += ch.len_utf8();
-                while index < self.bytes.len() {
-                    let inner = self.source[index..].chars().next().unwrap_or('\0');
-                    index += inner.len_utf8();
-                    if inner == '\\' && index < self.bytes.len() {
-                        index += self.source[index..]
-                            .chars()
-                            .next()
-                            .unwrap_or('\0')
-                            .len_utf8();
-                        continue;
-                    }
-                    if inner == ch {
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            // Skip template literals, including ${...} interpolations.
-            if ch == '`' {
-                index += ch.len_utf8();
-                while index < self.bytes.len() {
-                    let inner = self.source[index..].chars().next().unwrap_or('\0');
-                    index += inner.len_utf8();
-                    if inner == '\\' && index < self.bytes.len() {
-                        index += self.source[index..]
-                            .chars()
-                            .next()
-                            .unwrap_or('\0')
-                            .len_utf8();
-                        continue;
-                    }
-                    if inner == '`' {
-                        break;
-                    }
-                    if inner == '$'
-                        && index < self.bytes.len()
-                        && self.source[index..].starts_with('{')
-                    {
-                        index += 1; // skip '{'
-                        let mut depth = 1;
-                        while index < self.bytes.len() && depth > 0 {
-                            let tch = self.source[index..].chars().next().unwrap_or('\0');
-                            index += tch.len_utf8();
-                            if tch == '{' {
-                                depth += 1;
-                            } else if tch == '}' {
-                                depth -= 1;
-                            }
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // Skip line comments.
-            if self.source[index..].starts_with("//") {
-                index += 2;
-                while index < self.bytes.len() && !self.source[index..].starts_with('\n') {
-                    index += self.source[index..]
-                        .chars()
-                        .next()
-                        .unwrap_or('\0')
-                        .len_utf8();
-                }
-                continue;
-            }
-
-            // Skip block comments.
-            if self.source[index..].starts_with("/*") {
-                index += 2;
-                while index + 1 < self.bytes.len() && !self.source[index..].starts_with("*/") {
-                    index += self.source[index..]
-                        .chars()
-                        .next()
-                        .unwrap_or('\0')
-                        .len_utf8();
-                }
-                if index + 1 < self.bytes.len() {
-                    index += 2;
-                }
-                continue;
-            }
-
-            match ch {
-                '(' => paren_depth += 1,
-                ')' => paren_depth = paren_depth.saturating_sub(1),
-                '{' => brace_depth += 1,
-                '}' => brace_depth = brace_depth.saturating_sub(1),
-                '[' => bracket_depth += 1,
-                ']' => bracket_depth = bracket_depth.saturating_sub(1),
-                ';' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
-                    index += ch.len_utf8();
-                    break;
-                }
-                '\n' if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 => {
-                    break;
-                }
-                _ => {}
-            }
-
-            index += ch.len_utf8();
-        }
-
-        index
-    }
-
-    fn skip_to_statement_end(&mut self) {
+    pub(super) fn skip_to_statement_end(&mut self) {
         let mut brace_depth = 0;
         while !self.is_at_end() {
             if self.skip_lexical_content_at_current() {
@@ -856,7 +619,7 @@ impl<'a> ExportScanner<'a> {
     /// WHAT: consumes comments and string/template literals at the current cursor.
     /// WHY: statement and body scanners share this lexical boundary so `import`,
     ///      `export`, braces, or separators inside values do not affect top-level scanning.
-    fn skip_lexical_content_at_current(&mut self) -> bool {
+    pub(super) fn skip_lexical_content_at_current(&mut self) -> bool {
         if self.peek_str("//") {
             self.skip_line_comment();
             return true;
@@ -1000,7 +763,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    fn skip_whitespace(&mut self) {
+    pub(super) fn skip_whitespace(&mut self) {
         while let Some(ch) = self.current_char_opt() {
             if ch.is_whitespace() {
                 self.advance_char();
@@ -1010,7 +773,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    fn skip_whitespace_and_comments(&mut self) {
+    pub(super) fn skip_whitespace_and_comments(&mut self) {
         loop {
             self.skip_whitespace();
             if self.peek_str("//") {
@@ -1025,7 +788,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    fn consume_char(&mut self, expected: char) -> bool {
+    pub(super) fn consume_char(&mut self, expected: char) -> bool {
         if self.current_char_opt() == Some(expected) {
             self.advance_char();
             true
@@ -1043,7 +806,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    fn peek_str(&self, s: &str) -> bool {
+    pub(super) fn peek_str(&self, s: &str) -> bool {
         self.source[self.pos..].starts_with(s)
     }
 
@@ -1052,11 +815,14 @@ impl<'a> ExportScanner<'a> {
         if next_pos >= self.bytes.len() {
             return true;
         }
-        let next_ch = self.source[next_pos..].chars().next().unwrap_or('\0');
+        let next_ch = self.source[next_pos..]
+            .chars()
+            .next()
+            .expect("word-boundary offset is inside source");
         !is_identifier_continuation(next_ch)
     }
 
-    fn is_word_boundary_around(&self, candidate_len: usize) -> bool {
+    pub(super) fn is_word_boundary_around(&self, candidate_len: usize) -> bool {
         let before_boundary = self
             .source
             .get(..self.pos)
@@ -1065,19 +831,20 @@ impl<'a> ExportScanner<'a> {
         before_boundary && self.is_word_boundary_at(candidate_len)
     }
 
-    fn current_char(&self) -> char {
-        self.source[self.pos..].chars().next().unwrap_or('\0')
+    /// Current UTF-8 character; callers must have checked `is_at_end`.
+    pub(super) fn current_char(&self) -> char {
+        self.current_char_opt().expect("scanner is not at end")
     }
 
-    fn current_char_opt(&self) -> Option<char> {
+    pub(super) fn current_char_opt(&self) -> Option<char> {
         self.source[self.pos..].chars().next()
     }
 
-    fn is_at_end(&self) -> bool {
+    pub(super) fn is_at_end(&self) -> bool {
         self.pos >= self.bytes.len()
     }
 
-    fn advance_char(&mut self) {
+    pub(super) fn advance_char(&mut self) {
         if self.is_at_end() {
             return;
         }
@@ -1085,14 +852,8 @@ impl<'a> ExportScanner<'a> {
         self.pos += ch.len_utf8();
     }
 
-    fn advance_chars(&mut self, count: usize) {
+    pub(super) fn advance_chars(&mut self, count: usize) {
         for _ in 0..count {
-            self.advance_char();
-        }
-    }
-
-    fn advance_to_byte(&mut self, target: usize) {
-        while self.pos < target && !self.is_at_end() {
             self.advance_char();
         }
     }
@@ -1110,7 +871,7 @@ impl<'a> ExportScanner<'a> {
         });
     }
 
-    fn emit_diagnostic(
+    pub(super) fn emit_diagnostic(
         &mut self,
         message: impl Into<String>,
         kind: JsDiagnosticKind,
@@ -1126,227 +887,4 @@ impl<'a> ExportScanner<'a> {
 
 fn is_identifier_continuation(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ch == '$'
-}
-
-fn strip_js_comments_preserving_strings(source: &str) -> String {
-    let mut stripped = String::with_capacity(source.len());
-    let mut chars = source.chars().peekable();
-
-    while let Some(character) = chars.next() {
-        if character == '"' || character == '\'' {
-            stripped.push(character);
-            let quote = character;
-            while let Some(inner) = chars.next() {
-                stripped.push(inner);
-                if inner == '\\' {
-                    if let Some(escaped) = chars.next() {
-                        stripped.push(escaped);
-                    }
-                    continue;
-                }
-                if inner == quote {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        if character == '/' {
-            match chars.peek().copied() {
-                Some('/') => {
-                    chars.next();
-                    for comment_character in chars.by_ref() {
-                        if comment_character == '\n' {
-                            stripped.push('\n');
-                            break;
-                        }
-                    }
-                }
-                Some('*') => {
-                    chars.next();
-                    let mut previous = '\0';
-                    for comment_character in chars.by_ref() {
-                        if previous == '*' && comment_character == '/' {
-                            break;
-                        }
-                        previous = comment_character;
-                    }
-                    stripped.push(' ');
-                }
-                _ => stripped.push(character),
-            }
-            continue;
-        }
-
-        stripped.push(character);
-    }
-
-    stripped
-}
-
-fn extract_static_import_specifier(statement: &str) -> Option<String> {
-    let stripped = strip_js_comments_preserving_strings(statement);
-    if let Some(from_index) = find_word(&stripped, "from") {
-        return parse_string_literal_from(&stripped[from_index + "from".len()..]);
-    }
-
-    parse_string_literal_from(&stripped)
-}
-
-fn find_word(text: &str, word: &str) -> Option<usize> {
-    let mut search_start = 0;
-
-    while let Some(relative_index) = text[search_start..].find(word) {
-        let index = search_start + relative_index;
-        let before = text[..index].chars().next_back();
-        let after = text[index + word.len()..].chars().next();
-        let before_boundary = before.is_none_or(|ch| !is_identifier_continuation(ch));
-        let after_boundary = after.is_none_or(|ch| !is_identifier_continuation(ch));
-
-        if before_boundary && after_boundary {
-            return Some(index);
-        }
-
-        search_start = index + word.len();
-    }
-
-    None
-}
-
-fn parse_string_literal_from(text: &str) -> Option<String> {
-    let mut chars = text.char_indices().peekable();
-
-    while let Some((_, ch)) = chars.next() {
-        if ch != '"' && ch != '\'' {
-            continue;
-        }
-
-        let quote = ch;
-        let mut value = String::new();
-        while let Some((_, inner)) = chars.next() {
-            if inner == '\\' {
-                if let Some((_, escaped)) = chars.next() {
-                    value.push(match escaped {
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        '0' => '\0',
-                        other => other,
-                    });
-                }
-                continue;
-            }
-
-            if inner == quote {
-                return Some(value);
-            }
-
-            value.push(inner);
-        }
-
-        return None;
-    }
-
-    None
-}
-
-/// Parses simple named import identifiers from the text after `import`.
-///
-/// WHAT: extracts comma-separated identifiers from `{ a, b }` syntax.
-/// WHY: the scanner needs to know which symbols a registered runtime import
-///      references so the registry can validate them.
-///
-/// Returns `Ok(names)` for a plain named import followed by a `from` clause.
-/// Returns `Err(())` for any other form (default, namespace, alias, empty).
-fn parse_named_import_names(statement: &str) -> Result<Vec<String>, ()> {
-    let trimmed = statement.trim_start();
-    let after_brace = trimmed.strip_prefix('{').ok_or(())?;
-    let close_brace = after_brace.find('}').ok_or(())?;
-    let content = strip_js_comments_from_named_import_list(&after_brace[..close_brace]);
-    let from_clause = after_brace[close_brace + 1..].trim_start();
-    let after_from = from_clause.strip_prefix("from").ok_or(())?;
-
-    if after_from
-        .chars()
-        .next()
-        .is_some_and(is_identifier_continuation)
-    {
-        return Err(());
-    }
-
-    let mut names = Vec::new();
-    for part in content.split(',') {
-        let name = part.trim();
-        if name.is_empty() {
-            continue;
-        }
-        if name.split_whitespace().count() > 1 || !is_runtime_import_identifier(name) {
-            // Aliases or other unsupported forms inside braces.
-            return Err(());
-        }
-        names.push(name.to_owned());
-    }
-
-    if names.is_empty() {
-        return Err(());
-    }
-
-    Ok(names)
-}
-
-/// Removes comments from a named runtime import list before identifier validation.
-///
-/// WHAT: accepts comments inside the `{ ... }` portion of a runtime import without treating
-///       comment text as part of an imported name.
-/// WHY: statement scanning already treats comments as lexical trivia, and import-list parsing
-///      should preserve that same boundary without growing into a full JavaScript lexer.
-fn strip_js_comments_from_named_import_list(content: &str) -> String {
-    let mut stripped = String::new();
-    let mut chars = content.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch != '/' {
-            stripped.push(ch);
-            continue;
-        }
-
-        match chars.peek().copied() {
-            Some('/') => {
-                chars.next();
-                for comment_ch in chars.by_ref() {
-                    if comment_ch == '\n' {
-                        stripped.push('\n');
-                        break;
-                    }
-                }
-            }
-            Some('*') => {
-                chars.next();
-                let mut previous = '\0';
-                for comment_ch in chars.by_ref() {
-                    if previous == '*' && comment_ch == '/' {
-                        break;
-                    }
-                    previous = comment_ch;
-                }
-                stripped.push(' ');
-            }
-            _ => stripped.push(ch),
-        }
-    }
-
-    stripped
-}
-
-fn is_runtime_import_identifier(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-
-    if !first.is_ascii_alphabetic() && first != '_' && first != '$' {
-        return false;
-    }
-
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
 }

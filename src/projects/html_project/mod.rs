@@ -18,6 +18,10 @@ pub(crate) mod document_shell;
 pub(crate) mod external_js;
 pub mod html_project_builder;
 pub(crate) mod js_path;
+// WHY: The direct Moth template service is accepted design but has no production consumer today.
+// Real `.mtf` files use the integrated Stage 0 `module_preparation`/`canonical` dependency path,
+// so this API compiles only for its own tests until a consumer lands.
+#[cfg(test)]
 pub(crate) mod moth_template;
 pub mod new_html_project;
 pub(crate) mod output_plan;

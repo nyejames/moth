@@ -8,21 +8,36 @@
 //! lives in the respective `js_path` and `wasm/artifacts` modules.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+/// The canonical route projections shared by every HTML output consumer.
+///
+/// Route semantics are derived from the entry path exactly once. Consumers use the projection
+/// they need: JS output uses `logical_html_path`, Wasm co-location uses `route_base`, and page
+/// metadata uses `route_segment` for its display fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CanonicalPageRoute {
+    /// Logical HTML path derived from the entry file.
+    pub(crate) logical_html_path: PathBuf,
+    /// Route folder used to colocate Wasm artifacts.
+    pub(crate) route_base: PathBuf,
+    /// Raw final route component used by page-title formatting. Keeping the OS string preserves
+    /// the shell's existing non-UTF-8 infrastructure error boundary.
+    pub(crate) route_segment: Option<OsString>,
+}
 
 /// A resolved output plan for one HTML route.
 ///
-/// `html_path` is the physical HTML file location on disk. For JS-only mode this equals
-/// `logical_html_path`; for Wasm mode both can differ only when legacy non-folder paths
+/// `html_path` is the physical HTML file location on disk. For JS-only mode this equals the
+/// route's `logical_html_path`; for Wasm mode both can differ only when legacy non-folder paths
 /// are normalised into `<route>/index.html` form.
 ///
 /// `js_path` and `wasm_path` are `None` for JS-only builds and `Some` for Wasm builds.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HtmlRouteOutputPlan {
-    /// Logical route path derived from the entry file (e.g. `about/index.html`).
-    pub logical_html_path: PathBuf,
-    /// Physical HTML file destination (may differ from `logical_html_path` in Wasm mode).
+    /// Physical HTML file destination (may differ from the route's logical path in Wasm mode).
     pub html_path: PathBuf,
     /// Bootstrap JS path colocated with the HTML file (Wasm mode only).
     pub js_path: Option<PathBuf>,
@@ -30,17 +45,13 @@ pub(crate) struct HtmlRouteOutputPlan {
     pub wasm_path: Option<PathBuf>,
 }
 
-/// Build an output plan for one route in HTML+Wasm mode from an already-derived logical HTML path.
+/// Build an output plan for one route in HTML+Wasm mode.
 ///
 /// WHAT: colocates JS bootstrap and Wasm binary alongside `index.html` under the route folder.
-/// WHY: the HTML project builder derives the canonical page route once via `derive_logical_html_path`.
-///      This function must not re-derive routes — it only plans colocated artifact placement.
-pub(crate) fn plan_wasm_output_from_logical_html_path(
-    logical_html_path: &Path,
-) -> Result<HtmlRouteOutputPlan, CompilerError> {
-    let route_base = derive_wasm_route_base(logical_html_path)?;
-
-    let (html_path, js_path, wasm_path) = if route_base.as_os_str().is_empty() {
+/// WHY: the HTML project builder derives the canonical page route once, then every downstream
+///      output consumer uses this structured route without re-parsing a path string.
+pub(crate) fn plan_wasm_output_from_route(route: &CanonicalPageRoute) -> HtmlRouteOutputPlan {
+    let (html_path, js_path, wasm_path) = if route.route_base.as_os_str().is_empty() {
         (
             PathBuf::from("index.html"),
             PathBuf::from("page.js"),
@@ -48,30 +59,33 @@ pub(crate) fn plan_wasm_output_from_logical_html_path(
         )
     } else {
         (
-            route_base.join("index.html"),
-            route_base.join("page.js"),
-            route_base.join("page.wasm"),
+            route.route_base.join("index.html"),
+            route.route_base.join("page.js"),
+            route.route_base.join("page.wasm"),
         )
     };
 
-    Ok(HtmlRouteOutputPlan {
-        logical_html_path: logical_html_path.to_path_buf(),
+    HtmlRouteOutputPlan {
         html_path,
         js_path: Some(js_path),
         wasm_path: Some(wasm_path),
-    })
+    }
 }
 
-/// Derive the logical HTML output path from an entry file.
+/// Derive the canonical HTML page route from an entry file.
 ///
-/// WHAT: maps Moth entry conventions to HTML paths:
+/// WHAT: maps Moth entry conventions to one route value:
+///
 /// - Directory builds use only the module root directory relative to `entry_root`, so a root
 ///   module emits `index.html` and a nested module emits `<directory>/index.html`.
-/// - Single-file builds strip `#` prefix and use legacy `.html` extension.
+/// - Single-file builds strip `@` prefix and use legacy `.html` extension.
+///
+/// WHY: all HTML output consumers must use the same route projections rather than re-deriving
+/// route semantics from the logical path.
 pub(crate) fn derive_logical_html_path(
     entry_point: &Path,
     entry_root: Option<&Path>,
-) -> Result<PathBuf, CompilerError> {
+) -> Result<CanonicalPageRoute, CompilerError> {
     if let Some(entry_root) = entry_root {
         return derive_logical_html_path_from_entry_root(entry_point, entry_root);
     }
@@ -82,7 +96,7 @@ pub(crate) fn derive_logical_html_path(
 fn derive_logical_html_path_from_entry_root(
     entry_point: &Path,
     entry_root: &Path,
-) -> Result<PathBuf, CompilerError> {
+) -> Result<CanonicalPageRoute, CompilerError> {
     // Route derivation is deterministic: discovery order never affects output paths.
     let relative_entry = entry_point.strip_prefix(entry_root).map_err(|_| {
         CompilerError::file_error(
@@ -100,20 +114,30 @@ fn derive_logical_html_path_from_entry_root(
     // active root module is the homepage and every nested module is folder-backed at its
     // entry-root-relative directory.
     if parent.as_os_str().is_empty() {
-        return Ok(PathBuf::from("index.html"));
+        return Ok(CanonicalPageRoute {
+            logical_html_path: PathBuf::from("index.html"),
+            route_base: PathBuf::new(),
+            route_segment: None,
+        });
     }
 
-    Ok(parent.join("index.html"))
+    Ok(CanonicalPageRoute {
+        logical_html_path: parent.join("index.html"),
+        route_base: parent.to_path_buf(),
+        route_segment: parent.file_name().map(OsString::from),
+    })
 }
 
-/// Derive the logical HTML path for a single-file build.
+/// Derive the logical HTML route for a single-file build.
 ///
 /// WHAT: converts the entry stem to an exact UTF-8 route name, then maps `@page` to the
 /// homepage and strips a cosmetic leading `@` from any other stem.
 /// WHY: the stem is filesystem-authored, so an empty or non-UTF-8 stem is a File
 ///      infrastructure error. It must never collapse to a generic `main` fallback, which
 ///      would alias distinct source identities to one route.
-fn derive_single_file_logical_html_path(entry_point: &Path) -> Result<PathBuf, CompilerError> {
+fn derive_single_file_logical_html_path(
+    entry_point: &Path,
+) -> Result<CanonicalPageRoute, CompilerError> {
     let raw_stem = entry_point.file_stem().ok_or_else(|| {
         CompilerError::file_error(
             entry_point,
@@ -140,7 +164,11 @@ fn derive_single_file_logical_html_path(entry_point: &Path) -> Result<PathBuf, C
     }
 
     if file_stem == "@page" {
-        return Ok(PathBuf::from("index.html"));
+        return Ok(CanonicalPageRoute {
+            logical_html_path: PathBuf::from("index.html"),
+            route_base: PathBuf::new(),
+            route_segment: None,
+        });
     }
 
     let route_name = file_stem.strip_prefix('@').unwrap_or(file_stem);
@@ -152,34 +180,19 @@ fn derive_single_file_logical_html_path(entry_point: &Path) -> Result<PathBuf, C
         ));
     }
 
-    Ok(PathBuf::from(format!("{route_name}.html")))
-}
+    let logical_html_path = PathBuf::from(format!("{route_name}.html"));
+    // Preserve the canonical homepage projection for legacy `index.moth` entries too.
+    let is_homepage = route_name == "index";
 
-/// Derive the route folder base from a logical HTML path for Wasm artifact co-location.
-///
-/// - `index.html` -> empty route base (root)
-/// - `about/index.html` → `about`
-/// - `about.html` (legacy) → `about`
-fn derive_wasm_route_base(logical_html_path: &Path) -> Result<PathBuf, CompilerError> {
-    if logical_html_path == Path::new("index.html") {
-        return Ok(PathBuf::new());
-    }
-
-    if logical_html_path.file_name().and_then(|name| name.to_str()) == Some("index.html") {
-        return Ok(logical_html_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default());
-    }
-
-    // Legacy flat path: normalise to route folder.
-    if logical_html_path.extension().and_then(|ext| ext.to_str()) != Some("html") {
-        return Err(CompilerError::compiler_error(format!(
-            "HTML Wasm output conversion expected an '.html' path, got '{}'",
-            logical_html_path.display()
-        )));
-    }
-    Ok(logical_html_path.with_extension(""))
+    Ok(CanonicalPageRoute {
+        logical_html_path,
+        route_base: if is_homepage {
+            PathBuf::new()
+        } else {
+            PathBuf::from(route_name)
+        },
+        route_segment: (!is_homepage).then(|| OsString::from(route_name)),
+    })
 }
 
 #[cfg(test)]

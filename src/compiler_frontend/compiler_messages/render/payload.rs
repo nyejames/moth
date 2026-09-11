@@ -142,7 +142,6 @@ fn render_payload_message(
         | DiagnosticPayload::ExplicitSourceExtension { .. }
         | DiagnosticPayload::UnsupportedSourceFileKind { .. }
         | DiagnosticPayload::InvalidSourceFileEntry { .. }
-        | DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
         | DiagnosticPayload::MothTemplateInputsShareNoCommonAncestor { .. }
         | DiagnosticPayload::DuplicateMothTemplateInputPath { .. }
         | DiagnosticPayload::UnsupportedExternalExtension { .. }
@@ -175,8 +174,8 @@ fn render_payload_message(
             *backend_name,
             string_table,
         ),
-        DiagnosticPayload::UnusedName { name } => {
-            format!("Unused name '{}'", string_table.resolve(*name))
+        DiagnosticPayload::ReservedBuiltinName { name } => {
+            format!("Reserved builtin name '{}'", string_table.resolve(*name))
         }
         DiagnosticPayload::UnreachableMatchArm => "Unreachable match arm".to_owned(),
         DiagnosticPayload::IdentifierNamingConvention {
@@ -202,8 +201,8 @@ fn render_payload_message(
             string_table.resolve(*alias),
             string_table.resolve(*symbol)
         ),
-        DiagnosticPayload::MalformedTemplate { message } => {
-            format!("Malformed template: {}", string_table.resolve(*message))
+        DiagnosticPayload::MalformedTemplate { reason } => {
+            malformed_template_message(*reason, string_table)
         }
         DiagnosticPayload::InvalidCharacter { character } => {
             format!("Invalid character: '{character}'")
@@ -401,6 +400,7 @@ fn render_payload_message(
                 ReservedNameOwner::BuiltinType => "builtin type",
                 ReservedNameOwner::Keyword => "keyword",
                 ReservedNameOwner::CoreTrait => "core trait",
+                ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
             };
             format!(
                 "Reserved name collision: '{}' is a reserved {}",
@@ -886,9 +886,6 @@ fn import_payload_message(
         DiagnosticPayload::InvalidSourceFileEntry { path, extension } => {
             invalid_source_file_entry_message(path, *extension, string_table)
         }
-        DiagnosticPayload::InvalidMothTemplateApiScopeItem { path } => {
-            invalid_moth_template_api_scope_item_message(path, string_table)
-        }
         DiagnosticPayload::DuplicateMothTemplateInputPath { path, .. } => {
             duplicate_moth_template_input_path_message(path, string_table)
         }
@@ -903,8 +900,8 @@ fn import_payload_message(
         DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
             unsupported_external_extension_message(path, *extension, string_table)
         }
-        DiagnosticPayload::InvalidExternalModule { path, message } => {
-            invalid_external_module_message(path, *message, string_table)
+        DiagnosticPayload::InvalidExternalModule { path, reason } => {
+            invalid_external_module_message(path, reason, string_table)
         }
         _ => String::new(),
     }

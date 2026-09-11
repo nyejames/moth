@@ -28,8 +28,7 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedField, PublicFoldedValue,
 };
 use crate::compiler_frontend::headers::module_symbols::{
-    CompilerOwnedDeclaration, CompilerOwnedDeclarationKind, DeclarationId,
-    OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
+    DeclarationId, OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
 use crate::compiler_frontend::paths::resource_identity::{
@@ -69,17 +68,11 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
                 metadata_record(1, &trait_path, OrderedSemanticDeclarationKind::Trait),
             ],
             vec![
-                compiler_owned(
-                    CompilerOwnedDeclarationKind::Start,
-                    declaration(
-                        &start_path,
-                        DataType::Function(Box::new(None), Default::default()),
-                    ),
+                declaration(
+                    &start_path,
+                    DataType::Function(Box::new(None), Default::default()),
                 ),
-                compiler_owned(
-                    CompilerOwnedDeclarationKind::Builtin,
-                    declaration(&builtin_path, DataType::Inferred),
-                ),
+                declaration(&builtin_path, DataType::Inferred),
             ],
         )
         .expect("semantic holes and compiler-owned rows should build"),
@@ -606,11 +599,4 @@ fn declaration(path: &InternedPath, data_type: DataType) -> Declaration {
         binding_span: None,
         config_qualifier: None,
     }
-}
-
-fn compiler_owned(
-    kind: CompilerOwnedDeclarationKind,
-    declaration: Declaration,
-) -> CompilerOwnedDeclaration {
-    CompilerOwnedDeclaration { kind, declaration }
 }

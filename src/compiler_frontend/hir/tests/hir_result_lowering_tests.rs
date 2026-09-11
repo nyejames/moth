@@ -22,13 +22,13 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node,
+    fresh_success_returns, function_node, make_test_variable, node, param_with_type_id,
+    reference_expr_with_type_id, success_return_slot,
 };
 
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    error_return_slot, fresh_success_returns, inferred_type_reference_expr, multi_bind_target,
-    param_with_type_id, runtime_expr, runtime_handled_function_call_item, runtime_operand_item,
-    runtime_operator_item, success_return_slot,
+    error_return_slot, multi_bind_target, runtime_expr, runtime_handled_function_call_item,
+    runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -267,7 +267,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
             ],
         },
         vec![node(
-            NodeKind::Return(vec![inferred_type_reference_expr(
+            NodeKind::Return(vec![reference_expr_with_type_id(
                 source_input,
                 builtin_type_ids::STRING,
                 location,
@@ -282,7 +282,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
         source_name,
         vec![CallArgument::positional(
-            inferred_type_reference_expr(
+            reference_expr_with_type_id(
                 forward_input.clone(),
                 builtin_type_ids::STRING,
                 location,
@@ -428,7 +428,7 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
                 location,
             ),
             node(
-                NodeKind::Return(vec![inferred_type_reference_expr(
+                NodeKind::Return(vec![reference_expr_with_type_id(
                     value_name,
                     builtin_type_ids::STRING,
                     location,
@@ -593,13 +593,13 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             ),
             node(
                 NodeKind::Return(vec![
-                    inferred_type_reference_expr(
+                    reference_expr_with_type_id(
                         first_id,
                         builtin_type_ids::STRING,
                         location,
                         ValueMode::ImmutableReference,
                     ),
-                    inferred_type_reference_expr(
+                    reference_expr_with_type_id(
                         count_id,
                         builtin_type_ids::INT,
                         location,
@@ -735,7 +735,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             returns: vec![success_return_slot(builtin_type_ids::STRING)],
         },
         vec![node(
-            NodeKind::Return(vec![inferred_type_reference_expr(
+            NodeKind::Return(vec![reference_expr_with_type_id(
                 consume_input,
                 builtin_type_ids::STRING,
                 location,
@@ -782,7 +782,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 location,
             ),
             node(
-                NodeKind::Return(vec![inferred_type_reference_expr(
+                NodeKind::Return(vec![reference_expr_with_type_id(
                     value_name,
                     builtin_type_ids::STRING,
                     location,
@@ -940,7 +940,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 location,
             ),
             node(
-                NodeKind::Return(vec![inferred_type_reference_expr(
+                NodeKind::Return(vec![reference_expr_with_type_id(
                     value_name,
                     builtin_type_ids::INT,
                     location,

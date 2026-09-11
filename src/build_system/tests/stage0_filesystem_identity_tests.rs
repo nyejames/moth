@@ -12,6 +12,28 @@ use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+#[cfg(test)]
+fn compile_single_file_for_filesystem_test(
+    config: &crate::projects::settings::Config,
+    builder_surface: &mut crate::builder_surface::BuilderSurface,
+    extension: &std::ffi::OsStr,
+    string_table: &mut StringTable,
+) -> Result<crate::build_system::create_project_modules::ProjectFrontendCompilation, CompilerMessages>
+{
+    let mut project_source_files = None;
+    super::compilation::compile_single_file_frontend_with_inputs(
+        config,
+        crate::compiler_frontend::FrontendBuildProfile::Dev,
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::default(),
+        builder_surface,
+        extension,
+        string_table,
+        &mut project_source_files,
+        &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+        crate::build_system::create_project_modules::FrontendCompilationMode::Canonical,
+    )
+}
+
 #[cfg(target_os = "linux")]
 mod non_utf8_filesystem_identity {
     use super::*;
@@ -214,7 +236,6 @@ mod non_utf8_filesystem_identity {
 mod non_utf8_single_file_identity {
     use super::*;
     use crate::compiler_frontend::compiler_errors::ErrorType;
-    use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
@@ -248,10 +269,8 @@ mod non_utf8_single_file_identity {
         let extension = entry_with_bad_ext
             .extension()
             .expect("entry should have an extension");
-        let messages = super::compilation::compile_single_file_frontend(
+        let messages = super::compile_single_file_for_filesystem_test(
             &config,
-            crate::compiler_frontend::FrontendBuildProfile::Dev,
-            &StyleDirectiveRegistry::default(),
             &mut builder_surface,
             extension,
             &mut string_table,
@@ -279,10 +298,8 @@ mod non_utf8_single_file_identity {
         let extension = bad_file
             .extension()
             .expect("entry should have a .moth extension");
-        let messages = super::compilation::compile_single_file_frontend(
+        let messages = super::compile_single_file_for_filesystem_test(
             &config,
-            crate::compiler_frontend::FrontendBuildProfile::Dev,
-            &StyleDirectiveRegistry::default(),
             &mut builder_surface,
             extension,
             &mut string_table,
@@ -299,7 +316,6 @@ mod non_utf8_single_file_identity {
 mod non_utf8_windows_single_file_identity {
     use super::*;
     use crate::compiler_frontend::compiler_errors::ErrorType;
-    use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
@@ -333,10 +349,8 @@ mod non_utf8_windows_single_file_identity {
         let extension = entry_with_bad_ext
             .extension()
             .expect("entry should have an extension");
-        let messages = super::compilation::compile_single_file_frontend(
+        let messages = super::compile_single_file_for_filesystem_test(
             &config,
-            crate::compiler_frontend::FrontendBuildProfile::Dev,
-            &StyleDirectiveRegistry::default(),
             &mut builder_surface,
             extension,
             &mut string_table,

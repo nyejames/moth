@@ -67,24 +67,6 @@ fn assert_diagnostic_kinds(
     );
 }
 
-fn assert_diagnostic_message_contains(
-    parsed: &crate::projects::html_project::external_js::parser::parsed_js_module::ParsedJsModule,
-    expected: &str,
-) {
-    assert!(
-        parsed
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains(expected)),
-        "expected diagnostic message containing {expected:?}, got {:?}",
-        parsed
-            .diagnostics
-            .iter()
-            .map(|d| d.message.as_str())
-            .collect::<Vec<_>>()
-    );
-}
-
 fn assert_runtime_imports(
     parsed: &crate::projects::html_project::external_js::parser::parsed_js_module::ParsedJsModule,
     expected: &[(&str, &[&str])],
@@ -757,6 +739,50 @@ const url = import.meta.url;
 }
 
 #[test]
+fn import_meta_does_not_treat_a_later_from_binding_as_an_import() {
+    let source = r#"
+const base = import.meta.url;
+const from = "lodash";
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+}
+
+#[test]
+fn regex_literals_with_quotes_do_not_hide_later_imports() {
+    let source = r#"
+const text = "x";
+text.replace(/"/g, "");
+import { foo } from "./helper.js";
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ArbitraryImport]);
+}
+
+#[test]
+fn division_does_not_hide_a_later_dynamic_import() {
+    let source = "let value = 1; value++ / 2; import(\"./helper.js\");\n";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DynamicImport]);
+}
+
+#[test]
+fn from_binding_and_string_named_import_clauses_still_load_a_module() {
+    let source = r#"
+import { from as source } from "./from-helper.js";
+import { "feature-name" as feature } from "./named-helper.js";
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(
+        &parsed,
+        &[
+            JsDiagnosticKind::ArbitraryImport,
+            JsDiagnosticKind::ArbitraryImport,
+        ],
+    );
+}
+
+#[test]
 fn arbitrary_static_import_rejected() {
     let source = r#"
 import { foo } from "./helper.js";
@@ -805,6 +831,13 @@ fn unregistered_runtime_looking_module_is_rejected() {
     let source = r#"
 import { foo } from "@moth/other-runtime";
 "#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ArbitraryImport]);
+}
+
+#[test]
+fn escaped_runtime_looking_specifiers_are_not_allowlisted() {
+    let source = "import { mothOk } from \"@moth/ru\\ntime\";\n";
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ArbitraryImport]);
 }
@@ -986,11 +1019,7 @@ export function doThing() {
 "#;
     let registry = RuntimeModuleRegistry::v1();
     let parsed = parse_js_module(source, &registry);
-    assert!(
-        parsed.diagnostics.is_empty(),
-        "got: {:?}",
-        parsed.diagnostics
-    );
+    assert_no_diagnostics(&parsed);
     assert_eq!(parsed.free_functions.len(), 1);
 }
 
@@ -1001,13 +1030,7 @@ import { mothOk } from "@moth/runtime";
 "#;
     let registry = RuntimeModuleRegistry::empty();
     let parsed = parse_js_module(source, &registry);
-    assert!(
-        parsed
-            .diagnostics
-            .iter()
-            .any(|d| d.kind == JsDiagnosticKind::ArbitraryImport),
-        "expected ArbitraryImport for empty registry"
-    );
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::ArbitraryImport]);
 }
 
 #[test]
@@ -1313,7 +1336,6 @@ export function identity(value) {
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::GenericExternalFunction]);
-    assert_diagnostic_message_contains(&parsed, "External package functions cannot be generic");
 }
 
 #[test]
@@ -1325,7 +1347,6 @@ fn generic_external_opaque_type_rejected() {
 "#;
     let parsed = parse(source);
     assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::GenericExternalType]);
-    assert_diagnostic_message_contains(&parsed, "External package types cannot be generic");
     assert_opaque_types(&parsed, &[]);
 }
 

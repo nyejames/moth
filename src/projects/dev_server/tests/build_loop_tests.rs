@@ -19,9 +19,7 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::dev_server::state::DevServerState;
@@ -33,13 +31,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-fn unused_variable_warning(name: StringId) -> CompilerDiagnostic {
-    CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnusedName { name },
-    )
+fn naming_convention_warning(name: StringId) -> CompilerDiagnostic {
+    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None)
 }
 
 fn test_build_output_owner() -> OutputOwner {
@@ -137,7 +130,7 @@ fn html_build_result_without_entry_page() -> BuildResult {
 
 fn html_build_result_with_warning() -> BuildResult {
     let mut string_table = StringTable::new();
-    let warning = unused_variable_warning(string_table.get_or_intern("dev_warning".to_string()));
+    let warning = naming_convention_warning(string_table.get_or_intern("dev_warning".to_string()));
 
     BuildResult {
         project: Project {
@@ -290,7 +283,7 @@ impl BackendBuilder for InvalidOutputWarningBuilder {
             )],
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic([".js"]),
-            warnings: vec![unused_variable_warning(
+            warnings: vec![naming_convention_warning(
                 string_table.get_or_intern("x".to_string()),
             )],
             deferred_resources: Vec::new(),
@@ -599,7 +592,9 @@ fn successful_build_with_warnings_preserves_structured_success_messages() {
     assert_eq!(messages.warning_count(), 1);
     assert_eq!(messages.error_count(), 0);
     assert!(
-        outcome.diagnostics_summary.contains("Unused variable"),
+        outcome
+            .diagnostics_summary
+            .contains("Identifier naming convention"),
         "summary should name the warning, got: {}",
         outcome.diagnostics_summary
     );
@@ -655,7 +650,7 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
     assert!(
         build_state
             .last_build_messages_summary
-            .contains("Unused variable"),
+            .contains("Identifier naming convention"),
         "state summary should surface warning titles to SSE/state consumers, got: {}",
         build_state.last_build_messages_summary
     );

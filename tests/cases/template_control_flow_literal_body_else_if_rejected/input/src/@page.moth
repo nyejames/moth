@@ -1,0 +1,5 @@
+[$doc, if true:
+    literal-body then branch
+[else if false]
+    literal-body else-if branch
+]

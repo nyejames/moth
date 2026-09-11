@@ -7,12 +7,29 @@ use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use std::collections::{BTreeMap, HashMap};
+#[cfg(not(test))]
 use std::fs;
 use std::path::{Path, PathBuf};
 
 // -------------------------
 //  Source Extraction
 // -------------------------
+// WHAT: choose one reader for the whole build rather than branching on every file.
+// WHY: test-only read accounting stays in the test support module while shipping I/O remains
+//      branch-free.
+
+type SourceReader = fn(&Path) -> Result<String, std::io::Error>;
+
+#[cfg(not(test))]
+fn read_source_code_from_disk(file_path: &Path) -> Result<String, std::io::Error> {
+    fs::read_to_string(file_path)
+}
+
+#[cfg(not(test))]
+const SOURCE_READER: SourceReader = read_source_code_from_disk;
+
+#[cfg(test)]
+const SOURCE_READER: SourceReader = super::source_loading_test_support::read_source_code_for_test;
 
 /// Reads raw UTF-8 source text without constructing compiler diagnostics.
 ///
@@ -21,12 +38,7 @@ use std::path::{Path, PathBuf};
 ///      then convert any `std::io::Error` into a path-preserving infrastructure error on the
 ///      serial boundary.
 pub(crate) fn read_source_code(file_path: &Path) -> Result<String, std::io::Error> {
-    #[cfg(test)]
-    if super::source_loading_test_support::should_count_source_read_for_test(file_path) {
-        super::source_loading_test_support::record_source_read_for_test(file_path);
-    }
-
-    fs::read_to_string(file_path)
+    SOURCE_READER(file_path)
 }
 
 /// Source snapshots selected by the directory module-discovery walk.

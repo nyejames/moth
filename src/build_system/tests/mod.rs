@@ -14,8 +14,8 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
-    NameNamespace, RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, InvalidConfigReason, NameNamespace,
+    NamingConvention, RuleDiagnosticKind,
 };
 use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
@@ -218,13 +218,8 @@ fn html_project(output_files: Vec<OutputFile>, entry_page_rel: Option<PathBuf>) 
     }
 }
 
-fn unused_variable_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
-    CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
-        DiagnosticSeverity::Warning,
-        span,
-        DiagnosticPayload::UnusedName { name },
-    )
+fn naming_convention_warning(name: StringId, span: Option<SourceSpan>) -> CompilerDiagnostic {
+    CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, span)
 }
 
 fn unknown_name_error(
@@ -257,7 +252,7 @@ impl BackendBuilder for WarningBuilder {
             )],
             entry_page_rel: None,
             cleanup_policy: CleanupPolicy::generic([".js"]),
-            warnings: vec![unused_variable_warning(
+            warnings: vec![naming_convention_warning(
                 string_table.get_or_intern("x".to_string()),
                 None,
             )],
@@ -516,7 +511,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             .find(|module| module.metadata.entry_point.ends_with("src/docs/@page.moth"))
             .expect("directory build should discover docs module");
 
-        let warning = unused_variable_warning(string_table.get_or_intern("x".to_string()), None);
+        let warning = naming_convention_warning(string_table.get_or_intern("x".to_string()), None);
         let error = unknown_name_error(
             string_table.get_or_intern("homepage diagnostic".to_string()),
             NameNamespace::Value,

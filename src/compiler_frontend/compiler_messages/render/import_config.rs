@@ -579,17 +579,6 @@ pub(crate) fn invalid_source_file_entry_message(
     )
 }
 
-pub(crate) fn invalid_moth_template_api_scope_item_message(
-    path: &InternedPath,
-    string_table: &dyn StringTableResolver,
-) -> String {
-    let path = path.to_portable_string(string_table);
-    format!(
-        "Direct Moth template compilation for `{path}` does not support caller-supplied scope constants yet.\n\
-         Remove the scope constants from the request, or expose compile-time constants through the compiler-integrated `@html` and same-directory module-root public export paths."
-    )
-}
-
 pub(crate) fn duplicate_moth_template_input_path_message(
     path: &InternedPath,
     string_table: &dyn StringTableResolver,
@@ -630,12 +619,20 @@ pub(crate) fn unsupported_external_extension_message(
 
 pub(crate) fn invalid_external_module_message(
     path: &InternedPath,
-    message: StringId,
+    reason: &InvalidExternalModuleReason,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let path = path.to_portable_string(string_table);
-    let message = string_table.resolve(message);
-    format!("External JS module `{path}` is invalid.\n{message}")
+    let detail = match reason {
+        InvalidExternalModuleReason::ReceiverMethod { moth_name } => format!(
+            "JS module signature for '{}' uses a 'this' receiver parameter. Project-local JS imports must expose free functions and opaque types only.",
+            string_table.resolve(*moth_name)
+        ),
+        InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
+            string_table.resolve(*parser_detail).to_owned()
+        }
+    };
+    format!("External JS module `{path}` is invalid.\n{detail}")
 }
 
 pub(crate) fn dependency_namespace_used_as_value_message(

@@ -24,12 +24,9 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node,
+    function_node, make_test_variable, node, param_with_type_id, reference_expr_with_type_id,
 };
 
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, param_with_type_id,
-};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
@@ -104,7 +101,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let value_match_expr = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::Match(ValueMatchBlock {
-                scrutinee: inferred_type_reference_expr(
+                scrutinee: reference_expr_with_type_id(
                     x.clone(),
                     builtin_type_ids::INT,
                     None,

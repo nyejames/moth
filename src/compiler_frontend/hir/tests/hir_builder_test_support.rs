@@ -20,13 +20,14 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -38,6 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
@@ -218,12 +220,26 @@ impl<'a> HirBuilder<'a> {
         self.test_register_function_name(name, id);
 
         let entry = self.current_block_id().unwrap_or(BlockId(0));
-        self.push_function(HirFunction {
+        let function = HirFunction {
             id,
             entry,
             params: vec![],
             return_type,
-        });
+        };
+        if let Some(index) = self.function_index_by_id.get(&id).copied() {
+            self.module.functions[index] = function;
+        } else {
+            self.push_function(function);
+        }
+        let origin = if self.module.start_function == Some(id) {
+            HirFunctionOrigin::EntryStart
+        } else {
+            HirFunctionOrigin::Normal
+        };
+        self.module.function_origins.insert(id, origin);
+        self.module
+            .function_provenance
+            .insert(id, SyntheticInterfaceProvenance::empty());
     }
 
     pub(crate) fn test_register_struct_with_fields(
@@ -376,12 +392,17 @@ pub(crate) fn setup_builder(string_table: &'_ mut StringTable) -> HirBuilder<'_>
         terminator: HirTerminator::Uninitialized,
     };
 
+    builder.module.start_function = Some(function_id);
+    builder.push_region(HirRegion::lexical(region, None));
     builder.test_push_block(block);
     builder.test_set_current_region(region);
     builder.test_set_current_block(BlockId(0));
-    builder.test_register_function_name(test_function_name, function_id);
+    builder.test_register_function_with_return_type(
+        test_function_name,
+        function_id,
+        crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
+    );
     builder.test_set_current_function(function_id);
-    builder.module.start_function = Some(function_id);
 
     builder
 }

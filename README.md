@@ -2,18 +2,25 @@
 
 <img src="./docs/assets/moth-logo.webp" width="10%"/>
 
-<br>
 
+<br>
 # Moth
 
 <p><em>
   A language for creating reliable software in elegant codebases
 </em></p>
 
-<p>⚠️ This project is in early Alpha ⚠️</p>
-<p>⚠️ The language is still stabilising and working towards the full Wasm backend implementation ⚠️</p> 
+<p><em>
+  Solve problems with code, not frameworks.
+</em></p>
 
-<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. </p>
+> [!WARNING]
+> This project is in early Alpha ⚠️
+
+> [!IMPORTANT]
+> The language semantics and compiler are still stabilising. The Wasm backend and final memory model are not fully implemented.</p> 
+
+<p><a href="https://nyejames.github.io/moth/">The documentation site</a> was created using this language and toolchain. Check it out for code examples and to familiarise yourself with the basics.</p>
 
 </div>
 <br>
@@ -32,8 +39,6 @@ The goal is to provide everything you need for modern, memory safe apps. Designe
 Web development is the current focus. The home-grown HTML project builder creates static web pages using core compiler tooling.
 
 </br>
-
-Have a look at the [language docs](https://nyejames.github.io/moth/docs/) to get to grip with the basics.
 
 <div align="center">
 
@@ -64,7 +69,8 @@ No more TypeScript framework lasagne, build-tool linguini or 17 package dependen
 `moth` is the project tool for creating, checking, building and running Moth projects.
 It's the CLI bundled with the compiler and build system.
 
-Installation scripts will arrive for Beta, with tagged releases starting soon. For now you'll have to build from source.
+> [!NOTE]
+> Installation scripts will arrive for Beta, with tagged releases starting soon. For now you'll have to build from source.
 
 ### Create a project
 
@@ -134,7 +140,8 @@ Moth is designed for developers focused on the final design and implementation r
 
 This isn't a language for LLMs only, its a language for human creativity with the churn automated away as much as possible.
 
-See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about this.
+> [!NOTE]
+> See [HUMANS.md](./HUMANS.md) for way too much elaboration about this.
 
 <div align="center">
 
@@ -166,8 +173,6 @@ See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about th
 
 <a href="https://github.com/nyejames/moth-vscode-highlighting">Syntax highlighting for Visual Studio Code</a>
 
-(LSP and more tooling to come in the future as the language stabilises)
-
 <div align="center">
 <br>
 
@@ -178,7 +183,5 @@ See [HUMANS.md](./HUMANS.md) for more info and way too much elaboration about th
 Here is the current <a href="https://nyejames.github.io/moth/docs/progress/">progress matrix</a>.
 
 The compiler already has broad frontend, backend and build-system tooling in place.
-
-The language semantics and implementation is still shifting around as the final design is settled on.
 
 <br>

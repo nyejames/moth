@@ -5,10 +5,6 @@
 //! WHY: a binding can be rebound while older aliases remain meaningful; provenance therefore
 //! belongs to values and event flow, not to local names.
 
-// Some provenance rows are consumed by focused tests and future differential queries rather than
-// by every current dump. Keep the complete typed result surface warning-free.
-#![allow(dead_code)]
-
 use super::super::problem::{
     BindingId, BorrowProblem, CallResultProvenance, CallResultUnknownReason, Event, EventId,
     EventKind, OriginKind, PlaceId, ProjectionElem, UseId, UseKind, ValueOrigin, ValueOriginId,
@@ -84,10 +80,7 @@ pub(crate) struct OriginSolution {
 }
 
 impl OriginSolution {
-    pub(crate) fn facts(&self) -> &[OriginFact] {
-        &self.facts
-    }
-
+    #[cfg(test)]
     pub(crate) fn traces(&self) -> &[OriginTrace] {
         &self.traces
     }
@@ -1391,9 +1384,10 @@ fn apply_event(
         EventKind::CallArgument { .. }
         | EventKind::Access { .. }
         | EventKind::ReactiveObserve { .. }
-        | EventKind::Terminator { .. }
-        | EventKind::LoanIssue { .. }
-        | EventKind::LoanKill { .. } => Ok((OriginTraceRule::Noop, None, Vec::new())),
+        | EventKind::Terminator { .. } => Ok((OriginTraceRule::Noop, None, Vec::new())),
+        EventKind::LoanIssue { .. } | EventKind::LoanKill { .. } => {
+            Ok((OriginTraceRule::Noop, None, Vec::new()))
+        }
     }
 }
 fn join_mode(left: BindingMode, right: BindingMode) -> BindingMode {
@@ -1500,6 +1494,8 @@ fn rebuild_origins(state: &mut FlowState) {
     state.origins = origins;
 }
 
+// LEAVE-LOCAL: counterpart is boracle/oracle/execute.rs:369 is_place_available_without_materialising.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn place_is_in_generation(
     problem: &BorrowProblem,
     generation: PlaceId,
@@ -1546,6 +1542,8 @@ fn replace_mode_generation(
     rebuild_origins(state);
 }
 
+// LEAVE-LOCAL: counterpart is boracle/oracle/calls.rs:109 execute_call_effect (Fresh/AliasParams/Alias/Unknown dispatch).
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn call_result_origins(
     problem: &BorrowProblem,
     provenance: &CallResultProvenance,

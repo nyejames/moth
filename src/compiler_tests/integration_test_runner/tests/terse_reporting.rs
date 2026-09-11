@@ -20,7 +20,8 @@ use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_errors::RenderSourceContext;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
+    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NamingConvention,
+    RuleDiagnosticKind,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{
@@ -429,12 +430,8 @@ fn terse_compiler_messages_suppress_warnings_when_show_warnings_false() {
 fn terse_build_result_warnings_render_when_show_warnings() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("unused_value");
-    let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnusedName { name },
-    );
+    let warning =
+        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
     let build_result = build_result_with_warning(warning, string_table);
 
     let case = expected_failure_case("unexpected_build", BackendId::Html);

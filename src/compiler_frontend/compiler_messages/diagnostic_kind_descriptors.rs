@@ -12,7 +12,91 @@ use super::diagnostic_kind::{
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticDescriptor, DiagnosticSeverity};
 
+macro_rules! reasoned_diagnostic_kind {
+    (Syntax::$kind:ident) => {
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::$kind)
+    };
+    (Type::$kind:ident) => {
+        DiagnosticKind::Type(TypeDiagnosticKind::$kind)
+    };
+    (Rule::$kind:ident) => {
+        DiagnosticKind::Rule(RuleDiagnosticKind::$kind)
+    };
+    (Import::$kind:ident) => {
+        DiagnosticKind::Import(ImportDiagnosticKind::$kind)
+    };
+    (Borrow::$kind:ident) => {
+        DiagnosticKind::Borrow(BorrowDiagnosticKind::$kind)
+    };
+    (Config::$kind:ident) => {
+        DiagnosticKind::Config(ConfigDiagnosticKind::$kind)
+    };
+    (DeferredFeature::$kind:ident) => {
+        DiagnosticKind::DeferredFeature(DeferredFeatureDiagnosticKind::$kind)
+    };
+}
+
+macro_rules! emit_reasoned_descriptors {
+    (
+        $remap_label:ident: $remap_name:ident;
+        $( $records:tt )*
+    ) => {
+        emit_reasoned_descriptors!(@collect [] $( $records )*);
+    };
+    (@collect [$( $arms:tt )*]) => {
+        fn reasoned_descriptor_for_kind(kind: DiagnosticKind) -> Option<DiagnosticDescriptor> {
+            match kind {
+                $( $arms )*
+                _ => None,
+            }
+        }
+    };
+    (
+        @collect [$( $arms:tt )*]
+        Shared::$kind:ident => {
+            payload: $payload:ident;
+            fields: $fields:tt
+            bindings: $bindings:tt
+            remap: $remap:tt
+            descriptor: none
+        },
+        $( $rest:tt )*
+    ) => {
+        emit_reasoned_descriptors!(@collect [$( $arms )*] $( $rest )*);
+    };
+    (
+        @collect [$( $arms:tt )*]
+        $category:ident::$kind:ident => {
+            payload: $payload:ident;
+            fields: $fields:tt
+            bindings: $bindings:tt
+            remap: $remap:tt
+            descriptor: {
+                $code:literal, $title:literal, $severity:ident
+            }
+        },
+        $( $rest:tt )*
+    ) => {
+        emit_reasoned_descriptors!(
+            @collect [
+                $( $arms )*
+                reasoned_diagnostic_kind!($category::$kind) => Some(DiagnosticDescriptor::new(
+                    $code,
+                    $title,
+                    DiagnosticSeverity::$severity,
+                )),
+            ]
+            $( $rest )*
+        );
+    };
+}
+
+crate::define_reasoned_diagnostic_registry!(emit_reasoned_descriptors);
+
 pub(super) fn descriptor_for_kind(kind: DiagnosticKind) -> DiagnosticDescriptor {
+    if let Some(descriptor) = reasoned_descriptor_for_kind(kind) {
+        return descriptor;
+    }
     match kind {
         DiagnosticKind::Syntax(kind) => syntax_descriptor(kind),
         DiagnosticKind::Type(kind) => type_descriptor(kind),
@@ -62,11 +146,6 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid character",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::InvalidNumberLiteral => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0008",
-            "Invalid number literal",
-            DiagnosticSeverity::Error,
-        ),
         SyntaxDiagnosticKind::InvalidCharLiteral => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0009",
             "Invalid character literal",
@@ -92,31 +171,6 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Unexpected token in declaration",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::InvalidTypeAnnotation => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0014",
-            "Invalid type annotation",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidGenericApplication => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0015",
-            "Invalid generic application",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidCollectionType => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0016",
-            "Invalid collection type",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidMapType => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0016-MAP",
-            "Invalid map type",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidMapLiteral => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0033",
-            "Invalid map literal",
-            DiagnosticSeverity::Error,
-        ),
         SyntaxDiagnosticKind::UnexpectedEndOfFile => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0017",
             "Unexpected end of file",
@@ -127,44 +181,9 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Invalid path",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::InvalidDependencyClause => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0019",
-            "Invalid dependency clause",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::LegacyDependencyClause => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0035",
-            "Legacy dependency clause syntax",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidGenericParameter => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0020",
-            "Invalid generic parameter",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidTemplateDirective => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0021",
-            "Invalid template directive",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidTemplateStructure => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0022",
-            "Invalid template structure",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidExpression => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0023",
-            "Invalid expression",
-            DiagnosticSeverity::Error,
-        ),
         SyntaxDiagnosticKind::MissingOperatorOperand => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0024",
             "Missing operator operand",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidStandaloneStatement => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0025",
-            "Invalid standalone statement",
             DiagnosticSeverity::Error,
         ),
         SyntaxDiagnosticKind::ExpectedSymbolStatement => DiagnosticDescriptor::new(
@@ -177,34 +196,9 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Missing collection item",
             DiagnosticSeverity::Error,
         ),
-        SyntaxDiagnosticKind::InvalidMatchArm => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0028",
-            "Invalid match arm",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidLoopHeader => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0029",
-            "Invalid loop header",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidStatementPosition => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0030",
-            "Invalid statement position",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::CommonSyntaxMistake => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0031",
-            "Common syntax mistake",
-            DiagnosticSeverity::Error,
-        ),
         SyntaxDiagnosticKind::UnescapedImplicitTemplateClose => DiagnosticDescriptor::new(
             "MOTH-SYNTAX-0032",
             "Unescaped implicit template close",
-            DiagnosticSeverity::Error,
-        ),
-        SyntaxDiagnosticKind::InvalidStringEscape => DiagnosticDescriptor::new(
-            "MOTH-SYNTAX-0034",
-            "Invalid string escape",
             DiagnosticSeverity::Error,
         ),
         SyntaxDiagnosticKind::SourceSpanCapacity => DiagnosticDescriptor::new(
@@ -212,6 +206,7 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Source span capacity exceeded",
             DiagnosticSeverity::Error,
         ),
+        _ => unreachable!("reasoned syntax descriptors come from the central registry"),
     }
 }
 
@@ -230,16 +225,7 @@ fn type_descriptor(kind: TypeDiagnosticKind) -> DiagnosticDescriptor {
             "Unsupported operator types",
             DiagnosticSeverity::Error,
         ),
-        TypeDiagnosticKind::InvalidFallibleOperand => DiagnosticDescriptor::new(
-            "MOTH-TYPE-0004",
-            "Unhandled fallible operand",
-            DiagnosticSeverity::Error,
-        ),
-        TypeDiagnosticKind::IncompatibleChoiceComparison => DiagnosticDescriptor::new(
-            "MOTH-TYPE-0005",
-            "Incompatible choice comparison",
-            DiagnosticSeverity::Error,
-        ),
+        _ => unreachable!("reasoned type descriptors come from the central registry"),
     }
 }
 
@@ -252,44 +238,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "MOTH-RULE-0002",
             "Duplicate declaration",
             DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::UnusedVariable => DiagnosticDescriptor::new(
-            "MOTH-RULE-0010",
-            "Unused variable",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedFunction => DiagnosticDescriptor::new(
-            "MOTH-RULE-0011",
-            "Unused function",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedType => {
-            DiagnosticDescriptor::new("MOTH-RULE-0012", "Unused type", DiagnosticSeverity::Warning)
-        }
-        RuleDiagnosticKind::UnusedConstant => DiagnosticDescriptor::new(
-            "MOTH-RULE-0013",
-            "Unused constant",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedFunctionArgument => DiagnosticDescriptor::new(
-            "MOTH-RULE-0014",
-            "Unused function argument",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedFunctionReturnValue => DiagnosticDescriptor::new(
-            "MOTH-RULE-0015",
-            "Unused function return value",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedFunctionParameter => DiagnosticDescriptor::new(
-            "MOTH-RULE-0016",
-            "Unused function parameter",
-            DiagnosticSeverity::Warning,
-        ),
-        RuleDiagnosticKind::UnusedFunctionParameterDefaultValue => DiagnosticDescriptor::new(
-            "MOTH-RULE-0017",
-            "Unused function parameter default value",
-            DiagnosticSeverity::Warning,
         ),
         RuleDiagnosticKind::IdentifierNamingConvention => DiagnosticDescriptor::new(
             "MOTH-RULE-0021",
@@ -309,16 +257,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
         RuleDiagnosticKind::ReservedBuiltinName => DiagnosticDescriptor::new(
             "MOTH-RULE-0027",
             "Reserved builtin name",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidSignatureMember => DiagnosticDescriptor::new(
-            "MOTH-RULE-0028",
-            "Invalid signature member",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidChoiceVariant => DiagnosticDescriptor::new(
-            "MOTH-RULE-0029",
-            "Invalid choice variant",
             DiagnosticSeverity::Error,
         ),
         RuleDiagnosticKind::InvalidStructDefaultValue => DiagnosticDescriptor::new(
@@ -364,104 +302,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Reserved name collision",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::InvalidThisUsage => DiagnosticDescriptor::new(
-            "MOTH-RULE-0040",
-            "Invalid this usage",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidReceiverDeclaration => DiagnosticDescriptor::new(
-            "MOTH-RULE-0041",
-            "Invalid receiver declaration",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidControlFlowStatement => DiagnosticDescriptor::new(
-            "MOTH-RULE-0042",
-            "Invalid control flow statement",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidDeclaration => DiagnosticDescriptor::new(
-            "MOTH-RULE-0043",
-            "Invalid declaration",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidAssignmentTarget => DiagnosticDescriptor::new(
-            "MOTH-RULE-0044",
-            "Invalid assignment target",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidMultiBind => DiagnosticDescriptor::new(
-            "MOTH-RULE-0045",
-            "Invalid multi-bind",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidBuiltinCall => DiagnosticDescriptor::new(
-            "MOTH-RULE-0046",
-            "Invalid builtin call",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidCast => {
-            DiagnosticDescriptor::new("MOTH-RULE-0083", "Invalid cast", DiagnosticSeverity::Error)
-        }
-        RuleDiagnosticKind::InvalidReceiverCall => DiagnosticDescriptor::new(
-            "MOTH-RULE-0047",
-            "Invalid receiver call",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidCopyTarget => DiagnosticDescriptor::new(
-            "MOTH-RULE-0056",
-            "Invalid copy target",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidFieldAccess => DiagnosticDescriptor::new(
-            "MOTH-RULE-0048",
-            "Invalid field access",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidMatchPattern => DiagnosticDescriptor::new(
-            "MOTH-RULE-0049",
-            "Invalid match pattern",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::NonExhaustiveMatch => DiagnosticDescriptor::new(
-            "MOTH-RULE-0050",
-            "Non-exhaustive match",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidFallibleHandling => DiagnosticDescriptor::new(
-            "MOTH-RULE-0051",
-            "Invalid fallible handling",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidTemplateSlot => DiagnosticDescriptor::new(
-            "MOTH-RULE-0052",
-            "Invalid template slot",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::CompileTimeEvaluationError => DiagnosticDescriptor::new(
-            "MOTH-RULE-0053",
-            "Compile-time evaluation error",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidCallShape => DiagnosticDescriptor::new(
-            "MOTH-RULE-0054",
-            "Invalid call shape",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidReturnShape => DiagnosticDescriptor::new(
-            "MOTH-RULE-0055",
-            "Invalid return shape",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidFunctionSignature => DiagnosticDescriptor::new(
-            "MOTH-RULE-0062",
-            "Invalid function signature",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidGenericInstantiation => DiagnosticDescriptor::new(
-            "MOTH-RULE-0057",
-            "Invalid generic instantiation",
-            DiagnosticSeverity::Error,
-        ),
         RuleDiagnosticKind::UnsupportedExternalFunction => DiagnosticDescriptor::new(
             "MOTH-RULE-0058",
             "Unsupported external function",
@@ -475,21 +315,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
         RuleDiagnosticKind::UnsupportedBuilderPackage => DiagnosticDescriptor::new(
             "MOTH-RULE-0060",
             "Unsupported builder package",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::UnsupportedBackendFeature => DiagnosticDescriptor::new(
-            "MOTH-RULE-0064",
-            "Unsupported backend feature",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidPageMetadata => DiagnosticDescriptor::new(
-            "MOTH-RULE-0061",
-            "Invalid page metadata",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidCompileTimePath => DiagnosticDescriptor::new(
-            "MOTH-RULE-0063",
-            "Invalid compile-time path",
             DiagnosticSeverity::Error,
         ),
         RuleDiagnosticKind::DependencyNamespaceUsedAsValue => DiagnosticDescriptor::new(
@@ -530,16 +355,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Unsupported trait feature",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::InvalidTraitConformance => DiagnosticDescriptor::new(
-            "MOTH-RULE-0073",
-            "Invalid trait conformance",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidTraitIncompatibility => DiagnosticDescriptor::new(
-            "MOTH-RULE-0084",
-            "Invalid trait incompatibility",
-            DiagnosticSeverity::Error,
-        ),
         RuleDiagnosticKind::GenericBoundPrivateSurfaceLeak => DiagnosticDescriptor::new(
             "MOTH-RULE-0074",
             "Private trait exposed by generic bound",
@@ -548,11 +363,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
         RuleDiagnosticKind::TraitNameUsedAsType => DiagnosticDescriptor::new(
             "MOTH-RULE-0075",
             "Trait name used as value type",
-            DiagnosticSeverity::Error,
-        ),
-        RuleDiagnosticKind::InvalidTraitKeywordUsage => DiagnosticDescriptor::new(
-            "MOTH-RULE-0076",
-            "Invalid trait keyword usage",
             DiagnosticSeverity::Error,
         ),
         RuleDiagnosticKind::ExportOutsideModuleRoot => DiagnosticDescriptor::new(
@@ -580,11 +390,7 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Private type exposed by exported API",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::ProjectContextEscape => DiagnosticDescriptor::new(
-            "MOTH-RULE-0086",
-            "Project context escapes package facade",
-            DiagnosticSeverity::Error,
-        ),
+        _ => unreachable!("reasoned rule descriptors come from the central registry"),
     }
 }
 
@@ -651,11 +457,6 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Cross-module dependency not exported",
             DiagnosticSeverity::Error,
         ),
-        ImportDiagnosticKind::InvalidImportPath => DiagnosticDescriptor::new(
-            "MOTH-IMPORT-0016",
-            "Invalid dependency path",
-            DiagnosticSeverity::Error,
-        ),
         ImportDiagnosticKind::DirectSymbolPathImport => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0017",
             "Direct symbol dependency path",
@@ -681,11 +482,6 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Unsupported external file dependency extension",
             DiagnosticSeverity::Error,
         ),
-        ImportDiagnosticKind::InvalidExternalModule => DiagnosticDescriptor::new(
-            "MOTH-IMPORT-0022",
-            "Invalid external JS module",
-            DiagnosticSeverity::Error,
-        ),
         ImportDiagnosticKind::ExplicitSourceExtension => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0024",
             "Explicit source extension in dependency",
@@ -701,11 +497,6 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Source file kind cannot be used as an entry",
             DiagnosticSeverity::Error,
         ),
-        ImportDiagnosticKind::InvalidMothTemplateApiScopeItem => DiagnosticDescriptor::new(
-            "MOTH-IMPORT-0027",
-            "Invalid Moth template API scope item",
-            DiagnosticSeverity::Error,
-        ),
         ImportDiagnosticKind::MothTemplateInputsShareNoCommonAncestor => DiagnosticDescriptor::new(
             "MOTH-IMPORT-0029",
             "Moth template inputs share no common ancestor",
@@ -716,6 +507,7 @@ fn import_descriptor(kind: ImportDiagnosticKind) -> DiagnosticDescriptor {
             "Duplicate Moth template input path",
             DiagnosticSeverity::Error,
         ),
+        _ => unreachable!("reasoned import descriptors come from the central registry"),
     }
 }
 
@@ -751,29 +543,20 @@ fn borrow_descriptor(kind: BorrowDiagnosticKind) -> DiagnosticDescriptor {
             "Whole-value access conflict",
             DiagnosticSeverity::Error,
         ),
-        BorrowDiagnosticKind::InvalidMutableAccess => DiagnosticDescriptor::new(
-            "MOTH-BORROW-0007",
-            "Invalid mutable access",
-            DiagnosticSeverity::Error,
-        ),
         BorrowDiagnosticKind::UseOfUninitializedLocal => DiagnosticDescriptor::new(
             "MOTH-BORROW-0009",
             "Use of uninitialized local",
             DiagnosticSeverity::Error,
         ),
+        _ => {
+            unreachable!("every remaining borrow descriptor is generated from the reason registry")
+        }
     }
 }
 
-fn config_descriptor(kind: ConfigDiagnosticKind) -> DiagnosticDescriptor {
-    match kind {
-        ConfigDiagnosticKind::InvalidConfig => DiagnosticDescriptor::new(
-            "MOTH-CONFIG-0001",
-            "Invalid config",
-            DiagnosticSeverity::Error,
-        ),
-    }
+fn config_descriptor(_kind: ConfigDiagnosticKind) -> DiagnosticDescriptor {
+    unreachable!("every config descriptor is generated from the reason registry")
 }
-
 fn infrastructure_descriptor(kind: InfrastructureDiagnosticKind) -> DiagnosticDescriptor {
     match kind {
         InfrastructureDiagnosticKind::InfrastructureFailure => DiagnosticDescriptor::new(
@@ -784,12 +567,6 @@ fn infrastructure_descriptor(kind: InfrastructureDiagnosticKind) -> DiagnosticDe
     }
 }
 
-fn deferred_feature_descriptor(kind: DeferredFeatureDiagnosticKind) -> DiagnosticDescriptor {
-    match kind {
-        DeferredFeatureDiagnosticKind::DeferredFeature => DiagnosticDescriptor::new(
-            "MOTH-DEFERRED-0001",
-            "Deferred feature",
-            DiagnosticSeverity::Error,
-        ),
-    }
+fn deferred_feature_descriptor(_kind: DeferredFeatureDiagnosticKind) -> DiagnosticDescriptor {
+    unreachable!("every deferred-feature descriptor is generated from the reason registry")
 }

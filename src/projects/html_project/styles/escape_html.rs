@@ -2,8 +2,8 @@
 //!
 //! WHAT:
 //! - `push_escaped_html_text` is the single allocation-free writer for the five
-//!   HTML-sensitive bytes, shared by the `$code` highlighter and the `$escape_html`
-//!   formatter.
+//!   HTML-sensitive bytes, shared by the `$code` highlighter, the document shell,
+//!   and the `$escape_html` formatter.
 //! - `EscapeHtmlTemplateFormatter` is the public `$escape_html` directive wrapper.
 //! - Preserves opaque child anchors so frontend composition semantics remain unchanged.
 //!
@@ -29,7 +29,7 @@ use std::sync::Arc;
 ///       `& < > " '` with their named entities.
 /// WHY: every replacement byte is ASCII, so the byte indexes between escapes stay
 ///      valid UTF-8 boundaries and plain text is copied without decoding every scalar.
-pub(super) fn push_escaped_html_text(output: &mut String, text: &str) {
+pub(crate) fn push_escaped_html_text(output: &mut String, text: &str) {
     let mut chunk_start = 0;
 
     for (index, byte) in text.bytes().enumerate() {

@@ -16,17 +16,14 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node,
+    assignment_target, fresh_success_returns, function_node, make_test_variable, node,
+    param_with_type_id, reference_expr_with_type_id,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
-};
 
 /// The authored (non-generated) local names a block owns, in declaration order.
 ///
@@ -55,7 +52,7 @@ fn allocates_parameter_locals_and_binds_names() {
     let x = super::symbol("x", &mut string_table);
 
     let body = vec![node(
-        NodeKind::Return(vec![inferred_type_reference_expr(
+        NodeKind::Return(vec![reference_expr_with_type_id(
             x.clone(),
             builtin_type_ids::INT,
             None,

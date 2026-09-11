@@ -35,12 +35,12 @@ Coverage is not quality. An audited area may still have open findings.
 | Area | Covers | Audited |
 |---|---|---|
 | `tests.harness` | `src/compiler_tests/integration_test_runner/**`, `src/compiler_tests/{test_support,test_fs,test_diagnostics}.rs`, `src/compiler_frontend/tests/frontend_pipeline_tests.rs`. Excludes the fixture directories, which `tests.cases` owns. | — |
-| `tests.support` | Test-only support and helper modules under `src/**/tests/` and `src/**/test_support.rs` | Redundancy 2026-08 AUD-0001 `partial` |
+| `tests.support` | Test-only support and helper modules under `src/**/tests/` and `src/**/test_support.rs` | Redundancy 2026-08 AUD-0001 `partial` `stale` |
 | `tests.cases` | `tests/cases/manifest.toml` and every `tests/cases/*/` fixture | — |
 | `build.stage0` | `src/build_system/create_project_modules/**` - source discovery, preparation, module identity and graph, wave scheduling and publication | Performance 2026-08 AUD-0002 `partial` `stale` |
 | `feature.runtime_assertion_messages` | Assertion messages and call arguments end to end: `ast/expressions/{call_arguments,call_argument,call_validation}.rs` and `ast/statements/asserts.rs` through AST finalization and HIR validation into the JS and Wasm backends | Correctness 2026-08 AUD-0003 `stale` |
 | `frontend.tokenizer` | `src/compiler_frontend/tokenizer/**` - lexer, tokens, numeric scanning, text modes, line scanning, newline handling, and the tokenizer test files | Correctness 2026-08 AUD-0005 `stale` |
-| `frontend.symbols` | `src/compiler_frontend/symbols/**` - string interning with fork/merge/freeze, complete-path interning (`PathId`, `PathInternerBuilder`, `PathTable`), `InternedPath`, identifier and reserved-name policy, compiler-owned symbol preseeding, dependency identities, and the symbols test files | Correctness 2026-09 AUD-0006 |
+| `frontend.symbols` | `src/compiler_frontend/symbols/**` - string interning with fork/merge/freeze, complete-path interning (`PathId`, `PathInternerBuilder`, `PathTable`), `InternedPath`, identifier and reserved-name policy, compiler-owned symbol preseeding, dependency identities, and the symbols test files | Correctness 2026-09 AUD-0006 `stale` |
 
 ## Never audited
 

@@ -1,29 +1,36 @@
-//! HTML JavaScript `@moth.*` annotation parser.
+//! HTML JavaScript `@moth.*` annotation parser and runtime-module scanner.
 //!
 //! WHAT: turns a single JS source file into a `ParsedJsModule` containing opaque types,
 //!       free functions, receiver-shaped signatures, registered runtime imports, and diagnostics.
 //! WHY: this parser stays independent from compiler diagnostics and package registration so
 //!      provider and built-in package registration can share one source model while rejecting
-//!      receiver-shaped signatures consistently.
+//!      receiver-shaped signatures consistently; its scanner also owns first-party module-loading
+//!      policy.
 //!
 //! ## Module layout
 //!
 //! - `parsed_js_module`: parser-owned data model (spans, diagnostics, signatures).
 //! - `comment_extractor`: finds `/** ... */` blocks and extracts `@moth.opaque` / `@moth.sig`.
-//! - `export_scanner`: finds supported JS exports and rejects unsupported forms.
+//! - `export_scanner`: finds supported JS exports, counts parameters, and provides shared JS
+//!   lexical skipping used by import scanning.
+//! - `import_scan`: validates static import / `require()` forms against the runtime module
+//!   registry as an extra `ExportScanner` implementation.
 //! - `signature_parser`: parses the Moth parameter/return syntax inside `@moth.sig`.
 //! - `mod.rs` (this file): orchestrates extraction → scanning → binding → signature parsing.
 
 mod comment_extractor;
 mod export_scanner;
+mod import_scan;
 pub(crate) mod parsed_js_module;
 mod signature_parser;
+
+pub(crate) use export_scanner::scan_exports;
 
 #[cfg(test)]
 mod tests;
 
 use comment_extractor::{AnnotationKind, ExtractedAnnotation, extract_annotations};
-use export_scanner::{JsExport, scan_exports};
+use export_scanner::JsExport;
 use parsed_js_module::{
     JsDiagnosticKind, JsParserDiagnostic, ParsedJsFunction, ParsedJsModule, ParsedOpaqueType,
     ParsedRuntimeImport,
@@ -44,34 +51,6 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) fn parse_js_module(source: &str, registry: &RuntimeModuleRegistry) -> ParsedJsModule {
     let mut orchestrator = ParseOrchestrator::new(source, registry);
     orchestrator.run()
-}
-
-/// Import, require and re-export findings under the first-party zero-third-party policy.
-///
-/// WHAT: reuses the HTML JS module scanner and the v1 runtime-module registry.
-/// WHY: first-party validation must not own a second JavaScript lexer or a second allowlist.
-///
-/// The scanner diagnostics remain structured here so the first-party audit can distinguish
-/// module-loading facts from invalid forms of an otherwise registered runtime import. Parser-only
-/// syntax diagnostics, such as local exports and CommonJS exports, are intentionally omitted.
-pub(crate) fn first_party_javascript_import_messages(source: &str) -> Vec<JsParserDiagnostic> {
-    let registry = RuntimeModuleRegistry::v1();
-    let scanned = scan_exports(source, &registry);
-    scanned
-        .diagnostics
-        .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                &diagnostic.kind,
-                JsDiagnosticKind::DynamicImport
-                    | JsDiagnosticKind::ArbitraryImport
-                    | JsDiagnosticKind::CommonJsRequire
-                    | JsDiagnosticKind::ReExportFrom
-                    | JsDiagnosticKind::UnsupportedRuntimeImportForm
-                    | JsDiagnosticKind::UnknownRuntimeImportName
-            )
-        })
-        .collect()
 }
 
 struct ParseOrchestrator<'a> {

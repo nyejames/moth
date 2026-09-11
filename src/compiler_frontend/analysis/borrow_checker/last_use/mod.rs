@@ -9,11 +9,6 @@
 //! syntax, borrow legality or lifetime topology. The alpha checker therefore remains on its
 //! existing metadata path while Boracle and future consumers can use this independent owner.
 
-// The alpha checker intentionally does not consume this independent vocabulary yet. The local
-// allowance keeps the shared handoff warning-free until Boracle and later lifetime consumers use
-// each part of the contract.
-#![allow(dead_code)]
-
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use super::problem::{
@@ -37,6 +32,8 @@ pub(crate) enum FutureUseStatus {
 pub(crate) enum LastUseSubject {
     Place(PlaceId),
     Binding(BindingId),
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    #[allow(dead_code)]
     Origin(super::problem::ValueOriginId),
     Loan(LoanId),
 }
@@ -186,6 +183,8 @@ impl LastUseAnalysis {
     }
 
     /// Add solver-owned observations to the normalized place and binding observations.
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    #[allow(dead_code)]
     pub(crate) fn with_observations(
         mut self,
         problem: &BorrowProblem,
@@ -197,22 +196,6 @@ impl LastUseAnalysis {
         }
         self.sort_observations();
         Ok(self)
-    }
-
-    /// Build an analysis from caller-owned observations, retaining normalized CFG and event
-    /// ordering. This is the handoff used by origin solving for origin-specific future use.
-    pub(crate) fn from_observations(
-        problem: &BorrowProblem,
-        observations: impl IntoIterator<Item = LastUseObservation>,
-    ) -> Result<Self, CompilerError> {
-        problem.validate()?;
-        let mut analysis = Self::empty(problem);
-        for observation in observations {
-            analysis.validate_observation(problem, observation)?;
-            analysis.add_observation(observation);
-        }
-        analysis.sort_observations();
-        Ok(analysis)
     }
 
     /// Query one subject after a point or event boundary.
@@ -278,22 +261,6 @@ impl LastUseAnalysis {
         })
     }
 
-    pub(crate) fn query_place(
-        &self,
-        place: PlaceId,
-        location: LastUseLocation,
-    ) -> Result<LastUseResult, CompilerError> {
-        self.query(LastUseSubject::Place(place), location)
-    }
-
-    pub(crate) fn query_loan(
-        &self,
-        loan: LoanId,
-        location: LastUseLocation,
-    ) -> Result<LastUseResult, CompilerError> {
-        self.query(LastUseSubject::Loan(loan), location)
-    }
-
     fn empty(problem: &BorrowProblem) -> Self {
         let mut point_block = BTreeMap::new();
         for point in problem.points() {
@@ -336,6 +303,8 @@ impl LastUseAnalysis {
         }
     }
 
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    #[allow(dead_code)]
     fn validate_observation(
         &self,
         problem: &BorrowProblem,
@@ -543,31 +512,6 @@ impl LastUseAnalysis {
             })
     }
 
-    fn find_later_use(
-        &self,
-        subject: LastUseSubject,
-        query_block: BlockId,
-        query_start_index: usize,
-    ) -> Option<UseId> {
-        self.first_observation_in_block(subject, query_block, query_start_index)
-            .or_else(|| self.find_reachable_use(subject, self.successors.get(&query_block)?))
-    }
-
-    fn find_reachable_use(&self, subject: LastUseSubject, starts: &[BlockId]) -> Option<UseId> {
-        let mut queue = VecDeque::from(starts.to_vec());
-        let mut visited = BTreeSet::new();
-        while let Some(block) = queue.pop_front() {
-            if !visited.insert(block) {
-                continue;
-            }
-            if let Some(use_id) = self.first_observation_in_block(subject, block, 0) {
-                return Some(use_id);
-            }
-            queue.extend(self.successors.get(&block).into_iter().flatten().copied());
-        }
-        None
-    }
-
     fn find_summary_use(
         &self,
         subject: LastUseSubject,
@@ -639,6 +583,8 @@ impl LastUseAnalysis {
 }
 
 /// Map each normalized use to its exact owning event.
+// Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+#[allow(dead_code)]
 pub(crate) fn event_for_use(
     problem: &BorrowProblem,
     use_id: UseId,

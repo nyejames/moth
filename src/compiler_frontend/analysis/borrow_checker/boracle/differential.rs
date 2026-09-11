@@ -5,12 +5,9 @@
 //! WHY: a disagreement is useful only when its static rule-set identity, runtime completeness and
 //!      witnesses remain visible together.
 
-// `compare_problem_parts` is the Phase 4 generator/reducer seam; `experiments()` and
-// malformed-problem classification support future corpus reporting. Keep the typed differential
-// API warning-free until those callers land.
-#![allow(dead_code)]
-
-use super::super::problem::{BorrowProblem, BorrowProblemParts};
+use super::super::problem::BorrowProblem;
+#[cfg(test)]
+use super::super::problem::BorrowProblemParts;
 use super::oracle::{OracleBounds, OracleOutcome, execute_bounded};
 use super::report::{BoracleReport, BoracleSolver};
 use super::service::{BoracleExperiment, BoracleRuleSelection, format_experiment_names};
@@ -23,6 +20,8 @@ pub(crate) enum OracleComparisonClass {
     StaticAcceptedRuntimeConflict,
     StaticRejectedBoundedSafe,
     OracleInconclusive,
+    #[allow(dead_code)]
+    // Boracle conflict-directed relational refinement plan: malformed-input classification.
     MalformedProblem,
     ExperimentOnlyAcceptedDifference,
 }
@@ -45,6 +44,8 @@ impl OracleComparisonClass {
 pub(crate) enum OracleComparisonSeverity {
     SoundnessFailure,
     PrecisionCandidate,
+    #[allow(dead_code)]
+    // Boracle conflict-directed relational refinement plan: malformed-input severity.
     MalformedInput,
     Informational,
 }
@@ -137,6 +138,7 @@ impl OracleComparisonSet {
     }
 }
 
+#[cfg(test)]
 /// Compare normalized problem parts against the reference rule-set and every legality-changing
 /// experiment. A validation failure is returned as a classified malformed comparison set.
 pub(crate) fn compare_problem_parts(
@@ -221,6 +223,7 @@ fn validate_selections(selections: &[BoracleRuleSelection]) -> Result<(), Compil
     Ok(())
 }
 
+#[cfg(test)]
 fn malformed_comparison_set(
     reference_selection: BoracleRuleSelection,
     experiment_selections: Vec<BoracleRuleSelection>,

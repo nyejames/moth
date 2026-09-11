@@ -6,10 +6,11 @@
 //! WHY:  the summary is pure structured data; these tests run before any
 //!       terminal rendering so policy bugs cannot hide behind styling.
 
-use crate::timing::enabled::render::{
-    boundary_row_text, boundary_row_text_with_width, boundary_section_title, render_row_text,
-    report_title_text, section_label_width, slowest_module_text,
+use crate::timing::enabled::render::test_support::{
+    boundary_row_text, boundary_row_text_with_width, render_row_text, report_title_text,
+    section_label_width, slowest_module_text,
 };
+use crate::timing::enabled::render::{ACCOUNTING_NOTE, boundary_section_title};
 use crate::timing::enabled::session::TimingSessionId;
 use crate::timing::enabled::summary::{
     TimingAccountingIssue, TimingBoundarySummary, TimingReportItem, TimingSlowestModuleSummary,
@@ -1465,12 +1466,11 @@ fn accounting_note_appears_after_pipeline_for_dev() {
 #[test]
 fn accounting_note_text_states_pipeline_only_rule() {
     assert!(
-        crate::timing::enabled::render::ACCOUNTING_NOTE_TEXT
-            .contains("Only pipeline rows account for the command total"),
+        ACCOUNTING_NOTE.contains("Only pipeline rows account for the command total"),
         "accounting note must state the pipeline-only rule"
     );
     assert!(
-        crate::timing::enabled::render::ACCOUNTING_NOTE_TEXT.contains("overlapping attribution"),
+        ACCOUNTING_NOTE.contains("overlapping attribution"),
         "accounting note must mention overlapping attribution"
     );
 }

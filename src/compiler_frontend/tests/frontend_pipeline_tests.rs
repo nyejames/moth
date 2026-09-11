@@ -25,10 +25,12 @@ use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOri
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::source::SourceDatabase;
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
     TemplateHeadCompatibility,
@@ -107,12 +109,12 @@ impl FrontendProject {
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let entry_file = fs::canonicalize(project_root.join(entry_relative_path))
             .expect("entry file should canonicalize");
-        let resolver = ProjectPathResolver::new(
+        let resolver = ProjectPathResolver::new_with_module_roots(
             canonical_project_root.clone(),
             canonical_entry_root,
-            crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(
-            ),
+            PreparedSourcePackageRoots::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            ModuleRootTable::empty(),
         )
         .expect("project path resolver should build");
 

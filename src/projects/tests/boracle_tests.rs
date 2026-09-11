@@ -1055,59 +1055,6 @@ result = survivor
 }
 
 #[test]
-fn boracle_source_optional_transfer_sees_write_through_alias_observation() {
-    let report = solve_source(
-        r#"
-observe |value {Int}| -> {Int}:
-    return value
-;
-
-items ~= {1}
-result = observe(value = items)
-writer ~= items
-writer = {2}
-"#,
-    );
-    let function = report
-        .functions()
-        .iter()
-        .find(|function| {
-            function
-                .problem
-                .events()
-                .iter()
-                .any(|event| matches!(event.kind, EventKind::CallArgument { .. }))
-                && function.problem.uses().iter().any(|use_row| {
-                    use_row.definition && function.report.origin.is_write_through_use(use_row.id)
-                })
-        })
-        .expect("write-through transfer source should produce a typed call report");
-    let (event_id, place, point) = function
-        .problem
-        .events()
-        .iter()
-        .find_map(|event| match &event.kind {
-            EventKind::CallArgument { argument, .. } => {
-                Some((event.id, argument.place, event.point))
-            }
-            _ => None,
-        })
-        .expect("call argument event should be present");
-    let origin = function
-        .report
-        .origin
-        .origins_for_place_after_event(&function.problem, event_id, place)
-        .first()
-        .copied()
-        .expect("call argument should retain its source origin");
-    assert!(
-        !function
-            .report
-            .final_use_candidate_for_origin_after_event(origin, event_id, point)
-    );
-}
-
-#[test]
 fn boracle_source_write_through_keeps_alias_loan_live_before_overlap() {
     let report = solve_source(
         r#"
@@ -2015,61 +1962,6 @@ loop counter < 2:
     assert_eq!(
         first_function.report.debug_dump(),
         second_function.report.debug_dump()
-    );
-}
-
-#[test]
-fn boracle_source_final_call_argument_queries_transfer_after_exact_event() {
-    let report = solve_source(
-        r#"
-observe |value {Int}| -> {Int}:
-    return value
-;
-
-items ~= {1}
-result = observe(value = items)
-"#,
-    );
-    let function = report
-        .functions()
-        .iter()
-        .find(|function| {
-            function
-                .problem
-                .events()
-                .iter()
-                .any(|event| matches!(event.kind, EventKind::CallArgument { .. }))
-        })
-        .expect("final call source should contain a typed call argument event");
-    let (event_id, place, use_id, point) = function
-        .problem
-        .events()
-        .iter()
-        .find_map(|event| match &event.kind {
-            EventKind::CallArgument { argument, .. } => {
-                Some((event.id, argument.place, argument.use_id, event.point))
-            }
-            _ => None,
-        })
-        .expect("final call should retain its exact argument event");
-    let origin = function
-        .report
-        .origin
-        .origins_for_place_after_event(&function.problem, event_id, place)
-        .first()
-        .copied()
-        .expect("final call argument should retain its source origin");
-    let use_row = function
-        .problem
-        .uses()
-        .get(use_id.index())
-        .expect("call argument should own its normalized use");
-    assert_eq!(use_row.point, point);
-    assert_eq!(use_row.place, place);
-    assert!(
-        function
-            .report
-            .final_use_candidate_for_origin_after_event(origin, event_id, point)
     );
 }
 

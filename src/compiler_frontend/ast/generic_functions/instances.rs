@@ -9,6 +9,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct GenericFunctionInstanceKey {
@@ -39,6 +40,28 @@ pub(crate) struct GenericFunctionInstantiationRequest {
     pub(crate) key: GenericFunctionInstanceKey,
     pub(crate) instance_path: InternedPath,
     pub(crate) call_span: Option<SourceSpan>,
+}
+
+impl GenericFunctionInstantiationRequest {
+    pub(crate) fn generated(
+        declaration_identity: &GeneratedDeclarationIdentity,
+        function_path: InternedPath,
+        type_arguments: Box<[TypeId]>,
+        string_table: &mut StringTable,
+        call_span: Option<SourceSpan>,
+    ) -> Self {
+        let instance_path = function_path.join_str("__generated_instance", string_table);
+        Self {
+            declaration_identity: Some(declaration_identity.clone()),
+            evidence: Box::new([]),
+            key: GenericFunctionInstanceKey {
+                function_path,
+                type_arguments,
+            },
+            instance_path,
+            call_span,
+        }
+    }
 }
 
 /// Half-open slice of provisional generic requests emitted while parsing one branch body.

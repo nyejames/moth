@@ -50,7 +50,6 @@ fn fork_without_new_strings_produces_identity_delta_remap() {
     let remap = build_table.merge_delta_from(&module_table, base_len);
 
     assert!(remap.is_identity());
-    assert!(!remap.has_non_identity_after(base_len));
     assert_eq!(remap.get(inherited_id), inherited_id);
 }
 
@@ -97,7 +96,6 @@ fn overlapping_module_forks_remap_diverging_local_suffixes() {
     let second_only_global_id = second_remap.get(second_only_id);
 
     assert!(!second_remap.is_identity());
-    assert!(second_remap.has_non_identity_after(second_base_len));
     assert_eq!(second_remap.get(second_shared_id), shared_global_id);
     assert_ne!(second_only_global_id, second_only_id);
     assert_eq!(build_table.resolve(second_only_global_id), "second-only");

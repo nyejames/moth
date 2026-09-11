@@ -57,14 +57,12 @@ impl ExecutionTrace {
         format!("{self:#?}")
     }
 
+    #[cfg(test)]
     pub(crate) fn entries(&self) -> &[TraceEntry] {
         &self.entries
     }
 
-    pub(crate) fn capabilities(&self) -> &[RuntimeCapability] {
-        &self.capabilities
-    }
-
+    #[cfg(test)]
     pub(crate) fn block_entries(&self) -> &BTreeMap<BlockId, usize> {
         &self.block_entries
     }

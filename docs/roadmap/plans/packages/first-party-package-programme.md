@@ -247,12 +247,14 @@ Phase 0 adds one focused validation owner to `just validate`. It must:
 
 - inspect only first-party package and runtime implementation roots
 - reject package-manager manifests and lockfiles within those roots
-- reject unapproved bare JavaScript module imports
+- reuse the HTML JS parser scanner rather than a second lexer or repository-wide substring scan
+- reject unapproved JavaScript module-loading forms other than a named static import of a
+  registered runtime module
+- report invalid named imports or unsupported import forms from a registered runtime module as a
+  distinct rule
 - use one explicit allowlist for Moth-owned runtime modules where imports are required
 - reject known vendored dependency roots
 - include positive and negative tests
-- avoid a repository-wide substring scan that mistakes documentation or test fixtures for production
-  dependencies
 
 ## Merge isolation and branch policy
 

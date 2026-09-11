@@ -27,12 +27,11 @@ use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node,
+    fresh_success_returns, function_node, make_test_variable, node, param_with_type_id,
+    reference_expr_with_type_id,
 };
 
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    choice_type_id, fresh_success_returns, inferred_type_reference_expr, param_with_type_id,
-};
+use crate::compiler_frontend::tests::type_id_fixture_support::choice_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::hir::hir_builder::{
@@ -60,7 +59,7 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: inferred_type_reference_expr(
+                scrutinee: reference_expr_with_type_id(
                     x,
                     builtin_type_ids::INT,
                     None,
@@ -149,7 +148,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: inferred_type_reference_expr(
+                scrutinee: reference_expr_with_type_id(
                     status_local,
                     status_type_id,
                     None,
@@ -242,7 +241,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 x.clone(),
                 builtin_type_ids::INT,
                 None,
@@ -330,7 +329,7 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 x.clone(),
                 builtin_type_ids::INT,
                 None,
@@ -420,7 +419,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: inferred_type_reference_expr(
+                scrutinee: reference_expr_with_type_id(
                     x,
                     builtin_type_ids::INT,
                     None,
@@ -471,14 +470,14 @@ fn match_rejects_non_literal_pattern_expressions() {
         },
         vec![node(
             NodeKind::Match {
-                scrutinee: inferred_type_reference_expr(
+                scrutinee: reference_expr_with_type_id(
                     x.clone(),
                     builtin_type_ids::INT,
                     None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(inferred_type_reference_expr(
+                    pattern: MatchPattern::Literal(reference_expr_with_type_id(
                         x,
                         builtin_type_ids::INT,
                         None,
@@ -659,7 +658,7 @@ fn lowers_relational_pattern_to_hir_relational() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 x.clone(),
                 builtin_type_ids::INT,
                 None,
@@ -744,7 +743,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 x.clone(),
                 builtin_type_ids::INT,
                 None,
@@ -842,7 +841,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 status_local.clone(),
                 status_type_id,
                 None,
@@ -972,7 +971,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
 
     let match_node = node(
         NodeKind::Match {
-            scrutinee: inferred_type_reference_expr(
+            scrutinee: reference_expr_with_type_id(
                 maybe_name.clone(),
                 option_int_type_id,
                 None,
@@ -988,7 +987,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 },
                 guard: None,
                 body: vec![node(
-                    NodeKind::ExpressionStatement(inferred_type_reference_expr(
+                    NodeKind::ExpressionStatement(reference_expr_with_type_id(
                         capture_path,
                         builtin_type_ids::INT,
                         None,

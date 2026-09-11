@@ -12,15 +12,16 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
 use crate::compiler_frontend::ast::templates::template::FormatterResult;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, MalformedTemplateReason, SyntaxDiagnosticKind,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct SourceWarning {
-    pub message: String,
+    pub reason: MalformedTemplateReason,
     pub start_offset: usize,
-    #[allow(dead_code)] // Retained for deferred validator range mapping.
     pub end_offset: usize, // exclusive
 }
 
@@ -97,14 +98,14 @@ impl PassThroughFormatterInput {
         }
     }
 
+    /// Turn validator warnings into malformed-template diagnostics of one syntax kind.
+    ///
+    /// WHY: both callers report the same payload shape and differ only in which template kind
+    /// was malformed, so the kind travels as data rather than as a per-caller constructor.
     pub(crate) fn map_warnings(
         &self,
         warnings: Vec<SourceWarning>,
-        make_diagnostic: impl Fn(
-            crate::compiler_frontend::symbols::string_interning::StringId,
-            Option<SourceSpan>,
-        ) -> CompilerDiagnostic,
-        string_table: &mut StringTable,
+        kind: SyntaxDiagnosticKind,
     ) -> Vec<CompilerDiagnostic> {
         if self.spans.is_empty() || self.flattened_source.trim().is_empty() {
             return Vec::new();
@@ -114,8 +115,11 @@ impl PassThroughFormatterInput {
             .into_iter()
             .filter_map(|warning| {
                 let span = map_warning_span_to_source_span(&self.spans, &warning)?;
-                let msg_id = string_table.get_or_intern(warning.message);
-                Some(make_diagnostic(msg_id, span))
+                Some(CompilerDiagnostic::malformed_template(
+                    kind,
+                    warning.reason,
+                    span,
+                ))
             })
             .collect()
     }

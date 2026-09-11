@@ -1,9 +1,9 @@
 //! Stable nominal blueprints and generated-local nominal reconstruction.
 
-use super::{
+use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    ModuleMaterialisationPreparation,
 };
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};

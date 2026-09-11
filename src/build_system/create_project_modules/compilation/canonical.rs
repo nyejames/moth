@@ -20,9 +20,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::{
-    CompiledModuleArtifact, KnownGeneratedFunctions, ModuleCompilationContext,
-    ModuleCompilationOutcome, ModuleSemanticResult, ProviderMaterialisationRegistry,
-    compile_module,
+    KnownGeneratedFunctions, ModuleCompilationContext, ModuleCompilationOutcome,
+    ModuleSemanticResult, ProviderMaterialisationRegistry, compile_module,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::{
@@ -58,8 +57,8 @@ use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 
 use super::{
-    ModuleBoundaryPublication, build_module_package_dependency_index, build_provider_binding_index,
-    build_source_package_dependency_index, publish_module_and_generated,
+    build_module_package_dependency_index, build_provider_binding_index,
+    build_source_package_dependency_index, publish_compiled_module,
     seed_completed_package_materialisations,
 };
 
@@ -1009,35 +1008,17 @@ pub(super) fn compile_module_waves_in_premerge_lane(
             };
             match outcome.outcome {
                 DirectoryModuleTaskOutcome::Success(compiled) => {
-                    let compiled = *compiled;
-                    let remap = string_table
-                        .merge_delta_from(&compiled.string_table, outcome.string_table_base_len);
-                    let ModuleSemanticResult {
-                        mut module,
-                        mut generated_delta,
-                        resource_source_associations,
-                        string_table: _,
-                        public_interface,
-                    } = compiled;
-                    if !remap.is_identity() {
-                        module.remap_string_ids(&remap);
-                        generated_delta.remap_string_ids(&remap);
-                    }
-                    let artifact = CompiledModuleArtifact {
-                        module,
-                        interface: public_interface,
-                    };
-                    publish_module_and_generated(ModuleBoundaryPublication {
-                        modules: &mut provider_store,
-                        generated: &mut generated_store,
-                        materialisations: &mut provider_materialisations,
+                    publish_compiled_module(
+                        &mut provider_store,
+                        &mut generated_store,
+                        &mut provider_materialisations,
                         resource_inputs,
-                        module_id: outcome.module_id,
-                        expected_origin: graph.node(outcome.module_id).stable_origin(),
-                        artifact,
-                        generated_delta,
-                        resource_source_associations,
-                    })?;
+                        outcome.module_id,
+                        graph.node(outcome.module_id).stable_origin(),
+                        *compiled,
+                        outcome.string_table_base_len,
+                        string_table,
+                    )?;
                 }
                 DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                     provider_store.mark_diagnosed(outcome.module_id)?;

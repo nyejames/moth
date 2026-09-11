@@ -49,6 +49,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
 };
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -178,11 +179,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable) {
         SourceFileKind::MothTemplate.extension(),
         SourceFileKind::MothTemplate,
     );
-    let project_path_resolver = ProjectPathResolver::new(
+    let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &source_file_kinds,
+        ModuleRootTable::empty(),
     )
     .expect("test project path resolver should build");
     let entry_file_path = input_path.clone();
@@ -1815,11 +1817,12 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
 
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let project_path = std::env::temp_dir();
-    let project_path_resolver = ProjectPathResolver::new(
+    let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         project_path.clone(),
         project_path,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("test project path resolver should build");
 

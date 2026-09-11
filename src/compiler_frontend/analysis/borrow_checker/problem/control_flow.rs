@@ -13,6 +13,7 @@ pub(crate) struct ProgramPoint {
 }
 
 impl ProgramPoint {
+    #[cfg(test)]
     pub(crate) const fn new(id: PointId, block: BlockId, ordinal: u32) -> Self {
         Self {
             id,

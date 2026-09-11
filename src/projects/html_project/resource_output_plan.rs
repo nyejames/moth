@@ -62,15 +62,10 @@ impl ResourceDiagnosticSite {
 
 /// The artefact whose URL rules observe one resource-bearing string.
 ///
-/// The current HTML entry pipeline has one explicit page-document context. Stylesheet contexts are
-/// represented now so a later standalone CSS lane can use the same record shape without treating a
-/// stylesheet as a JavaScript or Wasm container.
+/// The current HTML entry pipeline has one explicit page-document context.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResourceUrlContext {
     PageDocument(PathBuf),
-    /// Constructed only by focused tests until the standalone CSS lane exists.
-    #[allow(dead_code)]
-    Stylesheet(PathBuf),
 }
 
 impl ResourceUrlContext {
@@ -81,7 +76,7 @@ impl ResourceUrlContext {
 
     pub(crate) fn artefact_path(&self) -> &Path {
         match self {
-            Self::PageDocument(path) | Self::Stylesheet(path) => path,
+            Self::PageDocument(path) => path,
         }
     }
 }
@@ -573,6 +568,8 @@ fn package_relative_path(module_path: &str, resource_path: &str) -> PathBuf {
 /// Hex encoding keeps the prefix portable while making both the package origin and canonical name
 /// injective. Consumer aliases never enter this identity.
 pub(crate) fn package_output_prefix(package: &StablePackageIdentity) -> PathBuf {
+    // Keep this total package-name hex encoding distinct from `percent_encode_url_segment`; output
+    // paths depend on its opaque spelling.
     let mut encoded_name = String::from("p");
     for byte in package.name().as_bytes() {
         let _ = write!(encoded_name, "{byte:02x}");

@@ -6,8 +6,9 @@
 //!      reference solver's origin or loan state.
 
 use super::OracleLimitReason;
+use crate::compiler_frontend::analysis::borrow_checker::problem::LoanId;
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, BindingId, BlockId, BorrowProblem, CallId, EventId, LoanId, PlaceId, PlaceOverlap,
+    AccessKind, BindingId, BlockId, BorrowProblem, CallId, EventId, PlaceId, PlaceOverlap,
     ProjectionElem,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -15,12 +16,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct DynamicOriginId(u32);
-
-impl DynamicOriginId {
-    pub(crate) const fn raw(self) -> u32 {
-        self.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RuntimePlaceState {
@@ -110,6 +105,7 @@ pub(crate) struct RuntimeAccessTarget {
 pub(crate) struct RuntimeCapabilityId(u32);
 
 impl RuntimeCapabilityId {
+    #[cfg(test)]
     pub(crate) const fn raw(self) -> u32 {
         self.0
     }
@@ -661,14 +657,6 @@ impl OracleState {
             }
             capability.call_effect_index = Some(event_index);
         }
-    }
-
-    fn retire_holder(
-        &mut self,
-        holder: PlaceId,
-        event_index: usize,
-    ) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
-        self.end_capabilities_for_retired_holders(&BTreeSet::from([holder]), event_index)
     }
 
     /// Ends every capability held by a place that structurally overlaps `written`.

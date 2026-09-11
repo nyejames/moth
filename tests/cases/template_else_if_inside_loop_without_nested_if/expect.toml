@@ -1,0 +1,10 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.template_else_if_in_loop_body"
+path = "input/@page.moth"
+line = 4

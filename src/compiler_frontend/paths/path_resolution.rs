@@ -47,26 +47,12 @@ pub(crate) struct ProjectPathResolver {
 }
 
 impl ProjectPathResolver {
-    /// WHAT: creates a resolver from canonical project and entry roots.
-    /// WHY: dependency normalization depends on a stable filesystem view of the project layout.
-    pub(crate) fn new(
-        project_root: PathBuf,
-        entry_root: PathBuf,
-        source_package_roots: PreparedSourcePackageRoots,
-        source_file_kinds: &SourceFileKindRegistry,
-    ) -> Result<Self, CompilerError> {
-        Self::new_with_module_roots(
-            project_root,
-            entry_root,
-            source_package_roots,
-            source_file_kinds,
-            ModuleRootTable::empty(),
-        )
-    }
-
     /// WHAT: creates a resolver from canonical roots and Stage 0 module-root data.
     /// WHY: path resolution may query prepared module boundaries, but it must not perform
-    /// filesystem discovery during normal directory construction.
+    ///      filesystem discovery during normal directory construction. Single-file compilation
+    ///      passes `ModuleRootTable::empty()` for bare `.moth` entries
+    ///      (`create_project_modules/compilation/single_file.rs:275-277`), so this constructor is
+    ///      also the production entry point for the supported no-module-root state.
     pub(crate) fn new_with_module_roots(
         project_root: PathBuf,
         entry_root: PathBuf,

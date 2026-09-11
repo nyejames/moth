@@ -43,6 +43,7 @@ use crate::compiler_frontend::module_dependencies::{
 };
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
@@ -135,11 +136,12 @@ pub(crate) fn compile_moth_template_source(
         SourceFileKind::MothTemplate.extension(),
         SourceFileKind::MothTemplate,
     );
-    let path_resolver = ProjectPathResolver::new(
+    let path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root,
-        PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &source_file_kinds,
+        ModuleRootTable::empty(),
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 

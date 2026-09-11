@@ -9,11 +9,12 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::output_plan::CanonicalPageRoute;
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
+use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
 use crate::timed_stage;
-use std::fmt::Write as _;
-use std::path::Path;
+use std::ffi::OsStr;
 const CORE_CSS: &str = include_str!("moth-css-core.css");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +39,7 @@ pub(crate) struct HtmlDocumentShellInput<'a> {
     pub config: &'a HtmlDocumentConfig,
     pub page_metadata: &'a HtmlPageMetadata,
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
-    pub logical_html_path: &'a Path,
+    pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
     pub body_html: String,
     pub script_html: String,
@@ -62,7 +63,7 @@ fn resolve_html_document(
         config,
         page_metadata,
         structural_url_renderer,
-        logical_html_path,
+        route,
         project_name,
         body_html,
         script_html,
@@ -72,7 +73,7 @@ fn resolve_html_document(
     let mut base_title =
         render_metadata_value(page_metadata.title.as_ref(), structural_url_renderer)?;
     if base_title.is_none() {
-        base_title = route_title_fallback(logical_html_path)?;
+        base_title = route_title_fallback(route.route_segment.as_deref())?;
     }
     if base_title.is_none() && !project_name.is_empty() {
         base_title = Some(project_name.to_string());
@@ -126,11 +127,11 @@ fn render_metadata_value(
 fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
     let mut html = String::new();
     html.push_str("<!DOCTYPE html>\n");
-    let _ = writeln!(
-        html,
-        "<html lang=\"{}\">",
-        escape_html_attribute(&document.lang)
-    );
+
+    html.push_str("<html lang=\"");
+    push_escaped_html_text(&mut html, &document.lang);
+    html.push_str("\">\n");
+
     html.push_str("  <head>\n");
     if document.inject_charset {
         html.push_str("    <meta charset=\"UTF-8\">\n");
@@ -143,26 +144,21 @@ fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
     if document.inject_color_scheme {
         html.push_str("    <meta name=\"color-scheme\" content=\"light dark\">\n");
     }
-    let _ = writeln!(
-        html,
-        "    <title>{}</title>",
-        escape_html_text(&document.title)
-    );
+
+    html.push_str("    <title>");
+    push_escaped_html_text(&mut html, &document.title);
+    html.push_str("</title>\n");
 
     if let Some(description) = &document.description {
-        let _ = writeln!(
-            html,
-            "    <meta name=\"description\" content=\"{}\">",
-            escape_html_attribute(description)
-        );
+        html.push_str("    <meta name=\"description\" content=\"");
+        push_escaped_html_text(&mut html, description);
+        html.push_str("\">\n");
     }
 
     if let Some(favicon) = &document.favicon {
-        let _ = writeln!(
-            html,
-            "    <link rel=\"icon\" href=\"{}\">",
-            escape_html_attribute(favicon)
-        );
+        html.push_str("    <link rel=\"icon\" href=\"");
+        push_escaped_html_text(&mut html, favicon);
+        html.push_str("\">\n");
     }
 
     if let Some(core_css) = &document.core_css {
@@ -183,11 +179,9 @@ fn render_resolved_document(document: &ResolvedHtmlDocument) -> String {
     }
 
     html.push_str("  </head>\n");
-    let _ = writeln!(
-        html,
-        "  <body style=\"{}\">",
-        escape_html_attribute(&document.body_style)
-    );
+    html.push_str("  <body style=\"");
+    push_escaped_html_text(&mut html, &document.body_style);
+    html.push_str("\">\n");
     if !document.body_html.is_empty() {
         append_rendered_html_fragment(&mut html, &document.body_html);
     }
@@ -211,19 +205,20 @@ fn append_rendered_html_fragment(output: &mut String, fragment: &str) {
     }
 }
 
-/// Derive a human-readable title from the validated route path.
+/// Format the planned route segment for the page-title fallback.
 ///
-/// WHAT: returns the directory name for `index.html` routes or the file stem for flat routes,
-/// formatted with spaces and title-cased word boundaries.
-/// WHY: `logical_html_path` is built from already-validated route components, so a non-UTF-8
-///      segment here breaks the validated-route contract and must surface as an internal error
-///      rather than silently downgrading to a project-title fallback. A missing route segment
-///      (root page) legitimately returns `None` so the caller can fall through to the project name.
-fn route_title_fallback(logical_html_path: &Path) -> Result<Option<String>, CompilerError> {
-    let route_segment = match extract_route_segment(logical_html_path)? {
-        Some(segment) => segment,
-        None => return Ok(None),
+/// WHAT: turns `-`, `_` and `/` boundaries into spaces and title-cases each following word.
+/// WHY: route semantics are owned by `CanonicalPageRoute`; this function only projects its raw
+///      segment into display text and never inspects a path.
+fn route_title_fallback(route_segment: Option<&OsStr>) -> Result<Option<String>, CompilerError> {
+    let Some(route_segment) = route_segment else {
+        return Ok(None);
     };
+    let route_segment = route_segment.to_str().ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "HTML planned route segment {route_segment:?} is not valid UTF-8; route components must be validated before title fallback."
+        ))
+    })?;
 
     if route_segment.is_empty() {
         return Ok(None);
@@ -249,53 +244,6 @@ fn route_title_fallback(logical_html_path: &Path) -> Result<Option<String>, Comp
     }
 
     Ok(Some(formatted))
-}
-
-/// Extract the raw route segment used for the title fallback.
-///
-/// WHAT: returns the directory name for `index.html` routes or the file stem for flat routes.
-/// WHY: a missing segment (root page or path with no parent) legitimately yields `None`, but a
-///      present non-UTF-8 segment breaks the validated-route contract and must surface as an
-///      internal error rather than silently downgrading to a project-title fallback.
-fn extract_route_segment(logical_html_path: &Path) -> Result<Option<String>, CompilerError> {
-    let is_index_route =
-        logical_html_path.file_name().and_then(|name| name.to_str()) == Some("index.html");
-
-    if is_index_route {
-        let Some(parent) = logical_html_path.parent() else {
-            return Ok(None);
-        };
-        let Some(folder_name) = parent.file_name() else {
-            return Ok(None);
-        };
-        let segment = folder_name.to_str().ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "HTML route directory component {parent:?} is not valid UTF-8; route components must be validated before title fallback."
-            ))
-        })?;
-        return Ok(Some(segment.to_string()));
-    }
-
-    let Some(stem) = logical_html_path.file_stem() else {
-        return Ok(None);
-    };
-    let segment = stem.to_str().ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "HTML route stem component {logical_html_path:?} is not valid UTF-8; route components must be validated before title fallback."
-        ))
-    })?;
-    Ok(Some(segment.to_string()))
-}
-
-fn escape_html_text(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-fn escape_html_attribute(value: &str) -> String {
-    escape_html_text(value).replace('"', "&quot;")
 }
 
 #[cfg(test)]

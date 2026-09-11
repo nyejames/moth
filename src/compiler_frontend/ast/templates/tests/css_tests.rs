@@ -3,7 +3,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::compiler_messages::{CssTemplateWarning, MalformedTemplateReason};
 
 fn located_text_piece(text: &str, string_table: &mut StringTable) -> FormatterInputPiece {
     FormatterInputPiece::Text(FormatterTextPiece {
@@ -12,49 +12,47 @@ fn located_text_piece(text: &str, string_table: &mut StringTable) -> FormatterIn
     })
 }
 
+fn validate_css_for_test(source: &str, mode: CssFormatterMode) -> Vec<SourceWarning> {
+    let mut string_table = StringTable::new();
+    validate_css_source(source, mode, &mut string_table)
+}
+
 #[test]
 fn valid_block_css_emits_no_warnings() {
-    let warnings = validate_css_source(
+    let warnings = validate_css_for_test(
         ".button { color: red; }\n@media (width > 600px) { .button { padding: 1rem; } }",
         CssFormatterMode::Block,
     );
-
     assert!(warnings.is_empty());
 }
 
 #[test]
 fn valid_block_css_ignores_comments_inside_statements() {
-    let warnings = validate_css_source(
+    let warnings = validate_css_for_test(
         ":root { /* Default Background Colours */ --moth-bg-lightmode: #fff; /* Code block colours */ --comment-dark: #838c86; }",
         CssFormatterMode::Block,
     );
-
     assert!(warnings.is_empty());
 }
 
 #[test]
 fn inline_css_rejects_selector_blocks() {
-    let warnings = validate_css_source(".button { color: red; }", CssFormatterMode::Inline);
-    assert!(
-        warnings
-            .iter()
-            .any(|warning| warning.message.contains("only allow declarations"))
-    );
+    let warnings = validate_css_for_test(".button { color: red; }", CssFormatterMode::Inline);
+    assert!(warnings.iter().any(|warning| {
+        warning.reason == MalformedTemplateReason::Css(CssTemplateWarning::InlineSelectorBlock)
+    }));
 }
 
 #[test]
 fn malformed_css_reports_balancing_and_declaration_shape() {
-    let warnings = validate_css_source(".button { color red; ", CssFormatterMode::Block);
-    assert!(
-        warnings
-            .iter()
-            .any(|warning| warning.message.contains("Unclosed '{'"))
-    );
-    assert!(
-        warnings
-            .iter()
-            .any(|warning| warning.message.contains("Expected 'property: value'"))
-    );
+    let warnings = validate_css_for_test(".button { color red; ", CssFormatterMode::Block);
+    assert!(warnings.iter().any(|warning| {
+        warning.reason
+            == MalformedTemplateReason::Css(CssTemplateWarning::UnclosedDelimiter { opening: '{' })
+    }));
+    assert!(warnings.iter().any(|warning| {
+        warning.reason == MalformedTemplateReason::Css(CssTemplateWarning::MalformedDeclaration)
+    }));
 }
 
 #[test]

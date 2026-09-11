@@ -128,6 +128,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [slot_layout.rs](src/compiler_frontend/ast/templates/tir/slot_layout.rs), [slot_plan.rs](src/compiler_frontend/ast/templates/tir/slot_plan.rs), [slot_composition/](src/compiler_frontend/ast/templates/tir/slot_composition/), [wrapper_sets.rs](src/compiler_frontend/ast/templates/tir/wrapper_sets.rs): slot layout, routing and wrapper reuse.
         - [handoff_materialization.rs](src/compiler_frontend/ast/templates/tir/handoff_materialization.rs): owned runtime-template trees for HIR lowering.
 - [generic_functions](src/compiler_frontend/ast/generic_functions/): generic templates, calls, inference, instances, diagnostics.
+    - [materialisation.rs](src/compiler_frontend/ast/generic_functions/materialisation.rs): declaring-module capture parent, owning only the lane map. Lanes: [stable_types.rs](src/compiler_frontend/ast/generic_functions/materialisation/stable_types.rs) donor-independent capture contracts, [visibility.rs](src/compiler_frontend/ast/generic_functions/materialisation/visibility.rs) stable visibility/namespace capture, [preparation_freeze.rs](src/compiler_frontend/ast/generic_functions/materialisation/preparation_freeze.rs) preparation capture and publication freeze, [artefact_emit.rs](src/compiler_frontend/ast/generic_functions/materialisation/artefact_emit.rs) frozen artefact reconstruction, [sidecar_build.rs](src/compiler_frontend/ast/generic_functions/materialisation/sidecar_build.rs) generated sidecar environment build and evidence installation.
 - [const_values](src/compiler_frontend/ast/const_values/): module-local folded-value store, its borrowed row/value views, and the advisory const fact resolver.
 - [generic_bounds.rs](src/compiler_frontend/ast/generic_bounds.rs): static bound evidence checks.
 
@@ -144,6 +145,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [transfer.rs](src/compiler_frontend/analysis/borrow_checker/transfer.rs), [transfer/](src/compiler_frontend/analysis/borrow_checker/transfer/): access policy.
     - [state.rs](src/compiler_frontend/analysis/borrow_checker/state.rs): lattice.
     - [diagnostics.rs](src/compiler_frontend/analysis/borrow_checker/diagnostics.rs).
+    - [return_alias.rs](src/compiler_frontend/analysis/borrow_checker/return_alias.rs): return-provenance classification and callee-summary projection, split from the retained metadata in [metadata.rs](src/compiler_frontend/analysis/borrow_checker/metadata.rs).
+    - [problem/](src/compiler_frontend/analysis/borrow_checker/problem/): the solver-independent borrow problem, including [call_effects.rs](src/compiler_frontend/analysis/borrow_checker/problem/call_effects.rs) call-boundary access and result provenance.
 
 ## Backends
 
@@ -167,6 +170,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [HTML document assembly](src/projects/html_project/output_plan.rs), [page_metadata.rs](src/projects/html_project/page_metadata.rs), [document_shell.rs](src/projects/html_project/document_shell.rs), [document_config.rs](src/projects/html_project/document_config.rs)
 - [compile_input.rs](src/projects/html_project/compile_input.rs), [diagnostics.rs](src/projects/html_project/diagnostics.rs), [js_path.rs](src/projects/html_project/js_path.rs), [path_policy.rs](src/projects/html_project/path_policy.rs), [style_directives.rs](src/projects/html_project/style_directives.rs): build inputs/policy.
 - [styles](src/projects/html_project/styles/): $html/$css/$escape_html/$code validation/rendering.
+    - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
     - [@web/canvas binding package](src/projects/html_project/binding_packages/web/canvas/): built-in JS canvas asset (`canvas.js`) and `@web/canvas` registration. Used by the `@html` canvas helpers.
@@ -178,7 +182,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [integration test runner](src/compiler_tests/integration_test_runner/): manifest fixtures, expectations, execution, and assertion-family owners under [assertions](src/compiler_tests/integration_test_runner/assertions/). Production code, not `#[cfg(test)]`.
 - [frontend stage-boundary tests](src/compiler_frontend/tests/frontend_pipeline_tests.rs): one stage at a time, for handoffs a stage-local test cannot see. Not the canonical sequence — that is `compile_module`.
 - [architecture boundary rules](xtask/src/architecture_boundary.rs): the compiler/build dependency direction the source audit enforces.
-- [first-party package dependency audit](xtask/src/first_party_deps.rs): scoped first-party implementation-root validation for manifests, vendored roots and JavaScript module imports, using [first-party JavaScript inventory](src/first_party_js.rs).
+- [first-party package dependency audit](xtask/src/first_party_deps.rs): scoped first-party implementation-root validation for manifests, vendored roots and JavaScript module imports, using [first-party JavaScript inventory](src/first_party_js/mod.rs).
 - [integration fixtures](tests/cases/): expect.toml backend matrices.
 - [subsystem unit tests](src/): `*/tests` and module tests throughout src/.
 - [in-process compiler benchmark API](src/benchmarking/): for xtask/dev tooling.

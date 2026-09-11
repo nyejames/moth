@@ -7,15 +7,48 @@
 
 use super::*;
 
+macro_rules! emit_reasoned_payload_remap {
+    (
+        $remap_label:ident: $remap_name:ident;
+        $(
+            $category:ident::$kind:ident => {
+                payload: $payload:ident;
+                fields: { $( $field:ident : $field_type:ty ),* $(,)? }
+                bindings: { $( $binding:ident ),* $(,)? }
+                remap: { $($remap:tt)* }
+                descriptor: $descriptor:tt
+            },
+        )*
+    ) => {
+        impl DiagnosticPayload {
+            fn remap_reasoned_string_ids(&mut self, $remap_name: &StringIdRemap) -> bool {
+                match self {
+                    $(
+                        DiagnosticPayload::$payload { $( $binding, )* .. } => {
+                            $($remap)*
+                            true
+                        }
+                    )*
+                    _ => false,
+                }
+            }
+        }
+    };
+}
+
+crate::define_reasoned_diagnostic_registry!(emit_reasoned_payload_remap);
+
 impl DiagnosticPayload {
     pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if self.remap_reasoned_string_ids(remap) {
+            return;
+        }
         match self {
             DiagnosticPayload::None
             | DiagnosticPayload::UnexpectedTrailingComma
             | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
             | DiagnosticPayload::TypeMismatch { .. }
-            | DiagnosticPayload::UnreachableMatchArm
-            | DiagnosticPayload::ProjectContextEscape { .. } => {}
+            | DiagnosticPayload::UnreachableMatchArm => {}
 
             DiagnosticPayload::ExpectedToken { expected, found } => {
                 expected.remap_string_ids(remap);
@@ -30,13 +63,14 @@ impl DiagnosticPayload {
             }
 
             DiagnosticPayload::UnknownName { name, .. }
-            | DiagnosticPayload::UnusedName { name }
-            | DiagnosticPayload::IdentifierNamingConvention { name, .. }
-            | DiagnosticPayload::MalformedTemplate { message: name } => {
+            | DiagnosticPayload::ReservedBuiltinName { name } => {
                 *name = remap.get(*name);
             }
 
             DiagnosticPayload::DuplicateDeclaration { name } => {
+                *name = remap.get(*name);
+            }
+            DiagnosticPayload::IdentifierNamingConvention { name, .. } => {
                 *name = remap.get(*name);
             }
 
@@ -50,8 +84,7 @@ impl DiagnosticPayload {
                 ..
             }
             | DiagnosticPayload::MissingModuleRootPublicSurface { symbol_path: path }
-            | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path }
-            | DiagnosticPayload::InvalidMothTemplateApiScopeItem { path } => {
+            | DiagnosticPayload::CrossModuleImportNotExported { symbol_path: path } => {
                 remap_path_import_payload(path, remap);
             }
 
@@ -64,10 +97,6 @@ impl DiagnosticPayload {
             } => {
                 remap_path_import_payload(first_path, remap);
                 remap_path_import_payload(second_path, remap);
-            }
-
-            DiagnosticPayload::InvalidImportPath { path, reason } => {
-                remap_invalid_import_path_payload(path, reason, remap);
             }
 
             DiagnosticPayload::ImportNameCollision { name } => {
@@ -118,25 +147,6 @@ impl DiagnosticPayload {
                 remap_single_place_borrow_payload(place, remap);
             }
 
-            DiagnosticPayload::InvalidMutableAccess {
-                place,
-                conflicting_place,
-                ..
-            } => {
-                remap_place_with_optional_conflict(place, conflicting_place, remap);
-            }
-
-            DiagnosticPayload::InvalidConfig { key, reason } => {
-                if let Some(key) = key {
-                    *key = remap.get(*key);
-                }
-                reason.remap_string_ids(remap);
-            }
-
-            DiagnosticPayload::DeferredFeature { reason } => {
-                reason.remap_string_ids(remap);
-            }
-
             DiagnosticPayload::UnsupportedExternalFunction {
                 function_name,
                 package_path,
@@ -154,24 +164,12 @@ impl DiagnosticPayload {
                 *symbol = remap.get(*symbol);
             }
 
-            DiagnosticPayload::InvalidNumberLiteral { literal_text, .. } => {
-                *literal_text = remap.get(*literal_text);
-            }
-
             DiagnosticPayload::InvalidStyleDirective {
                 directive_name,
                 supported_directives,
             } => {
                 *directive_name = remap.get(*directive_name);
                 *supported_directives = remap.get(*supported_directives);
-            }
-
-            DiagnosticPayload::InvalidMapType { reason } => {
-                reason.remap_string_ids(remap);
-            }
-
-            DiagnosticPayload::InvalidMapLiteral { reason } => {
-                reason.remap_string_ids(remap);
             }
 
             DiagnosticPayload::MissingClosingDelimiter { expected_delimiter } => {
@@ -184,72 +182,10 @@ impl DiagnosticPayload {
                 }
             }
 
-            DiagnosticPayload::LegacyDependencyClause { replacement, .. } => {
-                if let Some(replacement) = replacement {
-                    *replacement = remap.get(*replacement);
-                }
-            }
-
             DiagnosticPayload::SourceSpanCapacity { .. }
             | DiagnosticPayload::InvalidCharacter { .. }
-            | DiagnosticPayload::InvalidStringEscape { .. }
-            | DiagnosticPayload::InvalidGenericApplication { .. }
             | DiagnosticPayload::InvalidPath { .. }
-            | DiagnosticPayload::InvalidDependencyClause { .. }
-            | DiagnosticPayload::InvalidCollectionType { .. }
-            | DiagnosticPayload::InvalidGenericParameter { .. }
             | DiagnosticPayload::InvalidStructDefaultValue => {}
-
-            DiagnosticPayload::InvalidTemplateStructure { .. } => {}
-
-            DiagnosticPayload::InvalidChoiceVariant {
-                choice_name,
-                variant_name,
-                available_variants,
-                ..
-            } => {
-                if let Some(name) = choice_name {
-                    *name = remap.get(*name);
-                }
-                if let Some(name) = variant_name {
-                    *name = remap.get(*name);
-                }
-                for variant in available_variants {
-                    *variant = remap.get(*variant);
-                }
-            }
-
-            DiagnosticPayload::InvalidTypeAnnotation { reason, .. } => {
-                if let InvalidTypeAnnotationReason::InvalidTokenAfterName { token }
-                | InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found: token } = reason
-                {
-                    token.remap_string_ids(remap);
-                }
-            }
-
-            DiagnosticPayload::InvalidTemplateDirective {
-                directive_name,
-                reason,
-            } => {
-                if let Some(directive_name) = directive_name {
-                    *directive_name = remap.get(*directive_name);
-                }
-                if let InvalidTemplateDirectiveReason::InvalidArgument { detail } = reason
-                    && let Some(detail) = detail
-                {
-                    *detail = remap.get(*detail);
-                }
-            }
-
-            DiagnosticPayload::InvalidSignatureMember { .. } => {}
-
-            DiagnosticPayload::InvalidFunctionSignature { reason } => {
-                if let InvalidFunctionSignatureReason::MissingArrowOrColon { found }
-                | InvalidFunctionSignatureReason::MissingCommaOrColon { found } = reason
-                {
-                    found.remap_string_ids(remap);
-                }
-            }
 
             DiagnosticPayload::MissingDeclarationInitializer { name } => {
                 *name = remap.get(*name);
@@ -271,11 +207,6 @@ impl DiagnosticPayload {
                 *name = remap.get(*name);
             }
 
-            DiagnosticPayload::InvalidThisUsage { .. }
-            | DiagnosticPayload::InvalidTraitKeywordUsage { .. }
-            | DiagnosticPayload::InvalidReceiverDeclaration { .. }
-            | DiagnosticPayload::InvalidCopyTarget { .. } => {}
-
             DiagnosticPayload::DuplicatePublicExport { name } => {
                 *name = remap.get(*name);
             }
@@ -284,247 +215,15 @@ impl DiagnosticPayload {
                 *exported_name = remap.get(*exported_name);
             }
 
-            DiagnosticPayload::InvalidControlFlowStatement { .. }
-            | DiagnosticPayload::InvalidFallibleHandling { .. } => {}
-
-            DiagnosticPayload::CompileTimeEvaluationError { operation, .. } => {
-                if let Some(operation) = operation {
-                    *operation = remap.get(*operation);
-                }
-            }
-
-            DiagnosticPayload::InvalidDeclaration { name, reason } => {
-                if let Some(name) = name {
-                    *name = remap.get(*name);
-                }
-                match reason {
-                    InvalidDeclarationReason::UnusedGenericParameter { parameter_name }
-                    | InvalidDeclarationReason::InvalidGenericParameterName { parameter_name }
-                    | InvalidDeclarationReason::DuplicateGenericParameter { parameter_name }
-                    | InvalidDeclarationReason::GenericParameterNameCollision { parameter_name }
-                    | InvalidDeclarationReason::ReservedGenericParameterName { parameter_name }
-                    | InvalidDeclarationReason::ExternalTypeAlias {
-                        type_name: parameter_name,
-                    } => {
-                        *parameter_name = remap.get(*parameter_name);
-                    }
-                    _ => {}
-                }
-            }
-
-            DiagnosticPayload::InvalidAssignmentTarget {
-                target_name,
-                field_name,
-                root_binding_name,
-                ..
-            } => {
-                if let Some(name) = target_name {
-                    *name = remap.get(*name);
-                }
-                if let Some(name) = field_name {
-                    *name = remap.get(*name);
-                }
-                if let Some(name) = root_binding_name {
-                    *name = remap.get(*name);
-                }
-            }
-
-            DiagnosticPayload::InvalidMultiBind {
-                target_name: name, ..
-            }
-            | DiagnosticPayload::InvalidBuiltinCall {
-                builtin_name: name, ..
-            }
-            | DiagnosticPayload::InvalidTemplateSlot {
-                slot_name: name, ..
-            } => {
-                if let Some(name) = name {
-                    *name = remap.get(*name);
-                }
-            }
-
             // InvalidFieldAccess carries both a field_name and a known_fields list,
             // both of which need remapping.
-            DiagnosticPayload::InvalidFieldAccess {
-                field_name: name,
-                known_fields,
-                ..
-            } => {
-                if let Some(name) = name {
-                    *name = remap.get(*name);
-                }
-                for field in known_fields {
-                    *field = remap.get(*field);
-                }
-            }
-
-            DiagnosticPayload::InvalidReceiverCall {
-                receiver_type,
-                method_name,
-                receiver_binding_name,
-                ..
-            } => {
-                if let Some(receiver_type) = receiver_type {
-                    *receiver_type = remap.get(*receiver_type);
-                }
-                if let Some(method_name) = method_name {
-                    *method_name = remap.get(*method_name);
-                }
-                if let Some(receiver_binding_name) = receiver_binding_name {
-                    *receiver_binding_name = remap.get(*receiver_binding_name);
-                }
-            }
-
-            DiagnosticPayload::InvalidMatchPattern {
-                variant_name,
-                scrutinee_name,
-                ..
-            } => {
-                if let Some(variant_name) = variant_name {
-                    *variant_name = remap.get(*variant_name);
-                }
-                if let Some(scrutinee_name) = scrutinee_name {
-                    *scrutinee_name = remap.get(*scrutinee_name);
-                }
-            }
-
-            DiagnosticPayload::NonExhaustiveMatch {
-                missing_variants, ..
-            } => {
-                for variant in missing_variants {
-                    *variant = remap.get(*variant);
-                }
-            }
-
             DiagnosticPayload::EmptyCollectionTypeAmbiguity
-            | DiagnosticPayload::UnsupportedOperatorTypes { .. }
-            | DiagnosticPayload::InvalidFallibleOperand { .. }
-            | DiagnosticPayload::InvalidCast { .. }
-            | DiagnosticPayload::InvalidReturnShape { .. } => {}
-
-            DiagnosticPayload::InvalidGenericInstantiation { type_name, reason } => {
-                if let Some(type_name) = type_name {
-                    *type_name = remap.get(*type_name);
-                }
-                match reason {
-                    InvalidGenericInstantiationReason::CannotInferArguments {
-                        missing_parameters,
-                    }
-                    | InvalidGenericInstantiationReason::CannotInferFunctionArguments {
-                        missing_parameters,
-                    } => {
-                        for parameter in missing_parameters {
-                            *parameter = remap.get(*parameter);
-                        }
-                    }
-                    InvalidGenericInstantiationReason::ConflictingInference {
-                        parameter_name,
-                        ..
-                    } => {
-                        *parameter_name = remap.get(*parameter_name);
-                    }
-                    InvalidGenericInstantiationReason::MissingTraitEvidence {
-                        parameter_name,
-                        trait_name,
-                        ..
-                    }
-                    | InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
-                        parameter_name,
-                        trait_name,
-                        ..
-                    } => {
-                        *parameter_name = remap.get(*parameter_name);
-                        *trait_name = remap.get(*trait_name);
-                    }
-                    InvalidGenericInstantiationReason::WrongArgumentCount { .. }
-                    | InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments
-                    | InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported
-                    | InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported
-                    | InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported
-                    | InvalidGenericInstantiationReason::MissingTypeArguments
-                    | InvalidGenericInstantiationReason::RecursiveFunctionInstantiation
-                    | InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported
-                    | InvalidGenericInstantiationReason::GenericFunctionValueDeferred => {}
-                }
-            }
-
-            DiagnosticPayload::IncompatibleChoiceComparison { reason, .. } => {
-                if let IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported {
-                    field_name,
-                    ..
-                } = reason
-                {
-                    *field_name = remap.get(*field_name);
-                }
-            }
-
-            DiagnosticPayload::InvalidCallShape {
-                reason,
-                callee_name,
-            } => {
-                if let Some(callee_name) = callee_name {
-                    *callee_name = remap.get(*callee_name);
-                }
-                match reason {
-                    InvalidCallShapeReason::MissingArgument { parameter_name, .. }
-                    | InvalidCallShapeReason::DuplicateArgument { parameter_name, .. }
-                    | InvalidCallShapeReason::MutableAccessRequired { parameter_name, .. }
-                    | InvalidCallShapeReason::MutableAccessNotAllowed { parameter_name, .. }
-                    | InvalidCallShapeReason::MutableAccessOnNonPlace { parameter_name, .. }
-                    | InvalidCallShapeReason::ReactiveSourceRequired { parameter_name, .. } => {
-                        if let Some(parameter_name) = parameter_name {
-                            *parameter_name = remap.get(*parameter_name);
-                        }
-                    }
-                    InvalidCallShapeReason::MutableAccessOnImmutablePlace {
-                        parameter_name,
-                        binding_name,
-                        ..
-                    }
-                    | InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
-                        parameter_name,
-                        binding_name,
-                        ..
-                    } => {
-                        if let Some(parameter_name) = parameter_name {
-                            *parameter_name = remap.get(*parameter_name);
-                        }
-                        if let Some(binding_name) = binding_name {
-                            *binding_name = remap.get(*binding_name);
-                        }
-                    }
-                    InvalidCallShapeReason::ExtraPositionalArgument { .. }
-                    | InvalidCallShapeReason::PositionalAfterNamed
-                    | InvalidCallShapeReason::NamedArgumentsNotSupported => {}
-                    InvalidCallShapeReason::NamedArgumentNotFound {
-                        name,
-                        known_parameters,
-                    } => {
-                        *name = remap.get(*name);
-                        for parameter_name in known_parameters {
-                            *parameter_name = remap.get(*parameter_name);
-                        }
-                    }
-                }
-            }
+            | DiagnosticPayload::UnsupportedOperatorTypes { .. } => {}
 
             DiagnosticPayload::InvalidRangeOperand { .. } => {}
 
             DiagnosticPayload::UnsupportedBuilderPackage { package_path } => {
                 *package_path = remap.get(*package_path);
-            }
-
-            DiagnosticPayload::UnsupportedBackendFeature { backend_name, .. } => {
-                *backend_name = remap.get(*backend_name);
-            }
-
-            DiagnosticPayload::InvalidPageMetadata { key, .. } => {
-                *key = remap.get(*key);
-            }
-
-            DiagnosticPayload::InvalidCompileTimePath { path, reason } => {
-                path.remap_string_ids(remap);
-                reason.remap_string_ids(remap);
             }
 
             DiagnosticPayload::DirectSymbolPathImport { path }
@@ -539,11 +238,6 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnsupportedExternalExtension { path, extension } => {
                 path.remap_string_ids(remap);
                 *extension = remap.get(*extension);
-            }
-
-            DiagnosticPayload::InvalidExternalModule { path, message } => {
-                path.remap_string_ids(remap);
-                *message = remap.get(*message);
             }
 
             DiagnosticPayload::DuplicateImportSurfaceMember {
@@ -595,64 +289,24 @@ impl DiagnosticPayload {
                 *feature = remap.get(*feature);
             }
 
-            DiagnosticPayload::InvalidTraitConformance {
-                target_name,
-                trait_name,
-                reason,
-            } => {
-                *target_name = remap.get(*target_name);
-                if let Some(trait_name) = trait_name {
-                    *trait_name = remap.get(*trait_name);
-                }
-                reason.remap_string_ids(remap);
-            }
-
-            DiagnosticPayload::InvalidTraitIncompatibility {
-                subject_name,
-                incompatible_trait_name,
-                ..
-            } => {
-                *subject_name = remap.get(*subject_name);
-                if let Some(incompatible_trait_name) = incompatible_trait_name {
-                    *incompatible_trait_name = remap.get(*incompatible_trait_name);
-                }
-            }
-
             DiagnosticPayload::TraitNameUsedAsType { trait_name } => {
                 *trait_name = remap.get(*trait_name);
             }
 
-            DiagnosticPayload::InvalidExpression { .. }
-            | DiagnosticPayload::ExpectedSymbolStatement
+            DiagnosticPayload::ExpectedSymbolStatement
             | DiagnosticPayload::MissingCollectionItem => {}
 
             DiagnosticPayload::MissingOperatorOperand { operator, .. } => {
                 *operator = remap.get(*operator);
             }
 
-            DiagnosticPayload::InvalidStandaloneStatement { .. }
-            | DiagnosticPayload::InvalidMatchArm { .. }
-            | DiagnosticPayload::InvalidLoopHeader { .. }
-            | DiagnosticPayload::InvalidStatementPosition { .. } => {}
-
-            DiagnosticPayload::CommonSyntaxMistake { reason } => {
-                reason.remap_string_ids(remap);
-            }
+            _ => unreachable!("reasoned payloads are handled by the central remap registry"),
         }
     }
 }
 
 fn remap_path_import_payload(path: &mut InternedPath, remap: &StringIdRemap) {
     path.remap_string_ids(remap);
-}
-
-fn remap_invalid_import_path_payload(
-    path: &mut InternedPath,
-    reason: &mut InvalidImportPathReason,
-    remap: &StringIdRemap,
-) {
-    path.remap_string_ids(remap);
-    reason.remap_string_ids(remap);
 }
 
 fn remap_single_place_borrow_payload(place: &mut DiagnosticPlace, remap: &StringIdRemap) {

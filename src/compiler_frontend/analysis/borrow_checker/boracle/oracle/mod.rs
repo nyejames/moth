@@ -17,11 +17,11 @@
 //!
 //! The path layer owns the frontier and all bounds that span executions. The executor only
 //! advances one concrete path through one block at a time.
-#![allow(dead_code)]
 
 mod calls;
 mod conflicts;
 mod execute;
+#[cfg(test)]
 pub(crate) mod generator;
 mod paths;
 mod state;
@@ -31,8 +31,9 @@ mod traces;
 mod tests;
 
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    BlockId, CallId, CallResultUnknownReason, LoanId, PlaceId, ProjectionElem, ValueOriginId,
+    BlockId, CallId, CallResultUnknownReason, PlaceId, ProjectionElem,
 };
+use crate::compiler_frontend::analysis::borrow_checker::problem::{LoanId, ValueOriginId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OracleBounds {
@@ -58,6 +59,7 @@ impl Default for OracleBounds {
 }
 
 impl OracleBounds {
+    #[cfg(test)]
     pub(crate) const fn new(
         max_executions: usize,
         max_executed_events: usize,
@@ -75,10 +77,6 @@ impl OracleBounds {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OracleLimitReason {
-    CallAliasParams {
-        call: CallId,
-        alternative_count: usize,
-    },
     RebindAliasOrigins {
         origins: Box<[ValueOriginId]>,
     },

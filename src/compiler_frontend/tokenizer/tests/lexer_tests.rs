@@ -22,12 +22,6 @@ use crate::compiler_frontend::style_directives::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
-use crate::projects::html_project::style_directives::html_project_style_directives;
-
-fn html_project_test_style_directives() -> StyleDirectiveRegistry {
-    StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("html project style directives should merge with core directives")
-}
 
 fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
     let style_directives = frontend_test_style_directives();
@@ -35,7 +29,7 @@ fn tokenize_source(source: &str) -> (FileTokens, StringTable) {
 }
 
 fn tokenize_html_source(source: &str) -> (FileTokens, StringTable) {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     tokenize_source_with_registry(source, &style_directives)
 }
 
@@ -357,12 +351,12 @@ fn assert_invalid_string_escape(source: &str, expected_reason: InvalidStringEsca
 }
 
 #[test]
-fn quoted_string_decodes_every_accepted_escape() {
-    // Source escapes: \\ \" \n \r \t decode to backslash, quote, newline, carriage return, tab.
-    let (file_tokens, string_table) = tokenize_source(r#"value = "a\\b\"c\nd\re\tf""#);
+fn quoted_string_decodes_carriage_return_escape() {
+    // The integration case `print_special_chars` owns the other accepted escapes.
+    let (file_tokens, string_table) = tokenize_source(r#"value = "a\rb""#);
     let texts = collect_literal_texts(&file_tokens, &string_table);
 
-    assert_eq!(texts, vec!["a\\b\"c\nd\re\tf"]);
+    assert_eq!(texts, vec!["a\rb"]);
 }
 
 #[test]
@@ -582,6 +576,29 @@ fn rejects_multiple_decimal_points_in_numeric_literal() {
         "1.2",
         NumberLiteralErrorReason::MultipleDecimalPoints,
     );
+}
+
+#[test]
+fn rejects_non_ascii_numeric_leads_as_invalid_characters() {
+    for (source, expected_character) in [
+        ("٣ = 2\n", '٣'),
+        ("b = ½\n", '½'),
+        ("value = -٣\n", '٣'),
+        ("value = -½\n", '½'),
+    ] {
+        let (diagnostic, _string_table) = tokenize_source_error(source);
+        assert_eq!(
+            diagnostic.kind,
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter)
+        );
+        assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0007");
+        match diagnostic.payload {
+            DiagnosticPayload::InvalidCharacter { character } => {
+                assert_eq!(character, expected_character);
+            }
+            payload => panic!("expected invalid character payload, found {payload:?}"),
+        }
+    }
 }
 
 #[test]
@@ -919,6 +936,26 @@ fn rejects_binary_operator_spacing() {
             MissingWhitespace::Both,
         ),
         (
+            "value = a<B\n",
+            DiagnosticOperator::LessThan,
+            MissingWhitespace::Both,
+        ),
+        (
+            "value = a>(b)\n",
+            DiagnosticOperator::GreaterThan,
+            MissingWhitespace::Both,
+        ),
+        (
+            "value = a<(b)\n",
+            DiagnosticOperator::LessThan,
+            MissingWhitespace::Both,
+        ),
+        (
+            "value = identity<Int>(42)\n",
+            DiagnosticOperator::LessThan,
+            MissingWhitespace::Both,
+        ),
+        (
             "value = a>=b\n",
             DiagnosticOperator::GreaterThanOrEqual,
             MissingWhitespace::Both,
@@ -992,11 +1029,11 @@ fn rejects_compound_assignment_missing_all_spacing() {
     }
 }
 
-/// Compound assignments with left spacing but missing right spacing (`count +=1`) must fail.
+/// Compound assignments with left spacing but missing right spacing remain covered for
+/// operators not owned by the `compound_assignment_spacing_rejected` case.
 #[test]
-fn rejects_compound_assignment_missing_right_spacing() {
+fn rejects_compound_assignment_missing_right_spacing_for_other_operators() {
     for (source, operator) in [
-        ("count +=1\n", DiagnosticCompoundAssignmentOperator::Add),
         (
             "count -=1\n",
             DiagnosticCompoundAssignmentOperator::Subtract,
@@ -1206,7 +1243,6 @@ fn uppercase_exponent_on_signed_literal_preserves_authored_text() {
 
 #[test]
 fn tokenizer_does_not_steal_parser_owned_punctuation_diagnostics() {
-    tokenize_source("value = identity<Int>(42)\n");
     tokenize_source(r#"scores = {"Priya" =}"#);
 }
 

@@ -20,8 +20,8 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
-    test_source_location,
+    assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
+    symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
@@ -71,7 +71,7 @@ fn frontend_check_borrows_propagates_failures() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     z,
-                    immutable_reference_expr(
+                    reference_expr_with_datatype(
                         x,
                         DataType::Int,
                         builtin_type_ids::INT,

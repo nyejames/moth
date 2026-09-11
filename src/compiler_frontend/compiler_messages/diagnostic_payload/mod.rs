@@ -16,615 +16,312 @@ mod types;
 
 pub use types::*;
 
-// --------------------------
-//  Main Diagnostic Payloads
-// --------------------------
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum DiagnosticPayload {
-    None,
-
-    // -----------------
-    //  General Syntax
-    // -----------------
-    ExpectedToken {
-        expected: DiagnosticToken,
-        found: Option<DiagnosticToken>,
-    },
-
-    UnexpectedToken {
-        found: DiagnosticToken,
-    },
-
-    UnexpectedTrailingComma,
-
-    UnescapedImplicitTemplateClose {
-        source_kind: SourceFileKind,
-    },
-
-    UnknownName {
-        name: StringId,
-        namespace: NameNamespace,
-    },
-
-    TypeMismatch {
-        expected: TypeId,
-        found: TypeId,
-        context: TypeMismatchContext,
-    },
-
-    DuplicateDeclaration {
-        name: StringId,
-    },
-
-    // -----------------
-    //  Import payloads
-    // -----------------
-    MissingImportTarget {
-        path: InternedPath,
-    },
-
-    AmbiguousImportTarget {
-        path: InternedPath,
-    },
-
-    BareFileImport {
-        path: InternedPath,
-    },
-
-    DirectSpecialFileImport {
-        path: InternedPath,
-    },
-
-    ImportNameCollision {
-        name: StringId,
-    },
-
-    NotExportedBySourceFile {
-        symbol_path: InternedPath,
-    },
-
-    NotExportedByPublicSurface {
-        requested_path: InternedPath,
-        public_surface_name: StringId,
-        public_surface_type: ImportPublicSurfaceType,
-    },
-
-    MissingModuleRootPublicSurface {
-        symbol_path: InternedPath,
-    },
-
-    MissingPackageSymbol {
-        symbol: StringId,
-        package_path: StringId,
-    },
-
-    CrossModuleImportNotExported {
-        symbol_path: InternedPath,
-    },
-
-    InvalidImportPath {
-        path: InternedPath,
-        reason: InvalidImportPathReason,
-    },
-
-    DirectSymbolPathImport {
-        path: InternedPath,
-    },
-
-    InvalidNamespaceDefaultName {
-        path: InternedPath,
-    },
-
-    DuplicateImportSurfaceMember {
-        surface_path: InternedPath,
-        member_name: StringId,
-    },
-
-    ExplicitMothExtension {
-        path: InternedPath,
-    },
-
-    ExplicitSourceExtension {
-        path: InternedPath,
-        extension: StringId,
-    },
-
-    UnsupportedSourceFileKind {
-        path: InternedPath,
-        extension: StringId,
-    },
-
-    InvalidSourceFileEntry {
-        path: InternedPath,
-        extension: StringId,
-    },
-
-    InvalidMothTemplateApiScopeItem {
-        path: InternedPath,
-    },
-
-    MothTemplateInputsShareNoCommonAncestor {
-        first_path: InternedPath,
-        second_path: InternedPath,
-    },
-
-    DuplicateMothTemplateInputPath {
-        path: InternedPath,
-    },
-
-    UnsupportedExternalExtension {
-        path: InternedPath,
-        extension: StringId,
-    },
-
-    InvalidExternalModule {
-        path: InternedPath,
-        message: StringId,
-    },
-
-    // -----------------
-    //  Borrow Payloads
-    // -----------------
-    BorrowConflict {
-        place: DiagnosticPlace,
-        existing_access: BorrowAccessKind,
-        requested_access: BorrowAccessKind,
-    },
-
-    MultipleMutableBorrows {
-        place: DiagnosticPlace,
-        conflicting_place: Option<DiagnosticPlace>,
-    },
-
-    SharedMutableConflict {
-        place: DiagnosticPlace,
-        existing_access: BorrowAccessKind,
-        requested_access: BorrowAccessKind,
-        conflicting_place: Option<DiagnosticPlace>,
-    },
-
-    UseAfterPossibleMove {
-        place: DiagnosticPlace,
-    },
-
-    MoveWhileBorrowed {
-        place: DiagnosticPlace,
-        existing_access: BorrowAccessKind,
-    },
-
-    WholeObjectBorrowConflict {
-        whole_place: DiagnosticPlace,
-        part_place: DiagnosticPlace,
-    },
-
-    InvalidMutableAccess {
-        place: DiagnosticPlace,
-        reason: InvalidMutableAccessReason,
-        conflicting_place: Option<DiagnosticPlace>,
-    },
-
-    UseOfUninitializedLocal {
-        place: DiagnosticPlace,
-    },
-
-    // -----------------
-    //  Config Payloads
-    // -----------------
-    InvalidConfig {
-        key: Option<StringId>,
-        reason: InvalidConfigReason,
-    },
-
-    DeferredFeature {
-        reason: DeferredFeatureReason,
-    },
-
-    UnsupportedExternalFunction {
-        function_name: StringId,
-        package_path: Option<StringId>,
-        backend_name: StringId,
-    },
-
-    // ----------
-    //  Warnings
-    // ----------
-    UnusedName {
-        name: StringId,
-    },
-
-    UnreachableMatchArm,
-
-    IdentifierNamingConvention {
-        name: StringId,
-        expected_style: NamingConvention,
-    },
-
-    DependencyAliasCaseMismatch {
-        alias: StringId,
-        symbol: StringId,
-    },
-
-    MalformedTemplate {
-        message: StringId,
-    },
-
-    // -----------------
-    //  Syntax Payloads
-    // -----------------
-    SourceSpanCapacity {
-        start: u32,
-        length: u32,
-        resource: SourceSpanCapacityResource,
-    },
-
-    InvalidCharacter {
-        character: char,
-    },
-    InvalidStringEscape {
-        reason: InvalidStringEscapeReason,
-    },
-
-    InvalidNumberLiteral {
-        literal_text: StringId,
-        reason: NumberLiteralErrorReason,
-    },
-
-    InvalidStyleDirective {
-        directive_name: StringId,
-        supported_directives: StringId,
-    },
-
-    MissingClosingDelimiter {
-        expected_delimiter: StringId,
-    },
-
-    InvalidGenericApplication {
-        reason: GenericApplicationErrorReason,
-    },
-
-    UnexpectedEndOfFile {
-        expected_delimiter: Option<StringId>,
-    },
-
-    InvalidPath {
-        path_kind: PathKind,
-    },
-
-    InvalidDependencyClause {
-        clause_kind: DependencyClauseKind,
-        reason: InvalidDependencyClauseReason,
-    },
-
-    LegacyDependencyClause {
-        reason: LegacyDependencyClauseReason,
-        replacement: Option<StringId>,
-    },
-
-    InvalidTypeAnnotation {
-        context: TypeAnnotationContext,
-        reason: InvalidTypeAnnotationReason,
-    },
-
-    InvalidCollectionType {
-        reason: InvalidCollectionTypeReason,
-    },
-
-    InvalidMapType {
-        reason: InvalidMapTypeReason,
-    },
-
-    InvalidMapLiteral {
-        reason: InvalidMapLiteralReason,
-    },
-
-    InvalidGenericParameter {
-        reason: InvalidGenericParameterReason,
-    },
-
-    InvalidTemplateDirective {
-        directive_name: Option<StringId>,
-        reason: InvalidTemplateDirectiveReason,
-    },
-
-    InvalidTemplateStructure {
-        reason: InvalidTemplateStructureReason,
-    },
-
-    InvalidSignatureMember {
-        reason: InvalidSignatureMemberReason,
-    },
-
-    InvalidFunctionSignature {
-        reason: InvalidFunctionSignatureReason,
-    },
-
-    InvalidChoiceVariant {
-        reason: InvalidChoiceVariantReason,
-        choice_name: Option<StringId>,
-        variant_name: Option<StringId>,
-        available_variants: Vec<StringId>,
-    },
-
-    InvalidStructDefaultValue,
-
-    /// A declaration that omitted `=` entirely. Distinct from an authored `=` with no
-    /// initializer expression, which uses `InvalidDeclaration` with
-    /// `MissingInitializerExpression`.
-    MissingDeclarationInitializer {
-        name: StringId,
-    },
-
-    CircularDependency {
-        path: InternedPath,
-    },
-
-    NamespaceMisuse {
-        name: StringId,
-        expected: NameNamespace,
-        found: NameNamespace,
-    },
-
-    ShadowedName {
-        name: StringId,
-    },
-
-    ReservedNameCollision {
-        name: StringId,
-        reserved_by: ReservedNameOwner,
-    },
-
-    InvalidThisUsage {
-        reason: InvalidThisUsageReason,
-    },
-
-    InvalidReceiverDeclaration {
-        reason: InvalidReceiverDeclarationReason,
-    },
-
-    InvalidControlFlowStatement {
-        reason: InvalidControlFlowStatementReason,
-    },
-
-    InvalidDeclaration {
-        reason: InvalidDeclarationReason,
-        name: Option<StringId>,
-    },
-
-    InvalidAssignmentTarget {
-        reason: InvalidAssignmentTargetReason,
-        target_name: Option<StringId>,
-        target_type: Option<TypeId>,
-        field_name: Option<StringId>,
-        root_binding_name: Option<StringId>,
-    },
-
-    InvalidMultiBind {
-        reason: InvalidMultiBindReason,
-        target_name: Option<StringId>,
-    },
-
-    InvalidBuiltinCall {
-        reason: InvalidBuiltinCallReason,
-        builtin_name: Option<StringId>,
-    },
-
-    InvalidCast {
-        reason: InvalidCastReason,
-        source_type: Option<TypeId>,
-        target_type: Option<TypeId>,
-    },
-
-    InvalidReceiverCall {
-        reason: InvalidReceiverCallReason,
-        receiver_type: Option<StringId>,
-        method_name: Option<StringId>,
-        receiver_kind: Option<ReceiverCallKind>,
-        receiver_binding_name: Option<StringId>,
-    },
-
-    InvalidCopyTarget {
-        reason: InvalidCopyTargetReason,
-    },
-
-    InvalidFieldAccess {
-        reason: InvalidFieldAccessReason,
-        field_name: Option<StringId>,
-        receiver_type: Option<TypeId>,
-        known_fields: Vec<StringId>,
-    },
-
-    InvalidMatchPattern {
-        reason: InvalidMatchPatternReason,
-        variant_name: Option<StringId>,
-        scrutinee_name: Option<StringId>,
-    },
-
-    NonExhaustiveMatch {
-        reason: NonExhaustiveMatchReason,
-        missing_variants: Vec<StringId>,
-    },
-
-    InvalidFallibleHandling {
-        reason: InvalidFallibleHandlingReason,
-    },
-
-    InvalidTemplateSlot {
-        reason: InvalidTemplateSlotReason,
-        slot_name: Option<StringId>,
-    },
-
-    CompileTimeEvaluationError {
-        reason: CompileTimeEvaluationErrorReason,
-        operation: Option<StringId>,
-    },
-
-    EmptyCollectionTypeAmbiguity,
-
-    UnsupportedOperatorTypes {
-        operator: DiagnosticOperator,
-        lhs: TypeId,
-        rhs: Option<TypeId>,
-    },
-
-    InvalidFallibleOperand {
-        reason: InvalidFallibleOperandReason,
-        category: UnsupportedOperatorCategory,
-        operand_type: TypeId,
-    },
-
-    IncompatibleChoiceComparison {
-        reason: IncompatibleChoiceComparisonReason,
-        lhs: TypeId,
-        rhs: TypeId,
-    },
-
-    InvalidCallShape {
-        reason: InvalidCallShapeReason,
-        callee_name: Option<StringId>,
-    },
-
-    InvalidReturnShape {
-        reason: InvalidReturnShapeReason,
-    },
-
-    InvalidGenericInstantiation {
-        type_name: Option<StringId>,
-        reason: InvalidGenericInstantiationReason,
-    },
-
-    InvalidRangeOperand {
-        operand: RangeOperandKind,
-        found_type: TypeId,
-    },
-
-    UnsupportedBuilderPackage {
-        package_path: StringId,
-    },
-
-    UnsupportedBackendFeature {
-        backend_name: StringId,
-        reason: UnsupportedBackendFeatureReason,
-    },
-
-    InvalidPageMetadata {
-        key: StringId,
-        reason: InvalidPageMetadataReason,
-    },
-
-    InvalidCompileTimePath {
-        path: InternedPath,
-        reason: InvalidCompileTimePathReason,
-    },
-
-    DependencyNamespaceUsedAsValue {
-        record_name: StringId,
-    },
-
-    ConstRecordUsedAsValue {
-        record_name: StringId,
-    },
-
-    NestedDependencyTraversal {
-        record_name: StringId,
-    },
-
-    NamespaceTypeValueMisuse {
-        name: StringId,
-        expected: NamespaceTypeValueMisuseKind,
-        found: NamespaceTypeValueMisuseKind,
-    },
-
-    UnknownTrait {
-        name: StringId,
-    },
-
-    DuplicateTraitRequirement {
-        trait_name: StringId,
-        requirement_name: StringId,
-    },
-
-    TraitPrivateSurfaceLeak {
-        trait_name: StringId,
-        surface_type: TypeId,
-    },
-
-    GenericBoundPrivateSurfaceLeak {
-        function_name: StringId,
-        trait_name: StringId,
-    },
-
-    UnsupportedTraitFeature {
-        trait_name: StringId,
-        feature: StringId,
-    },
-
-    InvalidTraitKeywordUsage {
-        reason: InvalidTraitKeywordUsageReason,
-    },
-
-    DuplicatePublicExport {
-        name: StringId,
-    },
-
-    PrivateTypeInExportedApi {
-        exported_name: StringId,
-        private_type: TypeId,
-    },
-
-    ProjectContextEscape {
-        reason: ProjectContextEscapeReason,
-    },
-
-    InvalidTraitConformance {
-        target_name: StringId,
-        trait_name: Option<StringId>,
-        reason: InvalidTraitConformanceReason,
-    },
-
-    InvalidTraitIncompatibility {
-        subject_name: StringId,
-        incompatible_trait_name: Option<StringId>,
-        reason: InvalidTraitIncompatibilityReason,
-    },
-
-    TraitNameUsedAsType {
-        trait_name: StringId,
-    },
-
-    InvalidExpression {
-        reason: InvalidExpressionReason,
-    },
-
-    MissingOperatorOperand {
-        operator: StringId,
-        position: OperatorOperandPosition,
-    },
-
-    InvalidStandaloneStatement {
-        reason: InvalidStandaloneStatementReason,
-    },
-
-    ExpectedSymbolStatement,
-
-    MissingCollectionItem,
-
-    InvalidMatchArm {
-        reason: InvalidMatchArmReason,
-    },
-
-    InvalidLoopHeader {
-        reason: InvalidLoopHeaderReason,
-    },
-
-    InvalidStatementPosition {
-        reason: InvalidStatementPositionReason,
-    },
-
-    CommonSyntaxMistake {
-        reason: CommonSyntaxMistakeReason,
-    },
+macro_rules! emit_diagnostic_payload_enum {
+    (
+        $remap_label:ident: $remap_name:ident;
+        $(
+            $category:ident::$kind:ident => {
+                payload: $payload:ident;
+                fields: {
+                    $( $field:ident : $field_type:ty ),* $(,)?
+                }
+                bindings: { $( $binding:ident ),* $(,)? }
+                remap: { $($remap:tt)* }
+                descriptor: $descriptor:tt
+            },
+        )*
+    ) => {
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum DiagnosticPayload {
+            None,
+
+            ExpectedToken {
+                expected: DiagnosticToken,
+                found: Option<DiagnosticToken>,
+            },
+            UnexpectedToken {
+                found: DiagnosticToken,
+            },
+            UnexpectedTrailingComma,
+            UnescapedImplicitTemplateClose {
+                source_kind: SourceFileKind,
+            },
+            UnknownName {
+                name: StringId,
+                namespace: NameNamespace,
+            },
+            TypeMismatch {
+                expected: TypeId,
+                found: TypeId,
+                context: TypeMismatchContext,
+            },
+            DuplicateDeclaration {
+                name: StringId,
+            },
+            ReservedBuiltinName {
+                name: StringId,
+            },
+
+            MissingImportTarget {
+                path: InternedPath,
+            },
+            AmbiguousImportTarget {
+                path: InternedPath,
+            },
+            BareFileImport {
+                path: InternedPath,
+            },
+            DirectSpecialFileImport {
+                path: InternedPath,
+            },
+            ImportNameCollision {
+                name: StringId,
+            },
+            NotExportedBySourceFile {
+                symbol_path: InternedPath,
+            },
+            NotExportedByPublicSurface {
+                requested_path: InternedPath,
+                public_surface_name: StringId,
+                public_surface_type: ImportPublicSurfaceType,
+            },
+            MissingModuleRootPublicSurface {
+                symbol_path: InternedPath,
+            },
+            MissingPackageSymbol {
+                symbol: StringId,
+                package_path: StringId,
+            },
+            CrossModuleImportNotExported {
+                symbol_path: InternedPath,
+            },
+            DirectSymbolPathImport {
+                path: InternedPath,
+            },
+            InvalidNamespaceDefaultName {
+                path: InternedPath,
+            },
+            DuplicateImportSurfaceMember {
+                surface_path: InternedPath,
+                member_name: StringId,
+            },
+            ExplicitMothExtension {
+                path: InternedPath,
+            },
+            ExplicitSourceExtension {
+                path: InternedPath,
+                extension: StringId,
+            },
+            UnsupportedSourceFileKind {
+                path: InternedPath,
+                extension: StringId,
+            },
+            InvalidSourceFileEntry {
+                path: InternedPath,
+                extension: StringId,
+            },
+            MothTemplateInputsShareNoCommonAncestor {
+                first_path: InternedPath,
+                second_path: InternedPath,
+            },
+            DuplicateMothTemplateInputPath {
+                path: InternedPath,
+            },
+            UnsupportedExternalExtension {
+                path: InternedPath,
+                extension: StringId,
+            },
+
+            BorrowConflict {
+                place: DiagnosticPlace,
+                existing_access: BorrowAccessKind,
+                requested_access: BorrowAccessKind,
+            },
+            MultipleMutableBorrows {
+                place: DiagnosticPlace,
+                conflicting_place: Option<DiagnosticPlace>,
+            },
+            SharedMutableConflict {
+                place: DiagnosticPlace,
+                existing_access: BorrowAccessKind,
+                requested_access: BorrowAccessKind,
+                conflicting_place: Option<DiagnosticPlace>,
+            },
+            UseAfterPossibleMove {
+                place: DiagnosticPlace,
+            },
+            MoveWhileBorrowed {
+                place: DiagnosticPlace,
+                existing_access: BorrowAccessKind,
+            },
+            WholeObjectBorrowConflict {
+                whole_place: DiagnosticPlace,
+                part_place: DiagnosticPlace,
+            },
+            UseOfUninitializedLocal {
+                place: DiagnosticPlace,
+            },
+
+            UnsupportedExternalFunction {
+                function_name: StringId,
+                package_path: Option<StringId>,
+                backend_name: StringId,
+            },
+
+            UnreachableMatchArm,
+            IdentifierNamingConvention {
+                name: StringId,
+                expected_style: NamingConvention,
+            },
+            DependencyAliasCaseMismatch {
+                alias: StringId,
+                symbol: StringId,
+            },
+
+            SourceSpanCapacity {
+                start: u32,
+                length: u32,
+                resource: SourceSpanCapacityResource,
+            },
+            InvalidCharacter {
+                character: char,
+            },
+            InvalidStyleDirective {
+                directive_name: StringId,
+                supported_directives: StringId,
+            },
+            MissingClosingDelimiter {
+                expected_delimiter: StringId,
+            },
+            UnexpectedEndOfFile {
+                expected_delimiter: Option<StringId>,
+            },
+            InvalidPath {
+                path_kind: PathKind,
+            },
+
+            InvalidStructDefaultValue,
+            MissingDeclarationInitializer {
+                name: StringId,
+            },
+            CircularDependency {
+                path: InternedPath,
+            },
+            NamespaceMisuse {
+                name: StringId,
+                expected: NameNamespace,
+                found: NameNamespace,
+            },
+            ShadowedName {
+                name: StringId,
+            },
+            ReservedNameCollision {
+                name: StringId,
+                reserved_by: ReservedNameOwner,
+            },
+            EmptyCollectionTypeAmbiguity,
+            UnsupportedOperatorTypes {
+                operator: DiagnosticOperator,
+                lhs: TypeId,
+                rhs: Option<TypeId>,
+            },
+            InvalidRangeOperand {
+                operand: RangeOperandKind,
+                found_type: TypeId,
+            },
+            UnsupportedBuilderPackage {
+                package_path: StringId,
+            },
+            DependencyNamespaceUsedAsValue {
+                record_name: StringId,
+            },
+            ConstRecordUsedAsValue {
+                record_name: StringId,
+            },
+            NestedDependencyTraversal {
+                record_name: StringId,
+            },
+            NamespaceTypeValueMisuse {
+                name: StringId,
+                expected: NamespaceTypeValueMisuseKind,
+                found: NamespaceTypeValueMisuseKind,
+            },
+            UnknownTrait {
+                name: StringId,
+            },
+            DuplicateTraitRequirement {
+                trait_name: StringId,
+                requirement_name: StringId,
+            },
+            TraitPrivateSurfaceLeak {
+                trait_name: StringId,
+                surface_type: TypeId,
+            },
+            GenericBoundPrivateSurfaceLeak {
+                function_name: StringId,
+                trait_name: StringId,
+            },
+            UnsupportedTraitFeature {
+                trait_name: StringId,
+                feature: StringId,
+            },
+            DuplicatePublicExport {
+                name: StringId,
+            },
+            PrivateTypeInExportedApi {
+                exported_name: StringId,
+                private_type: TypeId,
+            },
+            TraitNameUsedAsType {
+                trait_name: StringId,
+            },
+            MissingOperatorOperand {
+                operator: StringId,
+                position: OperatorOperandPosition,
+            },
+            ExpectedSymbolStatement,
+            MissingCollectionItem,
+
+            $( $payload {
+                $( $field: $field_type, )*
+            }, )*
+        }
+    };
 }
+
+crate::define_reasoned_diagnostic_registry!(emit_diagnostic_payload_enum);
+
+macro_rules! emit_reasoned_payload_stable_key {
+    (
+        $remap_label:ident: $remap_name:ident;
+        $(
+            $category:ident::$kind:ident => {
+                payload: $payload:ident;
+                fields: {
+                    $( $field:ident : $field_type:ty ),* $(,)?
+                }
+                bindings: { $( $binding:ident ),* $(,)? }
+                remap: { $($remap:tt)* }
+                descriptor: $descriptor:tt
+            },
+        )*
+    ) => {
+        impl DiagnosticPayload {
+            fn reasoned_stable_reason_key(&self) -> Option<&'static str> {
+                match self {
+                    $(
+                        DiagnosticPayload::$payload { reason, .. } => {
+                            Some(reason.stable_reason_key())
+                        }
+                    )*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+crate::define_reasoned_diagnostic_registry!(emit_reasoned_payload_stable_key);
 
 #[cfg(test)]
 pub(super) fn stable_reason_keys_for_tests() -> &'static [&'static str] {
@@ -634,66 +331,9 @@ pub(super) fn stable_reason_keys_for_tests() -> &'static [&'static str] {
 impl DiagnosticPayload {
     /// Return the stable, qualified key for a typed reason payload.
     ///
-    /// Reasonless payloads deliberately return `None`. This dispatch is the single bridge from
-    /// the top-level diagnostic payload to the typed reason definitions below.
+    /// Reasonless payloads deliberately return `None`; every reasoned variant is dispatched by
+    /// the central registry above.
     pub(super) fn stable_reason_key(&self) -> Option<&'static str> {
-        let key = match self {
-            Self::InvalidImportPath { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidMutableAccess { reason, .. } => reason.stable_reason_key(),
-            Self::UnsupportedBackendFeature { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidConfig { reason, .. } => reason.stable_reason_key(),
-            Self::DeferredFeature { reason } => reason.stable_reason_key(),
-            Self::InvalidStringEscape { reason } => reason.stable_reason_key(),
-            Self::InvalidNumberLiteral { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidGenericApplication { reason } => reason.stable_reason_key(),
-            Self::InvalidDependencyClause { reason, .. } => reason.stable_reason_key(),
-            Self::LegacyDependencyClause { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidTypeAnnotation { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidCollectionType { reason } => reason.stable_reason_key(),
-            Self::InvalidMapType { reason } => reason.stable_reason_key(),
-            Self::InvalidMapLiteral { reason } => reason.stable_reason_key(),
-            Self::InvalidGenericParameter { reason } => reason.stable_reason_key(),
-            Self::InvalidTemplateDirective { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidTemplateStructure { reason } => reason.stable_reason_key(),
-            Self::InvalidSignatureMember { reason } => reason.stable_reason_key(),
-            Self::InvalidFunctionSignature { reason } => reason.stable_reason_key(),
-            Self::InvalidChoiceVariant { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidThisUsage { reason } => reason.stable_reason_key(),
-            Self::InvalidReceiverDeclaration { reason } => reason.stable_reason_key(),
-            Self::InvalidControlFlowStatement { reason } => reason.stable_reason_key(),
-            Self::InvalidDeclaration { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidAssignmentTarget { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidMultiBind { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidBuiltinCall { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidCast { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidReceiverCall { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidCopyTarget { reason } => reason.stable_reason_key(),
-            Self::InvalidFieldAccess { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidMatchPattern { reason, .. } => reason.stable_reason_key(),
-            Self::NonExhaustiveMatch { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidFallibleHandling { reason } => reason.stable_reason_key(),
-            Self::InvalidTemplateSlot { reason, .. } => reason.stable_reason_key(),
-            Self::CompileTimeEvaluationError { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidFallibleOperand { reason, .. } => reason.stable_reason_key(),
-            Self::IncompatibleChoiceComparison { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidCallShape { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidReturnShape { reason } => reason.stable_reason_key(),
-            Self::InvalidGenericInstantiation { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidPageMetadata { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidCompileTimePath { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidTraitKeywordUsage { reason } => reason.stable_reason_key(),
-            Self::InvalidTraitConformance { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidTraitIncompatibility { reason, .. } => reason.stable_reason_key(),
-            Self::InvalidExpression { reason } => reason.stable_reason_key(),
-            Self::InvalidStandaloneStatement { reason } => reason.stable_reason_key(),
-            Self::InvalidMatchArm { reason } => reason.stable_reason_key(),
-            Self::InvalidLoopHeader { reason } => reason.stable_reason_key(),
-            Self::InvalidStatementPosition { reason } => reason.stable_reason_key(),
-            Self::CommonSyntaxMistake { reason } => reason.stable_reason_key(),
-            Self::ProjectContextEscape { reason } => reason.stable_reason_key(),
-            _ => return None,
-        };
-
-        Some(key)
+        self.reasoned_stable_reason_key()
     }
 }

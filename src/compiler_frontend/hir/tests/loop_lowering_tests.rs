@@ -18,10 +18,11 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    reference_expr_with_type_id, test_if_branch_metadata,
+};
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, loop_binding_with_type_id as loop_binding, runtime_expr,
-    runtime_operand_item,
+    loop_binding_with_type_id as loop_binding, runtime_expr, runtime_operand_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -354,7 +355,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
                 Expression::int(0, location, ValueMode::ImmutableOwned),
                 Expression::int(10, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
-                Some(inferred_type_reference_expr(
+                Some(reference_expr_with_type_id(
                     step_symbol,
                     builtin_type_ids::INT,
                     location,

@@ -591,6 +591,15 @@ impl ExternalPackageRegistry {
         self.functions_by_id.get(&id)
     }
 
+    /// Iterates registered functions as `(id, definition)` pairs.
+    pub(crate) fn functions(
+        &self,
+    ) -> impl Iterator<Item = (ExternalFunctionId, &ExternalFunctionDef)> {
+        self.functions_by_id
+            .iter()
+            .map(|(id, definition)| (*id, definition))
+    }
+
     /// Looks up an external type by its stable ID.
     pub fn get_type_by_id(&self, id: ExternalTypeId) -> Option<&ExternalTypeDef> {
         self.types_by_id.get(&id)
@@ -961,38 +970,6 @@ impl ExternalPackageRegistry {
         self.function_reverse_identity_by_id
             .get(&id)
             .map(|identity| identity.package_id)
-    }
-
-    /// Inline JavaScript lowering templates registered on first-party binding functions.
-    ///
-    /// WHAT: names each `InlineExpression` by package path and symbol path.
-    /// WHY: first-party dependency validation must inspect these templates without scraping
-    ///      Rust string literals out of registration files.
-    pub(crate) fn javascript_inline_expressions(&self) -> Vec<(String, String)> {
-        let mut expressions = Vec::new();
-
-        for (id, definition) in &self.functions_by_id {
-            let Some(
-                crate::compiler_frontend::external_packages::ExternalJsLowering::InlineExpression(
-                    source,
-                ),
-            ) = definition.lowerings.js.as_ref()
-            else {
-                continue;
-            };
-
-            let package = self
-                .resolve_function_package(*id)
-                .unwrap_or("unknown-package");
-            let symbol = self
-                .resolve_function_symbol_path(*id)
-                .map(|path| path.to_string())
-                .unwrap_or_else(|| definition.name.clone());
-            expressions.push((format!("{package}::{symbol}"), source.clone()));
-        }
-
-        expressions.sort_by(|left, right| left.0.cmp(&right.0));
-        expressions
     }
 
     /// Returns the owned stable external type identity for a build-local `ExternalTypeId`.

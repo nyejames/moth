@@ -50,9 +50,8 @@ use crate::compiler_frontend::hir::hir_builder::{
     expressions_to_owned_render_node_with_resources, fixture_resource, lower_ast,
     lower_ast_with_metadata, lower_module,
 };
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, no_value_expr,
-};
+use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
+use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
 
 #[test]
 fn registers_declarations_and_resolves_start_function() {
@@ -229,7 +228,7 @@ fn start_function_can_reference_module_constant() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement(inferred_type_reference_expr(
+            NodeKind::ExpressionStatement(reference_expr_with_type_id(
                 third_const.clone(),
                 builtin_type_ids::INT,
                 None,
@@ -713,7 +712,7 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement(inferred_type_reference_expr(
+            NodeKind::ExpressionStatement(reference_expr_with_type_id(
                 logo_const.clone(),
                 builtin_type_ids::STRING,
                 None,

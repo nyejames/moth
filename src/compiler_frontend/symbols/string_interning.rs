@@ -122,25 +122,6 @@ impl StringIdRemap {
     pub fn is_identity(&self) -> bool {
         self.is_identity
     }
-
-    /// Returns true when any ID at or after `base_len` changes during remapping.
-    pub fn has_non_identity_after(&self, base_len: usize) -> bool {
-        if self.is_identity {
-            return false;
-        }
-
-        let remap_len = self.identity_prefix_len + self.mapped_suffix.len();
-        if base_len >= remap_len {
-            return false;
-        }
-
-        let suffix_start = base_len.saturating_sub(self.identity_prefix_len);
-        self.mapped_suffix
-            .iter()
-            .enumerate()
-            .skip(suffix_start)
-            .any(|(offset, mapped)| mapped.0 as usize != self.identity_prefix_len + offset)
-    }
 }
 
 /// Shared immutable prefix used by module-local string-table forks.

@@ -88,32 +88,6 @@ pub(crate) struct ProjectGlobalsMemberMetadata {
     pub(crate) provenance: SyntheticInterfaceProvenance,
 }
 
-impl ProjectGlobalsMemberMetadata {
-    /// The stable synthetic-interface member identity.
-    #[cfg(test)]
-    pub(crate) fn identity(&self) -> &SyntheticInterfaceMemberIdentity {
-        &self.identity
-    }
-
-    /// The exact source span retained for diagnostics, when source-authored.
-    #[cfg(test)]
-    pub(crate) fn span(&self) -> Option<SourceSpan> {
-        self.span
-    }
-
-    /// The semantic build-configuration fingerprint for this field.
-    #[cfg(test)]
-    pub(crate) fn fingerprint(&self) -> BuildConfigFingerprint {
-        self.fingerprint
-    }
-
-    /// The member-granular synthetic-interface provenance for this field.
-    #[cfg(test)]
-    pub(crate) fn provenance(&self) -> &SyntheticInterfaceProvenance {
-        &self.provenance
-    }
-}
-
 /// Immutable synthetic provider for direct project fields under `@project`.
 ///
 /// The ordinary public interface carries one constant declaration and export binding for every
@@ -124,6 +98,7 @@ pub(crate) struct ProjectGlobalsInterface {
     interface: PublicSemanticInterface,
     members: Vec<ProjectGlobalsMemberMetadata>,
 }
+
 impl ProjectGlobalsInterface {
     /// Build the immutable project-global interface for one project package boundary.
     ///
@@ -207,12 +182,6 @@ impl ProjectGlobalsInterface {
         &self.interface
     }
 
-    /// Borrow member metadata in deterministic public-field-name order.
-    #[cfg(test)]
-    pub(crate) fn members(&self) -> &[ProjectGlobalsMemberMetadata] {
-        &self.members
-    }
-
     /// Find one field's metadata by its exact public name.
     #[cfg(test)]
     pub(crate) fn member(&self, name: &str) -> Option<&ProjectGlobalsMemberMetadata> {
@@ -293,9 +262,9 @@ mod tests {
         .expect("unique project fields should construct");
 
         let names: Vec<_> = interface
-            .members()
+            .members
             .iter()
-            .map(|metadata| metadata.identity().member())
+            .map(|metadata| metadata.identity.member())
             .collect();
         assert_eq!(names, ["alpha", "zeta"]);
 
@@ -343,22 +312,24 @@ mod tests {
         )
         .expect("project field should construct");
         let metadata = interface
-            .member("version")
+            .members
+            .iter()
+            .find(|metadata| metadata.identity.member() == "version")
             .expect("metadata should be indexed by field name");
 
-        assert_eq!(metadata.span(), span(17));
-        assert_eq!(metadata.fingerprint(), BuildConfigFingerprint(0xfeed));
+        assert_eq!(metadata.span, span(17));
+        assert_eq!(metadata.fingerprint, BuildConfigFingerprint(0xfeed));
         assert_eq!(
-            metadata.identity(),
-            &SyntheticInterfaceMemberIdentity::new(
+            metadata.identity,
+            SyntheticInterfaceMemberIdentity::new(
                 SyntheticInterfaceClass::ProjectContext,
                 PROJECT_GLOBALS_DEPENDENCY_NAME,
                 "version",
             )
         );
         assert_eq!(
-            metadata.provenance(),
-            &SyntheticInterfaceProvenance::single(metadata.identity().clone())
+            metadata.provenance,
+            SyntheticInterfaceProvenance::single(metadata.identity.clone())
         );
     }
 
@@ -377,11 +348,11 @@ mod tests {
         assert_eq!(interface.interface().module_origin, synthetic_origin);
         assert_ne!(synthetic_origin, facade_origin);
         assert_eq!(
-            interface.members()[0].identity().class(),
+            interface.members[0].identity.class(),
             SyntheticInterfaceClass::ProjectContext
         );
-        assert_eq!(interface.members()[0].identity().interface(), "project");
-        assert!(!interface.members()[0].provenance().is_empty());
+        assert_eq!(interface.members[0].identity.interface(), "project");
+        assert!(!interface.members[0].provenance.is_empty());
     }
 
     #[test]

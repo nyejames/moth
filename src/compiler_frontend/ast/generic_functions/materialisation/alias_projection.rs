@@ -1,10 +1,9 @@
 //! Stable alias target projection and generated-local alias restoration.
 
+use super::artefact_emit::{ModuleMaterialisationContext, append_materialised_declaration};
 use super::nominal_blueprints::intern_generated_canonical_type;
-use super::{
-    GenericTemplateArtefact, ModuleMaterialisationContext, ModuleMaterialisationPreparation,
-    append_materialised_declaration,
-};
+use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::stable_types::GenericTemplateArtefact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;

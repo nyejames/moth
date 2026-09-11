@@ -28,12 +28,14 @@ use crate::compiler_frontend::paths::file_references::{
     ResolvedFileReferenceOutcome, ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId,
 };
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -46,11 +48,12 @@ use std::sync::Arc;
 pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
     let cwd = std::env::temp_dir();
 
-    ProjectPathResolver::new(
+    ProjectPathResolver::new_with_module_roots(
         cwd.clone(),
         cwd,
-        crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("test path resolver should be valid")
 }

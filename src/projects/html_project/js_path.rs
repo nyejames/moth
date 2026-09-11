@@ -29,12 +29,12 @@ use crate::projects::html_project::document_shell::{
     HtmlDocumentShellInput, render_html_document_shell,
 };
 use crate::projects::html_project::external_js::runtime_glue::generate_module_glue;
-use crate::projects::html_project::output_plan::derive_logical_html_path;
+use crate::projects::html_project::output_plan::CanonicalPageRoute;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::timing_scope;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Inputs for rendering a JS-backed HTML document.
@@ -49,7 +49,7 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub string_table: &'a mut StringTable,
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub document_config: &'a HtmlDocumentConfig,
-    pub logical_html_path: &'a Path,
+    pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
     pub js_bundle: &'a str,
     pub function_names: &'a HashMap<FunctionId, String>,
@@ -97,7 +97,7 @@ pub(crate) struct HtmlJsCompileInput<'a> {
     pub(crate) all_generated_function_names: Arc<Vec<String>>,
     pub(crate) structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub(crate) compile_input: &'a HtmlModuleCompileInput<'a>,
-    pub(crate) output_path: PathBuf,
+    pub(crate) route: &'a CanonicalPageRoute,
 }
 
 /// Compiles one module through the JS-only HTML builder path.
@@ -118,7 +118,7 @@ pub(crate) fn compile_html_module_js(
         all_generated_function_names,
         structural_url_renderer,
         compile_input: input,
-        output_path,
+        route,
     } = input;
     let structural_string_urls = structural_url_renderer
         .lowering_map(&module.executable.resource_table, input.reachability)
@@ -245,7 +245,7 @@ pub(crate) fn compile_html_module_js(
         external_imports,
         &js_module.referenced_external_functions,
         input.external_package_registry.as_ref(),
-        &output_path,
+        &route.logical_html_path,
         input.build_profile.is_release(),
     )
     .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
@@ -264,7 +264,7 @@ pub(crate) fn compile_html_module_js(
         string_table,
         structural_url_renderer,
         document_config: input.document_config,
-        logical_html_path: &output_path,
+        route,
         project_name: input.project_name,
         js_bundle: &bundle_with_imports,
         function_names: &js_module.function_name_by_id,
@@ -275,12 +275,15 @@ pub(crate) fn compile_html_module_js(
     })?;
 
     let mut output_files = Vec::with_capacity(1 + glue_result.glue_output_files.len());
-    output_files.push(OutputFile::new(output_path.clone(), FileKind::Html(html)));
+    output_files.push(OutputFile::new(
+        route.logical_html_path.clone(),
+        FileKind::Html(html),
+    ));
     output_files.extend(glue_result.glue_output_files);
 
     Ok(CompiledHtmlJsModule {
         output_files,
-        html_output_path: output_path,
+        html_output_path: route.logical_html_path.clone(),
     })
 }
 
@@ -467,7 +470,7 @@ pub(crate) fn render_html_document(
         config: input.document_config,
         page_metadata: &input.page_metadata_plan.metadata,
         structural_url_renderer: input.structural_url_renderer,
-        logical_html_path: input.logical_html_path,
+        route: input.route,
         project_name: input.project_name,
         body_html,
         script_html,
@@ -573,16 +576,6 @@ fn append_runtime_bootstrap(
     }
 
     html.push_str(&format!("{indent}}}\n"));
-}
-
-/// Derive the logical HTML output path for this entry file.
-///
-/// Delegates to the canonical output planner so JS-only and Wasm paths agree on route derivation.
-pub(crate) fn html_output_path(
-    entry_point: &Path,
-    entry_root: Option<&Path>,
-) -> Result<PathBuf, CompilerError> {
-    derive_logical_html_path(entry_point, entry_root)
 }
 
 /// Escapes JS source so it is safe to embed inside an HTML `<script>` block.

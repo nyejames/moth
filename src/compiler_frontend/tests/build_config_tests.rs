@@ -53,6 +53,7 @@ fn build_input_names_follow_the_lower_snake_case_policy() {
         "value2",
         "_hidden",
         "a",
+        "café",
     ] {
         let name = BuildInputName::new(valid).expect("lower_snake_case name should validate");
         assert_eq!(name.as_str(), valid);
@@ -65,7 +66,6 @@ fn build_input_names_follow_the_lower_snake_case_policy() {
         "2fast",
         "bad-name",
         "value name",
-        "café",
         "_",
     ] {
         assert_eq!(
@@ -603,11 +603,11 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
         explicit_project
             .member("same_value")
             .expect("explicit project field should exist")
-            .fingerprint(),
+            .fingerprint,
         defaulted_project
             .member("same_value")
             .expect("defaulted project field should exist")
-            .fingerprint()
+            .fingerprint
     );
 }
 

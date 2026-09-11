@@ -162,27 +162,6 @@ pub(crate) enum OrderedSemanticDeclarationKind {
     Function,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct CompilerOwnedDeclaration {
-    pub(crate) kind: CompilerOwnedDeclarationKind,
-    pub(crate) declaration: Declaration,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CompilerOwnedDeclarationKind {
-    Start,
-    Builtin,
-}
-
-impl CompilerOwnedDeclaration {
-    pub(crate) fn builtin(declaration: Declaration) -> Self {
-        Self {
-            kind: CompilerOwnedDeclarationKind::Builtin,
-            declaration,
-        }
-    }
-}
-
 impl OrderedSemanticDeclarationKind {
     pub(crate) fn owns_value_row(self) -> bool {
         !matches!(self, Self::TypeAlias | Self::Trait)
@@ -216,7 +195,7 @@ pub(crate) struct ModuleSymbols {
     pub(crate) ordered_semantic_declarations: Vec<OrderedSemanticDeclaration>,
 
     /// Synthetic start and builtin declarations appended after authored semantic slots.
-    pub(crate) compiler_owned_declarations: Vec<CompilerOwnedDeclaration>,
+    pub(crate) compiler_owned_declarations: Vec<Declaration>,
 
     // Staging: builtin declarations collected during header parsing.
     // Consumed by resolve_module_dependencies and appended to compiler-owned rows after sorting.
@@ -385,20 +364,13 @@ impl ModuleSymbols {
                         declaration: declaration_from_header(header, string_table),
                     });
             } else if let Some(declaration) = declaration_from_header(header, string_table) {
-                self.compiler_owned_declarations
-                    .push(CompilerOwnedDeclaration {
-                        kind: CompilerOwnedDeclarationKind::Start,
-                        declaration,
-                    });
+                self.compiler_owned_declarations.push(declaration);
             }
         }
 
         // Append staged builtin declarations after all user-defined declarations.
-        self.compiler_owned_declarations.extend(
-            self.builtin_declarations
-                .drain(..)
-                .map(CompilerOwnedDeclaration::builtin),
-        );
+        self.compiler_owned_declarations
+            .append(&mut self.builtin_declarations);
     }
 }
 

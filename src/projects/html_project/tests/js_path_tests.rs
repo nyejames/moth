@@ -10,6 +10,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::html_project::output_plan::derive_logical_html_path;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
@@ -234,8 +235,10 @@ fn no_runtime_fragments_still_emits_start_call() {
         String::from("start_entry"),
     )]);
 
+    let route =
+        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
-    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
@@ -246,7 +249,7 @@ fn no_runtime_fragments_still_emits_start_call() {
             string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
-            logical_html_path: Path::new("index.html"),
+            route: &route,
             project_name: "",
             js_bundle: "function start_entry() { return []; }",
             function_names: &function_names,
@@ -291,8 +294,10 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     )]);
 
     let mut string_table = crate::compiler_frontend::symbols::string_interning::StringTable::new();
+    let route =
+        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
-    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let page_metadata_plan = HtmlPageMetadataPlan::default();
     let html = render_html_document(
@@ -303,7 +308,7 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
             string_table: &mut string_table,
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
-            logical_html_path: Path::new("index.html"),
+            route: &route,
             project_name: "",
             js_bundle: "const msg = \"</script>\";\n",
             function_names: &function_names,

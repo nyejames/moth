@@ -42,6 +42,7 @@ use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, 
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
 use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -61,17 +62,6 @@ fn make_test_variable(name: InternedPath, value: Expression) -> Declaration {
         binding_span: None,
         config_qualifier: None,
     }
-}
-
-fn param(
-    name: InternedPath,
-    type_id: TypeId,
-    mutable: bool,
-    span: Option<SourceSpan>,
-) -> Declaration {
-    crate::compiler_frontend::tests::type_id_fixture_support::param_declaration(
-        name, type_id, mutable, span,
-    )
 }
 
 fn function_node(
@@ -907,7 +897,12 @@ fn validator_rejects_non_literal_match_pattern() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(x.clone(), builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x.clone(),
+                builtin_type_ids::INT,
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
@@ -1190,7 +1185,12 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(value_name, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                value_name,
+                builtin_type_ids::INT,
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
@@ -1717,7 +1717,12 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(response_param, builtin_type_ids::NONE, false, None)],
+            parameters: vec![param_with_type_id(
+                response_param,
+                builtin_type_ids::NONE,
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
@@ -1825,7 +1830,12 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param(response_param, builtin_type_ids::NONE, false, None)],
+            parameters: vec![param_with_type_id(
+                response_param,
+                builtin_type_ids::NONE,
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],

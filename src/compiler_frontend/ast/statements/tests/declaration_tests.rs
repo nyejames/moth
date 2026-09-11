@@ -103,11 +103,14 @@ fn rejects_struct_redefinition_of_reserved_error_symbol() {
 
     assert!(matches!(
         diagnostic.kind,
-        DiagnosticKind::Rule(RuleDiagnosticKind::ReservedBuiltinName)
+        DiagnosticKind::Rule(RuleDiagnosticKind::ReservedNameCollision)
     ));
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::UnusedName { .. }
+        DiagnosticPayload::ReservedNameCollision {
+            reserved_by: ReservedNameOwner::BuiltinType,
+            ..
+        }
     ));
 }
 

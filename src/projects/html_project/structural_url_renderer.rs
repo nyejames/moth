@@ -13,6 +13,9 @@
 //! union.
 
 use crate::backends::structural_string::StructuralStringUrlMap;
+use crate::build_system::output::{
+    PortableRelativePath, parse_relative_path, percent_encode_url_segment,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::reachability::HirReachability;
@@ -22,7 +25,6 @@ use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext,
 };
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -109,31 +111,38 @@ impl<'a> StructuralUrlRenderer<'a> {
             })?;
 
         let context_path = self.context.artefact_path();
-        let context_segments = portable_segments(context_path, "context artefact")?;
+        let context_path = parse_portable_path(context_path, "context artefact")?;
+        let context_segments = context_path.components();
         let Some(context_file) = context_segments.len().checked_sub(1) else {
             return Err(CompilerError::compiler_error(
                 "HTML structural URL renderer received an empty context artefact path",
             ));
         };
-        let context_parent = &context_segments[..context_file];
-        let target_segments = portable_segments(&record.output_path, "resource output")?;
 
-        let common_segments = context_parent
+        // Prefix comparison follows the canonical output identity, while URL spelling retains the
+        // authored case of every target component.
+        let context_identities = context_path.identity_components();
+        let context_parent_identities = &context_identities[..context_file];
+        let target_path = parse_portable_path(&record.output_path, "resource output")?;
+        let target_segments = target_path.components();
+        let target_identities = target_path.identity_components();
+
+        let common_segments = context_parent_identities
             .iter()
-            .zip(&target_segments)
+            .zip(&target_identities)
             .take_while(|(context, target)| context == target)
             .count();
-        let same_or_descendant = target_segments.starts_with(context_parent);
+        let same_or_descendant = target_identities.starts_with(context_parent_identities);
 
         let mut relative_segments: Vec<String> = Vec::new();
         relative_segments.extend(std::iter::repeat_n(
             String::from(".."),
-            context_parent.len() - common_segments,
+            context_parent_identities.len() - common_segments,
         ));
         relative_segments.extend(
             target_segments[common_segments..]
                 .iter()
-                .map(|segment| encode_url_segment(segment)),
+                .map(|segment| percent_encode_url_segment(segment)),
         );
 
         let relative = relative_segments.join("/");
@@ -163,41 +172,22 @@ impl<'a> StructuralUrlRenderer<'a> {
     }
 }
 
-fn portable_segments<'a>(path: &'a Path, path_kind: &str) -> Result<Vec<&'a str>, CompilerError> {
+fn parse_portable_path(
+    path: &Path,
+    path_kind: &str,
+) -> Result<PortableRelativePath, CompilerError> {
     let raw = path.to_str().ok_or_else(|| {
         CompilerError::compiler_error(format!(
             "HTML structural URL renderer received a non-UTF-8 {path_kind} path"
         ))
     })?;
-    if raw.is_empty() || raw.starts_with('/') || raw.starts_with('\\') {
-        return Err(CompilerError::compiler_error(format!(
-            "HTML structural URL renderer received an invalid {path_kind} path '{raw}'"
-        )));
-    }
 
-    let segments = raw.split(['/', '\\']).collect::<Vec<_>>();
-    if segments
-        .iter()
-        .any(|segment| segment.is_empty() || *segment == "." || *segment == "..")
-    {
-        return Err(CompilerError::compiler_error(format!(
-            "HTML structural URL renderer received an invalid {path_kind} path '{raw}'"
-        )));
-    }
-
-    Ok(segments)
-}
-
-fn encode_url_segment(segment: &str) -> String {
-    let mut encoded = String::new();
-    for byte in segment.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(byte as char);
-        } else {
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
+    parse_relative_path(raw).map_err(|reason| {
+        CompilerError::compiler_error(format!(
+            "HTML structural URL renderer received an invalid {path_kind} path '{raw}': \
+             {reason:?}"
+        ))
+    })
 }
 
 #[cfg(test)]

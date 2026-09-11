@@ -1,10 +1,12 @@
 //! HTML JavaScript external binding module support.
 //!
 //! WHAT: parses single-file JavaScript binding modules annotated with Moth `@moth.*`
-//!       metadata into a structured, parser-owned data model, and tracks builder-owned
-//!       core JS runtime modules such as `@moth/runtime`.
+//!       metadata into a structured, parser-owned data model, tracks builder-owned core JS
+//!       runtime modules such as `@moth/runtime`, and exposes the scanner's first-party
+//!       module-loading policy.
 //! WHY: project-local `.js` imports and built-in JS-backed packages such as `@web/canvas`
-//!      need a typed surface before they can be fed into the compiler frontend.
+//!      need a typed surface before they can be fed into the compiler frontend, while
+//!      first-party validation must reuse the parser's scanner policy.
 //!
 //! This module is intentionally isolated from compiler-stage machinery.
 //! The JS external import provider and built-in JS-backed packages convert
@@ -13,7 +15,8 @@
 //!
 //! ## Module layout
 //!
-//! - `parser/`: the `@moth.*` annotation scanner, export scanner, and signature parser.
+//! - `parser/`: the `@moth.*` annotation parser, export-form scanner, static import / `require()`
+//!   module-loading policy, and signature parser.
 //! - `runtime_module_registry`: builder-owned registry of allowed JS runtime module imports
 //!   and their authored source.
 

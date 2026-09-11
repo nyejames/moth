@@ -25,7 +25,8 @@ use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, test_if_branch_metadata,
+    fresh_success_returns, function_node, make_test_variable, node, param_with_type_id,
+    reference_expr_with_type_id, test_if_branch_metadata,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -34,8 +35,7 @@ use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    fresh_success_returns, inferred_type_reference_expr, runtime_expr, runtime_function_call_item,
-    runtime_operand_item, runtime_operator_item,
+    runtime_expr, runtime_function_call_item, runtime_operand_item, runtime_operator_item,
 };
 
 fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -> Vec<BlockId> {
@@ -429,13 +429,13 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
 
     let condition = runtime_expr(
         vec![
-            runtime_operand_item(inferred_type_reference_expr(
+            runtime_operand_item(reference_expr_with_type_id(
                 lhs_name.clone(),
                 builtin_type_ids::BOOL,
                 location,
                 ValueMode::ImmutableReference,
             )),
-            runtime_operand_item(inferred_type_reference_expr(
+            runtime_operand_item(reference_expr_with_type_id(
                 rhs_name.clone(),
                 builtin_type_ids::BOOL,
                 location,
@@ -533,7 +533,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
 
     let then_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![inferred_type_reference_expr(
+            expressions: vec![reference_expr_with_type_id(
                 left_name.clone(),
                 builtin_type_ids::INT,
                 location,
@@ -546,7 +546,7 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
 
     let else_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![inferred_type_reference_expr(
+            expressions: vec![reference_expr_with_type_id(
                 right_name.clone(),
                 builtin_type_ids::INT,
                 location,
@@ -663,7 +663,7 @@ fn assertion_failure_uses_message_value_block_tail() {
     let message_value = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: inferred_type_reference_expr(
+                condition: reference_expr_with_type_id(
                     condition_name.clone(),
                     builtin_type_ids::BOOL,
                     location,
@@ -711,19 +711,17 @@ fn assertion_failure_uses_message_value_block_tail() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![
-                crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id(
-                    condition_name.clone(),
-                    builtin_type_ids::BOOL,
-                    false,
-                    location,
-                ),
-            ],
+            parameters: vec![param_with_type_id(
+                condition_name.clone(),
+                builtin_type_ids::BOOL,
+                false,
+                location,
+            )],
             returns: vec![],
         },
         vec![node(
             NodeKind::Assert {
-                condition: inferred_type_reference_expr(
+                condition: reference_expr_with_type_id(
                     condition_name,
                     builtin_type_ids::BOOL,
                     location,
@@ -870,7 +868,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
     let message_value = Expression::new(
         ExpressionKind::ValueBlock {
             block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: inferred_type_reference_expr(
+                condition: reference_expr_with_type_id(
                     condition_name.clone(),
                     builtin_type_ids::BOOL,
                     location,
@@ -918,14 +916,12 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![
-                crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id(
-                    condition_name,
-                    builtin_type_ids::BOOL,
-                    false,
-                    location,
-                ),
-            ],
+            parameters: vec![param_with_type_id(
+                condition_name,
+                builtin_type_ids::BOOL,
+                false,
+                location,
+            )],
             returns: vec![],
         },
         vec![node(

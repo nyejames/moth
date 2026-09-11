@@ -43,14 +43,15 @@ pub(crate) fn is_keyword_shadow_identifier(name: &str) -> bool {
     keyword_shadow_match(name).is_some()
 }
 
-/// Returns true for CamelCase-style type identifiers: `^[A-Z][A-Za-z0-9]*$`.
+/// Returns true for CamelCase-style type identifiers with an uppercase first character followed by
+/// alphanumeric characters.
 pub(crate) fn is_camel_case_type_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
     };
 
-    first.is_ascii_uppercase() && chars.all(|ch| ch.is_ascii_alphanumeric())
+    first.is_uppercase() && chars.all(|ch| ch.is_alphanumeric())
 }
 
 /// Returns true for lowercase_with_underscores identifiers.
@@ -60,7 +61,7 @@ pub(crate) fn is_lowercase_with_underscores_name(name: &str) -> bool {
     let mut has_lowercase = false;
 
     for ch in name.chars() {
-        if ch.is_ascii_lowercase() {
+        if ch.is_lowercase() {
             has_lowercase = true;
             continue;
         }
@@ -82,7 +83,7 @@ pub(crate) fn is_uppercase_constant_name(name: &str) -> bool {
     let mut has_uppercase = false;
 
     for ch in name.chars() {
-        if ch.is_ascii_uppercase() {
+        if ch.is_uppercase() {
             has_uppercase = true;
             continue;
         }

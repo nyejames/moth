@@ -2,11 +2,13 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
+use super::LoanId;
+use super::RebindValue;
 use super::{
     BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, EventId, EventKind,
-    OriginKind, RebindValue, TerminatorEventKind, UseKind,
+    OriginKind, TerminatorEventKind, UseKind,
 };
-use super::{LoanId, PlaceId, PointId, ValueOriginId};
+use super::{PlaceId, PointId, ValueOriginId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 

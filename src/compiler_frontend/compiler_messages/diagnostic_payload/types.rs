@@ -1,4 +1,3 @@
-//! Supporting diagnostic payload reason and context types.
 //!
 //! WHAT: stores the typed reason enums and small payload helper records used by
 //! DiagnosticPayload variants.
@@ -311,6 +310,28 @@ pub enum InvalidOutputFolderReason {
     InvalidPathComponent,
     InsideOrEqualToEntryRoot,
     ResolvesOutsideProjectRoot,
+}
+/// Structured facts for a malformed external JavaScript module.
+///
+/// Compiler-authored receiver diagnostics carry the offending Moth name. Parser diagnostics keep
+/// their foreign tool detail opaque and interned so the compiler relays it without re-authoring it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidExternalModuleReason {
+    ReceiverMethod { moth_name: StringId },
+    ParserDiagnostic { parser_detail: StringId },
+}
+
+impl InvalidExternalModuleReason {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        match self {
+            Self::ReceiverMethod { moth_name } => {
+                *moth_name = remap.get(*moth_name);
+            }
+            Self::ParserDiagnostic { parser_detail } => {
+                *parser_detail = remap.get(*parser_detail);
+            }
+        }
+    }
 }
 
 impl InvalidConfigReason {
@@ -797,6 +818,57 @@ impl InvalidTemplateDirectiveReason {
         }
     }
 }
+/// Structured warning facts produced while validating a CSS template.
+///
+/// Values that appear in the warning text stay as source facts here; renderers own their prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CssTemplateWarning {
+    MismatchedClosingBrace { expected: char },
+    UnexpectedClosingBrace,
+    MismatchedClosingParenthesis { expected: char },
+    UnexpectedClosingParenthesis,
+    UnclosedDelimiter { opening: char },
+    InlineSelectorBlock,
+    MissingSelectorOrAtRulePrelude,
+    NestedBlock,
+    TopLevelContent,
+    MalformedDeclaration,
+    InvalidPropertyName { name: StringId },
+    MissingDeclarationValue,
+}
+
+impl CssTemplateWarning {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::InvalidPropertyName { name } = self {
+            *name = remap.get(*name);
+        }
+    }
+}
+
+/// Structured warning facts produced while validating an HTML template.
+///
+/// Every current variant reports potentially unsafe authored markup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HtmlTemplateWarning {
+    ScriptTag,
+    JavascriptUrl,
+    InlineEventHandler,
+}
+
+/// Which project-owned validator emitted a malformed-template warning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MalformedTemplateReason {
+    Css(CssTemplateWarning),
+    Html(HtmlTemplateWarning),
+}
+
+impl MalformedTemplateReason {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::Css(reason) = self {
+            reason.remap_string_ids(remap);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTemplateStructureReason {
@@ -915,6 +987,7 @@ pub enum ReservedNameOwner {
     BuiltinType,
     Keyword,
     CoreTrait,
+    ImplicitStart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

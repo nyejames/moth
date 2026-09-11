@@ -13,13 +13,19 @@ pub(crate) enum OriginKind {
         index: u32,
     },
     Fresh,
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     ExclusiveAlias(Box<[ValueOriginId]>),
     Copy(Box<[ValueOriginId]>),
     Projection {
         source: ValueOriginId,
         projection: ProjectionElem,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    #[allow(dead_code)]
     Join(Box<[ValueOriginId]>),
     CallResult {
         call: CallId,
@@ -45,6 +51,8 @@ pub(crate) enum CallResultUnknownReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CallResultProvenance {
     Fresh,
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (call summaries and deferred exclusive access).
+    #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
     AliasParams(Box<[usize]>),
     Unknown(CallResultUnknownReason),
@@ -65,6 +73,7 @@ impl ValueOrigin {
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn fresh(id: ValueOriginId) -> Self {
         Self {
             id,

@@ -1,16 +1,17 @@
 //! Closed semantic inputs selected for one retained generic materialisation.
 
+use super::artefact_emit::ModuleMaterialisationContext;
 use super::frozen_syntax::{materialise_path, stable_path};
 use super::nominal_blueprints::{
     MaterialisationTypeBlueprint, NominalMaterialisationBlueprint, intern_generated_canonical_type,
     intern_materialisation_type_blueprint,
 };
-use super::{
-    GenericTemplateArtefact, MaterialisationNominalSource, ModuleMaterialisationContext,
-    ModuleMaterialisationPreparation, StableCallableBinding, StableDeclarationBinding,
-    StableFunctionSignature, StableFunctionTarget, StableNominalBinding,
-    collect_namespace_source_paths,
+use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::stable_types::{
+    GenericTemplateArtefact, MaterialisationNominalSource, StableCallableBinding,
+    StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget, StableNominalBinding,
 };
+use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{

@@ -1,7 +1,6 @@
 //! Tests for the direct HTML-project Moth template API.
 //!
-//! WHAT: covers input normalization, AST-only compilation, ordering, duplicate diagnostics, and
-//! the deferred caller-supplied scope boundary.
+//! WHAT: covers input normalization, AST-only compilation, ordering, and duplicate diagnostics.
 //! WHY: this API is intentionally not wired into project builds yet, so module-local tests protect
 //! the tooling-facing boundary without adding integration artifacts.
 
@@ -25,8 +24,7 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
-    MothTemplateInput, MothTemplatePathScope, MothTemplateScopeConstant, MothTemplateSource,
-    compile_moth_template,
+    MothTemplateInput, MothTemplateSource, compile_moth_template,
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fs;
@@ -34,11 +32,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn request(input: MothTemplateInput) -> MothTemplateCompileRequest {
-    MothTemplateCompileRequest {
-        input,
-        default_module_constants: Vec::new(),
-        module_constants_by_path: Vec::new(),
-    }
+    MothTemplateCompileRequest { input }
 }
 
 fn temp_project(files: &[(&str, &str)]) -> TempDir {
@@ -583,7 +577,9 @@ fn files_input_repeated_markdown_content_value_is_inlined_twice() {
     let content_path = fs::canonicalize(temp_dir.path().join("docs/legal.md"))
         .expect("content should canonicalize");
     let tracked_root = fs::canonicalize(temp_dir.path()).expect("fixture root should canonicalize");
-    crate::compiler_frontend::reset_file_frontend_prepare_count_for_test(&tracked_root);
+    crate::compiler_frontend::pipeline_test_support::reset_file_frontend_prepare_count_for_test(
+        &tracked_root,
+    );
 
     let output = compile_ok(MothTemplateInput::Files(vec![entry_path.clone()]));
 
@@ -601,12 +597,12 @@ fn files_input_repeated_markdown_content_value_is_inlined_twice() {
         output.documents[0].content
     );
     assert_eq!(
-        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&entry_path),
+        crate::compiler_frontend::pipeline_test_support::file_frontend_prepare_count_for_path_for_test(&entry_path),
         1,
         "the direct entry should be prepared once across bundle construction and folding",
     );
     assert_eq!(
-        crate::compiler_frontend::file_frontend_prepare_count_for_path_for_test(&content_path),
+        crate::compiler_frontend::pipeline_test_support::file_frontend_prepare_count_for_path_for_test(&content_path),
         1,
         "a repeated content source should be prepared once and reused",
     );
@@ -978,37 +974,6 @@ fn compile_api_does_not_write_artifacts() {
     let _output = compile_ok(MothTemplateInput::File(temp_dir.path().join("intro.mtf")));
 
     assert_eq!(directory_entries(temp_dir.path()), before);
-}
-
-#[test]
-fn caller_supplied_scope_constants_are_deferred_without_exposing_internals() {
-    let temp_dir = temp_project(&[("intro.mtf", "intro")]);
-    let mut string_table = StringTable::new();
-    let request = MothTemplateCompileRequest {
-        input: MothTemplateInput::File(temp_dir.path().join("intro.mtf")),
-        default_module_constants: vec![MothTemplateScopeConstant::test_placeholder()],
-        module_constants_by_path: vec![MothTemplatePathScope {
-            source_path: temp_dir.path().join("intro.mtf"),
-            constants: Vec::new(),
-        }],
-    };
-
-    let messages = compile_moth_template(request, &mut string_table)
-        .expect_err("caller-supplied scope constants are intentionally unsupported in this slice");
-
-    assert_eq!(messages.error_count(), 1);
-    let diagnostic = messages
-        .diagnostics()
-        .next()
-        .expect("scope diagnostic should be present");
-    assert!(matches!(
-        diagnostic.kind,
-        DiagnosticKind::Import(ImportDiagnosticKind::InvalidMothTemplateApiScopeItem)
-    ));
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidMothTemplateApiScopeItem { .. }
-    ));
 }
 
 fn directory_entries(path: &Path) -> Vec<PathBuf> {

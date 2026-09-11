@@ -17,7 +17,7 @@ use crate::projects::html_project::document_shell::{
     HtmlDocumentShellInput, render_html_document_shell,
 };
 use crate::projects::html_project::js_path::render_entry_fragments;
-use crate::projects::html_project::output_plan::plan_wasm_output_from_logical_html_path;
+use crate::projects::html_project::output_plan::{CanonicalPageRoute, plan_wasm_output_from_route};
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::wasm::export_plan::{
@@ -27,7 +27,7 @@ use crate::projects::html_project::wasm::js_bootstrap::generate_wasm_bootstrap_j
 use crate::projects::html_project::wasm::request::build_wasm_backend_request;
 use crate::timing_scope;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 const SHOW_HTML_WASM_PLAN: bool = false;
@@ -64,7 +64,7 @@ pub(crate) struct HtmlWasmArtifactEmitInput<'a> {
     pub entry_fragment_html: &'a str,
     pub string_table: &'a mut StringTable,
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
-    pub logical_html_output_path: &'a Path,
+    pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
     pub document_config: &'a HtmlDocumentConfig,
     pub page_metadata_plan: &'a HtmlPageMetadataPlan,
@@ -99,7 +99,7 @@ pub(crate) struct CompiledHtmlWasmModule {
 pub(crate) fn compile_html_module_wasm(
     input: &HtmlModuleCompileInput<'_>,
     string_table: &mut StringTable,
-    logical_html_output_path: &Path,
+    route: &CanonicalPageRoute,
     structural_url_renderer: &StructuralUrlRenderer<'_>,
 ) -> Result<CompiledHtmlWasmModule, CompilerMessages> {
     // Record the full Wasm build duration on every exit path (success or error).
@@ -108,12 +108,9 @@ pub(crate) fn compile_html_module_wasm(
         crate::timing::TimingMetric::BackendWasmTotal
     );
 
-    // Derive per-route artifact paths from the already-derived logical HTML path.
-    // WHY: the builder has already computed the canonical route via derive_logical_html_path.
-    //      This planner only places JS/Wasm artifacts beside that HTML output, so it never
-    //      re-derives the route here.
-    let output_plan = plan_wasm_output_from_logical_html_path(logical_html_output_path)
-        .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
+    // Place per-route artifacts from the already-derived route projections. This lane never
+    // parses a logical path to recover route semantics.
+    let output_plan = plan_wasm_output_from_route(route);
     let structural_string_urls = structural_url_renderer
         .lowering_map(input.resource_table, input.reachability)
         .map_err(|error| CompilerMessages::from_error(error, string_table.clone()))?;
@@ -177,7 +174,7 @@ pub(crate) fn compile_html_module_wasm(
                 entry_fragment_html: &entry_fragment_html,
                 string_table,
                 structural_url_renderer,
-                logical_html_output_path,
+                route,
                 project_name: input.project_name,
                 document_config: input.document_config,
                 page_metadata_plan: input.page_metadata_plan,
@@ -247,7 +244,7 @@ pub(crate) fn emit_html_wasm_artifacts(
         entry_fragment_html,
         string_table,
         structural_url_renderer,
-        logical_html_output_path,
+        route,
         project_name,
         document_config,
         page_metadata_plan,
@@ -265,7 +262,7 @@ pub(crate) fn emit_html_wasm_artifacts(
         document_config,
         page_metadata_plan,
         structural_url_renderer,
-        logical_html_output_path,
+        route,
         project_name,
         entry_fragment_html,
     )
@@ -281,7 +278,7 @@ fn render_wasm_html_document(
     document_config: &HtmlDocumentConfig,
     page_metadata_plan: &HtmlPageMetadataPlan,
     structural_url_renderer: &StructuralUrlRenderer<'_>,
-    logical_html_output_path: &Path,
+    route: &CanonicalPageRoute,
     project_name: &str,
     entry_fragment_html: &str,
 ) -> Result<String, CompilerError> {
@@ -289,7 +286,7 @@ fn render_wasm_html_document(
         config: document_config,
         page_metadata: &page_metadata_plan.metadata,
         structural_url_renderer,
-        logical_html_path: logical_html_output_path,
+        route,
         project_name,
         body_html: entry_fragment_html.to_string(),
         script_html: String::from("<script src=\"./page.js\"></script>\n"),

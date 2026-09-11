@@ -53,7 +53,7 @@ pub(crate) fn start_pipeline_timing(metric: TimingMetric) -> PipelineTimingStart
     };
 
     #[cfg(test)]
-    super::runtime::record_timing_clock_read_for_test();
+    super::runtime::observe_timing_clock_read();
 
     PipelineTimingStart {
         started_at: Some(Instant::now()),

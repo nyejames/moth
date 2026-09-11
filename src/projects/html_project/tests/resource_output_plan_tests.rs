@@ -159,7 +159,7 @@ fn shared_origin_across_entries_emits_one_planned_record() {
     plan.plan_origin(
         origin,
         Some(third_span),
-        ResourceUrlContext::Stylesheet(PathBuf::from("docs/styles/main.css")),
+        ResourceUrlContext::page_document(Path::new("docs/third.html")).unwrap(),
         &mut string_table,
         ResourceUseKind::Executable,
     )

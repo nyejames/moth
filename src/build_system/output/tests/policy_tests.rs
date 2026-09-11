@@ -2,6 +2,7 @@ use super::super::output_path::parse_relative_path;
 use super::super::policy::classify_output_folder;
 use crate::build_system::output::output_path::{
     is_lossless_portable_relative_path, normalize_relative_path, output_path_component_identities,
+    percent_encode_url_segment,
 };
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
@@ -119,6 +120,20 @@ fn portable_parser_rejects_windows_ambiguous_components_on_every_host() {
             "{path:?} must be rejected before filesystem emission"
         );
     }
+}
+
+#[test]
+fn output_path_percent_encoding_preserves_unreserved_bytes_and_escapes_utf8() {
+    assert_eq!(
+        percent_encode_url_segment("AZaz09-._~"),
+        "AZaz09-._~",
+        "RFC 3986 unreserved bytes remain readable"
+    );
+    assert_eq!(
+        percent_encode_url_segment("space/%é"),
+        "space%2F%25%C3%A9",
+        "reserved and non-ASCII bytes use uppercase percent escapes"
+    );
 }
 
 #[test]

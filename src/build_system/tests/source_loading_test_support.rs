@@ -1,10 +1,25 @@
+//! Source-read instrumentation for Stage 0 tests.
+//!
+//! WHAT: wraps the raw source reader so tests can assert selected files are read exactly once.
+//! WHY: the shipping reader must stay a direct filesystem operation without test-only branches,
+//!      while discovery tests still need to observe its cache and selection contract.
+
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 static SOURCE_READ_TRACK_PREFIX_FOR_TEST: Mutex<Option<PathBuf>> = Mutex::new(None);
 static SOURCE_READ_COUNTS_BY_PATH_FOR_TEST: LazyLock<Mutex<HashMap<PathBuf, usize>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn read_source_code_for_test(file_path: &Path) -> Result<String, std::io::Error> {
+    if should_count_source_read_for_test(file_path) {
+        record_source_read_for_test(file_path);
+    }
+
+    fs::read_to_string(file_path)
+}
 
 pub(crate) fn should_count_source_read_for_test(file_path: &Path) -> bool {
     let prefix = SOURCE_READ_TRACK_PREFIX_FOR_TEST

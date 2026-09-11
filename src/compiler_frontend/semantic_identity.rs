@@ -134,7 +134,6 @@ impl ModulePrivateExecutableIdentity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(dead_code)]
 pub(crate) enum ModulePrivateExecutableCategory {
     FreeFunction,
     ReceiverMethod,
@@ -200,13 +199,11 @@ impl StablePackageIdentity {
     }
 
     /// The package origin classification.
-    #[allow(dead_code)]
     pub(crate) fn origin(&self) -> PackageOrigin {
         self.origin
     }
 
     /// The canonical package/project name spelling.
-    #[allow(dead_code)]
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
@@ -307,20 +304,17 @@ impl StableModuleOriginIdentity {
     }
 
     /// The owning stable package identity.
-    #[allow(dead_code)]
     pub(crate) fn package(&self) -> &StablePackageIdentity {
         &self.package
     }
 
     /// The canonical portable logical module path spelling (forward slashes, empty for the
     /// entry root).
-    #[allow(dead_code)]
     pub(crate) fn logical_module_path(&self) -> &str {
         &self.logical_module_path
     }
 
     /// The structural root role.
-    #[allow(dead_code)]
     pub(crate) fn role(&self) -> ModuleRootRole {
         self.role
     }
@@ -384,7 +378,6 @@ pub(crate) fn portable_relative_logical_path_from(
 /// build-local handles and absolute paths out prevents process-local indexes from leaking across
 /// module boundaries or into persistent artefacts. Identity changes when the module origin or the
 /// module-relative source file path changes, and is otherwise independent of checkout root.
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct StableOwnedSourceIdentity {
     module_origin: StableModuleOriginIdentity,
@@ -427,7 +420,6 @@ impl StableOwnedSourceIdentity {
 
     /// The canonical portable module-relative source file path spelling (forward slashes,
     /// including the root filename).
-    #[allow(dead_code)]
     pub(crate) fn relative_source_path(&self) -> &str {
         &self.relative_source_path
     }
@@ -438,7 +430,6 @@ impl StableOwnedSourceIdentity {
 /// Struct, choice and transparent alias are distinguished so changing a declaration's category
 /// changes its origin identity: a struct and a transparent alias with the same defining name in
 /// the same module are distinct exported declarations and must not share an [`OriginTypeId`].
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum OriginTypeCategory {
     Struct,
@@ -495,19 +486,16 @@ impl OriginTypeId {
     }
 
     /// The owning module origin identity.
-    #[allow(dead_code)]
     pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
         &self.module_origin
     }
 
     /// The exact defining declaration name.
-    #[allow(dead_code)]
     pub(crate) fn defining_name(&self) -> &str {
         &self.defining_name
     }
 
     /// The semantic source type category.
-    #[allow(dead_code)]
     pub(crate) fn category(&self) -> OriginTypeCategory {
         self.category
     }
@@ -565,7 +553,6 @@ impl OriginFunctionId {
     }
 
     /// The owning module origin identity.
-    #[allow(dead_code)]
     pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
         &self.module_origin
     }
@@ -618,13 +605,11 @@ impl OriginConstantId {
     }
 
     /// The owning module origin identity.
-    #[allow(dead_code)]
     pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
         &self.module_origin
     }
 
     /// The exact defining declaration name.
-    #[allow(dead_code)]
     pub(crate) fn defining_name(&self) -> &str {
         &self.defining_name
     }
@@ -656,13 +641,11 @@ impl OriginTraitId {
     }
 
     /// The owning module origin identity.
-    #[allow(dead_code)]
     pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
         &self.module_origin
     }
 
     /// The exact defining declaration name.
-    #[allow(dead_code)]
     pub(crate) fn defining_name(&self) -> &str {
         &self.defining_name
     }
@@ -686,7 +669,6 @@ pub(crate) enum OriginDeclarationId {
 
 impl OriginDeclarationId {
     /// The owning module origin identity for this declaration.
-    #[allow(dead_code)]
     pub(crate) fn module_origin(&self) -> &StableModuleOriginIdentity {
         match self {
             OriginDeclarationId::Function(function) => function.module_origin(),
@@ -750,7 +732,6 @@ impl ExportBinding {
     }
 
     /// The stable identity of the module exporting the declaration.
-    #[allow(dead_code)]
     pub(crate) fn exporting_module(&self) -> &StableModuleOriginIdentity {
         &self.exporting_module
     }

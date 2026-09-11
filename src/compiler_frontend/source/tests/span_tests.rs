@@ -7,7 +7,6 @@ use super::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, SourceSpanCapacityResource,
 };
-use std::cmp::Ordering;
 
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::headers::parse_file_headers::FileFrontendPrepareFailure;
@@ -37,8 +36,8 @@ fn installing_extended_spans_preserves_live_record_resolution() {
     let mut builder = ExtendedSpanBuilder::new();
     let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
     let extended = LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended span");
-    let empty_extended = LocalSpan::insertion_point(4 * 1024 * 1024, &mut builder)
-        .expect("extended insertion point");
+    let empty_extended =
+        LocalSpan::exact(4 * 1024 * 1024, 0, &mut builder).expect("extended zero-length span");
 
     let live_ranges = [
         inline.resolve_with(builder.resolver()),
@@ -50,12 +49,14 @@ fn installing_extended_spans_preserves_live_record_resolution() {
         .install_extended_spans(source_id, table)
         .expect("the loaded source should install its table once");
 
-    let record = database.source_record(source_id);
-    assert_eq!(inline.resolve(record), live_ranges[0]);
-    assert_eq!(extended.resolve(record), live_ranges[1]);
-    assert_eq!(empty_extended.resolve(record), live_ranges[2]);
-    assert!(!inline.is_empty(record));
-    assert!(empty_extended.is_empty(record));
+    let inline_range = SourceSpan::new(source_id, inline).byte_range(&database);
+    let extended_range = SourceSpan::new(source_id, extended).byte_range(&database);
+    let empty_extended_range = SourceSpan::new(source_id, empty_extended).byte_range(&database);
+    assert_eq!(inline_range, live_ranges[0]);
+    assert_eq!(extended_range, live_ranges[1]);
+    assert_eq!(empty_extended_range, live_ranges[2]);
+    assert!(!(inline_range.start() == inline_range.end()));
+    assert!(empty_extended_range.start() == empty_extended_range.end());
 }
 
 #[test]
@@ -75,8 +76,8 @@ fn repeated_source_preparation_preserves_earlier_extended_spans() {
     let database = sources
         .finish()
         .expect("all producers returned their builders");
-    let first = first_span.resolve(database.source_record(source_id));
-    let repeated = repeated_span.resolve(database.source_record(source_id));
+    let first = SourceSpan::new(source_id, first_span).byte_range(&database);
+    let repeated = SourceSpan::new(source_id, repeated_span).byte_range(&database);
     let snapshot = database
         .retained_text(source_id)
         .expect("retained snapshot");
@@ -181,10 +182,9 @@ fn inline_span_resolves_through_a_record_before_table_installation() {
     let inline = LocalSpan::exact(12, 8, &mut builder).expect("inline span");
     assert!(builder.is_empty());
 
-    let record = database.source_record(source_id);
-    let range = inline.resolve(record);
+    let range = SourceSpan::new(source_id, inline).byte_range(&database);
     assert_eq!((range.start(), range.end()), (12, 20));
-    assert!(!inline.is_empty(record));
+    assert!(!(range.start() == range.end()));
 }
 
 #[test]
@@ -261,9 +261,6 @@ fn compilation_root_span_resolves_only_its_exact_empty_range() {
     let root = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
     let range = root.byte_range(&database);
     assert_eq!((range.start(), range.end()), (0, 0));
-    assert_eq!(root.start(&database), 0);
-    assert_eq!(root.end(&database), 0);
-    assert!(root.contains(root, &database));
 }
 
 #[test]
@@ -273,7 +270,7 @@ fn non_empty_compilation_root_spans_fail_loudly_as_compiler_bugs() {
 
     for local in [
         LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
-        LocalSpan::insertion_point(7, &mut builder).expect("non-zero empty root span"),
+        LocalSpan::exact(7, 0, &mut builder).expect("non-zero empty root span"),
         LocalSpan::exact(5_000, 2_000, &mut builder).expect("extended root span"),
     ] {
         let span = SourceSpan::new(SourceId::COMPILATION_ROOT, local);
@@ -290,27 +287,11 @@ fn non_empty_compilation_root_spans_fail_loudly_as_compiler_bugs() {
             "the root range rejection should name the identity as a compiler bug: {message}"
         );
     }
-
-    // The rejection must come from the span contract itself, not from a record lookup accident.
-    let non_empty = SourceSpan::new(
-        SourceId::COMPILATION_ROOT,
-        LocalSpan::exact(4, 3, &mut builder).expect("non-empty inline root span"),
-    );
-    let overlap_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        non_empty.overlaps(non_empty, &database);
-    }))
-    .expect_err("a non-empty root span must fail the same way through overlaps");
-    let message = compiler_bug_panic_message(overlap_panic);
-    assert!(
-        message.contains("compilation root") && message.contains("compiler bug"),
-        "overlaps must route through the same root span contract: {message}"
-    );
 }
 
 #[test]
-fn database_span_operations_match_live_resolvers_and_reject_cross_source_pairs() {
+fn database_span_resolution_uses_each_source_extended_table() {
     let first_path = PathBuf::from("/project/first.moth");
-
     let second_path = PathBuf::from("/project/second.moth");
     let mut string_table = StringTable::new();
     let mut database = SourceDatabase::build(
@@ -336,21 +317,15 @@ fn database_span_operations_match_live_resolvers_and_reject_cross_source_pairs()
         .expect("second source text should be retained");
 
     let mut first_builder = ExtendedSpanBuilder::new();
-    let outer_local = LocalSpan::exact(5_000, 5_000, &mut first_builder).expect("outer span");
-    let inner_local = LocalSpan::exact(6_000, 10, &mut first_builder).expect("inner span");
-    let first_outer = SourceSpan::new(first_id, outer_local);
-    let first_inner = SourceSpan::new(first_id, inner_local);
-    let live_outer_range = outer_local.resolve_with(first_builder.resolver());
-    let live_inner_range = inner_local.resolve_with(first_builder.resolver());
-    let live_overlap = first_outer.overlaps_with(first_inner, first_builder.resolver_for(first_id));
-    let live_containment =
-        first_outer.contains_with(first_inner, first_builder.resolver_for(first_id));
+    let first_local = LocalSpan::exact(5_000, 5_000, &mut first_builder).expect("first span");
+    let first_span = SourceSpan::new(first_id, first_local);
+    let first_range = first_local.resolve_with(first_builder.resolver());
     let first_table = first_builder.freeze();
 
     let mut second_builder = ExtendedSpanBuilder::new();
-    let coincident_local =
-        LocalSpan::exact(5_000, 5_000, &mut second_builder).expect("coincident span");
-    let second_coincident = SourceSpan::new(second_id, coincident_local);
+    let second_local = LocalSpan::exact(7_000, 3_000, &mut second_builder).expect("second span");
+    let second_span = SourceSpan::new(second_id, second_local);
+    let second_range = second_local.resolve_with(second_builder.resolver());
     let second_table = second_builder.freeze();
 
     database
@@ -360,33 +335,8 @@ fn database_span_operations_match_live_resolvers_and_reject_cross_source_pairs()
         .install_extended_spans(second_id, second_table)
         .expect("second source should install its table");
 
-    assert_eq!(first_outer.byte_range(&database), live_outer_range);
-    assert_eq!(first_inner.byte_range(&database), live_inner_range);
-    assert_eq!(first_outer.start(&database), live_outer_range.start());
-    assert_eq!(first_outer.end(&database), live_outer_range.end());
-    assert_eq!(first_outer.overlaps(first_inner, &database), live_overlap);
-    assert_eq!(
-        first_outer.contains(first_inner, &database),
-        live_containment
-    );
-
-    let first_coincident = SourceSpan::new(first_id, outer_local);
-    assert_eq!(
-        first_coincident.byte_range(&database),
-        second_coincident.byte_range(&database)
-    );
-    assert!(!first_coincident.overlaps(second_coincident, &database));
-    assert!(!first_coincident.contains(second_coincident, &database));
-    assert!(!second_coincident.contains(first_coincident, &database));
-    let absent_source = SourceSpan::new(SourceId::from_index(99), outer_local);
-    let absent_cross_source = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        absent_source.overlaps(first_coincident, &database)
-    }));
-    assert!(
-        absent_cross_source.is_ok(),
-        "cross-source overlap must reject before source lookup"
-    );
-    assert!(!absent_cross_source.unwrap());
+    assert_eq!(first_span.byte_range(&database), first_range);
+    assert_eq!(second_span.byte_range(&database), second_range);
 }
 
 #[test]
@@ -448,32 +398,6 @@ fn largest_inline_start_and_length_encode_inline_without_spilling() {
     assert!(builder.is_empty());
     assert_eq!(range.start(), start);
     assert_eq!(range.end(), start + 1022);
-}
-
-#[test]
-fn zero_length_span_at_offset_zero_round_trips() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let span = LocalSpan::insertion_point(0, &mut builder).expect("empty span at byte 0");
-    let range = span.resolve_with(builder.resolver());
-
-    assert!(builder.is_empty());
-    assert!(span.is_empty_with(builder.resolver()));
-    assert_eq!(range.start(), 0);
-    assert_eq!(range.end(), 0);
-}
-
-#[test]
-fn zero_length_span_past_inline_start_limit_round_trips() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let offset = 4 * 1024 * 1024;
-    let span =
-        LocalSpan::insertion_point(offset, &mut builder).expect("empty span past inline start");
-    let range = span.resolve_with(builder.resolver());
-
-    assert_eq!(builder.len(), 1);
-    assert!(span.is_empty_with(builder.resolver()));
-    assert_eq!(range.start(), offset);
-    assert_eq!(range.end(), offset);
 }
 
 #[test]
@@ -663,21 +587,6 @@ fn same_source_join_keeps_the_identity_and_covers_an_extended_operand() {
 
     assert_eq!(joined.source(), source);
     assert_eq!((range.start(), range.end()), (10, 14_000));
-    assert!(joined.contains_with(inline, resolver));
-    assert!(joined.contains_with(extended, resolver));
-}
-
-#[test]
-fn cross_source_overlap_and_containment_are_false_when_byte_ranges_coincide() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let local = LocalSpan::exact(0, 10, &mut builder).expect("shared byte range");
-    let left = SourceSpan::new(SourceId::from_index(1), local);
-    let right = SourceSpan::new(SourceId::from_index(2), local);
-    let resolver = builder.resolver();
-
-    assert!(!left.overlaps_with(right, resolver));
-    assert!(!left.contains_with(right, resolver));
-    assert!(!right.contains_with(left, resolver));
 }
 
 /// A global span must never resolve through another source's extended table.
@@ -726,145 +635,6 @@ fn source_span_rejects_resolution_through_another_sources_resolver() {
         (5_000, 7_000),
         "the same-source qualified resolver must keep resolving its own table"
     );
-
-    let empty_builder = ExtendedSpanBuilder::new();
-    let second = SourceSpan::new(SourceId::from_index(2), LocalSpan::source_start());
-    let empty_foreign = empty_builder.resolver_for(SourceId::from_index(3));
-    assert!(
-        !first_span.overlaps_with(second, empty_foreign),
-        "cross-source operands still answer false without resolving"
-    );
-    assert!(
-        !first_span.contains_with(second, empty_foreign),
-        "cross-source operands still answer false without resolving"
-    );
-    assert_eq!(
-        first_span.source_order_with(second, empty_foreign),
-        Ordering::Less,
-        "cross-source operands still order by identity without resolving"
-    );
-}
-
-#[test]
-fn source_order_sorts_by_source_then_start_then_end() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let early_short = LocalSpan::exact(0, 5, &mut builder).expect("early short");
-    let early_long = LocalSpan::exact(0, 10, &mut builder).expect("early long");
-    let later = LocalSpan::exact(10, 10, &mut builder).expect("later");
-    let other_source = LocalSpan::exact(0, 1, &mut builder).expect("other source");
-
-    let mut spans = [
-        SourceSpan::new(SourceId::from_index(2), other_source),
-        SourceSpan::new(SourceId::from_index(1), later),
-        SourceSpan::new(SourceId::from_index(1), early_long),
-        SourceSpan::new(SourceId::from_index(1), early_short),
-    ];
-    let first = builder.resolver_for(SourceId::from_index(1));
-    let second = builder.resolver_for(SourceId::from_index(2));
-    spans.sort_by(|left, right| left.source_order_with(*right, first));
-
-    let resolve = |span: SourceSpan| {
-        if span.source() == SourceId::from_index(1) {
-            span.resolve_with(first)
-        } else {
-            span.resolve_with(second)
-        }
-    };
-
-    assert_eq!(
-        spans.map(|span| (span.source(), resolve(span))),
-        [
-            (SourceId::from_index(1), early_short.resolve_with(first)),
-            (SourceId::from_index(1), early_long.resolve_with(first)),
-            (SourceId::from_index(1), later.resolve_with(first)),
-            (SourceId::from_index(2), other_source.resolve_with(second)),
-        ]
-    );
-}
-
-#[test]
-fn spans_in_one_source_overlap_only_where_they_share_a_byte() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let source = SourceId::from_index(1);
-    let span = |start, length, builder: &mut ExtendedSpanBuilder| {
-        SourceSpan::new(
-            source,
-            LocalSpan::exact(start, length, builder).expect("test span"),
-        )
-    };
-
-    let first = span(0, 10, &mut builder);
-    let straddling = span(5, 10, &mut builder);
-    let adjacent = span(10, 5, &mut builder);
-    let nested = span(2, 3, &mut builder);
-    let resolver = builder.resolver_for(source);
-
-    assert!(first.overlaps_with(straddling, resolver));
-    assert!(straddling.overlaps_with(first, resolver));
-    assert!(first.overlaps_with(nested, resolver));
-    assert!(first.overlaps_with(first, resolver));
-    assert!(
-        !first.overlaps_with(adjacent, resolver),
-        "a range ending where the next begins shares no byte with it"
-    );
-}
-
-/// An insertion point sits inside a range without sharing a byte with it.
-///
-/// Overlap is the non-emptiness of the intersection, so an empty span overlaps nothing at all.
-/// Containment is the question consumers actually ask of an insertion point, and it answers yes.
-#[test]
-fn an_empty_span_is_contained_but_overlaps_nothing() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let source = SourceId::from_index(1);
-    let range = SourceSpan::new(
-        source,
-        LocalSpan::exact(0, 10, &mut builder).expect("range"),
-    );
-    let interior = SourceSpan::new(
-        source,
-        LocalSpan::insertion_point(5, &mut builder).expect("interior insertion point"),
-    );
-    let on_start = SourceSpan::new(
-        source,
-        LocalSpan::insertion_point(0, &mut builder).expect("insertion point on the start"),
-    );
-    let on_end = SourceSpan::new(
-        source,
-        LocalSpan::insertion_point(10, &mut builder).expect("insertion point on the end"),
-    );
-    let resolver = builder.resolver_for(source);
-
-    for point in [interior, on_start, on_end] {
-        assert!(!range.overlaps_with(point, resolver));
-        assert!(!point.overlaps_with(range, resolver));
-        assert!(range.contains_with(point, resolver));
-    }
-
-    assert!(!interior.overlaps_with(interior, resolver));
-    assert!(!range.is_empty_with(resolver));
-    assert!(interior.is_empty_with(resolver));
-}
-
-#[test]
-fn containment_is_directional_and_reflexive_within_one_source() {
-    let mut builder = ExtendedSpanBuilder::new();
-    let source = SourceId::from_index(1);
-    let outer = SourceSpan::new(
-        source,
-        LocalSpan::exact(0, 10, &mut builder).expect("outer"),
-    );
-    let inner = SourceSpan::new(source, LocalSpan::exact(2, 3, &mut builder).expect("inner"));
-    let straddling = SourceSpan::new(
-        source,
-        LocalSpan::exact(5, 10, &mut builder).expect("straddling"),
-    );
-    let resolver = builder.resolver_for(source);
-
-    assert!(outer.contains_with(inner, resolver));
-    assert!(!inner.contains_with(outer, resolver));
-    assert!(outer.contains_with(outer, resolver));
-    assert!(!outer.contains_with(straddling, resolver));
 }
 
 /// The cover is the minimum start and the maximum end, whichever operand each comes from.

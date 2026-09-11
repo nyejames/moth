@@ -98,13 +98,11 @@ pub(crate) mod single_source_compilation;
 mod pipeline;
 
 pub(crate) use pipeline::CompilerFrontend;
+#[cfg(test)]
+pub(crate) use pipeline::test_support as pipeline_test_support;
 pub(crate) use pipeline::{
     AstBuildRequest, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
-};
-#[cfg(test)]
-pub(crate) use pipeline::{
-    file_frontend_prepare_count_for_path_for_test, reset_file_frontend_prepare_count_for_test,
 };
 
 /// Flags change the behavior of the core `compiler_frontend` pipeline.

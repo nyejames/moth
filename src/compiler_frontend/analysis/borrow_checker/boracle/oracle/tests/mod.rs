@@ -4824,11 +4824,6 @@ impl Fixture {
             .expect("access should append an event")
     }
 
-    fn call_argument(&mut self, place: PlaceId, access: AccessKind) -> CallArgument {
-        let (_, argument) = self.call_argument_at(CallId::new(0), 0, place, access);
-        argument
-    }
-
     fn call_argument_at(
         &mut self,
         call: CallId,

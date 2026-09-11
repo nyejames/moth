@@ -7,7 +7,7 @@
 //! Alias-target reach into nominal blueprints is owned by the cross-module integration cases,
 //! because that is where a missing blueprint is observable.
 
-use super::ModuleMaterialisationPreparation;
+use super::preparation_freeze::ModuleMaterialisationPreparation;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;

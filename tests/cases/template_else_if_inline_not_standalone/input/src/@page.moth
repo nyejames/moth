@@ -1,0 +1,5 @@
+show = true
+
+[if show:
+    Then [else if false] Else
+]

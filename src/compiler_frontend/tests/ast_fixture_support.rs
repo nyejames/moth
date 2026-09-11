@@ -55,10 +55,10 @@ pub(crate) fn make_test_variable(name: InternedPath, value: Expression) -> Decla
     }
 }
 
-pub(crate) fn param(
+fn parameter(
     name: InternedPath,
     data_type: DataType,
-    id: TypeId,
+    type_id: TypeId,
     mutable: bool,
     span: Option<SourceSpan>,
 ) -> Declaration {
@@ -70,10 +70,38 @@ pub(crate) fn param(
 
     Declaration {
         id: name,
-        value: Expression::new(ExpressionKind::NoValue, span, id, data_type, value_mode),
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            span,
+            type_id,
+            data_type,
+            value_mode,
+        ),
         binding_span: None,
         config_qualifier: None,
     }
+}
+
+/// Parameter fixture entry points: use `param_with_datatype` when the diagnostic
+/// type is part of the fixture, and `param_with_type_id` when the canonical
+/// `TypeId` is all the test needs.
+pub(crate) fn param_with_datatype(
+    name: InternedPath,
+    data_type: DataType,
+    type_id: TypeId,
+    mutable: bool,
+    span: Option<SourceSpan>,
+) -> Declaration {
+    parameter(name, data_type, type_id, mutable, span)
+}
+
+pub(crate) fn param_with_type_id(
+    name: InternedPath,
+    type_id: TypeId,
+    mutable: bool,
+    span: Option<SourceSpan>,
+) -> Declaration {
+    parameter(name, DataType::Inferred, type_id, mutable, span)
 }
 
 pub(crate) fn function_node(
@@ -85,15 +113,19 @@ pub(crate) fn function_node(
     node(NodeKind::Function(name, signature, body), span)
 }
 
+pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
+    ReturnSlot {
+        value: DataType::Inferred,
+        type_id: Some(type_id),
+        reactive_template: None,
+        channel: ReturnChannel::Success,
+    }
+}
+
 pub(crate) fn fresh_success_returns(result_type_ids: Vec<TypeId>) -> Vec<ReturnSlot> {
     result_type_ids
         .into_iter()
-        .map(|type_id| ReturnSlot {
-            value: DataType::Inferred,
-            type_id: Some(type_id),
-            reactive_template: None,
-            channel: ReturnChannel::Success,
-        })
+        .map(success_return_slot)
         .collect()
 }
 
@@ -101,25 +133,49 @@ pub(crate) fn symbol(name: &str, string_table: &mut StringTable) -> InternedPath
     InternedPath::from_single_str(name, string_table)
 }
 
-/// A reference expression whose value mode is fixed to `ImmutableReference`.
-///
-/// The caller supplies the diagnostic `DataType`. Named for the mode it fixes so it cannot be
-/// confused with `type_id_fixture_support::inferred_type_reference_expr`, which fixes the
-/// `DataType` instead and lets the caller choose the mode.
-pub(crate) fn immutable_reference_expr(
+fn reference_expr(
     name: InternedPath,
     data_type: DataType,
-    id: TypeId,
+    type_id: TypeId,
     span: Option<SourceSpan>,
+    value_mode: ValueMode,
 ) -> Expression {
     Expression::reference_with_type_id(
         name,
         data_type,
-        id,
+        type_id,
         span,
-        ValueMode::ImmutableReference,
+        value_mode,
         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
     )
+}
+
+/// Reference-expression fixture entry points: use `reference_expr_with_datatype`
+/// when the diagnostic type is part of the fixture (and the reference is
+/// immutable), or `reference_expr_with_type_id` when the canonical `TypeId` is
+/// known and the value mode must be chosen by the caller.
+pub(crate) fn reference_expr_with_datatype(
+    name: InternedPath,
+    data_type: DataType,
+    type_id: TypeId,
+    span: Option<SourceSpan>,
+) -> Expression {
+    reference_expr(
+        name,
+        data_type,
+        type_id,
+        span,
+        ValueMode::ImmutableReference,
+    )
+}
+
+pub(crate) fn reference_expr_with_type_id(
+    name: InternedPath,
+    type_id: TypeId,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    reference_expr(name, DataType::Inferred, type_id, span, value_mode)
 }
 
 pub(crate) fn assignment_target(

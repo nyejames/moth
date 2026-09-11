@@ -408,7 +408,12 @@ fn aggregate_with_missing_field_source_state_is_rejected() {
 fn empty_access_states_keep_the_conservative_conflict() {
     let problem = super::loan_conflict_problem();
     let origins = super::super::OriginSolver::solve(&problem).expect("origins should solve");
-    let solution = super::super::LoanSolver::solve(&problem, &origins).expect("loans should solve");
+    let solution = super::super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("loans should solve");
 
     // The conflicting access observes no recorded generation. Old overlap treated the empty
     // set as top; the typed decision must keep that conservative conflict as unknown
@@ -432,7 +437,12 @@ fn empty_access_states_keep_the_conservative_conflict() {
 fn identity_witnesses_carry_the_exact_origin() {
     let problem = super::mixed_binding_problem();
     let origins = super::super::OriginSolver::solve(&problem).expect("origins should solve");
-    let solution = super::super::LoanSolver::solve(&problem, &origins).expect("loans should solve");
+    let solution = super::super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("loans should solve");
 
     // Identity witnesses must name the exact shared generation: the identity origin appears
     // in the access origins and the loan origins alike, never a guessed pair.
@@ -465,7 +475,12 @@ fn identity_witnesses_carry_the_exact_origin() {
 fn conservative_unknown_witnesses_name_the_exact_reason() {
     let problem = unknown_loan_witness_problem();
     let origins = super::super::OriginSolver::solve(&problem).expect("origins should solve");
-    let solution = super::super::LoanSolver::solve(&problem, &origins).expect("loans should solve");
+    let solution = super::super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("loans should solve");
 
     let conflict = solution
         .conflicts()
@@ -486,8 +501,12 @@ fn write_through_witnesses_name_the_path_join_reason() {
     let problem = write_through_witness_problem();
     let origins =
         super::super::OriginSolver::solve(&problem).expect("write-through origins should solve");
-    let solution = super::super::LoanSolver::solve(&problem, &origins)
-        .expect("write-through loans should solve");
+    let solution = super::super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("write-through loans should solve");
 
     let conflict = solution
         .conflicts()

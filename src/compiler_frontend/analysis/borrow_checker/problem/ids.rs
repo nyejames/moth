@@ -18,6 +18,9 @@ macro_rules! define_problem_id {
                 self.0
             }
 
+            // Not every ID space indexes a dense row vector in every build configuration, so
+            // this accessor may go unused without meaning the ID space is dead.
+            #[allow(dead_code)]
             pub(crate) const fn index(self) -> usize {
                 self.0 as usize
             }

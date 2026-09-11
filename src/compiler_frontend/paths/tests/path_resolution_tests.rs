@@ -81,11 +81,12 @@ impl TestHarness {
         fs::write(entry_root.join("index.moth"), b"").unwrap();
         fs::write(project_root.join("docs/readme.txt"), b"").unwrap();
 
-        let resolver = ProjectPathResolver::new(
+        let resolver = ProjectPathResolver::new_with_module_roots(
             project_root.clone(),
             entry_root,
             prepared_source_package_roots(source_packages),
             source_file_kinds,
+            ModuleRootTable::empty(),
         )
         .expect("resolver creation should succeed");
 
@@ -163,11 +164,12 @@ fn source_package_dependency_resolves_to_package_root() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -212,11 +214,12 @@ fn source_package_prefix_takes_priority_over_entry_root() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -370,11 +373,12 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &registry,
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -412,11 +416,12 @@ fn canonicalized_source_package_file_resolves_to_package_prefixed_logical_path()
     let mut source_packages = SourcePackageRegistry::new();
     source_packages.register_filesystem_root("html", package_root.clone(), PackageOrigin::Builder);
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root,
         entry_root,
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -461,11 +466,12 @@ fn package_scan_root_name_is_not_package_prefix() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -506,11 +512,12 @@ fn package_direct_child_is_package_prefix() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -543,11 +550,12 @@ fn entry_root_dependency_fallback_success() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -591,11 +599,12 @@ fn source_package_prefix_wins_consistently() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -634,11 +643,12 @@ fn dependency_dotdot_rejected() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -671,11 +681,12 @@ fn missing_dependency_target_is_typed_diagnostic() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -710,11 +721,12 @@ fn dependency_escape_project_root_rejected() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -764,11 +776,12 @@ fn dependency_escape_package_root_rejected() {
         PackageOrigin::Builder,
     );
 
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -811,11 +824,12 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -887,11 +901,12 @@ fn dependency_case_sensitive_symbol_mismatch_rejected() {
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
     let source_packages = SourcePackageRegistry::new();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         entry_root.clone(),
         prepared_source_package_roots(&source_packages),
         &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver creation should succeed");
 
@@ -1061,11 +1076,12 @@ fn resolver_with_prepared_source_package_roots(roots: &[(&str, &str)]) -> Projec
         )
     });
 
-    ProjectPathResolver::new(
+    ProjectPathResolver::new_with_module_roots(
         PathBuf::from("/project"),
         PathBuf::from("/project/src"),
         PreparedSourcePackageRoots::from_entries(entries),
         &SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
     )
     .expect("resolver should build")
 }

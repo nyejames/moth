@@ -39,7 +39,7 @@ Empirical checks ran through `moth check` on minimal projects: tight `<`/`>` com
 
 ### AUD-0005-F01: Tight `<`/`>` spacing suppression accepts binary comparisons that violate the operator spacing contract
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -84,9 +84,19 @@ Fix touches only the two predicates and their call sites in `lexer.rs`. Preserve
 
 The missing dedicated parser rejection of explicit call-site type application (`identity<Int>(42)` reaching name resolution) is a Stage 4/AST concern outside this area; not filed here to avoid a second area in one run.
 
+#### Triage record
+
+2026-09-11 — **Accepted and resolved.** Reproduced on `fix-open-audit-findings`: `a<b` and `a<(b)`
+still reported `MOTH-SYNTAX-0031`; `a<B` compiled with only a naming warning; `a>(b)` compiled
+clean. Deleted `less_than_is_generic_angle_start` and `greater_than_is_generic_angle_end`; kept
+template-tag predicates. Tight `a<B`, `a<(b)`, `a>(b)` and `identity<Int>(42)` now report
+`MOTH-SYNTAX-0031`. `generic_explicit_call_angle_syntax_rejected` uses spaced
+`identity < Int > (42)` so `MOTH-RULE-0057` remains reachable. Phase audit required one F03
+follow-up (signed dispatch); F01 itself was clean. `just validate` passed.
+
 ### AUD-0005-F02: Consecutive bare-CR newlines are consumed as horizontal whitespace, drifting line and column tracking
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -123,9 +133,20 @@ Fix is local to `lexer.rs` whitespace consumption. Preserve: single-`\r` and CRL
 
 Linked Tests finding: no tokenizer test covers consecutive bare-CR newlines; `lexer_tests.rs:216-258` covers only single newlines per literal.
 
+#### Triage record
+
+2026-09-11 — **Closed as superseded.** The filed mechanism no longer exists: `TokenStream::next`
+advances only the UTF-8 byte cursor, and diagnostic line/column resolution uses
+`source::line_index::line_start_offsets`, which treats every bare CR not followed by LF as a line
+boundary. Empirical `moth check --terse` of `a = 1\\n\\nzzzz` and `a = 1\\r\\rzzzz` both report
+`MOTH-RULE-0031` at `@page.moth:3:5`. Consecutive CR collapse into one `Newline` token, matching LF
+runs. The suggested `consume_all_whitespace` line-tracking change must not be applied. A stale
+`newline_handling.rs` comment still claims `TokenStream::next` owns line and column; that comment is
+in-scope for the tokenizer correction.
+
 ### AUD-0005-F03 (linked, Diagnostics lane): Unicode numeric characters are diagnosed as `_` separator errors
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Diagnostics` (linked finding; recorded without Diagnostics coverage - Correctness run)
 - Area: `frontend.tokenizer` dispatch / shared numeric grammar boundary
 
@@ -160,6 +181,14 @@ Legality must not change: the input is rejected today and must stay rejected. Pr
 #### Linked findings
 
 None.
+
+#### Triage record
+
+2026-09-11 — **Accepted and resolved.** Unsigned dispatch now uses `is_ascii_digit()`. A phase
+audit found the signed `-` peek still used `is_numeric()`; that site now matches, and no
+`is_numeric()` remains in the tokenizer. `٣`, `½`, `-٣` and `-½` report `MOTH-SYNTAX-0007`.
+Genuine `_` separator mistakes still use `MOTH-SYNTAX-0008`. Focused verification of the signed
+path returned clean. `just validate` passed.
 
 ## Checked and clean
 

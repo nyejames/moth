@@ -51,7 +51,7 @@ Executed evidence (throwaway fixtures under `tmp/`, debug binary):
 
 ### AUD-0006-F01: A user-authored root-level `start` function reaches the compiler-invariant lane and is reported as a compiler bug
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Correctness`
 
 #### Evidence
@@ -140,9 +140,28 @@ Bounded to reserved-name validation plus its diagnostic identity. Preserve: the 
 
 AUD-0006-F06 (Tests lane): the only existing authored-`start` fixture cannot reach this path.
 
+#### Triage record
+
+2026-09-11 — **Accepted.** Reproduced: a root-level `start ||:` with a valid body still reports
+`MOTH-INFRA-0001` / Compiler Bug. Authorised fix: `validate_declared_name` rejects an authored
+declaration named `IMPLICIT_START_FUNC_NAME` only when `FileRole` is `ActiveModuleRoot`; skip
+`HeaderKind::StartFunction`; emit `ReservedNameCollision` (`MOTH-RULE-0039`) with a new
+`ReservedNameOwner` variant for the implicit start, not `ReservedBuiltinName`. Preserve helper-file
+legality and the `start ~= 1` / `start = 1` diagnostics. Delete the `declaration_table.rs`
+authored-start shadow exception if header rejection makes it unreachable. Add the valid-body
+`tests/cases/` fixture required by F06. Compare resolved name text; do not plumb `CompilerSymbolIds`.
+
+2026-09-11 — **Accepted and resolved.** Active-root authored `start` now reports `MOTH-RULE-0039`
+(`ReservedNameOwner::ImplicitStart`, "compiler-owned entry point") from `validate_declared_name`.
+`HeaderKind::StartFunction` is skipped. Helper-file `start` remains legal. `start ~= 1` stays
+`MOTH-RULE-0038` and `start = 1` stays `MOTH-RULE-0044`. The `this_local_declaration_error`
+wrapper was renamed to `example` so it still reports exactly `MOTH-RULE-0040`. The unread
+`CompilerOwnedDeclaration.kind` field was deleted with `CompilerOwnedDeclarationKind`.
+`just validate` passed. Phase audit returned clean.
+
 ### AUD-0006-F02 (linked, Diagnostics lane): ASCII-only naming predicates warn on legal Unicode identifiers, telling the user to use the convention they already used
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Diagnostics`
 
 #### Evidence
@@ -218,9 +237,22 @@ Bounded to the three naming predicates and, if the contract needs recording, a l
 
 None. Independent of F01.
 
+#### Triage record
+
+2026-09-11 — **Accepted.** Reproduced: `café` and `naïve_value` still warn `MOTH-RULE-0021` asking
+for `lowercase_with_underscores` they already satisfy. No canonical ASCII identifier restriction
+exists; the tokenizer already accepts Unicode identifiers. Authorised fix: align the three naming
+predicates with Unicode `is_lowercase` / `is_uppercase` / `is_alphanumeric`, keep camelCase
+rejecting underscores, preserve `MOTH-RULE-0021` and all current ASCII outcomes.
+
+2026-09-11 — **Accepted and resolved.** The three naming predicates now use Unicode letter case
+and `is_alphanumeric`, still reject underscores in camelCase, and keep ASCII outcomes.
+`café` / `naïve_value` no longer warn. `BuildInputName` shares the snake-case helper, so `café`
+is now a valid build-input name. `just validate` passed.
+
 ### AUD-0006-F03 (linked, Redundancy lane): `StringIdRemap::has_non_identity_after` has no production caller and its only consumers are the tests that pin it
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -259,9 +291,17 @@ Preserve `is_identity` and the cached `is_identity` field it reads, `StringIdRem
 
 None.
 
+#### Triage record
+
+2026-09-11 — **Accepted.** No production caller. Delete the method and the two assertions that only
+exercise it. Keep `is_identity` and the surrounding fork/merge assertions.
+
+2026-09-11 — **Accepted and resolved.** `has_non_identity_after` and its two pinning assertions
+were deleted. `is_identity` and the surrounding fork/merge tests remain. `just validate` passed.
+
 ### AUD-0006-F04 (linked, Redundancy lane): `path_interner/frozen.rs` defines a private duplicate of the crate's `StringTableResolver` trait
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -313,9 +353,18 @@ Preserve `render_portable` and `render_portable_frozen` signatures and their pan
 
 None.
 
+#### Triage record
+
+2026-09-11 — **Accepted.** Import the crate `StringTableResolver` and delete the private trait and
+its two impls. Keep `render_portable_with` generic.
+
+2026-09-11 — **Accepted and resolved.** `frozen.rs` now imports the crate `StringTableResolver`.
+The private duplicate trait and impls are gone. `render_portable_with` stays generic.
+`just validate` passed.
+
 ### AUD-0006-F05 (linked, Redundancy lane): the typed `CompilerSymbolIds` accessors have no production consumer
 
-- State: `candidate`
+- State: `fixed`
 - Kind: `Redundancy`
 
 #### Evidence
@@ -368,9 +417,20 @@ Preserve the preseed call at `build.rs:1890`, the exact interning order in `Comp
 
 AUD-0006-F06 shares the observation that no harness test drives the production preseeded table.
 
+#### Triage record
+
+2026-09-11 — **Accepted.** No production consumer and no plan slice names one. Reduce the API to
+preseeding a table in fixed order: delete `CompilerSymbolIds` and `PreseededStringTable`, return
+`StringTable` from `preseeded_table`, keep intern order, and drop the independent-table stability
+test that only pinned the unused IDs. Do not keep the struct as a home for sniffer `intern("this")`
+consolidation.
+
+2026-09-11 — **Accepted and resolved.** `preseeded_table` returns `StringTable`. `CompilerSymbolIds`
+and `PreseededStringTable` are gone. Intern order is unchanged. `just validate` passed.
+
 ### AUD-0006-F06 (linked, Tests lane): no Rust harness test drives the frontend with a preseeded string table, and the only authored-`start` fixture cannot reach F01
 
-- State: `candidate`
+- State: `closed`
 - Kind: `Tests`
 
 #### Evidence
@@ -410,6 +470,13 @@ Preserve every existing assertion; if preseeding shifts an asserted `StringId` v
 #### Linked findings
 
 AUD-0006-F01 (the untested path), AUD-0006-F05 (the unconsumed preseed invariant).
+
+#### Triage record
+
+2026-09-11 — **Split.** The missing authored-`start` valid-body fixture is accepted as part of F01.
+The proposed rewrite of ~51 `compile_project_frontend` harness sites to `preseeded_table` is
+**rejected**: those tests have no numeric `StringId` assertions, `tests/cases/` already runs
+production preseeding, and `compiler_symbols_tests` already pin the preseed prefix.
 
 ## Checked and clean
 

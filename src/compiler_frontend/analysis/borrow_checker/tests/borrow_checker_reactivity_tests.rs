@@ -33,14 +33,14 @@ use crate::compiler_frontend::public_call_summary::{
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    assignment_target, function_node, make_test_variable, node, param_with_type_id,
+    reference_expr_with_datatype, symbol,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::assert_invalid_mutable_access_reason;
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
-use crate::compiler_frontend::tests::type_id_fixture_support::param_with_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_frontend::{external_packages::CallTarget, hir::reactivity::ReactiveSourceId};
 
@@ -144,7 +144,7 @@ fn reactive_parameter_summary_retains_subscription_without_transfer() {
             ),
             node(
                 NodeKind::Return(vec![
-                    immutable_reference_expr(
+                    reference_expr_with_datatype(
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
@@ -252,7 +252,7 @@ fn reactive_subscription_followed_by_mutation_is_valid_and_dirtying() {
             ),
             node(
                 NodeKind::PushStartRuntimeFragment(
-                    immutable_reference_expr(
+                    reference_expr_with_datatype(
                         view_path,
                         DataType::StringSlice,
                         builtin_type_ids::STRING,
@@ -338,7 +338,7 @@ fn mutable_call_argument_records_reactive_invalidation() {
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
                     mutate_path,
                     vec![CallArgument::positional(
-                        immutable_reference_expr(
+                        reference_expr_with_datatype(
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,
@@ -451,7 +451,7 @@ fn reactive_source_shared_optional_transfer_falls_back_to_read() {
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
                     inspect_path,
                     vec![CallArgument::positional(
-                        immutable_reference_expr(
+                        reference_expr_with_datatype(
                             count_path.clone(),
                             DataType::Int,
                             builtin_type_ids::INT,

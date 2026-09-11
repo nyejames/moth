@@ -544,7 +544,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         project_root.clone(),
-        PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &source_file_kinds,
         ModuleRootTable::from_records(vec![ModuleRootRecord::new(
             project_root.clone(),
@@ -767,7 +767,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         project_root.clone(),
         project_root.clone(),
-        PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &SourceFileKindRegistry::new(),
         ModuleRootTable::from_records(vec![ModuleRootRecord::new(
             project_root,

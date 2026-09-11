@@ -14,18 +14,19 @@ use crate::compiler_frontend::compiler_messages::{
     ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
     InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
-    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidLoopHeaderReason, InvalidMapLiteralReason,
-    InvalidMapTypeReason, InvalidMatchArmReason, InvalidMutableAccessReason,
-    InvalidPageMetadataReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitConformanceReason,
+    InvalidExternalModuleReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
+    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
+    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
+    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
+    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    LegacyDependencyClauseReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
-    NumberLiteralErrorReason, OperatorOperandPosition, PathKind, ProjectContextEscapeReason,
-    RangeOperandKind, RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind,
-    TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, NamingConvention, NumberLiteralErrorReason,
+    OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
+    RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -370,17 +371,9 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn invalid_moth_template_api_scope_item(
-        path: InternedPath,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Import(ImportDiagnosticKind::InvalidMothTemplateApiScopeItem),
-            span,
-            DiagnosticPayload::InvalidMothTemplateApiScopeItem { path },
-        )
-    }
-
+    // The compiler-source-token-and-diagnostic-data-layout plan retains the direct-template
+    // source boundary. Its current consumer is the test-gated Moth-template input service.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn moth_template_inputs_share_no_common_ancestor(
         first_path: InternedPath,
         second_path: InternedPath,
@@ -396,6 +389,9 @@ impl CompilerDiagnostic {
         )
     }
 
+    // The compiler-source-token-and-diagnostic-data-layout plan retains the direct-template
+    // source boundary. Its current consumer is the test-gated Moth-template input service.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn duplicate_moth_template_input_path(
         path: InternedPath,
         first_span: Option<SourceSpan>,
@@ -423,13 +419,13 @@ impl CompilerDiagnostic {
 
     pub(crate) fn invalid_external_module(
         path: InternedPath,
-        message: StringId,
+        reason: InvalidExternalModuleReason,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Import(ImportDiagnosticKind::InvalidExternalModule),
             span,
-            DiagnosticPayload::InvalidExternalModule { path, message },
+            DiagnosticPayload::InvalidExternalModule { path, reason },
         )
     }
 
@@ -784,21 +780,16 @@ impl CompilerDiagnostic {
         )
     }
 
-    pub(crate) fn malformed_css_template(message: StringId, span: Option<SourceSpan>) -> Self {
+    pub(crate) fn malformed_template(
+        kind: SyntaxDiagnosticKind,
+        reason: MalformedTemplateReason,
+        span: Option<SourceSpan>,
+    ) -> Self {
         Self::with_severity(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedCssTemplate),
+            DiagnosticKind::Syntax(kind),
             DiagnosticSeverity::Warning,
             span,
-            DiagnosticPayload::MalformedTemplate { message },
-        )
-    }
-
-    pub(crate) fn malformed_html_template(message: StringId, span: Option<SourceSpan>) -> Self {
-        Self::with_severity(
-            DiagnosticKind::Syntax(SyntaxDiagnosticKind::MalformedHtmlTemplate),
-            DiagnosticSeverity::Warning,
-            span,
-            DiagnosticPayload::MalformedTemplate { message },
+            DiagnosticPayload::MalformedTemplate { reason },
         )
     }
 
@@ -1522,7 +1513,7 @@ impl CompilerDiagnostic {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::ReservedBuiltinName),
             span,
-            DiagnosticPayload::UnusedName { name },
+            DiagnosticPayload::ReservedBuiltinName { name },
         )
     }
 

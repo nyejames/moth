@@ -8,7 +8,7 @@
 use super::builder::PathNode;
 use super::id::PathId;
 use crate::compiler_frontend::symbols::string_interning::{
-    FrozenStringTable, StringId, StringTable,
+    FrozenStringTable, StringId, StringTable, StringTableResolver,
 };
 
 /// Immutable path trie storage shared by the mutable builder and frozen readers.
@@ -139,21 +139,5 @@ impl PathTable {
             rendered.push_str(string_table.resolve(*component));
         }
         rendered
-    }
-}
-
-trait StringTableResolver {
-    fn resolve(&self, id: StringId) -> &str;
-}
-
-impl StringTableResolver for StringTable {
-    fn resolve(&self, id: StringId) -> &str {
-        StringTable::resolve(self, id)
-    }
-}
-
-impl StringTableResolver for FrozenStringTable {
-    fn resolve(&self, id: StringId) -> &str {
-        FrozenStringTable::resolve(self, id)
     }
 }

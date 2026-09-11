@@ -37,6 +37,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::value_mode::ValueMode;
 
+use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
+
 // ---------------------------------------------------------------------------
 // Choice definition helper used by build_ast_with_choices
 // ---------------------------------------------------------------------------
@@ -50,17 +52,6 @@ pub(crate) struct HirTestChoiceDefinition {
 // Return-slot helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) use crate::compiler_frontend::tests::ast_fixture_support::fresh_success_returns;
-
-pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
-    ReturnSlot {
-        value: DataType::Inferred,
-        type_id: Some(type_id),
-        reactive_template: None,
-        channel: ReturnChannel::Success,
-    }
-}
-
 pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
         value: DataType::Inferred,
@@ -73,40 +64,6 @@ pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
 // ---------------------------------------------------------------------------
 // Parameter / declaration helpers
 // ---------------------------------------------------------------------------
-pub(crate) fn param_with_type_id(
-    name: InternedPath,
-    type_id: TypeId,
-    mutable: bool,
-    span: Option<SourceSpan>,
-) -> Declaration {
-    param_declaration(name, type_id, mutable, span)
-}
-
-pub(crate) fn param_declaration(
-    name: InternedPath,
-    type_id: TypeId,
-    mutable: bool,
-    span: Option<SourceSpan>,
-) -> Declaration {
-    let value_mode = if mutable {
-        ValueMode::MutableOwned
-    } else {
-        ValueMode::ImmutableOwned
-    };
-
-    Declaration {
-        id: name,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            span,
-            type_id,
-            DataType::Inferred,
-            value_mode,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    }
-}
 
 pub(crate) fn loop_binding_with_type_id(
     name: &str,
@@ -124,26 +81,6 @@ pub(crate) fn loop_binding_with_type_id(
 // ---------------------------------------------------------------------------
 // Expression helpers
 // ---------------------------------------------------------------------------
-
-/// A reference expression whose diagnostic type is fixed to `DataType::Inferred`.
-///
-/// The caller supplies the `ValueMode`. Named for the type it fixes so it cannot be confused
-/// with `ast_fixture_support::immutable_reference_expr`, which fixes the mode instead.
-pub(crate) fn inferred_type_reference_expr(
-    name: InternedPath,
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-    value_mode: ValueMode,
-) -> Expression {
-    Expression::reference_with_type_id(
-        name,
-        DataType::Inferred,
-        type_id,
-        span,
-        value_mode,
-        ConstRecordState::RuntimeValue,
-    )
-}
 
 pub(crate) fn const_record_reference_expr(
     name: InternedPath,

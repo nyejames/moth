@@ -1378,22 +1378,6 @@ impl TypeEnvironment {
     //  Queries
     // --------------------------------------------------------
 
-    /// Test-only query for canonical numeric classification fixtures.
-    ///
-    /// Decimal is intentionally excluded: it is seeded in the environment to keep
-    /// stable builtin TypeId layout, but it is not an authorable or operator-active
-    /// numeric type in the Alpha surface.
-    #[cfg(test)]
-    pub fn is_numeric(&self, id: TypeId) -> bool {
-        matches!(
-            self.get(id),
-            Some(TypeDefinition::Builtin(builtin)) if matches!(
-                builtin.key,
-                BuiltinTypeKey::Int | BuiltinTypeKey::Float
-            )
-        )
-    }
-
     /// Returns true if the type is a collection.
     pub fn is_collection(&self, id: TypeId) -> bool {
         self.collection_shape(id).is_some()
@@ -1458,18 +1442,6 @@ impl TypeEnvironment {
     /// Returns true if the type is an ordered map.
     pub fn is_map_type(&self, id: TypeId) -> bool {
         self.map_shape(id).is_some()
-    }
-
-    /// Test-only query for a canonical map key type.
-    #[cfg(test)]
-    pub fn map_key_type(&self, id: TypeId) -> Option<TypeId> {
-        self.map_shape(id).map(|shape| shape.key_type)
-    }
-
-    /// Test-only query for a canonical map value type.
-    #[cfg(test)]
-    pub fn map_value_type(&self, id: TypeId) -> Option<TypeId> {
-        self.map_shape(id).map(|shape| shape.value_type)
     }
 
     /// Returns the full shape of a map type, if this type is a map.
@@ -1745,21 +1717,6 @@ impl TypeEnvironment {
         }
 
         variants
-    }
-
-    /// Returns one borrowed choice variant for environment fixtures.
-    ///
-    /// WHAT: centralizes direct variant lookup over base and generic choice
-    /// instances so callers do not need a clone-returning query surface.
-    #[cfg(test)]
-    pub fn variant_for(
-        &self,
-        type_id: TypeId,
-        variant_name: StringId,
-    ) -> Option<&ChoiceVariantDefinition> {
-        self.variants_for(type_id)?
-            .iter()
-            .find(|variant| variant.name == variant_name)
     }
 
     /// Returns true if the type is a const record struct.

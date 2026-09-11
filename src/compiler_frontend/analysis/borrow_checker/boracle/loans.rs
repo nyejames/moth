@@ -5,10 +5,6 @@
 //! WHY: legality depends on the capability and represented value lineage, not on binding names or
 //! lexical visibility alone.
 
-// Some research-facing rows are not printed by every current dump. Keep the complete typed
-// result surface warning-free as future investigation queries are added.
-#![allow(dead_code)]
-
 use super::super::problem::{
     AccessKind, BlockId, BorrowProblem, Event, EventId, EventKind, Loan, LoanId, PlaceId,
     PlaceOverlap, PointId, UseId, UseKind, ValueOriginId,
@@ -73,6 +69,7 @@ impl LoanSolution {
         &self.loans
     }
 
+    #[cfg(test)]
     pub(crate) fn decisions(&self) -> &[AccessDecision] {
         &self.decisions
     }
@@ -96,13 +93,6 @@ pub(crate) enum ExclusiveLoanLiveness {
 }
 
 impl LoanSolver {
-    pub(crate) fn solve(
-        problem: &BorrowProblem,
-        origins: &OriginSolution,
-    ) -> Result<LoanSolution, CompilerError> {
-        Self::solve_with_liveness(problem, origins, ExclusiveLoanLiveness::Conservative)
-    }
-
     pub(crate) fn solve_with_liveness(
         problem: &BorrowProblem,
         origins: &OriginSolution,
@@ -243,10 +233,10 @@ fn event_accesses(
         | EventKind::ExclusiveAliasFromPlace { source, .. }
             if origins.is_initial_alias_event(event.id) =>
         {
+            // Issuing a mutable alias is itself an exclusive access to the represented
+            // source. The later alias loan describes the capability; this event checks that
+            // issuance does not overlap an already-live loan.
             Ok(vec![AccessFact {
-                // Issuing a mutable alias is itself an exclusive access to the represented
-                // source. The later alias loan describes the capability; this event checks that
-                // issuance does not overlap an already-live loan.
                 use_id: None,
                 place: *source,
                 kind: AccessKind::Exclusive,
@@ -975,14 +965,8 @@ impl EventGraph {
         origins_for_access(problem, origins, event.id, access.place)
     }
 
-    fn next_event(&self, event: EventId) -> Option<EventId> {
-        let (block, index) = self.event_location.get(&event).copied()?;
-        self.events_by_block
-            .get(&block)
-            .and_then(|events| events.get(index + 1))
-            .copied()
-    }
-
+    // LEAVE-LOCAL: counterpart is boracle/oracle/conflicts.rs:31 exercise_capabilities.
+    // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
     fn loan_live_at_event(
         &self,
         problem: &BorrowProblem,

@@ -7,17 +7,20 @@
 
 use super::calls;
 use super::conflicts;
+use super::state::CapabilitySource;
 use super::state::{
-    CapabilitySource, DefinitionEventKind, DefinitionRole, DefinitionTransition, OracleState,
-    PlaceIndex, RuntimeAccessTarget, RuntimePlaceState,
+    DefinitionEventKind, DefinitionRole, DefinitionTransition, OracleState, PlaceIndex,
+    RuntimeAccessTarget, RuntimePlaceState,
 };
 use super::traces::{RuntimeConflictWitness, TraceAccess, TraceBuilder};
 use super::{OracleBounds, OracleLimitReason};
+use crate::compiler_frontend::analysis::borrow_checker::problem::RebindValue;
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, AggregateField, BlockId, BorrowProblem, Call, CallId, CfgBlock, Event, EventId,
-    EventKind, Loan, LoanId, OriginKind, Place, PlaceId, PointId, ProgramPoint, RebindValue,
-    TerminatorEventKind, Use, UseId, ValueOrigin, ValueOriginId,
+    EventKind, OriginKind, Place, PlaceId, TerminatorEventKind, Use, UseId, ValueOrigin,
+    ValueOriginId,
 };
+use crate::compiler_frontend::analysis::borrow_checker::problem::{Loan, LoanId};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -361,6 +364,8 @@ pub(super) fn finish_definition_transition(
 ///
 /// Write-through definitions still validate their ignored inputs, but resolving those inputs
 /// would create generations and could make an otherwise allocation-free event inconclusive.
+// LEAVE-LOCAL: independent static place-ancestor prefix logic is at boracle/origins.rs:1499.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(super) fn is_place_available_without_materialising(
     problem: &BorrowProblem,
     state: &OracleState,
@@ -1379,23 +1384,6 @@ fn require_event(problem: &BorrowProblem, event: EventId) -> Result<&Event, Comp
         return Err(oracle_error(format!(
             "event index {:?} names {:?}",
             event, row.id
-        )));
-    }
-    Ok(row)
-}
-
-pub(super) fn require_point(
-    problem: &BorrowProblem,
-    point: PointId,
-) -> Result<&ProgramPoint, CompilerError> {
-    let row = problem
-        .points()
-        .get(point.index())
-        .ok_or_else(|| oracle_error(format!("Boracle oracle cannot locate point {:?}", point)))?;
-    if row.id != point {
-        return Err(oracle_error(format!(
-            "point index {:?} names {:?}",
-            point, row.id
         )));
     }
     Ok(row)

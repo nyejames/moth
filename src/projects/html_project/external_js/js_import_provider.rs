@@ -12,8 +12,10 @@ use crate::builder_surface::external_import_providers::provider::{
     ExternalImportProviderKind, ExternalImportRequest, ResolvedExternalImport,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticSeverity, InvalidExternalModuleReason,
+};
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::interned_path::{InternedPath, NonUtf8PathComponent};
@@ -185,14 +187,10 @@ fn reject_receiver_methods_in_project_local_js(
     let path = js_source_path.clone();
 
     for receiver_method in &parsed.receiver_methods {
-        let message = format!(
-            "JS module signature for '{}' uses a 'this' receiver parameter. Project-local JS imports must expose free functions and opaque types only.",
-            receiver_method.moth_name
-        );
-        let message_id = string_table.intern(&message);
+        let moth_name = string_table.intern(&receiver_method.moth_name);
         diagnostics.push(CompilerDiagnostic::invalid_external_module(
             path.clone(),
-            message_id,
+            InvalidExternalModuleReason::ReceiverMethod { moth_name },
             None,
         ));
     }
@@ -213,10 +211,10 @@ fn convert_js_parser_diagnostics(
     let path = js_source_path.clone();
 
     for parser_diagnostic in parser_diagnostics {
-        let message_id = string_table.intern(&parser_diagnostic.message);
+        let parser_detail = string_table.intern(&parser_diagnostic.message);
         diagnostics.push(CompilerDiagnostic::invalid_external_module(
             path.clone(),
-            message_id,
+            InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
             None,
         ));
     }

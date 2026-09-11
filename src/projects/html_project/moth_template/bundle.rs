@@ -29,6 +29,7 @@ use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
@@ -85,11 +86,12 @@ pub(super) fn prepare_file_value_bundle(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     let source_file_kinds = recognised_source_file_kinds();
-    let path_resolver = ProjectPathResolver::new(
+    let path_resolver = ProjectPathResolver::new_with_module_roots(
         module_root.clone(),
         module_root.clone(),
-        PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &source_file_kinds,
+        ModuleRootTable::empty(),
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 

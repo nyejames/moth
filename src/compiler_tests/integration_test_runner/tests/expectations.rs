@@ -379,7 +379,7 @@ fn structured_diagnostic_assertions_are_failure_only() {
 fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
     let (_root, case_root) = write_fixture(
         "exact_warning_codes",
-        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\n",
+        "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0021\"]\n",
     );
 
     let cases = load_canonical_case_specs(&case_root, None)
@@ -390,7 +390,7 @@ fn exact_warning_codes_are_retained_as_a_typed_multiset_contract() {
     assert_eq!(
         expectation.warnings,
         WarningExpectation::Exact(ExactWarningExpectation {
-            expected_codes: vec!["MOTH-RULE-0022".to_owned(), "MOTH-RULE-0010".to_owned(),],
+            expected_codes: vec!["MOTH-RULE-0022".to_owned(), "MOTH-RULE-0021".to_owned(),],
         })
     );
 }
@@ -444,11 +444,11 @@ fn removed_warning_count_spelling_is_rejected() {
     let cases = [
         (
             "backend",
-            "[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_count = 1\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
+            "[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_count = 1\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0021\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
         ),
         (
             "top_level",
-            "warning_count = 1\n[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0010\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
+            "warning_count = 1\n[backends.html]\nmode = \"failure\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\", \"MOTH-RULE-0021\"]\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
         ),
     ];
 

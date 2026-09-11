@@ -258,9 +258,9 @@ fn unknown_call_result_returns_unknown_overlap_evidence() {
 }
 
 #[test]
-fn relation_rows_and_debug_dumps_are_deterministic() {
-    // Invariant: construction canonicalises map/set input, so row order and debug output do not
-    // depend on extraction or fixture iteration order.
+fn relation_rows_are_deterministic() {
+    // Invariant: construction canonicalises map/set input, so row order does not depend on
+    // extraction or fixture iteration order.
     let rows = [
         OriginRelation::proven_disjoint(origin(1), origin(2), DisjointReason::DistinctFixedIndices),
         OriginRelation::projection(origin(0), origin(1), ProjectionElem::Field(0)),
@@ -270,21 +270,6 @@ fn relation_rows_and_debug_dumps_are_deterministic() {
     let second = relation_table([fresh(1), fresh(2), fresh(0)], [rows[2], rows[0], rows[1]]);
 
     assert_eq!(first.rows(), second.rows());
-    assert_eq!(first.debug_dump(), second.debug_dump());
-    assert_eq!(
-        first.debug_dump(),
-        concat!(
-            "origin-registrations:\n",
-            "  Fresh(ValueOriginId(0))\n",
-            "  Fresh(ValueOriginId(1))\n",
-            "  Fresh(ValueOriginId(2))\n",
-            "mixed-generation-sets:\n",
-            "relations:\n",
-            "  OriginRelation { left: ValueOriginId(0), right: ValueOriginId(1), kind: Projection { projection: Field(0) }, evidence: Projection { source: ValueOriginId(0), derived: ValueOriginId(1), projection: Field(0) } }\n",
-            "  OriginRelation { left: ValueOriginId(0), right: ValueOriginId(2), kind: CopyCorrespondence { copy_graph: CopyGraphId(3) }, evidence: CopyCorrespondence { source: ValueOriginId(0), result: ValueOriginId(2), copy_graph: CopyGraphId(3) } }\n",
-            "  OriginRelation { left: ValueOriginId(1), right: ValueOriginId(2), kind: ProvenDisjoint { reason: DistinctFixedIndices }, evidence: ProvenDisjoint { left: ValueOriginId(1), right: ValueOriginId(2), reason: DistinctFixedIndices } }\n",
-        )
-    );
 }
 
 #[test]

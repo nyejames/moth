@@ -23,9 +23,7 @@ use crate::compiler_frontend::build_config::{
 };
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, RuleDiagnosticKind,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
 use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::{
@@ -1080,12 +1078,8 @@ fn successful_build_with_warnings_exposes_warning_messages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let mut string_table = StringTable::new();
     let name = string_table.intern("unused_value");
-    let warning = CompilerDiagnostic::with_severity(
-        DiagnosticKind::Rule(RuleDiagnosticKind::UnusedVariable),
-        DiagnosticSeverity::Warning,
-        None,
-        DiagnosticPayload::UnusedName { name },
-    );
+    let warning =
+        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
 
     let build_result = build_result_with_warnings(vec![warning]);
     let messages = build_warnings_messages(&build_result).expect("warnings should be wrapped");

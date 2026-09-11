@@ -22,8 +22,9 @@ use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    inferred_type_reference_expr, runtime_expr, runtime_operand_item, runtime_operator_item,
+    runtime_expr, runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -67,7 +68,7 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let mut string_table = StringTable::new();
     let loc = None;
     let x_name = symbol("x", &mut string_table);
-    let x_ref = inferred_type_reference_expr(
+    let x_ref = reference_expr_with_type_id(
         x_name.clone(),
         builtin_type_ids::INT,
         loc,
@@ -241,7 +242,7 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     let mut string_table = StringTable::new();
     let loc = None;
     let x_name = symbol("x", &mut string_table);
-    let x_ref = inferred_type_reference_expr(
+    let x_ref = reference_expr_with_type_id(
         x_name.clone(),
         builtin_type_ids::INT,
         loc,

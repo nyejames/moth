@@ -218,8 +218,9 @@ Before declaring a non-trivial code-bearing slice complete, run:
         [: First-party dependency audit]
         [: `just first-party-deps`]
         [: Scoped first-party package and runtime roots must contain no package-manager manifests,
-        vendored dependency directories or unapproved bare JavaScript module imports. The audit
-        writes `first_party_deps.json`]
+        vendored dependency directories or unapproved JavaScript module-loading forms. Invalid
+        runtime imports from a registered module are a distinct rule. The audit writes
+        `first_party_deps.json`]
     ]
 
     [td:
@@ -344,6 +345,8 @@ It walks only these first-party implementation roots: `packages/`,
 `src/projects/html_project/binding_packages/`. It also inspects the compiler-owned JavaScript
 inventory from `moth::first_party_js`: Core helper bodies, `@core/collections` runtime helpers,
 inline lowering templates and every module registered in `RuntimeModuleRegistry`.
+JavaScript module-loading classification is owned by the HTML JS parser scanner. This audit maps
+those diagnostics onto two rules and does not keep a second lexer.
 
 The only allowed JavaScript module specifier is an exact compiler-owned runtime module registered
 by `RuntimeModuleRegistry`. Dynamic `import()`, `require()`, relative, absolute, URL and data

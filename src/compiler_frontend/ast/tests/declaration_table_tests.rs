@@ -13,8 +13,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::module_symbols::{
-    CompilerOwnedDeclaration, CompilerOwnedDeclarationKind, OrderedSemanticDeclaration,
-    OrderedSemanticDeclarationKind,
+    OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
@@ -246,10 +245,7 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
             OrderedSemanticDeclarationKind::TypeAlias,
             None,
         )],
-        vec![compiler_owned(
-            CompilerOwnedDeclarationKind::Builtin,
-            declaration(&path, DataType::Bool),
-        )],
+        vec![declaration(&path, DataType::Bool)],
     );
 
     assert!(
@@ -259,7 +255,7 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
 }
 
 #[test]
-fn implicit_start_preserves_authored_start_collision_for_source_diagnostics() {
+fn implicit_start_rejects_authored_start_collision() {
     let mut string_table = StringTable::new();
     let start_path = InternedPath::from_single_str("start", &mut string_table);
     let authored = declaration(
@@ -268,7 +264,7 @@ fn implicit_start_preserves_authored_start_collision_for_source_diagnostics() {
     );
     let implicit = authored.clone();
 
-    let table = TopLevelDeclarationTable::from_stage3_order(
+    let authored_collision = TopLevelDeclarationTable::from_stage3_order(
         vec![ordered_declaration(
             0,
             0,
@@ -276,50 +272,29 @@ fn implicit_start_preserves_authored_start_collision_for_source_diagnostics() {
             OrderedSemanticDeclarationKind::Function,
             Some(authored),
         )],
-        vec![compiler_owned(
-            CompilerOwnedDeclarationKind::Start,
-            implicit,
-        )],
-    )
-    .expect("implicit start may share the authored start path until body diagnostics run");
-
-    assert!(table.get_by_id(DeclarationId::from_index(0)).is_some());
-    assert_eq!(
-        table.declaration_id_by_path(&start_path),
-        Some(DeclarationId::from_index(1))
+        vec![implicit],
+    );
+    assert!(
+        authored_collision.is_err(),
+        "an authored start path must not shadow the compiler-owned start"
     );
 
     let repeated_start = TopLevelDeclarationTable::from_stage3_order(
-        vec![ordered_declaration(
-            0,
-            0,
-            &start_path,
-            OrderedSemanticDeclarationKind::Function,
-            Some(declaration(
+        Vec::new(),
+        vec![
+            declaration(
                 &start_path,
                 DataType::Function(Box::new(None), Default::default()),
-            )),
-        )],
-        vec![
-            compiler_owned(
-                CompilerOwnedDeclarationKind::Start,
-                declaration(
-                    &start_path,
-                    DataType::Function(Box::new(None), Default::default()),
-                ),
             ),
-            compiler_owned(
-                CompilerOwnedDeclarationKind::Start,
-                declaration(
-                    &start_path,
-                    DataType::Function(Box::new(None), Default::default()),
-                ),
+            declaration(
+                &start_path,
+                DataType::Function(Box::new(None), Default::default()),
             ),
         ],
     );
     assert!(
         repeated_start.is_err(),
-        "a second compiler-owned start must not replace the first trailing row"
+        "a second compiler-owned start must not replace the first compiler-owned row"
     );
 }
 
@@ -500,17 +475,11 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
             ),
         ],
         vec![
-            compiler_owned(
-                CompilerOwnedDeclarationKind::Start,
-                declaration(
-                    &start_path,
-                    DataType::Function(Box::new(None), Default::default()),
-                ),
+            declaration(
+                &start_path,
+                DataType::Function(Box::new(None), Default::default()),
             ),
-            compiler_owned(
-                CompilerOwnedDeclarationKind::Builtin,
-                declaration(&builtin_path, DataType::Inferred),
-            ),
+            declaration(&builtin_path, DataType::Inferred),
         ],
     )
     .expect("compiler-owned rows should follow the semantic range");
@@ -817,13 +786,6 @@ fn ordered_declaration(
         kind,
         declaration,
     }
-}
-
-fn compiler_owned(
-    kind: CompilerOwnedDeclarationKind,
-    declaration: Declaration,
-) -> CompilerOwnedDeclaration {
-    CompilerOwnedDeclaration { kind, declaration }
 }
 
 fn semantic_header(kind: HeaderKind, path: InternedPath, string_table: &mut StringTable) -> Header {

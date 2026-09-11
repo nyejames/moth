@@ -73,13 +73,16 @@ pub(crate) struct Use {
 pub(crate) enum UseKind {
     Read,
     Write,
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+    #[allow(dead_code)]
     LoanObservation,
 }
 
 impl UseKind {
     pub(crate) const fn access_kind(self) -> AccessKind {
         match self {
-            Self::Read | Self::LoanObservation => AccessKind::Shared,
+            Self::Read => AccessKind::Shared,
+            Self::LoanObservation => AccessKind::Shared,
             Self::Write => AccessKind::Exclusive,
         }
     }
@@ -106,6 +109,8 @@ pub(crate) struct Loan {
 }
 
 /// Why a normalized loan stops being usable.
+// Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KillReason {
     FinalUse,
@@ -155,8 +160,14 @@ pub(crate) struct Call {
 /// A rebinding preserves an explicit value meaning instead of mutating an old origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RebindValue {
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Fresh(ValueOriginId),
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Alias(Box<[ValueOriginId]>),
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     AliasFromPlace(PlaceId),
 }
 
@@ -167,6 +178,8 @@ pub(crate) enum EventKind {
         destination: PlaceId,
         origin: ValueOriginId,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Alias {
         source: PlaceId,
         destination: PlaceId,
@@ -176,6 +189,8 @@ pub(crate) enum EventKind {
         source: PlaceId,
         destination: PlaceId,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     ExclusiveAlias {
         source: PlaceId,
         destination: PlaceId,
@@ -195,6 +210,8 @@ pub(crate) enum EventKind {
         destination: PlaceId,
         origin: ValueOriginId,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     Rebind {
         destination: PlaceId,
         value: RebindValue,
@@ -228,9 +245,13 @@ pub(crate) enum EventKind {
     Access {
         use_id: UseId,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     LoanIssue {
         loan: LoanId,
     },
+    // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
+    #[allow(dead_code)]
     LoanKill {
         loan: LoanId,
         reason: KillReason,

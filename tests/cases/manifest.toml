@@ -5348,6 +5348,13 @@ contract = "language.templates.literal_body_else_rejected"
 role = "primary"
 
 [[case]]
+id = "template_control_flow_literal_body_else_if_rejected"
+path = "template_control_flow_literal_body_else_if_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.literal_body_else_if_rejected"
+role = "primary"
+
+[[case]]
 id = "template_control_flow_missing_comma_before_if"
 path = "template_control_flow_missing_comma_before_if"
 tags = ["integration","templates","diagnostics"]
@@ -5600,6 +5607,13 @@ contract = "language.templates.docs_examples_runtime_coverage"
 role = "primary"
 
 [[case]]
+id = "template_else_body_orphan"
+path = "template_else_body_orphan"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_body_orphan_rejected"
+role = "primary"
+
+[[case]]
 id = "template_else_duplicate"
 path = "template_else_duplicate"
 tags = ["integration","templates","diagnostics"]
@@ -5611,6 +5625,41 @@ id = "template_else_if_after_else"
 path = "template_else_if_after_else"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.else_if_after_else_rejected"
+role = "primary"
+
+[[case]]
+id = "template_else_if_inline_not_standalone"
+path = "template_else_if_inline_not_standalone"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_if_inline_not_standalone_rejected"
+role = "primary"
+
+[[case]]
+id = "template_else_if_inside_loop_without_nested_if"
+path = "template_else_if_inside_loop_without_nested_if"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_if_inside_loop_without_nested_if_rejected"
+role = "primary"
+
+[[case]]
+id = "template_else_if_malformed"
+path = "template_else_if_malformed"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_if_malformed_rejected"
+role = "primary"
+
+[[case]]
+id = "template_else_if_missing_condition"
+path = "template_else_if_missing_condition"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_if_missing_condition_rejected"
+role = "primary"
+
+[[case]]
+id = "template_else_if_orphan"
+path = "template_else_if_orphan"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.else_if_orphan_rejected"
 role = "primary"
 
 [[case]]
@@ -8930,6 +8979,13 @@ path = "this_local_declaration_error"
 tags = ["integration", "diagnostics", "receiver-methods"]
 contract = "language.structs.this_reserved_identifier_rejected"
 role = "boundary"
+
+[[case]]
+id = "authored_root_start_function_rejected"
+path = "authored_root_start_function_rejected"
+tags = ["integration", "diagnostics", "entry-start"]
+contract = "language.modules.authored_start_function_name_rejected"
+role = "primary"
 
 [[case]]
 id = "this_struct_field_error"

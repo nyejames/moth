@@ -2,9 +2,10 @@
 //!
 //! WHAT: normalizes `\r` and `\r\n` into stable `\n` token text payloads.
 //!
-//! WHY these only consume: `TokenStream::next` owns the authored line and column, so a helper
-//! that adjusted the position too would double-count the break. What is left here is the token
-//! text policy plus consuming the second half of a `\r\n` pair.
+//! WHY these only consume: spans are byte-anchored; line and column come from
+//! `source::line_index`, not from `TokenStream::next`. A helper that adjusted position too would
+//! duplicate source mapping. What is left here is the token text policy plus consuming the second
+//! half of a `\r\n` pair.
 
 use crate::compiler_frontend::tokenizer::tokens::TokenStream;
 

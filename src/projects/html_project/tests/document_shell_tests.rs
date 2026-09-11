@@ -1,7 +1,9 @@
 //! Tests for shared HTML shell rendering.
 
 use super::*;
+use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::output_plan::{CanonicalPageRoute, derive_logical_html_path};
 use crate::projects::html_project::page_metadata::HtmlPageMetadata;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext,
@@ -10,25 +12,29 @@ use crate::projects::html_project::structural_url_renderer::StructuralUrlRendere
 use crate::projects::html_project::tests::test_support::{
     assert_fragment_before_body_close, assert_has_basic_shell,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+fn root_route() -> CanonicalPageRoute {
+    derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve")
+}
 
 fn render_shell(
     config: &HtmlDocumentConfig,
     page_metadata: &HtmlPageMetadata,
-    logical_html_path: &str,
+    route: &CanonicalPageRoute,
     project_name: &str,
     body_html: &str,
     script_html: &str,
 ) -> String {
     let output_plan = HtmlResourceOutputPlan::new(project_name);
-    let context = ResourceUrlContext::PageDocument(PathBuf::from(logical_html_path));
+    let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let structural_url_renderer = StructuralUrlRenderer::new(&output_plan, &context, "/");
 
     render_html_document_shell(HtmlDocumentShellInput {
         config,
         page_metadata,
         structural_url_renderer: &structural_url_renderer,
-        logical_html_path: Path::new(logical_html_path),
+        route,
         project_name,
         body_html: body_html.to_owned(),
         script_html: script_html.to_owned(),
@@ -42,7 +48,7 @@ fn renderer_outputs_full_document_shell() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<h1>Hello</h1>\n",
         "<script>start()</script>\n",
@@ -57,7 +63,11 @@ fn renderer_uses_route_title_fallback_before_project_name() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "docs/basics/index.html",
+        &derive_logical_html_path(
+            Path::new("src/docs/basics/@page.moth"),
+            Some(Path::new("src")),
+        )
+        .expect("nested route should resolve"),
         "Project",
         "",
         "",
@@ -67,12 +77,36 @@ fn renderer_uses_route_title_fallback_before_project_name() {
 }
 
 #[test]
+fn renderer_escapes_all_html_sensitive_metadata_bytes() {
+    let metadata = HtmlPageMetadata {
+        title: Some(OwnedFoldedString::Text("A & < > \" '".to_owned())),
+        description: Some(OwnedFoldedString::Text("D & < > \" '".to_owned())),
+        lang: Some(OwnedFoldedString::Text("L & < > \" '".to_owned())),
+        ..HtmlPageMetadata::default()
+    };
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &metadata,
+        &root_route(),
+        "",
+        "",
+        "",
+    );
+
+    assert!(html.contains("<title>A &amp; &lt; &gt; &quot; &#39;</title>"));
+    assert!(
+        html.contains("<meta name=\"description\" content=\"D &amp; &lt; &gt; &quot; &#39;\">")
+    );
+    assert!(html.contains("<html lang=\"L &amp; &lt; &gt; &quot; &#39;\">"));
+}
+
+#[test]
 fn renderer_keeps_script_inside_body() {
     let script = "<script>const message = `first\n    nested`;\nbootstrap(message)</script>\n";
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<div>content</div>\n",
         script,
@@ -91,7 +125,7 @@ fn renderer_preserves_whitespace_sensitive_body_content() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         body,
         "",
@@ -106,7 +140,7 @@ fn renderer_adds_only_missing_fragment_separator_newline() {
     let ending_with_newline = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<span>one</span>\n",
         "",
@@ -117,7 +151,7 @@ fn renderer_adds_only_missing_fragment_separator_newline() {
     let without_newline = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<span>two</span>",
         "",
@@ -130,7 +164,7 @@ fn renderer_injects_codeblock_scroll_styles() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<h1>Hello</h1>\n",
         "",
@@ -175,7 +209,7 @@ fn renderer_injects_every_shared_code_role_selector() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<h1>Hello</h1>\n",
         "",
@@ -210,7 +244,7 @@ fn renderer_no_longer_emits_old_code_role_names() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
         &HtmlPageMetadata::default(),
-        "index.html",
+        &root_route(),
         "",
         "<h1>Hello</h1>\n",
         "",

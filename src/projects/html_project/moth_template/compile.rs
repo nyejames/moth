@@ -40,7 +40,6 @@ use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, PlannedResourceOutput,
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
-use std::path::Path;
 use std::sync::Arc;
 
 pub(crate) fn compile_moth_template(
@@ -147,13 +146,16 @@ pub(crate) fn compile_moth_template_with_registry(
             Some(&source_database),
         )?;
         let content = report_with_prior_warnings(
-            render_document_content(
-                &content,
-                &module_resources,
-                &document_path,
-                &mut resource_plan,
-                string_table,
-            ),
+            match &content {
+                OwnedFoldedString::Text(text) => Ok(text.clone()),
+                OwnedFoldedString::Pieces(_) => render_structural_content(
+                    &content,
+                    &module_resources,
+                    &document_path,
+                    &mut resource_plan,
+                    string_table,
+                ),
+            },
             &mut warnings,
             &mut warning_source_contexts,
             Some(&source_database),
@@ -258,29 +260,4 @@ fn report_with_prior_warnings<T>(
         messages.install_source_contexts(prior_source_contexts, 0);
         messages
     })
-}
-
-/// Render one folded template at its document URL context against the request-wide plan.
-///
-/// Plain text keeps the dedicated text fast path without any link planning. Structural pieces
-/// add only the resource origins still present in the folded content to the shared plan, then
-/// render through that same plan at this document's URL context.
-fn render_document_content(
-    content: &OwnedFoldedString,
-    resources: &ModuleResourceTable,
-    document_path: &Path,
-    resource_plan: &mut HtmlResourceOutputPlan,
-    string_table: &mut StringTable,
-) -> Result<String, CompilerMessages> {
-    match content {
-        OwnedFoldedString::Text(text) => Ok(text.clone()),
-
-        OwnedFoldedString::Pieces(_) => render_structural_content(
-            content,
-            resources,
-            document_path,
-            resource_plan,
-            string_table,
-        ),
-    }
 }

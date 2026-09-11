@@ -1,8 +1,8 @@
-//! Portable output-path parsing and deterministic identity.
+//! Portable output-path parsing, deterministic identity and URL segment encoding.
 //!
 //! WHAT: owns the one portable relative-path parser that interprets both `/` and `\` as
-//! separators on every host, and the deterministic ASCII-case-folded identity derived from its
-//! validated components.
+//! separators on every host, the deterministic ASCII-case-folded identity derived from its
+//! validated components and RFC 3986 percent-encoding for URL segments.
 //! WHY: output-folder classification, development/release root comparison and destination
 //! collision checks must all consume the same validated components rather than each owning a
 //! separate lexical parser. `std::path` component classification is host-dependent (Windows
@@ -11,6 +11,7 @@
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,12 +26,19 @@ pub(crate) struct PortableRelativePath {
 }
 
 impl PortableRelativePath {
-    fn identity_string(&self) -> String {
+    pub(crate) fn components(&self) -> &[String] {
+        &self.components
+    }
+
+    pub(crate) fn identity_components(&self) -> Vec<String> {
         self.components
             .iter()
             .map(|component| component.to_ascii_lowercase())
-            .collect::<Vec<_>>()
-            .join("/")
+            .collect()
+    }
+
+    fn identity_string(&self) -> String {
+        self.identity_components().join("/")
     }
 
     fn to_path_buf(&self) -> PathBuf {
@@ -92,6 +100,22 @@ pub(crate) fn parse_relative_path(
     Ok(PortableRelativePath { components })
 }
 
+/// Percent-encode one URL path segment according to RFC 3986.
+///
+/// Unreserved ASCII bytes remain readable; every other UTF-8 byte is emitted as an uppercase
+/// percent escape. URL spelling deliberately preserves authored character case.
+pub(crate) fn percent_encode_url_segment(segment: &str) -> String {
+    let mut encoded = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
 /// Reject names that Windows normalises, reserves or cannot represent safely.
 ///
 /// WHAT: applies the strictest common component rules on every host.
@@ -148,13 +172,7 @@ pub(crate) fn output_path_component_identities(
     let raw = relative
         .to_str()
         .ok_or(InvalidOutputFolderReason::NonUtf8)?;
-    parse_relative_path(raw).map(|portable| {
-        portable
-            .components
-            .into_iter()
-            .map(|component| component.to_ascii_lowercase())
-            .collect()
-    })
+    parse_relative_path(raw).map(|portable| portable.identity_components())
 }
 
 /// Check whether a normalized relative path begins with a case-folded reserved component.

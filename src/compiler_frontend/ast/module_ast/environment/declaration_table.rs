@@ -15,8 +15,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 #[cfg(test)]
 use crate::compiler_frontend::headers::module_symbols::OrderedSemanticDeclarationKind;
 use crate::compiler_frontend::headers::module_symbols::{
-    CompilerOwnedDeclaration, CompilerOwnedDeclarationKind, DeclarationId,
-    OrderedSemanticDeclaration,
+    DeclarationId, OrderedSemanticDeclaration,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::symbols::interned_path::InternedPath;
@@ -139,7 +138,7 @@ impl TopLevelDeclarationTable {
     /// Build the table from Stage 3's final declaration-like header order.
     pub(crate) fn from_stage3_order(
         ordered_declarations: Vec<OrderedSemanticDeclaration>,
-        compiler_owned_declarations: Vec<CompilerOwnedDeclaration>,
+        compiler_owned_declarations: Vec<Declaration>,
     ) -> Result<Self, CompilerError> {
         let mut by_path = FxHashMap::default();
         let mut by_name: FxHashMap<StringId, Vec<DeclarationId>> = FxHashMap::default();
@@ -179,17 +178,11 @@ impl TopLevelDeclarationTable {
             declaration_slots.push(ordered.declaration);
         }
 
-        let semantic_len = declaration_slots.len();
-        for compiler_owned in compiler_owned_declarations {
-            let declaration = compiler_owned.declaration;
+        for declaration in compiler_owned_declarations {
             let declaration_id = DeclarationId::from_index(declaration_slots.len());
             let existing = by_path.insert(declaration.id.clone(), declaration_id);
 
-            // An authored function named `start` shares the implicit start path. Preserve the
-            // trailing-path shadow so body validation can emit the authored source diagnostic.
-            let shadows_authored_start = compiler_owned.kind == CompilerOwnedDeclarationKind::Start
-                && existing.is_some_and(|existing| existing.index() < semantic_len);
-            if existing.is_some() && !shadows_authored_start {
+            if existing.is_some() {
                 return Err(CompilerError::compiler_error(
                     "Compiler-owned declaration path collided with a Stage 3 declaration.",
                 ));

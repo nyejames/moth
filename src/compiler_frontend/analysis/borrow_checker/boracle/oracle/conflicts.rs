@@ -17,6 +17,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
+// LEAVE-LOCAL: independent static-origin and shared structural overlap lanes stay distinct at boracle/relations.rs:237 and problem/places.rs:64.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DynamicOverlap {
     Disjoint,
@@ -24,11 +26,13 @@ pub(crate) enum DynamicOverlap {
     Undecidable,
 }
 
+// LEAVE-LOCAL: independent static loan-liveness logic is at boracle/loans.rs:989.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(crate) fn exercise_capabilities(
     problem: &BorrowProblem,
     state: &mut OracleState,
     place_id: PlaceId,
-    target: &RuntimeAccessTarget,
+    _target: &RuntimeAccessTarget,
     event_index: usize,
     excluded_call: Option<CallId>,
 ) -> Result<Box<[RuntimeCapabilityId]>, CompilerError> {
@@ -48,7 +52,7 @@ pub(crate) fn exercise_capabilities(
     let capability_ids = state.capabilities.keys().copied().collect::<Vec<_>>();
     let mut exercised = Vec::new();
     for capability_id in capability_ids {
-        let (covered, covered_through_surviving_holder, source, ended, end_reason, post_call) = {
+        let (covered, covered_through_surviving_holder, _source, ended, end_reason, post_call) = {
             let capability = state.capabilities.get(&capability_id).ok_or_else(|| {
                 CompilerError::compiler_error("Boracle oracle lost a capability row")
             })?;
@@ -115,9 +119,9 @@ pub(crate) fn exercise_capabilities(
                         state,
                         problem,
                         capability_id,
-                        source,
+                        _source,
                         place,
-                        target,
+                        _target,
                     ) =>
                 {
                     continue;

@@ -5,13 +5,730 @@
 /// WHY: diagnostic identity must remain independent of rendered wording, while each key spelling
 /// should have one declaration and one owning registry.
 use super::*;
+#[doc(hidden)]
+#[macro_export]
+macro_rules! define_reasoned_diagnostic_registry {
+    ($callback:ident) => {
+        $callback! {
+            remap: remap;
+            Import::InvalidImportPath => {
+                payload: InvalidImportPath;
+                fields: { path: InternedPath, reason: InvalidImportPathReason }
+                bindings: { path, reason }
+                remap: {
+                    path.remap_string_ids(remap);
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-IMPORT-0016", "Invalid dependency path", Error }
+            },
+            Import::InvalidExternalModule => {
+                payload: InvalidExternalModule;
+                fields: { path: InternedPath, reason: InvalidExternalModuleReason }
+                bindings: { path, reason }
+                remap: {
+                    path.remap_string_ids(remap);
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-IMPORT-0022", "Invalid external JS module", Error }
+            },
+            Borrow::InvalidMutableAccess => {
+                payload: InvalidMutableAccess;
+                fields: {
+                    place: DiagnosticPlace,
+                    reason: InvalidMutableAccessReason,
+                    conflicting_place: Option<DiagnosticPlace>
+                }
+                bindings: { place, conflicting_place }
+                remap: {
+                    remap_place_with_optional_conflict(place, conflicting_place, remap);
+                }
+                descriptor: { "MOTH-BORROW-0007", "Invalid mutable access", Error }
+            },
+            Config::InvalidConfig => {
+                payload: InvalidConfig;
+                fields: { key: Option<StringId>, reason: InvalidConfigReason }
+                bindings: { key, reason }
+                remap: {
+                    if let Some(key) = key {
+                        *key = remap.get(*key);
+                    }
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-CONFIG-0001", "Invalid config", Error }
+            },
+            DeferredFeature::DeferredFeature => {
+                payload: DeferredFeature;
+                fields: { reason: DeferredFeatureReason }
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-DEFERRED-0001", "Deferred feature", Error }
+            },
+            Syntax::InvalidStringEscape => {
+                payload: InvalidStringEscape;
+                fields: { reason: InvalidStringEscapeReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0034", "Invalid string escape", Error }
+            },
+            Syntax::InvalidNumberLiteral => {
+                payload: InvalidNumberLiteral;
+                fields: { literal_text: StringId, reason: NumberLiteralErrorReason }
+                bindings: { literal_text }
+                remap: {
+                    *literal_text = remap.get(*literal_text);
+                }
+                descriptor: { "MOTH-SYNTAX-0008", "Invalid number literal", Error }
+            },
+            Syntax::InvalidGenericApplication => {
+                payload: InvalidGenericApplication;
+                fields: { reason: GenericApplicationErrorReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0015", "Invalid generic application", Error }
+            },
+            Syntax::InvalidDependencyClause => {
+                payload: InvalidDependencyClause;
+                fields: { clause_kind: DependencyClauseKind, reason: InvalidDependencyClauseReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0019", "Invalid dependency clause", Error }
+            },
+            Syntax::LegacyDependencyClause => {
+                payload: LegacyDependencyClause;
+                fields: { reason: LegacyDependencyClauseReason, replacement: Option<StringId> }
+                bindings: { replacement }
+                remap: {
+                    if let Some(replacement) = replacement {
+                        *replacement = remap.get(*replacement);
+                    }
+                }
+                descriptor: { "MOTH-SYNTAX-0035", "Legacy dependency clause syntax", Error }
+            },
+            Syntax::InvalidTypeAnnotation => {
+                payload: InvalidTypeAnnotation;
+                fields: { context: TypeAnnotationContext, reason: InvalidTypeAnnotationReason }
+                bindings: { reason }
+                remap: {
+                    if let InvalidTypeAnnotationReason::InvalidTokenAfterName { token }
+                    | InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found: token } = reason
+                    {
+                        token.remap_string_ids(remap);
+                    }
+                }
+                descriptor: { "MOTH-SYNTAX-0014", "Invalid type annotation", Error }
+            },
+            Syntax::InvalidCollectionType => {
+                payload: InvalidCollectionType;
+                fields: { reason: InvalidCollectionTypeReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0016", "Invalid collection type", Error }
+            },
+            Syntax::InvalidMapType => {
+                payload: InvalidMapType;
+                fields: { reason: InvalidMapTypeReason }
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-SYNTAX-0016-MAP", "Invalid map type", Error }
+            },
+            Syntax::InvalidMapLiteral => {
+                payload: InvalidMapLiteral;
+                fields: { reason: InvalidMapLiteralReason }
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-SYNTAX-0033", "Invalid map literal", Error }
+            },
+            Syntax::InvalidGenericParameter => {
+                payload: InvalidGenericParameter;
+                fields: { reason: InvalidGenericParameterReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0020", "Invalid generic parameter", Error }
+            },
+            Syntax::InvalidTemplateDirective => {
+                payload: InvalidTemplateDirective;
+                fields: {
+                    directive_name: Option<StringId>,
+                    reason: InvalidTemplateDirectiveReason
+                }
+                bindings: { directive_name, reason }
+                remap: {
+                    if let Some(directive_name) = directive_name {
+                        *directive_name = remap.get(*directive_name);
+                    }
+                    if let InvalidTemplateDirectiveReason::InvalidArgument { detail } = reason
+                        && let Some(detail) = detail
+                    {
+                        *detail = remap.get(*detail);
+                    }
+                }
+                descriptor: { "MOTH-SYNTAX-0021", "Invalid template directive", Error }
+            },
+            Shared::MalformedTemplate => {
+                payload: MalformedTemplate;
+                fields: { reason: MalformedTemplateReason }
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: none
+            },
+            Syntax::InvalidTemplateStructure => {
+                payload: InvalidTemplateStructure;
+                fields: { reason: InvalidTemplateStructureReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0022", "Invalid template structure", Error }
+            },
+            Rule::InvalidSignatureMember => {
+                payload: InvalidSignatureMember;
+                fields: { reason: InvalidSignatureMemberReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0028", "Invalid signature member", Error }
+            },
+            Rule::InvalidChoiceVariant => {
+                payload: InvalidChoiceVariant;
+                fields: {
+                    reason: InvalidChoiceVariantReason,
+                    choice_name: Option<StringId>,
+                    variant_name: Option<StringId>,
+                    available_variants: Vec<StringId>
+                }
+                bindings: { choice_name, variant_name, available_variants }
+                remap: {
+                    if let Some(name) = choice_name {
+                        *name = remap.get(*name);
+                    }
+                    if let Some(name) = variant_name {
+                        *name = remap.get(*name);
+                    }
+                    for variant in available_variants {
+                        *variant = remap.get(*variant);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0029", "Invalid choice variant", Error }
+            },
+            Rule::InvalidFunctionSignature => {
+                payload: InvalidFunctionSignature;
+                fields: { reason: InvalidFunctionSignatureReason }
+                bindings: { reason }
+                remap: {
+                    if let InvalidFunctionSignatureReason::MissingArrowOrColon { found }
+                    | InvalidFunctionSignatureReason::MissingCommaOrColon { found } = reason
+                    {
+                        found.remap_string_ids(remap);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0062", "Invalid function signature", Error }
+            },
+            Rule::InvalidThisUsage => {
+                payload: InvalidThisUsage;
+                fields: { reason: InvalidThisUsageReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0040", "Invalid this usage", Error }
+            },
+            Rule::InvalidReceiverDeclaration => {
+                payload: InvalidReceiverDeclaration;
+                fields: { reason: InvalidReceiverDeclarationReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0041", "Invalid receiver declaration", Error }
+            },
+            Rule::InvalidControlFlowStatement => {
+                payload: InvalidControlFlowStatement;
+                fields: { reason: InvalidControlFlowStatementReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0042", "Invalid control flow statement", Error }
+            },
+            Rule::InvalidDeclaration => {
+                payload: InvalidDeclaration;
+                fields: { reason: InvalidDeclarationReason, name: Option<StringId> }
+                bindings: { reason, name }
+                remap: {
+                    if let Some(name) = name {
+                        *name = remap.get(*name);
+                    }
+                    match reason {
+                        InvalidDeclarationReason::UnusedGenericParameter { parameter_name }
+                        | InvalidDeclarationReason::InvalidGenericParameterName { parameter_name }
+                        | InvalidDeclarationReason::DuplicateGenericParameter { parameter_name }
+                        | InvalidDeclarationReason::GenericParameterNameCollision { parameter_name }
+                        | InvalidDeclarationReason::ReservedGenericParameterName { parameter_name }
+                        | InvalidDeclarationReason::ExternalTypeAlias {
+                            type_name: parameter_name,
+                        } => {
+                            *parameter_name = remap.get(*parameter_name);
+                        }
+                        _ => {}
+                    }
+                }
+                descriptor: { "MOTH-RULE-0043", "Invalid declaration", Error }
+            },
+            Rule::InvalidAssignmentTarget => {
+                payload: InvalidAssignmentTarget;
+                fields: {
+                    reason: InvalidAssignmentTargetReason,
+                    target_name: Option<StringId>,
+                    target_type: Option<TypeId>,
+                    field_name: Option<StringId>,
+                    root_binding_name: Option<StringId>
+                }
+                bindings: { target_name, field_name, root_binding_name }
+                remap: {
+                    if let Some(name) = target_name {
+                        *name = remap.get(*name);
+                    }
+                    if let Some(name) = field_name {
+                        *name = remap.get(*name);
+                    }
+                    if let Some(name) = root_binding_name {
+                        *name = remap.get(*name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0044", "Invalid assignment target", Error }
+            },
+            Rule::InvalidMultiBind => {
+                payload: InvalidMultiBind;
+                fields: {
+                    reason: InvalidMultiBindReason,
+                    target_name: Option<StringId>
+                }
+                bindings: { target_name }
+                remap: {
+                    if let Some(name) = target_name {
+                        *name = remap.get(*name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0045", "Invalid multi-bind", Error }
+            },
+            Rule::InvalidBuiltinCall => {
+                payload: InvalidBuiltinCall;
+                fields: {
+                    reason: InvalidBuiltinCallReason,
+                    builtin_name: Option<StringId>
+                }
+                bindings: { builtin_name }
+                remap: {
+                    if let Some(name) = builtin_name {
+                        *name = remap.get(*name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0046", "Invalid builtin call", Error }
+            },
+            Rule::InvalidCast => {
+                payload: InvalidCast;
+                fields: {
+                    reason: InvalidCastReason,
+                    source_type: Option<TypeId>,
+                    target_type: Option<TypeId>
+                }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0083", "Invalid cast", Error }
+            },
+            Rule::InvalidReceiverCall => {
+                payload: InvalidReceiverCall;
+                fields: {
+                    reason: InvalidReceiverCallReason,
+                    receiver_type: Option<StringId>,
+                    method_name: Option<StringId>,
+                    receiver_kind: Option<ReceiverCallKind>,
+                    receiver_binding_name: Option<StringId>
+                }
+                bindings: { receiver_type, method_name, receiver_binding_name }
+                remap: {
+                    if let Some(receiver_type) = receiver_type {
+                        *receiver_type = remap.get(*receiver_type);
+                    }
+                    if let Some(method_name) = method_name {
+                        *method_name = remap.get(*method_name);
+                    }
+                    if let Some(receiver_binding_name) = receiver_binding_name {
+                        *receiver_binding_name = remap.get(*receiver_binding_name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0047", "Invalid receiver call", Error }
+            },
+            Rule::InvalidCopyTarget => {
+                payload: InvalidCopyTarget;
+                fields: { reason: InvalidCopyTargetReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0056", "Invalid copy target", Error }
+            },
+            Rule::InvalidFieldAccess => {
+                payload: InvalidFieldAccess;
+                fields: {
+                    reason: InvalidFieldAccessReason,
+                    field_name: Option<StringId>,
+                    receiver_type: Option<TypeId>,
+                    known_fields: Vec<StringId>
+                }
+                bindings: { field_name, known_fields }
+                remap: {
+                    if let Some(name) = field_name {
+                        *name = remap.get(*name);
+                    }
+                    for field in known_fields {
+                        *field = remap.get(*field);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0048", "Invalid field access", Error }
+            },
+            Rule::InvalidMatchPattern => {
+                payload: InvalidMatchPattern;
+                fields: {
+                    reason: InvalidMatchPatternReason,
+                    variant_name: Option<StringId>,
+                    scrutinee_name: Option<StringId>
+                }
+                bindings: { variant_name, scrutinee_name }
+                remap: {
+                    if let Some(name) = variant_name {
+                        *name = remap.get(*name);
+                    }
+                    if let Some(name) = scrutinee_name {
+                        *name = remap.get(*name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0049", "Invalid match pattern", Error }
+            },
+            Rule::NonExhaustiveMatch => {
+                payload: NonExhaustiveMatch;
+                fields: {
+                    reason: NonExhaustiveMatchReason,
+                    missing_variants: Vec<StringId>
+                }
+                bindings: { missing_variants }
+                remap: {
+                    for variant in missing_variants {
+                        *variant = remap.get(*variant);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0050", "Non-exhaustive match", Error }
+            },
+            Rule::InvalidFallibleHandling => {
+                payload: InvalidFallibleHandling;
+                fields: { reason: InvalidFallibleHandlingReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0051", "Invalid fallible handling", Error }
+            },
+            Rule::InvalidTemplateSlot => {
+                payload: InvalidTemplateSlot;
+                fields: {
+                    reason: InvalidTemplateSlotReason,
+                    slot_name: Option<StringId>
+                }
+                bindings: { slot_name }
+                remap: {
+                    if let Some(name) = slot_name {
+                        *name = remap.get(*name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0052", "Invalid template slot", Error }
+            },
+            Rule::CompileTimeEvaluationError => {
+                payload: CompileTimeEvaluationError;
+                fields: {
+                    reason: CompileTimeEvaluationErrorReason,
+                    operation: Option<StringId>
+                }
+                bindings: { operation }
+                remap: {
+                    if let Some(operation) = operation {
+                        *operation = remap.get(*operation);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0053", "Compile-time evaluation error", Error }
+            },
+            Type::InvalidFallibleOperand => {
+                payload: InvalidFallibleOperand;
+                fields: {
+                    reason: InvalidFallibleOperandReason,
+                    category: UnsupportedOperatorCategory,
+                    operand_type: TypeId
+                }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-TYPE-0004", "Unhandled fallible operand", Error }
+            },
+            Type::IncompatibleChoiceComparison => {
+                payload: IncompatibleChoiceComparison;
+                fields: {
+                    reason: IncompatibleChoiceComparisonReason,
+                    lhs: TypeId,
+                    rhs: TypeId
+                }
+                bindings: { reason }
+                remap: {
+                    if let IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported {
+                        field_name,
+                        ..
+                    } = reason
+                    {
+                        *field_name = remap.get(*field_name);
+                    }
+                }
+                descriptor: { "MOTH-TYPE-0005", "Incompatible choice comparison", Error }
+            },
+            Rule::InvalidCallShape => {
+                payload: InvalidCallShape;
+                fields: {
+                    reason: InvalidCallShapeReason,
+                    callee_name: Option<StringId>
+                }
+                bindings: { reason, callee_name }
+                remap: {
+                    if let Some(callee_name) = callee_name {
+                        *callee_name = remap.get(*callee_name);
+                    }
+                    match reason {
+                        InvalidCallShapeReason::MissingArgument { parameter_name, .. }
+                        | InvalidCallShapeReason::DuplicateArgument { parameter_name, .. }
+                        | InvalidCallShapeReason::MutableAccessRequired { parameter_name, .. }
+                        | InvalidCallShapeReason::MutableAccessNotAllowed { parameter_name, .. }
+                        | InvalidCallShapeReason::MutableAccessOnNonPlace { parameter_name, .. }
+                        | InvalidCallShapeReason::ReactiveSourceRequired { parameter_name, .. } => {
+                            if let Some(parameter_name) = parameter_name {
+                                *parameter_name = remap.get(*parameter_name);
+                            }
+                        }
+                        InvalidCallShapeReason::MutableAccessOnImmutablePlace {
+                            parameter_name,
+                            binding_name,
+                            ..
+                        }
+                        | InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired {
+                            parameter_name,
+                            binding_name,
+                            ..
+                        } => {
+                            if let Some(parameter_name) = parameter_name {
+                                *parameter_name = remap.get(*parameter_name);
+                            }
+                            if let Some(binding_name) = binding_name {
+                                *binding_name = remap.get(*binding_name);
+                            }
+                        }
+                        InvalidCallShapeReason::ExtraPositionalArgument { .. }
+                        | InvalidCallShapeReason::PositionalAfterNamed
+                        | InvalidCallShapeReason::NamedArgumentsNotSupported => {}
+                        InvalidCallShapeReason::NamedArgumentNotFound {
+                            name,
+                            known_parameters,
+                        } => {
+                            *name = remap.get(*name);
+                            for parameter_name in known_parameters {
+                                *parameter_name = remap.get(*parameter_name);
+                            }
+                        }
+                    }
+                }
+                descriptor: { "MOTH-RULE-0054", "Invalid call shape", Error }
+            },
+            Rule::InvalidReturnShape => {
+                payload: InvalidReturnShape;
+                fields: { reason: InvalidReturnShapeReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0055", "Invalid return shape", Error }
+            },
+            Rule::InvalidGenericInstantiation => {
+                payload: InvalidGenericInstantiation;
+                fields: {
+                    type_name: Option<StringId>,
+                    reason: InvalidGenericInstantiationReason
+                }
+                bindings: { type_name, reason }
+                remap: {
+                    if let Some(type_name) = type_name {
+                        *type_name = remap.get(*type_name);
+                    }
+                    match reason {
+                        InvalidGenericInstantiationReason::CannotInferArguments {
+                            missing_parameters,
+                        }
+                        | InvalidGenericInstantiationReason::CannotInferFunctionArguments {
+                            missing_parameters,
+                        } => {
+                            for parameter in missing_parameters {
+                                *parameter = remap.get(*parameter);
+                            }
+                        }
+                        InvalidGenericInstantiationReason::ConflictingInference {
+                            parameter_name,
+                            ..
+                        } => {
+                            *parameter_name = remap.get(*parameter_name);
+                        }
+                        InvalidGenericInstantiationReason::MissingTraitEvidence {
+                            parameter_name,
+                            trait_name,
+                            ..
+                        }
+                        | InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
+                            parameter_name,
+                            trait_name,
+                            ..
+                        } => {
+                            *parameter_name = remap.get(*parameter_name);
+                            *trait_name = remap.get(*trait_name);
+                        }
+                        InvalidGenericInstantiationReason::WrongArgumentCount { .. }
+                        | InvalidGenericInstantiationReason::TypeDoesNotAcceptArguments
+                        | InvalidGenericInstantiationReason::OptionTypeSyntaxNotSupported
+                        | InvalidGenericInstantiationReason::ResultTypeSyntaxNotSupported
+                        | InvalidGenericInstantiationReason::ExternalTypeArgumentsUnsupported
+                        | InvalidGenericInstantiationReason::MissingTypeArguments
+                        | InvalidGenericInstantiationReason::RecursiveFunctionInstantiation
+                        | InvalidGenericInstantiationReason::ExplicitCallTypeArgumentsUnsupported
+                        | InvalidGenericInstantiationReason::GenericFunctionValueDeferred => {}
+                    }
+                }
+                descriptor: { "MOTH-RULE-0057", "Invalid generic instantiation", Error }
+            },
+            Rule::InvalidPageMetadata => {
+                payload: InvalidPageMetadata;
+                fields: { key: StringId, reason: InvalidPageMetadataReason }
+                bindings: { key }
+                remap: {
+                    *key = remap.get(*key);
+                }
+                descriptor: { "MOTH-RULE-0061", "Invalid page metadata", Error }
+            },
+            Rule::InvalidCompileTimePath => {
+                payload: InvalidCompileTimePath;
+                fields: { path: InternedPath, reason: InvalidCompileTimePathReason }
+                bindings: { path, reason }
+                remap: {
+                    path.remap_string_ids(remap);
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-RULE-0063", "Invalid compile-time path", Error }
+            },
+            Rule::InvalidTraitKeywordUsage => {
+                payload: InvalidTraitKeywordUsage;
+                fields: { reason: InvalidTraitKeywordUsageReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0076", "Invalid trait keyword usage", Error }
+            },
+            Rule::InvalidTraitConformance => {
+                payload: InvalidTraitConformance;
+                fields: {
+                    target_name: StringId,
+                    trait_name: Option<StringId>,
+                    reason: InvalidTraitConformanceReason
+                }
+                bindings: { target_name, trait_name, reason }
+                remap: {
+                    *target_name = remap.get(*target_name);
+                    if let Some(trait_name) = trait_name {
+                        *trait_name = remap.get(*trait_name);
+                    }
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-RULE-0073", "Invalid trait conformance", Error }
+            },
+            Rule::InvalidTraitIncompatibility => {
+                payload: InvalidTraitIncompatibility;
+                fields: {
+                    subject_name: StringId,
+                    incompatible_trait_name: Option<StringId>,
+                    reason: InvalidTraitIncompatibilityReason
+                }
+                bindings: { subject_name, incompatible_trait_name }
+                remap: {
+                    *subject_name = remap.get(*subject_name);
+                    if let Some(incompatible_trait_name) = incompatible_trait_name {
+                        *incompatible_trait_name = remap.get(*incompatible_trait_name);
+                    }
+                }
+                descriptor: { "MOTH-RULE-0084", "Invalid trait incompatibility", Error }
+            },
+            Syntax::InvalidExpression => {
+                payload: InvalidExpression;
+                fields: { reason: InvalidExpressionReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0023", "Invalid expression", Error }
+            },
+            Syntax::InvalidStandaloneStatement => {
+                payload: InvalidStandaloneStatement;
+                fields: { reason: InvalidStandaloneStatementReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0025", "Invalid standalone statement", Error }
+            },
+            Syntax::InvalidMatchArm => {
+                payload: InvalidMatchArm;
+                fields: { reason: InvalidMatchArmReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0028", "Invalid match arm", Error }
+            },
+            Syntax::InvalidLoopHeader => {
+                payload: InvalidLoopHeader;
+                fields: { reason: InvalidLoopHeaderReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0029", "Invalid loop header", Error }
+            },
+            Syntax::InvalidStatementPosition => {
+                payload: InvalidStatementPosition;
+                fields: { reason: InvalidStatementPositionReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0030", "Invalid statement position", Error }
+            },
+            Syntax::CommonSyntaxMistake => {
+                payload: CommonSyntaxMistake;
+                fields: { reason: CommonSyntaxMistakeReason }
+                bindings: { reason }
+                remap: {
+                    reason.remap_string_ids(remap);
+                }
+                descriptor: { "MOTH-SYNTAX-0031", "Common syntax mistake", Error }
+            },
+            Rule::ProjectContextEscape => {
+                payload: ProjectContextEscape;
+                fields: { reason: ProjectContextEscapeReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0086", "Project context escapes package facade", Error }
+            },
+            Rule::UnsupportedBackendFeature => {
+                payload: UnsupportedBackendFeature;
+                fields: {
+                    backend_name: StringId,
+                    reason: UnsupportedBackendFeatureReason
+                }
+                bindings: { backend_name }
+                remap: {
+                    *backend_name = remap.get(*backend_name);
+                }
+                descriptor: { "MOTH-RULE-0064", "Unsupported backend feature", Error }
+            },
+        }
+    };
+}
 
 macro_rules! define_stable_reason_keys {
     (
         $(
             $reason_type:ident => {
                 $(@delegate($delegate_pattern:pat => $delegate_expression:expr);)*
-                $($pattern:pat => $key:literal),+ $(,)?
+                $($pattern:pat => $key:literal),* $(,)?
             }
         ),+ $(,)?
     ) => {
@@ -20,7 +737,7 @@ macro_rules! define_stable_reason_keys {
                 pub(super) fn stable_reason_key(&self) -> &'static str {
                     match self {
                         $($delegate_pattern => $delegate_expression,)*
-                        $($pattern => $key,)+
+                        $($pattern => $key,)*
                     }
                 }
             }
@@ -32,7 +749,7 @@ macro_rules! define_stable_reason_keys {
                 $(
                     $(
                         $key,
-                    )+
+                    )*
                 )+
             ]
         }
@@ -188,6 +905,11 @@ define_stable_reason_keys! {
     &InvalidImportPathReason::EscapesSourcePackageRoot => "invalid_import_path.escapes_source_package_root",
     &InvalidImportPathReason::CaseMismatch { .. } => "invalid_import_path.case_mismatch",
     },
+    InvalidExternalModuleReason => {
+        &InvalidExternalModuleReason::ReceiverMethod { .. } => "invalid_external_module.receiver_method",
+        &InvalidExternalModuleReason::ParserDiagnostic { .. } => "invalid_external_module.parser_diagnostic",
+    },
+
 
     InvalidCompileTimePathReason => {
     &InvalidCompileTimePathReason::MissingTarget => "invalid_compile_time_path.missing_target",
@@ -261,6 +983,32 @@ define_stable_reason_keys! {
     &InvalidTemplateDirectiveReason::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
     &InvalidTemplateDirectiveReason::InvalidChildrenArgument => "invalid_template_directive.invalid_children_argument",
     },
+    CssTemplateWarning => {
+        &CssTemplateWarning::MismatchedClosingBrace { .. } => "malformed_template.css.mismatched_closing_brace",
+        &CssTemplateWarning::UnexpectedClosingBrace => "malformed_template.css.unexpected_closing_brace",
+        &CssTemplateWarning::MismatchedClosingParenthesis { .. } => "malformed_template.css.mismatched_closing_parenthesis",
+        &CssTemplateWarning::UnexpectedClosingParenthesis => "malformed_template.css.unexpected_closing_parenthesis",
+        &CssTemplateWarning::UnclosedDelimiter { .. } => "malformed_template.css.unclosed_delimiter",
+        &CssTemplateWarning::InlineSelectorBlock => "malformed_template.css.inline_selector_block",
+        &CssTemplateWarning::MissingSelectorOrAtRulePrelude => "malformed_template.css.missing_selector_or_at_rule_prelude",
+        &CssTemplateWarning::NestedBlock => "malformed_template.css.nested_block",
+        &CssTemplateWarning::TopLevelContent => "malformed_template.css.top_level_content",
+        &CssTemplateWarning::MalformedDeclaration => "malformed_template.css.malformed_declaration",
+        &CssTemplateWarning::InvalidPropertyName { .. } => "malformed_template.css.invalid_property_name",
+        &CssTemplateWarning::MissingDeclarationValue => "malformed_template.css.missing_declaration_value",
+    },
+
+    HtmlTemplateWarning => {
+        &HtmlTemplateWarning::ScriptTag => "malformed_template.html.unsafe_script_tag",
+        &HtmlTemplateWarning::JavascriptUrl => "malformed_template.html.unsafe_javascript_url",
+        &HtmlTemplateWarning::InlineEventHandler => "malformed_template.html.unsafe_inline_event_handler",
+    },
+
+    MalformedTemplateReason => {
+        @delegate(&MalformedTemplateReason::Css(reason) => reason.stable_reason_key());
+        @delegate(&MalformedTemplateReason::Html(reason) => reason.stable_reason_key());
+    },
+
 
     InvalidTemplateStructureReason => {
     &InvalidTemplateStructureReason::MissingClosingBracket => "invalid_template_structure.missing_closing_bracket",

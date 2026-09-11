@@ -3,6 +3,7 @@
 //! The parent module retains the command-facing entry contracts; this child owns the synthetic
 //! module discovery, preparation and semantic compilation pipeline.
 
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::{timing_scope, timing_scope_attributed};
 
 #[cfg(feature = "boracle")]
@@ -10,8 +11,8 @@ use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 use crate::compiler_frontend::module_compilation::{
-    CompiledModuleArtifact, ModuleCompilationContext, ModuleCompilationOutcome,
-    ModuleSemanticResult, ProviderMaterialisationRegistry, compile_module,
+    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
+    compile_module,
 };
 
 use crate::builder_surface::BuilderSurface;
@@ -63,10 +64,10 @@ use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
 use super::super::source_tree_index::SourceTreeIndex;
-use super::{ModuleBoundaryPublication, append_finish_failure, publish_module_and_generated};
+use super::{append_finish_failure, publish_compiled_module};
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compile_single_file_frontend_with_inputs(
+pub(crate) fn compile_single_file_frontend_with_inputs(
     config: &Config,
     build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
@@ -111,7 +112,7 @@ pub(super) fn compile_single_file_frontend_with_inputs(
     }
 }
 #[cfg(feature = "boracle")]
-pub(super) fn compile_single_file_boracle_frontend(
+pub(crate) fn compile_single_file_boracle_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
     style_directives: &StyleDirectiveRegistry,
@@ -175,6 +176,10 @@ fn compile_single_file_frontend_with_target(
     string_table: &mut StringTable,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
+    // WHY: directory Check mode uses module_inventory::discover_*_with_check_only classification,
+    // ModuleCompilationSchedule::prepare_check_only_jobs, and deferred_check_only::compile_check_only_jobs_after_canonical
+    // / canonical::compile_check_only_batches; a synthetic one-node graph has no unselected owned sources,
+    // schedule or package facades, so every mechanism is vacuous here.
     _mode: FrontendCompilationMode,
     target: SingleFileFrontendTarget,
 ) -> Result<SingleFileFrontendResult, PremergeFailure> {
@@ -269,7 +274,7 @@ fn compile_single_file_frontend_with_target(
             string_table,
         )?
     } else {
-        crate::compiler_frontend::paths::module_roots::ModuleRootTable::empty()
+        ModuleRootTable::empty()
     };
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
@@ -511,32 +516,17 @@ fn compile_single_file_frontend_with_target(
             ModuleCompilationOutcome::Success(compiled) => {
                 #[cfg(feature = "timers")]
                 timing_guard_boundary_compile.finish();
-                let remap = string_table.merge_delta_from(&compiled.string_table, base_len);
-                let ModuleSemanticResult {
-                    mut module,
-                    mut generated_delta,
-                    resource_source_associations,
-                    string_table: _,
-                    public_interface,
-                } = *compiled;
-                if !remap.is_identity() {
-                    module.remap_string_ids(&remap);
-                    generated_delta.remap_string_ids(&remap);
-                }
-                publish_module_and_generated(ModuleBoundaryPublication {
-                    modules: &mut modules,
-                    generated: &mut generated_store,
-                    materialisations: &mut provider_materialisations,
-                    resource_inputs: &mut resource_inputs,
+                publish_compiled_module(
+                    &mut modules,
+                    &mut generated_store,
+                    &mut provider_materialisations,
+                    &mut resource_inputs,
                     module_id,
-                    expected_origin: &graph_stable_origin,
-                    artifact: CompiledModuleArtifact {
-                        module,
-                        interface: public_interface,
-                    },
-                    generated_delta,
-                    resource_source_associations,
-                })?;
+                    &graph_stable_origin,
+                    *compiled,
+                    base_len,
+                    string_table,
+                )?;
                 Vec::new()
             }
             ModuleCompilationOutcome::Diagnosed(diagnostics) => {

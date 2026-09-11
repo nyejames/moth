@@ -1,4 +1,5 @@
 use super::{ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan};
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
@@ -29,11 +30,12 @@ fn source_span_selects_exact_source_when_logical_paths_are_ambiguous() {
     let entry_config = fs::canonicalize(entry_config).expect("entry config should canonicalize");
 
     let source_file_kinds = SourceFileKindRegistry::default();
-    let resolver = ProjectPathResolver::new(
+    let resolver = ProjectPathResolver::new_with_module_roots(
         project_root,
         entry_root,
-        PreparedSourcePackageRoots::empty(),
+        PreparedSourcePackageRoots::default(),
         &source_file_kinds,
+        ModuleRootTable::empty(),
     )
     .expect("project path resolver should build");
     let mut string_table = StringTable::new();

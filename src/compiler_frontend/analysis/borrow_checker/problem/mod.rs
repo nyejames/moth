@@ -7,11 +7,6 @@
 //! This module is shared infrastructure, not a normal compiler pass. HIR extraction and solving
 //! are explicit consumers, and normal compilation does not construct a problem.
 
-// The alpha checker deliberately does not construct this shared vocabulary yet. Keeping the
-// allowance local documents that these rows are a published future-consumer seam, not dead code
-// that should be removed from the normal compiler path.
-#![allow(dead_code)]
-
 mod bindings;
 mod builder;
 mod control_flow;
@@ -25,6 +20,10 @@ mod validation;
 #[path = "tests/mod.rs"]
 mod tests;
 
+// WHY: the problem vocabulary is built for explicit consumers (HIR extraction, the reference
+// solver and their tests), so individual rows are unused in a feature-only build. The allows mark
+// that consumer boundary rather than tolerating dead shipped code: normal compilation never
+// constructs a problem.
 #[allow(unused_imports)]
 pub(crate) use bindings::Binding;
 #[allow(unused_imports)]
@@ -33,8 +32,10 @@ pub(crate) use control_flow::{CfgBlock, CfgEdge, ControlFlow, ProgramPoint};
 #[allow(unused_imports)]
 pub(crate) use events::{
     AccessKind, AggregateField, Call, CallArgument, CallEffect, CallResult, Event, EventKind,
-    EventSource, KillReason, Loan, RebindValue, TerminatorEventKind, Use, UseKind,
+    EventSource, Loan, TerminatorEventKind, Use, UseKind,
 };
+#[allow(unused_imports)]
+pub(crate) use events::{KillReason, RebindValue};
 #[allow(unused_imports)]
 pub(crate) use ids::{
     BindingId, BlockId, CallId, EventId, LoanId, PlaceId, PointId, UseId, ValueOriginId,
