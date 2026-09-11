@@ -70,8 +70,8 @@ pub struct ExtendedSpanBuilder {
 /// Frozen extended-span table with no spare capacity.
 #[derive(Debug)]
 pub struct ExtendedSpanTable {
-    /// Read through [`ExtendedSpanTable::resolver`] or [`record_resolver`] to resolve
-    /// extended entries against the owning source record.
+    /// Production readers resolve these entries through the owning source record.
+    /// Tests may inspect a standalone table through its test-only resolver helper.
     entries: Box<[ExtendedSpan]>,
 }
 

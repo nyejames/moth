@@ -732,7 +732,7 @@ impl FrozenSourceDatabase {
     }
 }
 
-#[allow(dead_code)] // Supports the deferred mutable logical-path lookup contract.
+#[cfg(test)]
 fn path_id_matches_components(
     table: &PathTable,
     path_id: PathId,
