@@ -7,11 +7,11 @@
 > `docs/compiler-data-layout-design.md`
 >
 > **Status:**
-> Phase 1 final review-correction pass is complete and committed in `3c9c776a8` after the
-> external-review correction checkpoint below. Related-site ownership, generic re-anchoring,
-> direct premerge failure ownership, structured renderer facts, and source/test-owner cleanup are
-> resolved here.
-> Phase 1 is delivered on main. The next implementation slice is Phase 2 on the rebased continuation branch, with package work proceeding in parallel. The roadmap retains the separate checkpoint before Phase 4.
+> Phase 1 is delivered on main. The 2026-09-11 data-layout regression investigation on
+> `diagnostic-data-layout-changes` found no reproducible throughput regression versus the last
+> recorded CLI baseline. Mixed-freeze ownership (DLR-04) and consuming-warning drain (DLR-05) landed
+> as correctness/cleanup. Resume Phase 2 on this continuation branch. Package work proceeds in
+> parallel. The roadmap retains the separate checkpoint before Phase 4.
 > Test Suite Hardening was delivered in `03168082d`; its activation evidence is historical and lives
 > in `benchmarks/frontend-optimization-results.md`.
 
@@ -68,27 +68,24 @@ ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
 CURRENT_SLICE:
-- Phase: Phase 1 is complete and delivered on main. Next: Phase 2 after refreshing the continuation branch and baseline. Package work proceeds in parallel under the roadmap checkpoints.
+- Phase: Phase 1 is complete. The 2026-09-11 regression investigation closed without a measured
+  timing patch. Next: Phase 2 on `diagnostic-data-layout-changes` after this investigation's
+  evidence in `benchmarks/frontend-optimization-results.md`. Package work proceeds in parallel.
 - Goal: retain the compact plain diagnostic boundary, final `SourceId`/`SourceSpan` ownership and
   deterministic publication while preserving exact authored spans and typed infrastructure failures.
-- Current code evidence: project and linked-module backend diagnostics carry explicit boundary ownership;
-  domain-less handles stay with the project default range while domained package handles resolve only
-  through exact package rows. Generic re-anchoring preserves a spanless body's primary owner;
-  materialisation invariant failures use direct premerge infrastructure/diagnostic lanes; terminal and
-  HTML renderers consume structured label facts with scalar/UTF-16/display-width separation; source
-  discovery and frontend tests use focused real modules without obsolete test loaders.
-- Validation evidence: focused ownership, capacity, merge, renderer, loading and retention regressions pass.
-  The clean final full gate passed on 2026-09-10 for the candidate committed as `3c9c776a8`: native
-  featured all-target Clippy, 5,105 workspace tests, 17 CLI tests, 825 xtask tests, integration
-  1,951/1,951, source audit 1,336 files, docs check, 82 benchmark preflights, three scaling series
-  and timer erasure.
-  The five-run retained-layout/allocator probe is recorded in
-  `benchmarks/frontend-optimization-results.md`.
-- Accepted code checkpoints: implementation `a9f9744de`; representation corrections `e1f16cb49`;
-  cross-target test-import correction `134aebf63`; obsolete span-allowance cleanup `749f9c3f0`;
-  stale diagnostic-boxing comment cleanup `eb6416312`; external-review correction checkpoints
-  `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and `3c9c776a8`.
-- Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign.
+- Current code evidence: mixed frozen/transitional message aggregation keeps existing frozen rows
+  when converting remaining source rows. Consuming render conversion moves artefact and sidecar
+  warnings. `SourceDatabaseBuilder::finish` returns an owned database. `TokenStream::next` advances
+  byte offsets. Domain-less handles stay with the project default range while package handles
+  resolve only through exact package rows.
+- Validation evidence: 2026-09-11 clean-tree `just bench-check` **-2ms avg** (0 slower), frontend
+  **-8ms avg** (0 slower), data-layout **-4ms avg**, scaling within budget. Clean memory-probe
+  retention is empty; warned/diagnosed reports retain snapshots. `just validate` passed after the
+  cleanup checkpoint `debe6db61`.
+- Accepted investigation checkpoints: measurement `958585972`; mixed-freeze `97bf5ee28`; warning
+  drain and leftover API prune `debe6db61`.
+- Non-goals: Phase 2 path/token-store work and later diagnostic schema/report redesign. DLR-02,
+  DLR-03 and DLR-06 remain unmeasured deferred cleanup.
 
 Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749f9c3f0`,
 `eb6416312`, `d8c182e9b`, `d7286e522`, `687295a80`, `18d8e92cb`, `a9f5eaae`, `fc9f449e9` and
@@ -96,9 +93,9 @@ Phase 1 code closeout is recorded in `a9f9744de`, `e1f16cb49`, `134aebf63`, `749
 
 CURRENT_WORKSPACE_STATE:
 - Phase 1 source, token, diagnostic, renderer and ownership corrections are complete and validated.
-- The exact correction checkpoint, feature-matrix result and full-gate result are recorded in the
-  correction evidence below.
-- Phase 2 is the next slice on the rebased continuation branch. Establish its actual workspace state and validation baseline when work starts.
+- The 2026-09-11 investigation did not reproduce the 19:18 CLI print; do not treat later speedups as
+  that record's cause.
+- Phase 2 is the next slice on this continuation branch.
 HISTORICAL_ACCEPTED_SLICES:
 Phase 0 and Phase 1 are complete on main. Per-slice delivery, review and validation logs live in
 Git. The compact Phase 0/1 summary below keeps standing contracts, later-phase prerequisites and

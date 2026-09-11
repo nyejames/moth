@@ -3556,3 +3556,45 @@ The predecessor comparison remains historical context only:
 The corrected live-report and after-report-drop fields are process-global allocator proxies, not owner
 attribution. The probe still does not partition common versus cold allocations or attribute allocator
 bytes to individual owners.
+
+## Data-layout regression investigation - 2026-09-11
+
+Branch `diagnostic-data-layout-changes`. Compiler checkpoint `debe6db61`. Toolchain rustc/cargo 1.97.1 `aarch64-apple-darwin`. Host `6D851D`.
+
+The 19:18 UTC CLI print versus `232f207f` (`+16ms avg`, 16 slower) was a read-only `bench-check`. Its revision and dirty state were never persisted. Exact reconstruction is blocked. Later clean-tree measurements are not a reproduction of that record.
+
+### Throughput
+
+Public summaries use mean (`avg`). There was no material regression to accept, so the five-invocation median policy was not applied.
+
+| Suite | Time (UTC) | Public mean | Faster / slower | Compared cases |
+| --- | --- | --- | --- | --- |
+| `just bench-check` | 22:47 | **-2ms avg** | 3 / 0 | 39/40; `docs_check` workload-changed |
+| `just bench-frontend-check` | 22:49 | **-8ms avg** | 15 / 0 | 41/42; `docs_frontend` workload-changed |
+| `just bench-data-layout-check` | 22:49 | **-4ms avg** | 1 / 0 | 2/2 |
+| `just bench-scaling` | 22:49 | all 3 series within budget |  |  |
+
+Same-session Phase 1 A/B versus harness predecessor `2843b9d6` was faster on every screened CLI case, including `generic_scaling_160_check` wall median 464.76 vs 524.42 ms. That speedup is not the cause of the 19:18 print.
+
+### Retention probe (single process each)
+
+Recipe: `cargo build --release --bin data_layout_memory_probe --features data_layout_memory_probe`. Allocator deltas are process-global proxies, not owner attribution.
+
+| Workload | Outcome | Errors / warnings | Snapshot bytes | Source identity slots | Diagnostic records | Identity contexts | After-report-drop bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `benchmarks/speed-test.moth` | Success | 0 / 0 | 0 | 0 | 0 | 0 | 1,494 |
+| `benchmarks/data-layout/warning-heavy.moth` | Success | 0 / 39 | 1,200 | 2 | 39 | 1 | 1,479 |
+| `benchmarks/data-layout/diagnosed` | Diagnosed | 40 / 0 | 903 | 42 | 40 | 1 | 1,488 |
+
+Clean-result freeze skip still retains no source snapshots or identity contexts. Warned and diagnosed reports retain the contexts needed to render.
+
+### Patches and dispositions
+
+- Proven timing cause: none.
+- DLR-04: mixed `append_messages_preserving_context` then `freeze_source_contexts` no longer drops existing frozen rows. Correctness repair, not a timing claim.
+- DLR-05: consuming render conversion moves artefact/sidecar warnings instead of cloning them.
+- DLR-07: one `Token::new`; leftover logical-path and span-resolver helpers are `#[cfg(test)]`.
+- DLR-08: original-plan Phase 1 current-state matches `SourceDatabaseBuilder::finish` and `TokenStream::next`.
+- Deferred: DLR-02, DLR-03, DLR-06. Historical 19:18 cause remains unresolved.
+
+Resume the original layout plan at Phase 2 on this branch.
