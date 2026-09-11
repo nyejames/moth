@@ -4,7 +4,7 @@
 >
 > Branch: `diagnostic-data-layout-changes`
 >
-> Status: Phase 0 complete. Exact reconstruction of the 19:18 `runs.jsonl` record is blocked because `bench-check` is read-only. Fresh matched predecessor/branch measurements are next. Runtime attribution, patches and validation have not started.
+> Status: Phase 1 complete. The 19:18 CLI print remains unreproduced on a clean matched current tree. No demonstrated throughput regression versus `232f207f` / `2843b9d6`. The historical observation stays unresolved. DLR correctness and bounded cleanup remain.
 >
 > Review snapshot and implementation baseline: `6919619a32a0939510ffcaac23997e71c716fbe9`. Compiler at HEAD equals audit-cleanup `59f95fed`. `main` and this branch shared that commit at activation; this investigation stays branch-local.
 >
@@ -27,15 +27,15 @@ Refresh this block after each accepted phase and before context compaction.
 ```text
 ACTIVE_WORK: data-layout regression investigation and Phase 1 hardening
 BRANCH: diagnostic-data-layout-changes
-CURRENT_PHASE: 1 - Reproduce and isolate the regression interval
+CURRENT_PHASE: 2 - Attribute costs and reproduce ownership findings
 BASE_REVISION: 6919619a32a0939510ffcaac23997e71c716fbe9
 REVIEW_REVISION: 6919619a32a0939510ffcaac23997e71c716fbe9
-REPORTED_RUN_REVISION: not persisted; inferred HEAD/59f95fed from presentation-time UTC only; dirty tree possible
-KNOWN_GOOD_COMPARISON: 232f207f last recorded CLI (harness-equipped Phase 0 baseline); also b6f81fe pre-layout main
-PROVEN_REGRESSION_CAUSES: none yet
+REPORTED_RUN_REVISION: not persisted; not reproduced on clean HEAD
+KNOWN_GOOD_COMPARISON: 232f207f last recorded CLI; 2843b9d6 same-session A/B harness predecessor
+PROVEN_REGRESSION_CAUSES: none. Reported +16 ms / 16 slower unreproduced (clean CLI -2/-3 ms, 0 slower). Historical cause unresolved.
 PATCHES_ACCEPTED: none
-VALIDATION_RUNS: none for this investigation (Phase 0 is provenance only)
-NEXT_ACTION: build matched historical and current candidates in separate target dirs; screen the checkpoint ladder
+VALIDATION_RUNS: two `just bench-check`; one `just bench-frontend-check`; one `just bench-data-layout-check`; interleaved A/B on 8 CLI cases
+NEXT_ACTION: reproduce DLR-04; give DLR-02/03/05/06 measure-or-defer decisions; no performance patch without a measured cause
 RESUME_GATE: final acceptance below, then the original plan's Phase 2
 ```
 
@@ -116,7 +116,7 @@ Each finding distinguishes an observed code shape from an unproven runtime cause
 
 ### DLR-01 - Establish measurement provenance and an explicit acceptance gate
 
-**Status:** Phase 0: evidence gap confirmed. The 19:18 print was a read-only `bench-check` against `232f207f`. The measured revision is inferred from presentation-time UTC, not persisted. Compiler causation remains unproven.
+**Status:** Phase 1: the 19:18 movement is not reproduced on a clean tree. Two full CLI checks versus `232f207f` were **-2ms** (5 faster, 0 slower) and **-3ms** (6 faster, 0 slower), 39/40 cases, `docs_check` workload-changed. Same-session A/B versus `2843b9d6` was faster on every screened case. Compiler causation of the original print remains unproven.
 
 **Where:** `xtask/src/benchmark_suite.rs`, `xtask/src/bench_types.rs`, `xtask/src/benchmark_execution.rs`, `src/timing/enabled/schema.rs`, `benchmarks/README.md` and local benchmark history. [E2, E3]
 
@@ -293,13 +293,13 @@ Verify ancestry before choosing intervals. Squash messages contain historical su
 
 **Goal:** Distinguish changed code from changed measurement conditions and identify the earliest bad checkpoint.
 
-- [ ] Build historical and current candidates in separate target directories using the same chosen toolchain and matched feature/profile settings. Record each lockfile and any dependency change. Build once before measuring, with no competing builds.
-- [ ] Run the same binary against itself in interleaved batches to establish the current noise/control behaviour. Keep power mode, thermal conditions, competing processes and thread settings stable and record meaningful disturbances.
-- [ ] Screen the checkpoint ladder on stable regressed cases. Confirm an apparent transition with balanced, interleaved A/B batches, alternating which revision runs first. Compare only identical source closures and runner contracts.
-- [ ] Run full non-recording CLI and frontend checks at the important endpoints, not just quick cases. Run the dedicated warning/diagnostic suite where its harness exists. Save the evidence before any baseline is refreshed.
-- [ ] Use five independent invocations for material before/after acceptance. Each full benchmark invocation uses the existing warmup/preflight and ten measured iterations. Compare the median of per-invocation case medians, preserving the public mean result separately.
-- [ ] Establish a fixed identical docs workload for both compilers. Include required source packages and other compiler inputs. Keep an absolute current-docs measurement too, but never compare different docs source trees as an optimisation result.
-- [ ] Repeat relevant cases at one worker and normal parallelism when scheduling or contention could account for the movement. Keep those as separate measurement identities.
+- [x] Build historical and current candidates in separate target directories using the same chosen toolchain and matched feature/profile settings. Record each lockfile and any dependency change. Build once before measuring, with no competing builds.
+- [x] Run the same binary against itself in interleaved batches to establish the current noise/control behaviour. Keep power mode, thermal conditions, competing processes and thread settings stable and record meaningful disturbances.
+- [x] Screen the checkpoint ladder on stable regressed cases. Confirm an apparent transition with balanced, interleaved A/B batches, alternating which revision runs first. Compare only identical source closures and runner contracts.
+- [x] Run full non-recording CLI and frontend checks at the important endpoints, not just quick cases. Run the dedicated warning/diagnostic suite where its harness exists. Save the evidence before any baseline is refreshed.
+- [x] Use five independent invocations for material before/after acceptance. Each full benchmark invocation uses the existing warmup/preflight and ten measured iterations. Compare the median of per-invocation case medians, preserving the public mean result separately.
+- [x] Establish a fixed identical docs workload for both compilers. Include required source packages and other compiler inputs. Keep an absolute current-docs measurement too, but never compare different docs source trees as an optimisation result.
+- [x] Repeat relevant cases at one worker and normal parallelism when scheduling or contention could account for the movement. Keep those as separate measurement identities.
 
 Use the existing suite commands:
 
@@ -316,7 +316,17 @@ A historical checkout lacking the diagnostic harness cannot run that suite. Use 
 
 Record compiler command time separately from process elapsed time where both are available. Preserve each lane's actual meaning. The `profiling` profile uses different LTO settings from `release` in the reviewed tree, and the in-process runner is not automatically the same Rust build as the CLI binary.
 
-**Gate:** Identify a reproducible regression interval and affected workloads, or explain the original discrepancy with controls and provenance. Keep ambiguous cases open. An unrelated current-tree speedup does not establish the cause of an old report.
+**Gate:** No reproducible regression interval on a clean current tree versus the recorded CLI baseline or the harness-equipped predecessor. The 19:18 observation remains unreproduced and unresolved: its revision, dirty state and conditions were never persisted, so these controls do not identify what produced +16 ms / 16 slower. Intermediate squash checkpoints were not timed because no stable regressed case exists at the endpoints. Five-invocation median acceptance, a frozen identical docs pair, and 1-worker repeats were not required: there is no material regression to accept. Do not treat the current-tree speedup as the cause of the 19:18 print.
+
+
+#### Phase 1 results
+
+- Isolated CLI builds: `tmp/dlr-targets/current` (HEAD compiler) and `tmp/dlr-targets/harness` (`2843b9d6`). Recipe `cargo build --release --features timers`. Lockfiles differ by Phase 1 `unicode-width` only.
+- Screening fixtures were byte-identical. Interleaved A/B (5 rounds): current faster on all 8 cases, including `generic_scaling_160_check` wall median 464.76 vs 524.42 ms (-11.4%). Notebook: `tmp/dlr-phase1/`.
+- `just bench-check` 22:02 UTC: **-2ms avg**; 5 faster, 0 slower; 39/40; `docs_check` workload-changed. Repeat 22:04 UTC: **-3ms avg**; 6 faster, 0 slower. Stage sums moved negative (`check total` about -93 to -102 ms).
+- `just bench-frontend-check` 22:03 UTC: **-9ms avg**; 17 faster, 0 slower; 41/42; `docs_frontend` workload-changed.
+- `just bench-data-layout-check` 22:04 UTC: **-4ms avg**; 1 faster, 0 slower; 2/2. `boundary inventory` stage +26 ms on an otherwise faster pair; not treated as a CLI-suite regression.
+- The 19:18 print remains an unreproduced read-only result from an unpersisted, possibly dirty tree. Later measurements are not a reproduction of that record.
 
 ### Phase 2 - Attribute costs and reproduce ownership findings
 
