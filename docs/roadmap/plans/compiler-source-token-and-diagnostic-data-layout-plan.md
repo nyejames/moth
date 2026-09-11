@@ -580,9 +580,9 @@ source in the boundary database. File/chunk merges place prepared results in pre
 reject duplicate, missing and out-of-range outputs.
 
 `SourceDatabaseBuilder` separates live span ownership from immutable lookup services. Private AST
-handles share the same allocation only during producer calls; finalization regains exclusive access
-and returns that same `Arc` after installing the tables. Package lookup publication waits for
-check-only producers.
+handles share the same allocation only during producer calls; `finish` consumes the builder,
+unwraps exclusive ownership, and returns an owned `SourceDatabase` after installing the tables.
+Package lookup publication waits for check-only producers.
 
 `SourceDatabase` owns the existing path interner as its one source identity base. The source
 `PathId`/legacy-path bridge ends at 2D and reconstructs transient components from table nodes,
@@ -615,8 +615,9 @@ final terminator resolves to the preceding visible line end. Unicode scalar colu
 and UTF-16 columns serve tooling; both are derived lazily from exact byte offsets. Empty spans
 overlap nothing; containment is the operation for insertion points.
 
-The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` is the single owner of
-the authored line counter. Unreadable-source failure stays at the slot layer; loaded records own
+The tokenizer's line-break set is LF, CRLF and bare CR. `TokenStream::next` advances the UTF-8
+byte-offset cursor; line indexes are derived from retained snapshots rather than an authored line
+counter in the tokenizer. Unreadable-source failure stays at the slot layer; loaded records own
 text, line starts and extended spans unconditionally.
 
 Cross-source joins are rejected. Named source-order, overlap and containment operations replace
@@ -758,9 +759,10 @@ columns, UTF-16 columns and tab stops remain distinct.
 
 #### Deferred representation work
 
-Parent-linked path tables, compact span encoding, token-store consolidation and declarative
-token/diagnostic schemas remain deferred to their planned migration slices. This Phase 1 work adds
-no second interner, scheduler, observer API or ubiquitous per-node owner.
+Token-store consolidation and declarative token/diagnostic schemas remain deferred to their planned
+migration slices. Parent-linked path tables and compact span encoding are Phase 1 current state, not
+future work. This Phase 1 work adds no second interner, scheduler, observer API or ubiquitous
+per-node owner.
 
 The private discovery-finalization barrier, parent-linked path trie, ambiguity-failing legacy path
 lookup and local `_unspanned` wrappers remain accepted migration choices until their owning cleanup

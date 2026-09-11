@@ -11,6 +11,7 @@
 use super::module_identity::ModuleId;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -254,6 +255,25 @@ impl ModuleArtifactStore {
             ProviderSlot::Successful(artifact_id) => self.artifacts.get(artifact_id.0),
             ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
         })
+    }
+
+    /// Move successful-artefact warnings in deterministic `ModuleId` order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+        let artifact_ids = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                ProviderSlot::Successful(artifact_id) => Some(*artifact_id),
+                ProviderSlot::Unavailable | ProviderSlot::Diagnosed | ProviderSlot::Blocked => None,
+            })
+            .collect::<Vec<_>>();
+        let mut warnings = Vec::new();
+        for artifact_id in artifact_ids {
+            if let Some(artifact) = self.artifacts.get_mut(artifact_id.0) {
+                warnings.append(&mut artifact.module.metadata.warnings);
+            }
+        }
+        warnings
     }
 
     /// Resolve the exact published context for one indexed location.

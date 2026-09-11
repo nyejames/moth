@@ -636,14 +636,10 @@ impl SourceDatabase {
 
     /// Resolve the unique physical slot for a logical path, if one exists.
     ///
-    /// This is deliberately a cold-path linear scan: renderers perform it only while producing a
-    /// diagnostic frame, and keeping the source database's compact identity storage free of a
-    /// second logical-path index avoids another allocation and synchronization boundary.
-    ///
     /// A logical path is safe to render only when it identifies exactly one slot in this
     /// database. Collisions can arise when independently rooted sources share a portable spelling;
     /// returning no slot on ambiguity is safer than guessing and displaying another file's text.
-    #[allow(dead_code)] // Retained for deferred mutable logical-path lookup consumers.
+    #[cfg(test)]
     pub(crate) fn unique_record_for_logical_path(
         &self,
         logical_path: &InternedPath,

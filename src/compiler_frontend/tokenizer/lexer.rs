@@ -526,7 +526,7 @@ pub fn tokenize(
 
     // `ModuleStart` is synthetic and carries the source-local empty anchor. Its owner is the
     // enclosing `FileTokens.file_id`, not a fabricated path/position record.
-    let mut token = Token::with_span(
+    let mut token = Token::new(
         TokenKind::ModuleStart,
         crate::compiler_frontend::source::LocalSpan::source_start(),
     );

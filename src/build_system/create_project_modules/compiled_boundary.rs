@@ -307,6 +307,13 @@ impl CompiledGraphBoundary {
             .chain(self.generated.sidecars().map(|sidecar| &sidecar.module))
     }
 
+    /// Move successful-module warnings from artefact and sidecar owners in view order.
+    pub(crate) fn take_successful_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+        let mut warnings = self.modules.take_successful_warnings();
+        warnings.extend(self.generated.take_sidecar_warnings());
+        warnings
+    }
+
     pub(crate) fn install_frozen_identity(
         &self,
         identity: Option<Arc<FrozenIdentityContext>>,
@@ -1117,10 +1124,7 @@ impl ProjectFrontendCompilation {
             project_source_database,
             ..
         } = self;
-        let project_warnings = project
-            .successful_module_views()
-            .flat_map(|module| module.metadata.warnings.iter().cloned())
-            .collect::<Vec<_>>();
+        let project_warnings = project.take_successful_warnings();
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
@@ -1129,14 +1133,8 @@ impl ProjectFrontendCompilation {
             .map(|package| std::mem::take(&mut package.boundary.diagnosed))
             .collect::<Vec<_>>();
         let package_warnings = source_packages
-            .iter()
-            .map(|package| {
-                package
-                    .boundary
-                    .successful_module_views()
-                    .flat_map(|module| module.metadata.warnings.iter().cloned())
-                    .collect::<Vec<_>>()
-            })
+            .iter_mut()
+            .map(|package| package.boundary.take_successful_warnings())
             .collect::<Vec<_>>();
         // Consume the caller aggregate without cloning; success warnings already live in
         // this domain while each local batch merges exactly once below before freezing.

@@ -706,7 +706,7 @@ fn parse_type_slice(
     string_table: &StringTable,
 ) -> TypeParseResult<ParsedTypeSlice> {
     let mut slice_tokens = tokens.to_vec();
-    slice_tokens.push(Token::with_span(TokenKind::Eof, LocalSpan::source_start()));
+    slice_tokens.push(Token::new(TokenKind::Eof, LocalSpan::source_start()));
     let mut stream = FileTokens::new_path_free_substream(
         outer_stream.src_path.clone(),
         outer_stream.file_id,

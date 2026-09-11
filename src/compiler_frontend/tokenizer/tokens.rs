@@ -107,11 +107,6 @@ impl Token {
     pub fn new(kind: TokenKind, span: LocalSpan) -> Self {
         Self { kind, span }
     }
-
-    /// Construct a token from a source-local exact span.
-    pub fn with_span(kind: TokenKind, span: LocalSpan) -> Self {
-        Self { kind, span }
-    }
 }
 
 /// The path-table lifecycle for one token stream.
@@ -752,7 +747,7 @@ impl<'a> TokenStream<'a> {
     pub fn new_token(&mut self, kind: TokenKind) -> Result<Token, SpanCapacityError> {
         let span = self.current_local_span()?;
         self.start_byte_offset = self.byte_offset;
-        Ok(Token::with_span(kind, span))
+        Ok(Token::new(kind, span))
     }
 
     /// Anchor the token's byte range at the character already consumed.

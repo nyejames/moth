@@ -863,15 +863,19 @@ fn assert_foreign_secondary_site(messages: &CompilerMessages, diagnostic_index: 
     assert_eq!(position.line, line);
 }
 
+struct MixedFreezeExpectation<'a> {
+    first_name: &'a str,
+    second_name: &'a str,
+    first_type: &'a str,
+    second_type: &'a str,
+    first_foreign_line: &'a str,
+    second_foreign_line: &'a str,
+}
+
 fn assert_mixed_freeze_keeps_originating_owners(
     first: CompilerMessages,
     second: CompilerMessages,
-    first_name: &str,
-    second_name: &str,
-    first_type: &str,
-    second_type: &str,
-    first_foreign_line: &str,
-    second_foreign_line: &str,
+    expected: MixedFreezeExpectation<'_>,
 ) {
     let first_len = first.diagnostic_slice().len();
     let mut messages = first;
@@ -885,28 +889,28 @@ fn assert_mixed_freeze_keeps_originating_owners(
         .expect("first diagnostic should keep its originating frozen owner");
     assert_eq!(
         first_identity.try_resolve_string(StringId::from_index(0)),
-        Some(first_name)
+        Some(expected.first_name)
     );
-    assert_foreign_secondary_site(&messages, 0, first_foreign_line);
+    assert_foreign_secondary_site(&messages, 0, expected.first_foreign_line);
 
     let second_identity = messages
         .frozen_identity_context_for_diagnostic(first_len)
         .expect("appended diagnostic should keep its originating frozen owner");
     assert_eq!(
         second_identity.try_resolve_string(StringId::from_index(0)),
-        Some(second_name)
+        Some(expected.second_name)
     );
-    assert_foreign_secondary_site(&messages, first_len, second_foreign_line);
+    assert_foreign_secondary_site(&messages, first_len, expected.second_foreign_line);
 
     let rendered =
         crate::compiler_frontend::compiler_messages::display_messages::format_terse_compiler_messages(
             &messages,
         )
         .join("\n");
-    assert!(rendered.contains(first_name), "{rendered}");
-    assert!(rendered.contains(second_name), "{rendered}");
-    assert!(rendered.contains(first_type), "{rendered}");
-    assert!(rendered.contains(second_type), "{rendered}");
+    assert!(rendered.contains(expected.first_name), "{rendered}");
+    assert!(rendered.contains(expected.second_name), "{rendered}");
+    assert!(rendered.contains(expected.first_type), "{rendered}");
+    assert!(rendered.contains(expected.second_type), "{rendered}");
 }
 
 #[test]
@@ -930,12 +934,14 @@ fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
             "mutable_primary_gamma",
             "mutable_foreign_delta",
         ),
-        "frozen-name",
-        "mutable-name",
-        "FrozenType",
-        "MutableType",
-        "frozen_foreign_omega",
-        "mutable_foreign_delta",
+        MixedFreezeExpectation {
+            first_name: "frozen-name",
+            second_name: "mutable-name",
+            first_type: "FrozenType",
+            second_type: "MutableType",
+            first_foreign_line: "frozen_foreign_omega",
+            second_foreign_line: "mutable_foreign_delta",
+        },
     );
     assert_mixed_freeze_keeps_originating_owners(
         colliding_owner_messages(
@@ -954,12 +960,14 @@ fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
         )
         .freeze_source_contexts()
         .expect("frozen owner should freeze before mixed aggregation"),
-        "mutable-name",
-        "frozen-name",
-        "MutableType",
-        "FrozenType",
-        "mutable_foreign_delta",
-        "frozen_foreign_omega",
+        MixedFreezeExpectation {
+            first_name: "mutable-name",
+            second_name: "frozen-name",
+            first_type: "MutableType",
+            second_type: "FrozenType",
+            first_foreign_line: "mutable_foreign_delta",
+            second_foreign_line: "frozen_foreign_omega",
+        },
     );
 }
 

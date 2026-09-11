@@ -10,6 +10,7 @@
 //!      unrelated boundaries and are never suppressed or resolved across them.
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::module_compilation::{
     CompletedGeneratedFunction, GeneratedFunctionDelta, GeneratedFunctionId,
     GeneratedFunctionSidecar, KnownGeneratedFunctions, validate_completed_generated_record,
@@ -105,6 +106,15 @@ impl BoundaryGeneratedFunctionStore {
     /// Borrow this boundary's completed sidecars in deterministic publication order.
     pub(crate) fn sidecars(&self) -> impl Iterator<Item = &GeneratedFunctionSidecar> + '_ {
         self.records.iter().map(|record| &record.sidecar)
+    }
+
+    /// Move sidecar warnings in deterministic publication order.
+    pub(crate) fn take_sidecar_warnings(&mut self) -> Vec<CompilerDiagnostic> {
+        let mut warnings = Vec::new();
+        for record in &mut self.records {
+            warnings.append(&mut record.sidecar.module.metadata.warnings);
+        }
+        warnings
     }
 
     /// Resolve one completed sidecar by its dense publication index.

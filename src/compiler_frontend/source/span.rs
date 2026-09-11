@@ -403,9 +403,7 @@ impl ExtendedSpanBuilder {
     /// WHY: a builder belongs to one source while it produces spans; qualifying at the builder
     /// names that source once instead of at every operation. Producers resolve their own local
     /// spans, so the qualified form first reaches compilation with the consumer migrations.
-    // Test-only API retained for source/tests/span_tests.rs and frontend test modules; production
-    // consumers resolve through source owners.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn resolver_for(&self, source: SourceId) -> ExtendedSpanResolver<'_> {
         self.resolver().for_source(source)
     }
@@ -434,10 +432,8 @@ impl ExtendedSpanTable {
         self.entries.len()
     }
 
-    // Test-only API owned by the frontend source test module source/tests/span_tests.rs; production
-    // consumers resolve through installed source records.
     /// The bare resolver for this table's own source-local work.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn resolver(&self) -> ExtendedSpanResolver<'_> {
         ExtendedSpanResolver {
             entries: Some(&self.entries),

@@ -78,7 +78,7 @@ pub(super) fn create_top_level_const_template(
 
     let eof_anchor = token_stream.current_token();
     let end_span = SourceSpan::new(token_stream.file_id, eof_anchor.span);
-    body.push(Token::with_span(TokenKind::Eof, eof_anchor.span));
+    body.push(Token::new(TokenKind::Eof, eof_anchor.span));
     let condition_references =
         collect_template_if_condition_references(&body, token_stream.file_id);
 

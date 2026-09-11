@@ -659,7 +659,7 @@ fn initializer_references_carry_the_scanned_token_span() {
     let source_id = SourceId::from_index(1);
     let span = LocalSpan::exact(4, 11, &mut builder).expect("reference bounds should encode");
     let tokens = vec![
-        Token::with_span(TokenKind::Symbol(name), span),
+        Token::new(TokenKind::Symbol(name), span),
         Token::new(TokenKind::Newline, LocalSpan::source_start()),
         Token::new(TokenKind::Eof, LocalSpan::source_start()),
     ];

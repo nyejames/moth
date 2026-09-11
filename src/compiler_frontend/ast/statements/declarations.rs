@@ -872,7 +872,7 @@ fn declaration_initializer_stream(
         )
         .into());
     };
-    initializer_tokens.push(Token::with_span(TokenKind::Eof, eof_span));
+    initializer_tokens.push(Token::new(TokenKind::Eof, eof_span));
     FileTokens::new_from_slice(
         qualified_name.to_owned(),
         context.shared.declaring_file_id,

@@ -4,7 +4,7 @@
 >
 > Branch: `diagnostic-data-layout-changes`
 >
-> Status: Phase 2/3 complete. No measured throughput regression to patch. DLR-04 mixed-freeze ownership is reproduced and repaired. DLR-02, DLR-03, DLR-05 freeze work, and DLR-06 remain deferred. Phase 4 cleanup remains.
+> Status: Phase 4 complete. DLR-04/05/07/08 landed. DLR-02/03/06 remain deferred. Phase 5 acceptance remains.
 >
 > Review snapshot and implementation baseline: `6919619a32a0939510ffcaac23997e71c716fbe9`. Compiler at HEAD equals audit-cleanup `59f95fed`. `main` and this branch shared that commit at activation; this investigation stays branch-local.
 >
@@ -33,9 +33,9 @@ REVIEW_REVISION: 6919619a32a0939510ffcaac23997e71c716fbe9
 REPORTED_RUN_REVISION: not persisted; not reproduced on clean HEAD
 KNOWN_GOOD_COMPARISON: 232f207f last recorded CLI; 2843b9d6 same-session A/B harness predecessor
 PROVEN_REGRESSION_CAUSES: none. Historical 19:18 cause unresolved. DLR-04 is a correctness defect, not a timing cause.
-PATCHES_ACCEPTED: DLR-04 keep existing frozen rows when freeze_source_contexts converts remaining source rows
-VALIDATION_RUNS: Phase 1 suite checks; freeze ownership unit test; `just validate` passed 22:22 UTC (bench-ci 0 slower; scaling within budget)
-NEXT_ACTION: Phase 4 DLR-05 consuming warning move, DLR-07 leftovers, DLR-08 docs. Do not reopen DLR-02/03/06 without a measured cause.
+PATCHES_ACCEPTED: DLR-04 mixed-freeze row preservation; DLR-05 consume warnings; DLR-07 one token constructor
+VALIDATION_RUNS: Phase 1 suite checks; freeze ownership unit test; `just validate` passed after DLR-04 and again after Phase 4 cleanup
+NEXT_ACTION: Phase 5 final acceptance matrix and durable evidence
 RESUME_GATE: final acceptance below, then the original plan's Phase 2
 ```
 
@@ -178,7 +178,7 @@ The repair extends existing frozen rows and appends newly converted nonempty row
 
 ### DLR-05 - Move warnings at consuming boundaries and measure freeze work separately
 
-**Status:** Clone cleanup retained for Phase 4. Extra freeze work is failure-path; the clean-result branch already skips freezing. `just bench-data-layout-check` was faster on current HEAD, so freeze work is not a CLI success-path cause.
+**Status:** Fixed. Consuming render conversion now moves successful-module warnings from artefact and sidecar owners. Extra freeze work remains failure-path; clean results still skip freezing.
 
 **Where:** `src/build_system/create_project_modules/compiled_boundary.rs::ProjectFrontendCompilation::into_render_messages_with_optional_retention`, `CompiledGraphBoundary::successful_module_views` and the frozen-context installation helpers. [E8]
 
@@ -208,7 +208,7 @@ Avoid a large typestate hierarchy or replacing real checks with `debug_assert!` 
 
 ### DLR-07 - Prune small representation leftovers and test-only production APIs
 
-**Status:** Confirmed cleanup candidates. Caller reachability must be refreshed before deletion.
+**Status:** Fixed. One `Token::new` constructor remains. `unique_record_for_logical_path`, `ExtendedSpanBuilder::resolver_for` and `ExtendedSpanTable::resolver` are test-only.
 
 **Where:** `src/compiler_frontend/tokenizer/tokens.rs` and `src/compiler_frontend/source/{database.rs,span.rs}`. [E10]
 
@@ -224,7 +224,7 @@ Keep mutable and frozen source owners distinct. Similar accessor bodies do not j
 
 ### DLR-08 - Correct active documentation and prevent a misleading restart
 
-**Status:** Confirmed stale current-state wording and evidence inconsistencies to reconcile against the activation tree.
+**Status:** Current-state wording corrected on this branch. Original-plan Phase 1 now matches `SourceDatabaseBuilder::finish` and `TokenStream::next`. Benchmark README no longer duplicates volatile inventory counts and distinguishes public mean summaries from median protocol.
 
 **Where:** Original layout plan, `benchmarks/README.md`, affected source comments and `benchmarks/frontend-optimization-results.md`. [E3, E4, E11]
 
@@ -390,17 +390,26 @@ Review failures in the success path as well as success in the failure path. A sm
 
 **Goal:** Leave a smaller, clearer starting point for Phase 2 without expanding this plan into Phase 2.
 
-- [ ] Complete the verified create-then-replace and consuming-warning cleanup from DLR-02 and DLR-05 where it remains after performance work.
-- [ ] Resolve the mixed-context ownership finding from DLR-04 before resuming representation changes.
-- [ ] Consolidate the token constructor and remove genuinely unused compatibility/test-only APIs from DLR-07. Preserve needed tests under their actual subsystem owner.
-- [ ] Give DLR-03 and DLR-06 measured fix/retain/defer decisions. Avoid forcing a path-index migration or validated-state framework when their costs are immaterial.
-- [ ] Correct DLR-08's current-state wording and evidence caveats. Name future ownership without resurrecting deleted APIs to match stale comments.
-- [ ] Review changed modules from their entry points. Split only when responsibilities are genuinely mixed, deepen the current subsystem rather than adding broad utility modules and retain concise comments which explain non-local ownership.
-- [ ] Recheck the complete changed-file inventory and adjacent callers. Mark uninspected or intentionally deferred areas explicitly. Remove experimental code and refresh affected test ownership.
+- [x] Complete the verified create-then-replace and consuming-warning cleanup from DLR-02 and DLR-05 where it remains after performance work.
+- [x] Resolve the mixed-context ownership finding from DLR-04 before resuming representation changes.
+- [x] Consolidate the token constructor and remove genuinely unused compatibility/test-only APIs from DLR-07. Preserve needed tests under their actual subsystem owner.
+- [x] Give DLR-03 and DLR-06 measured fix/retain/defer decisions. Avoid forcing a path-index migration or validated-state framework when their costs are immaterial.
+- [x] Correct DLR-08's current-state wording and evidence caveats. Name future ownership without resurrecting deleted APIs to match stale comments.
+- [x] Review changed modules from their entry points. Split only when responsibilities are genuinely mixed, deepen the current subsystem rather than adding broad utility modules and retain concise comments which explain non-local ownership.
+- [x] Recheck the complete changed-file inventory and adjacent callers. Mark uninspected or intentionally deferred areas explicitly. Remove experimental code and refresh affected test ownership.
 
 Use one primary regression test owner per behaviour. Remove redundant tests that only exercise deleted constructors or private storage arrangements. Keep hard layout assertions beside the types they constrain. Do not add tests requiring the future eight-byte token or 32-byte diagnostic types before their owning slices introduce them.
 
 **Gate:** Every finding has a supported disposition. Cleanup commits preserve behaviour and have their own required validation. All original-plan pull-forwards, if any, are reconciled without duplicate implementations or double-counted completion.
+
+#### Phase 4 results
+
+- DLR-02 create-then-replace stays deferred: no measured hotspot. DLR-05 moves warnings through `CompiledGraphBoundary::take_successful_warnings`.
+- DLR-04 already repaired in Phase 3.
+- DLR-07: `Token::with_span` removed. Logical-path uniqueness lookup and standalone span resolvers are `#[cfg(test)]`.
+- DLR-03 and DLR-06 remain deferred/leave-local.
+- DLR-08: original-plan Phase 1 current-state matches `finish` and `TokenStream::next`; README no longer pins drifting inventory counts.
+
 
 ### Phase 5 - Final acceptance, durable evidence and resume
 
