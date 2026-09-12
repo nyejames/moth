@@ -1,6 +1,6 @@
 `@html` provides compile-time HTML helpers as a builder source-backed package. It belongs to the Builder origin family with MothSource backing, so the compiler reads ordinary Moth source from `packages/html/@mod.moth`. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
-`@html` ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the standard library expands.
+`@html` ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the first-party packages expand.
 
 ### Implicit scope for Moth template files
 
@@ -270,7 +270,7 @@ The canvas wrapper functions call through to `@web/canvas`, which emits JavaScri
 
 ### Deferred surfaces
 
-`@html` ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the standard library matures. See @../../../progress (progress matrix) for current status.
+`@html` ships as a skeleton. Future expansions include richer tag coverage, form components, accessible widget helpers, layout primitives and broader style utilities. The package grows as the language stabilises and the first-party packages mature. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 
