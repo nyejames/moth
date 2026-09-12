@@ -23,7 +23,8 @@ NEXT_ACTION: after that prerequisite lands, audit its final Text evaluator owner
 ```
 
 The package-foundation baseline this plan waited on is merged, so the compiler prerequisite is the
-only remaining blocker.
+only remaining blocker owned here. The umbrella programme owns cross-cutting blockers for every
+code-bearing phase, including the current red `just validate` clippy lane.
 
 The prerequisite compiler work establishes truthful zero/one/many result slots, adds
 `ExternalConstEvalOp`, adds one AST-owned Core constant-evaluation path and proves it with the existing

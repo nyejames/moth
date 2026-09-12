@@ -8,6 +8,7 @@ use super::{
     audit_javascript_source, started_report,
 };
 use crate::report_file::ReportRunIdentity;
+use moth::first_party_js::{InventoriedJsSource, inventoried_javascript_sources};
 use std::fs;
 use std::path::Path;
 use tempfile::{TempDir, tempdir};
@@ -169,12 +170,19 @@ export * from "lodash";
         3,
         "require, dynamic import and star re-export are each module loading: {findings:?}"
     );
-    assert!(
-        findings
-            .iter()
-            .all(|finding| finding.rule == FirstPartyDepsRule::UnapprovedModuleImport),
-        "every non-static-import loading form uses the unapproved-module rule: {findings:?}"
-    );
+    for form in [
+        "CommonJS `require()`",
+        "Dynamic `import()`",
+        "Re-export forms",
+    ] {
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule == FirstPartyDepsRule::UnapprovedModuleImport
+                    && finding.message.contains(form)
+            }),
+            "{form} must reach the unapproved-module rule: {findings:?}"
+        );
+    }
 }
 
 #[test]
@@ -225,9 +233,50 @@ fn missing_first_party_root_fails_closed() {
 fn started_report_is_incomplete_until_the_walk_finishes() {
     let report = started_report(ReportRunIdentity::started("first-party-deps", None));
 
+    assert_eq!(FIRST_PARTY_DEPS_SCHEMA_VERSION, 3);
     assert_eq!(report.schema_version, FIRST_PARTY_DEPS_SCHEMA_VERSION);
     assert!(!report.run.completed);
     assert_eq!(report.visited_file_count, 0);
     assert_eq!(report.javascript_source_count, 0);
     assert!(report.findings.is_empty());
+}
+
+#[test]
+fn the_audit_inspects_the_compiler_owned_javascript_inventory() {
+    let workspace = fixture_workspace();
+
+    let (_visited, javascript_sources, findings) =
+        audit_first_party_deps(workspace.path()).expect("fixture roots are readable");
+
+    assert_eq!(
+        javascript_sources,
+        inventoried_javascript_sources().len(),
+        "empty roots leave only the compiler-owned inventory, which the audit must still inspect"
+    );
+    assert!(
+        findings.is_empty(),
+        "the shipped inventory must satisfy the first-party policy: {findings:?}"
+    );
+}
+
+#[test]
+fn an_inventoried_source_with_a_forbidden_import_is_rejected_under_its_label() {
+    let mut state = super::ScanState::default();
+    let sources = [InventoriedJsSource {
+        label: "moth::first_party_js::fixture".to_owned(),
+        source: "import x from \"lodash\";\n".to_owned(),
+    }];
+
+    super::scan_inventoried_javascript(&sources, &mut state);
+
+    assert_eq!(state.javascript_source_count, 1);
+    assert_eq!(
+        state.findings.len(),
+        1,
+        "an inventoried source must be scanned, not only counted: {:?}",
+        state.findings
+    );
+    let finding = &state.findings[0];
+    assert_eq!(finding.rule, FirstPartyDepsRule::UnapprovedModuleImport);
+    assert_eq!(finding.file, "moth::first_party_js::fixture");
 }

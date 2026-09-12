@@ -3,7 +3,7 @@
 ## Purpose
 
 Build a useful batteries-included set of first-party Moth packages, starting with JavaScript
-implementations while the compiler diagnostics and data-layout work continues in parallel.
+implementations while the compiler diagnostics and data-layout work continues.
 
 The programme completes the common gaps in existing Core and Builder packages before adding broad new
 surface area. It also establishes package terminology, implementation boundaries, progress tracking
@@ -17,10 +17,10 @@ plans under this directory.
 ## Current-state capsule
 
 ```text
-STATUS: active parallel programme, parked on its compiler prerequisite
-CURRENT_SLICE: none - Phase 0 foundations and Phase 1 workflow activation are delivered and merged
+STATUS: active programme, parked on its compiler prerequisite
+CURRENT_SLICE: none - Phase 1 is delivered; Phase 0 implementation is merged and stays open only on the red `just validate` clippy lane
 BLOCKERS: package implementation waits for the native result-slot and Core const-eval compiler checkpoint; `just validate` also fails repository-wide on pre-existing `clippy::result_large_err` owned by the source/token/diagnostic data-layout plan
-NEXT_ACTION: land the compiler checkpoint, then start Phase 2 from main with `core-text.md`
+NEXT_ACTION: settle the red clippy lane with the roadmap owner and close Phase 0 on a green gate, decide the host-loading guard boundary, then start Phase 2 from main with `core-text.md` once the compiler checkpoint lands
 ```
 
 Record the active revision, worktree state and validation baseline in untracked working notes when a
@@ -28,7 +28,7 @@ phase starts. Do not pin a moving programme to a baseline commit in this file.
 
 ## Roadmap position and lifecycle
 
-After the foundation and documentation baseline is squash-merged into main, continue this programme on a rebased packages-and-builder-progress-plan branch in parallel with compiler data-layout Phase 2 onward. The roadmap owns shared checkpoints. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
+The foundation and documentation baseline is merged into main. Phase 1 is delivered there and Phase 0's implementation is merged with only its `just validate` gate outstanding. The programme now waits on the compiler checkpoint below rather than running package phases alongside compiler data-layout work. The roadmap owns shared checkpoints and serial order. Each package slice keeps its own compiler prerequisites and the merge-isolation rules below.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file.
@@ -249,7 +249,8 @@ Phase 0 adds one focused validation owner to `just validate`. It must:
 - reject package-manager manifests and lockfiles within those roots
 - reuse the HTML JS parser scanner rather than a second lexer or repository-wide substring scan
 - reject unapproved JavaScript module-loading forms other than a named static import of a
-  registered runtime module
+  registered runtime module, within the lexical ECMAScript and `require` forms the scanner
+  classifies; host-driven script loading is a separate decision named in Phase 0 below
 - report invalid named imports or unsupported import forms from a registered runtime module as a
   distinct rule
 - use one explicit allowlist for Moth-owned runtime modules where imports are required
@@ -419,7 +420,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 
 | Order | Work item | Living plan | Current state | High-level v1 target |
 |---|---|---|---|---|
-| 0 | Package foundations | this plan | Delivered and merged | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
+| 0 | Package foundations | this plan | Implementation merged; open on the red `just validate` clippy lane | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | Designed, queued behind native result slots and Core const evaluation | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | `core-math.md` | TODO: create when activated | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
@@ -551,7 +552,7 @@ Only then add a package row to the packages and builders progress matrix.
 The main roadmap:
 
 - links this umbrella programme once
-- records that it is active in parallel with diagnostics
+- records the programme's current state, including what blocks the next package phase
 - does not list each child package plan
 - retains the later package dependency and manager foundations work as a separate item
 
@@ -600,7 +601,7 @@ Delivered before Phase 0:
 
 ### Phase 0 - package foundations hardening
 
-Delivered and merged:
+Implementation merged, phase not formally closed:
 
 - removed `PackageOrigin::Standard` and Standard-tier documentation
 - kept `PackageOrigin::Dependency` for later package-system work
@@ -609,11 +610,14 @@ Delivered and merged:
   and allows only exact `RuntimeModuleRegistry` specifiers
 - no cryptography Core package examples were present in canonical docs
 
-The guard classifies module loading lexically through the HTML JS scanner: static and dynamic
-`import`, `require` and re-export forms. Classic-worker `importScripts`, `new Worker(url)` and
-specifiers hidden in `eval`/`new Function` strings are outside lexical classification. Close that
-boundary in the Phase 10 guard audit, either by extending the scanner dispatch or by naming the
-exclusion in the validation ownership statement.
+The guard classifies ECMAScript module loading lexically through the HTML JS scanner: static and
+dynamic `import`, `require` and re-export forms. Host-driven script loading of any shape is outside
+that classification, including classic-worker `importScripts`, `new Worker(url)`, an injected
+`script` element and specifiers reaching `eval` or `new Function` through a string or `fetch`
+response. Decide before Phase 2 starts whether to extend the scanner dispatch to the mechanically
+enforceable host forms or to narrow the validation ownership statement to lexical classification
+with host loading as a named manual audit boundary. Until then the guard's green result proves
+lexical module-loading cleanliness, not the absence of every host-driven third-party load.
 
 Phase 0's mandatory `just validate` gate currently fails on `clippy::result_large_err` across 102
 build-system, frontend and benchmark `Result` boundaries. The root cause is diagnostic and error
@@ -621,9 +625,12 @@ payload layout owned by `compiler-source-token-and-diagnostic-data-layout-plan.m
 criteria require removing it without boxing or lint suppression. Package work must not box shared
 diagnostic payloads to make the gate green.
 
-That red lane is a recorded external blocker, not a waiver: no code-bearing package phase starts
-while it is red. Phase 2 resumes from a `main` carrying both the compiler checkpoint and the
-data-layout correction, so the programme neither fixes the lint nor skips the gate.
+That red lane is a recorded external blocker, not a waiver. A code-bearing package phase cannot
+finish its mandatory gate while it is red, so Phase 0 stays open on validation alone: its
+implementation, audits and every other gate lane are complete and merged, and the phase closes when
+`just validate` runs green. Root-cause removal is the data-layout plan's final phase, so the
+sequencing choice between waiting for that correction and accepting a scoped temporary allowance
+belongs to the roadmap owner. Record the decision in the roadmap before Phase 2 starts.
 
 ### Phase 1 - activate the living package workflow
 
